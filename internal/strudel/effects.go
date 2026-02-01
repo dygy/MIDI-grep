@@ -64,6 +64,11 @@ type StyleFXSettings struct {
 	Distort      float64 // Distortion amount (0 = off)
 	Vibrato      float64 // Vibrato speed (0 = off)
 	VibratoDepth float64 // Vibrato depth in semitones
+	// FM Synthesis parameters
+	FM        float64 // FM modulation index / brightness (0 = off)
+	FMH       float64 // FM harmonicity ratio (0 = off, use default)
+	FMDecay   float64 // FM envelope decay in seconds (0 = off)
+	FMSustain float64 // FM envelope sustain level (0-1)
 }
 
 // PatternFXSettings defines pattern-level transformations
@@ -330,6 +335,10 @@ var styleFXPresets = map[SoundStyle]StyleFXSettings{
 		PhaserDepth:  0.3,
 		Vibrato:      4,
 		VibratoDepth: 0.1,
+		FM:           1.5,  // Subtle FM for warmth
+		FMH:          1,    // Unison harmonicity
+		FMDecay:      0.3,
+		FMSustain:    0.5,
 	},
 	StyleOrchestral: {
 		Vibrato:      5,
@@ -339,6 +348,10 @@ var styleFXPresets = map[SoundStyle]StyleFXSettings{
 		Phaser:      0.8,
 		PhaserDepth: 0.5,
 		Distort:     0.1,
+		FM:          2,    // Moderate FM for brightness
+		FMH:         2,    // Octave harmonicity
+		FMDecay:     0.2,
+		FMSustain:   0.3,
 	},
 	StyleJazz: {
 		Vibrato:      3,
@@ -552,6 +565,20 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 	}
 	if effects.StyleFX.Vowel != "" {
 		parts = append(parts, fmt.Sprintf(".vowel(\"%s\")", effects.StyleFX.Vowel))
+	}
+
+	// FM Synthesis
+	if effects.StyleFX.FM > 0 {
+		parts = append(parts, fmt.Sprintf(".fm(%.1f)", effects.StyleFX.FM))
+		if effects.StyleFX.FMH > 0 {
+			parts = append(parts, fmt.Sprintf(".fmh(%.1f)", effects.StyleFX.FMH))
+		}
+		if effects.StyleFX.FMDecay > 0 {
+			parts = append(parts, fmt.Sprintf(".fmdecay(%.2f)", effects.StyleFX.FMDecay))
+		}
+		if effects.StyleFX.FMSustain > 0 {
+			parts = append(parts, fmt.Sprintf(".fmsustain(%.2f)", effects.StyleFX.FMSustain))
+		}
 	}
 
 	// Legato/Clip for note duration

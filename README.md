@@ -19,6 +19,7 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   - ADSR envelopes for synth/orchestral styles
   - Voice-appropriate reverb, delay, phaser, vibrato
   - Style-specific FX: bitcrush/coarse for lofi, distort for electronic
+  - FM synthesis (.fm, .fmh, .fmdecay) for synth/electronic richness
   - Pattern transforms: swing for jazz, degradeBy for lofi
   - `.clip()` for note duration control (staccato/legato/sustained)
   - `.echo()` for rhythmic repeats
@@ -279,7 +280,7 @@ $: stack(
 )
 ```
 
-### Synth Style (with phaser, envelope, off, superimpose)
+### Synth Style (with FM synthesis, phaser, envelope, off, superimpose)
 ```javascript
 // Style: synth
 $: stack(
@@ -290,6 +291,7 @@ $: stack(
     .pan(saw.range(0.43,0.57).slow(4)).hpf(50).lpf(800)
     .attack(0.003).decay(0.08).sustain(0.90).release(0.05)
     .phaser(0.50).phaserdepth(0.30).vib(4.0).vibmod(0.10)
+    .fm(1.5).fmh(1.0).fmdecay(0.30).fmsustain(0.50)
     .room(0.16).size(0.24).echo(2,0.125,0.40)
     .superimpose(add(0.03))
     .off(0.125, add(12)),

@@ -137,11 +137,16 @@ _Leveraging full Strudel capabilities for expressive output._
   - [x] **Per-Voice LFO Speed:** Different speeds per voice for movement
 
 - [x] **Style-Specific FX**
-  - [x] **Synth:** Phaser, vibrato
-  - [x] **Electronic:** Phaser, distort
+  - [x] **Synth:** Phaser, vibrato, FM synthesis
+  - [x] **Electronic:** Phaser, distort, FM synthesis
   - [x] **Orchestral:** Vibrato with longer depth
   - [x] **Jazz:** Subtle vibrato
   - [x] **Lofi:** Bitcrush (crush), sample rate reduction (coarse)
+
+- [x] **FM Synthesis**
+  - [x] **FM Index:** `.fm()` for modulation brightness
+  - [x] **FM Harmonicity:** `.fmh()` for timbre control
+  - [x] **FM Envelope:** `.fmdecay()`, `.fmsustain()` for FM dynamics
 
 - [x] **Pattern Transforms**
   - [x] **Swing:** `.swing()` for jazz style shuffle feel
@@ -285,3 +290,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.3 | 2026-02-01 | Phase 5 complete: Dynamic Strudel output with per-voice effects, velocity dynamics, section detection |
 | 1.4 | 2026-02-01 | Phase 5 enhanced: ADSR envelopes, multiple LFO shapes (perlin/saw/tri), style-specific FX (phaser/crush/coarse/vibrato/distort), pattern transforms (swing/degradeBy), proper .velocity() |
 | 1.5 | 2026-02-01 | Phase 5 complete: Articulation (.clip), accumulation (.echo, .superimpose, .off), scale quantization helper |
+| 1.6 | 2026-02-01 | FM synthesis (.fm, .fmh, .fmdecay, .fmsustain) for synth/electronic styles |
