@@ -216,6 +216,9 @@ func (g *Generator) Generate(notes []midi.Note, analysisResult *analysis.Result)
 func (g *Generator) generateFromCleanup(result *CleanupResult, analysisResult *analysis.Result) string {
 	var sb strings.Builder
 
+	// Detect sections for comments
+	sections := DetectSections(result)
+
 	// Header with stats
 	sb.WriteString("// MIDI-grep output\n")
 	sb.WriteString(fmt.Sprintf("// BPM: %.0f", analysisResult.BPM))
@@ -225,18 +228,27 @@ func (g *Generator) generateFromCleanup(result *CleanupResult, analysisResult *a
 	sb.WriteString(fmt.Sprintf("\n// Notes: %d (bass: %d, mid: %d, high: %d)\n",
 		result.Stats.Total, result.Stats.BassCount, result.Stats.MidCount, result.Stats.HighCount))
 	sb.WriteString(fmt.Sprintf("// Style: %s\n", g.style))
-	sb.WriteString(fmt.Sprintf("// Duration: %.1f beats\n\n", result.TotalBeats))
+	sb.WriteString(fmt.Sprintf("// Duration: %.1f beats\n", result.TotalBeats))
+
+	// Add section markers
+	if len(sections) > 0 {
+		sectionInfo := GenerateSectionHeader(sections, analysisResult.BPM)
+		sb.WriteString(sectionInfo)
+	}
+	sb.WriteString("\n")
 
 	// Tempo
 	sb.WriteString(fmt.Sprintf("setcps(%.0f/60/4)\n\n", analysisResult.BPM))
 
-	// Convert JSON notes to midi.Note
+	// Convert JSON notes to midi.Note (for pattern generation)
 	bass := jsonToNotes(result.Voices.Bass)
 	mid := jsonToNotes(result.Voices.Mid)
 	high := jsonToNotes(result.Voices.High)
 
-	// Generate the stacked pattern
-	g.generateStackedPattern(&sb, bass, mid, high, analysisResult.BPM)
+	// Generate the stacked pattern with velocity data
+	g.generateStackedPatternWithVelocity(&sb, bass, mid, high,
+		result.Voices.Bass, result.Voices.Mid, result.Voices.High,
+		analysisResult.BPM)
 
 	return sb.String()
 }
@@ -256,6 +268,11 @@ func jsonToNotes(jsonNotes []NoteJSON) []midi.Note {
 
 // generateStackedPattern creates a Strudel stack() with separate voices and GM sounds
 func (g *Generator) generateStackedPattern(sb *strings.Builder, bass, mid, high []midi.Note, bpm float64) {
+	g.generateStackedPatternWithVelocity(sb, bass, mid, high, nil, nil, nil, bpm)
+}
+
+// generateStackedPatternWithVelocity creates a Strudel stack() with per-voice effects and velocity dynamics
+func (g *Generator) generateStackedPatternWithVelocity(sb *strings.Builder, bass, mid, high []midi.Note, bassJSON, midJSON, highJSON []NoteJSON, bpm float64) {
 	// Calculate timing
 	beatDuration := 60.0 / bpm
 	gridSize := beatDuration / float64(g.quantize/4)
@@ -278,16 +295,17 @@ func (g *Generator) generateStackedPattern(sb *strings.Builder, bass, mid, high 
 		numBars = 16 // Limit to 16 bars for readability
 	}
 
-	// Define voices with their sounds from palette
+	// Define voices with their sounds, effects, and optional velocity data
 	voices := []struct {
-		name  string
-		notes []midi.Note
-		sound string
-		gain  float64
+		name     string
+		notes    []midi.Note
+		jsonData []NoteJSON
+		sound    string
+		gain     float64
 	}{
-		{"bass", bass, g.palette.Bass, g.palette.BassGain},
-		{"mid", mid, g.palette.Mid, g.palette.MidGain},
-		{"high", high, g.palette.High, g.palette.HighGain},
+		{"bass", bass, bassJSON, g.palette.Bass, g.palette.BassGain},
+		{"mid", mid, midJSON, g.palette.Mid, g.palette.MidGain},
+		{"high", high, highJSON, g.palette.High, g.palette.HighGain},
 	}
 
 	var activeVoices []string
@@ -295,12 +313,46 @@ func (g *Generator) generateStackedPattern(sb *strings.Builder, bass, mid, high 
 		if len(v.notes) > 0 {
 			pattern := g.voiceToPattern(v.notes, gridSize, numBars, beatDuration)
 			if pattern != "" && pattern != "~" {
+				// Get per-voice effects based on voice type and style
+				effects := GetVoiceEffects(v.name, g.style)
+
+				// Build voice code with per-voice effects
 				voiceCode := fmt.Sprintf("  // %s (%d notes)\n", v.name, len(v.notes))
 				voiceCode += fmt.Sprintf("  note(\"%s\")\n", pattern)
 				voiceCode += fmt.Sprintf("    .sound(\"%s\")", v.sound)
-				if v.gain != 1.0 {
-					voiceCode += fmt.Sprintf("\n    .gain(%.1f)", v.gain)
+
+				// Add velocity pattern for dynamics (proper Strudel way)
+				// Also add base gain for voice level balance
+				if len(v.jsonData) > 0 {
+					// Build velocity pattern (0-1 range)
+					velocityPattern := g.buildVelocityPattern(v.jsonData, gridSize, numBars)
+					if velocityPattern != "" {
+						voiceCode += fmt.Sprintf("\n    .velocity(\"%s\")", velocityPattern)
+					}
 				}
+				// Always add base gain for voice balance
+				if v.gain != 1.0 {
+					voiceCode += fmt.Sprintf("\n    .gain(%.2f)", v.gain)
+				}
+
+				// Add per-voice effect chain (filter, pan, reverb, delay, envelope, style FX, legato, echo)
+				effectChain := BuildEffectChain(effects, true)
+				if effectChain != "" {
+					voiceCode += "\n    " + effectChain
+				}
+
+				// Add harmony effects (superimpose, off) for layering
+				harmonyFX := BuildHarmonyEffects(effects)
+				if harmonyFX != "" {
+					voiceCode += "\n    " + harmonyFX
+				}
+
+				// Add pattern-level transforms (swing, degradeBy, etc.)
+				patternTransforms := BuildPatternTransforms(effects)
+				if patternTransforms != "" {
+					voiceCode += "\n    " + patternTransforms
+				}
+
 				activeVoices = append(activeVoices, voiceCode)
 			}
 		}
@@ -312,12 +364,12 @@ func (g *Generator) generateStackedPattern(sb *strings.Builder, bass, mid, high 
 	}
 
 	if len(activeVoices) == 1 {
-		// Single voice - no stack needed
+		// Single voice - no stack needed, effects already included per-voice
 		sb.WriteString("$: ")
 		sb.WriteString(strings.TrimPrefix(activeVoices[0], "  "))
-		sb.WriteString("\n  .room(0.3).size(0.6)\n")
+		sb.WriteString("\n")
 	} else {
-		// Multiple voices - use stack
+		// Multiple voices - use stack, effects already per-voice
 		sb.WriteString("$: stack(\n")
 		for i, voice := range activeVoices {
 			sb.WriteString(voice)
@@ -327,8 +379,129 @@ func (g *Generator) generateStackedPattern(sb *strings.Builder, bass, mid, high 
 			sb.WriteString("\n")
 		}
 		sb.WriteString(")\n")
-		sb.WriteString("  .room(0.3).size(0.6)\n")
 	}
+}
+
+// buildVelocityGainPattern creates a gain pattern matching the note pattern from velocity data
+func (g *Generator) buildVelocityGainPattern(notes []NoteJSON, gridSize float64, numBars int) string {
+	if len(notes) == 0 {
+		return ""
+	}
+
+	// Grid slots per bar (e.g., 16 for 16th notes in 4/4)
+	slotsPerBar := g.quantize
+	totalSlots := slotsPerBar * numBars
+
+	// Create slot arrays for velocities
+	slots := make([]float64, totalSlots)
+	hasNote := make([]bool, totalSlots)
+
+	// Place velocity values in slots
+	for _, n := range notes {
+		slot := int(n.Start / gridSize)
+		if slot >= 0 && slot < totalSlots {
+			// For chords, use average velocity
+			if hasNote[slot] {
+				slots[slot] = (slots[slot] + VelocityToGain(n.VelocityNormalized)) / 2
+			} else {
+				slots[slot] = VelocityToGain(n.VelocityNormalized)
+			}
+			hasNote[slot] = true
+		}
+	}
+
+	// Build pattern with bar structure matching note pattern
+	var bars []string
+	for bar := 0; bar < numBars; bar++ {
+		var barParts []string
+		startSlot := bar * slotsPerBar
+		endSlot := startSlot + slotsPerBar
+		barHasNotes := false
+
+		for i := startSlot; i < endSlot && i < totalSlots; i++ {
+			if hasNote[i] {
+				barParts = append(barParts, fmt.Sprintf("%.2f", slots[i]))
+				barHasNotes = true
+			} else {
+				barParts = append(barParts, "~")
+			}
+		}
+
+		if barHasNotes {
+			// Simplify the gain pattern same as note pattern
+			simplified := simplifyPattern(barParts)
+			if simplified != "" && !isAllRests(simplified) {
+				bars = append(bars, simplified)
+			}
+		}
+	}
+
+	if len(bars) == 0 {
+		return ""
+	}
+
+	return strings.Join(bars, " | ")
+}
+
+// buildVelocityPattern creates a velocity pattern (0-1 range) matching the note pattern
+func (g *Generator) buildVelocityPattern(notes []NoteJSON, gridSize float64, numBars int) string {
+	if len(notes) == 0 {
+		return ""
+	}
+
+	// Grid slots per bar (e.g., 16 for 16th notes in 4/4)
+	slotsPerBar := g.quantize
+	totalSlots := slotsPerBar * numBars
+
+	// Create slot arrays for velocities
+	slots := make([]float64, totalSlots)
+	hasNote := make([]bool, totalSlots)
+
+	// Place velocity values in slots (normalized 0-1 range)
+	for _, n := range notes {
+		slot := int(n.Start / gridSize)
+		if slot >= 0 && slot < totalSlots {
+			// For chords, use average velocity
+			if hasNote[slot] {
+				slots[slot] = (slots[slot] + n.VelocityNormalized) / 2
+			} else {
+				slots[slot] = n.VelocityNormalized
+			}
+			hasNote[slot] = true
+		}
+	}
+
+	// Build pattern with bar structure matching note pattern
+	var bars []string
+	for bar := 0; bar < numBars; bar++ {
+		var barParts []string
+		startSlot := bar * slotsPerBar
+		endSlot := startSlot + slotsPerBar
+		barHasNotes := false
+
+		for i := startSlot; i < endSlot && i < totalSlots; i++ {
+			if hasNote[i] {
+				barParts = append(barParts, fmt.Sprintf("%.2f", slots[i]))
+				barHasNotes = true
+			} else {
+				barParts = append(barParts, "~")
+			}
+		}
+
+		if barHasNotes {
+			// Simplify the velocity pattern same as note pattern
+			simplified := simplifyPattern(barParts)
+			if simplified != "" && !isAllRests(simplified) {
+				bars = append(bars, simplified)
+			}
+		}
+	}
+
+	if len(bars) == 0 {
+		return ""
+	}
+
+	return strings.Join(bars, " | ")
 }
 
 // voiceToPattern converts notes to Strudel mini-notation with proper bar structure

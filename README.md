@@ -12,7 +12,21 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
 - **AI-Powered Separation**: Demucs isolates piano/instruments from any mix
 - **Accurate Transcription**: Spotify's Basic Pitch for audio-to-MIDI
 - **BPM & Key Detection**: Automatic tempo and musical key analysis
-- **Strudel Output**: Ready-to-play `note()` patterns
+- **Dynamic Strudel Output**: Rich patterns with per-voice effects
+  - `.velocity()` patterns for authentic dynamics
+  - Per-voice filtering (HPF/LPF by register)
+  - Stereo panning with style-appropriate LFO shapes (sine, perlin, saw)
+  - ADSR envelopes for synth/orchestral styles
+  - Voice-appropriate reverb, delay, phaser, vibrato
+  - Style-specific FX: bitcrush/coarse for lofi, distort for electronic
+  - Pattern transforms: swing for jazz, degradeBy for lofi
+  - `.clip()` for note duration control (staccato/legato/sustained)
+  - `.echo()` for rhythmic repeats
+  - `.superimpose()` for detuned layering (synth richness)
+  - `.off()` for harmonic layering with time offset
+  - `.scale()` for key-aware quantization
+  - Section detection with time markers
+- **Sound Style Presets**: `--style piano|synth|orchestral|electronic|jazz|lofi`
 - **Web Interface**: HTMX-powered UI, no JavaScript frameworks
 - **CLI Tool**: Full-featured command-line interface
 
@@ -214,14 +228,73 @@ make build
 
 ## Example Output
 
+### Jazz Style (with swing, perlin LFO, vibrato)
 ```javascript
 // MIDI-grep output
-// BPM: 89, Key: E major
+// BPM: 89, Key: E minor
+// Notes: 48 (bass: 12, mid: 28, high: 8)
+// Style: jazz
+// Duration: 32.0 beats
+// Sections: 0:00 intro | 0:08 main
+
 setcps(89/60/4)
 
-$: note("[e2,e3,b3,gs4,ds5] [b3,ds4,ds5] gs5 e5 [ds4,cs5]...")
-  .sound("piano")
-  .room(0.3).size(0.6)
+$: stack(
+  // bass (12 notes)
+  note("e2 ~ b2 ~ | e2 g2 ~ b2")
+    .sound("gm_acoustic_bass")
+    .velocity("0.75 ~ 0.68 ~ | 0.82 0.60 ~ 0.70")
+    .gain(1.20)
+    .pan(0.5).hpf(50).lpf(800).vib(3.0).vibmod(0.08).room(0.20).size(0.30)
+    .swing(0.10),
+
+  // mid (28 notes)
+  note("[e4,g4] [b3,d4] fs4 [a3,cs4]")
+    .sound("gm_epiano1")
+    .velocity("0.65 0.72 0.80 0.58")
+    .pan(perlin.range(0.44,0.56).slow(4)).hpf(200).lpf(4000).vib(3.0).vibmod(0.08).room(0.35).size(0.50)
+    .swing(0.10),
+
+  // high (8 notes)
+  note("b5 ~ ~ e5 | fs5 ~ gs5 ~")
+    .sound("gm_vibraphone")
+    .velocity("0.55 ~ ~ 0.62 | 0.70 ~ 0.65 ~")
+    .gain(0.80)
+    .pan(perlin.range(0.38,0.62).slow(3)).hpf(400).lpf(10000).vib(3.0).vibmod(0.08).room(0.40).size(0.60).delay(0.15).delaytime(0.375).delayfeedback(0.30)
+    .swing(0.10)
+)
+```
+
+### Lofi Style (with bitcrush, coarse, echo, superimpose, degradeBy)
+```javascript
+// Style: lofi
+$: stack(
+  note("c3 ~ g2 ~ | c3 e3 ~ g2")
+    .sound("gm_electric_bass_finger")
+    .velocity("0.70 ~ 0.65 ~")
+    .pan(0.5).hpf(50).lpf(800).clip(1.10).crush(10).coarse(4).room(0.18).size(0.27).echo(2,0.125,0.40)
+    .superimpose(add(0.03))
+    .swing(0.05).degradeBy(0.05),
+  // ...
+)
+```
+
+### Synth Style (with phaser, envelope, off, superimpose)
+```javascript
+// Style: synth
+$: stack(
+  note("c3 ~ g3 ~ | c3 e3 ~ g3")
+    .sound("gm_synth_bass_1")
+    .velocity("0.75 ~ 0.70 ~")
+    .gain(1.30)
+    .pan(saw.range(0.43,0.57).slow(4)).hpf(50).lpf(800)
+    .attack(0.003).decay(0.08).sustain(0.90).release(0.05)
+    .phaser(0.50).phaserdepth(0.30).vib(4.0).vibmod(0.10)
+    .room(0.16).size(0.24).echo(2,0.125,0.40)
+    .superimpose(add(0.03))
+    .off(0.125, add(12)),
+  // ...
+)
 ```
 
 Paste this into [Strudel](https://strudel.dygy.app/) and press Ctrl+Enter to play!

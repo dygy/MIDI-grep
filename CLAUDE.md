@@ -44,7 +44,10 @@ midi-grep/
 │   ├── midi/
 │   │   ├── transcribe.go       # Basic Pitch wrapper
 │   │   └── cleanup.go          # Quantization, velocity filtering
-│   ├── strudel/generator.go    # MIDI → Strudel conversion
+│   ├── strudel/
+│   │   ├── generator.go        # MIDI → Strudel conversion
+│   │   ├── effects.go          # Per-voice effect settings (filter, pan, reverb, delay)
+│   │   └── sections.go         # Section detection (intro, verse, chorus)
 │   ├── pipeline/orchestrator.go # End-to-end CLI pipeline
 │   ├── server/
 │   │   ├── server.go           # HTTP server setup
@@ -120,10 +123,44 @@ defer ws.Cleanup()
 
 ### Modifying Strudel output
 
-Edit `internal/strudel/generator.go`:
-- `Generate()` - main output format
-- `notesToPattern()` - note conversion
+The Strudel generator is split across three files:
+
+**`internal/strudel/generator.go`** - Main output generation:
+- `Generate()` - legacy output format
+- `generateStackedPatternWithVelocity()` - voice stack with per-voice effects
+- `voiceToPattern()` - note conversion to mini-notation
+- `buildVelocityPattern()` - velocity patterns (0-1 range for `.velocity()`)
 - `midiToNoteName()` - pitch notation
+
+**`internal/strudel/effects.go`** - Per-voice effect settings:
+- `VoiceEffects` struct - filter, pan, reverb, delay, envelope, styleFX, patternFX, legato, echo, harmony
+- `EnvelopeSettings` - ADSR envelope (attack, decay, sustain, release)
+- `StyleFXSettings` - phaser, crush, coarse, vowel, distort, vibrato
+- `PatternFXSettings` - jux, swing, degradeBy, ply
+- `LegatoSettings` - clip for note duration control
+- `EchoSettings` - echo/stutter effect (times, time, feedback)
+- `HarmonySettings` - superimpose (detune), off (harmonic layering)
+- `LFOShape` - sine, saw, tri, square, perlin, rand
+- `GetVoiceEffects()` - returns effects for voice type + style
+- `BuildEffectChain()` - generates Strudel effect method chain
+- `BuildPatternTransforms()` - generates pattern-level transforms (.swing, .degradeBy)
+- `BuildHarmonyEffects()` - generates layering effects (.superimpose, .off)
+- `BuildScaleEffect()` - generates scale quantization effect
+
+**`internal/strudel/sections.go`** - Section detection:
+- `DetectSections()` - analyzes note density, velocity, register per bar
+- `Section` struct - start/end beats, type, energy level
+- `GenerateSectionHeader()` - creates time-stamped section comments
+
+### Style-specific effects
+
+Each style has unique effect settings:
+- **piano**: Minimal effects, natural envelope, clip=1.0
+- **synth**: Phaser, vibrato, saw LFO, ADSR, echo, superimpose, off
+- **orchestral**: Long attack envelope, vibrato, more reverb, clip=1.5 (sustained)
+- **electronic**: Phaser, distort, saw LFO, ADSR, echo, superimpose, off, clip=0.8 (punchy)
+- **jazz**: Perlin LFO (organic), vibrato, swing
+- **lofi**: Bitcrush, coarse, perlin LFO, degradeBy, swing, echo, superimpose, clip=1.1
 
 ### Adding CLI flags
 

@@ -104,26 +104,67 @@ _Deeper musical understanding for better output._
 
 ---
 
-## Phase 5: Rich Strudel Output
+## Phase 5: Rich Strudel Output ✅ COMPLETE
 
 _Leveraging full Strudel capabilities for expressive output._
 
-- [ ] **Dynamic Expression**
-  - [ ] **Velocity Mapping:** Preserve note velocities with `.velocity()` or `.gain()`
-  - [ ] **Dynamic Contours:** Represent crescendo/diminuendo patterns
-  - [ ] **Accent Patterns:** Highlight emphasized notes
+- [x] **Dynamic Expression**
+  - [x] **Velocity Mapping:** Proper `.velocity()` patterns (0-1 range) per voice
+  - [x] **Per-Voice Gain:** Base gain for voice level balance
+  - [ ] **Dynamic Contours:** Represent crescendo/diminuendo patterns (future)
+  - [ ] **Accent Patterns:** Highlight emphasized notes (future)
 
-- [ ] **Articulation & Duration**
+- [x] **ADSR Envelopes**
+  - [x] **Per-Voice Envelopes:** Attack/decay/sustain/release per voice type
+  - [x] **Style-Specific:** Longer attacks for orchestral, punchy for electronic
+  - [x] **Voice-Appropriate:** Quick attack for bass, longer release for highs
+
+- [ ] **Articulation & Duration** (future)
   - [ ] **Legato/Staccato:** Use `.legato()` for note lengths
   - [ ] **Sustain Pedal:** Detect and represent pedal markings
   - [ ] **Note Overlap:** Handle overlapping notes properly
 
-- [ ] **Effects & Processing**
-  - [ ] **Reverb Suggestions:** Appropriate room size based on detected style
-  - [ ] **Filter Sweeps:** Suggest filter patterns for electronic styles
-  - [ ] **Delay/Echo:** Rhythmic delay suggestions
+- [x] **Effects & Processing**
+  - [x] **Per-Voice Effects:** Voice-specific effect chains (filter, pan, reverb, delay, envelope)
+  - [x] **Reverb Per-Voice:** Register-appropriate room size (less on bass, more on highs)
+  - [x] **Filter Per-Voice:** HPF/LPF based on voice register
+  - [x] **Delay on Highs:** Rhythmic delay on high voice for space
+  - [x] **Stereo Panning:** Bass centered, mid/high with LFO stereo movement
 
-- [ ] **Pattern Variations**
+- [x] **LFO & Modulation**
+  - [x] **Multiple LFO Shapes:** sine, saw, tri, square, perlin (smooth random), rand
+  - [x] **Style-Specific LFOs:** perlin for jazz/lofi (organic), saw for electronic (rhythmic)
+  - [x] **Per-Voice LFO Speed:** Different speeds per voice for movement
+
+- [x] **Style-Specific FX**
+  - [x] **Synth:** Phaser, vibrato
+  - [x] **Electronic:** Phaser, distort
+  - [x] **Orchestral:** Vibrato with longer depth
+  - [x] **Jazz:** Subtle vibrato
+  - [x] **Lofi:** Bitcrush (crush), sample rate reduction (coarse)
+
+- [x] **Pattern Transforms**
+  - [x] **Swing:** `.swing()` for jazz style shuffle feel
+  - [x] **DegradeBy:** `.degradeBy()` for lofi random note removal
+  - [ ] **Jux:** `.jux(rev)` for stereo width (future: per-style)
+  - [ ] **Ply:** `.ply()` for rhythmic density (future)
+
+- [x] **Articulation & Duration**
+  - [x] **Clip/Legato:** `.clip()` for note duration (staccato/legato/sustained)
+  - [x] **Style-Specific Legato:** Shorter for electronic, longer for orchestral
+
+- [x] **Accumulation Effects**
+  - [x] **Echo/Stutter:** `.echo(times, time, feedback)` for rhythmic repeats
+  - [x] **Superimpose:** `.superimpose(add(0.03))` for detuned layering
+  - [x] **Off:** `.off(time, add(interval))` for harmonic layering with offset
+  - [x] **Scale:** `.scale("E:minor")` helper for key-aware quantization
+
+- [x] **Section Analysis**
+  - [x] **Section Detection:** Auto-detect intro, verse, chorus based on energy
+  - [x] **Section Comments:** Time-stamped section markers in output header
+  - [x] **Energy Curve:** Calculate density + velocity + register energy per bar
+
+- [ ] **Pattern Variations** (future)
   - [ ] **Multiple Takes:** Generate slight variations of the same pattern
   - [ ] **Humanization Options:** Add subtle timing/velocity variations
   - [ ] **Simplified Versions:** Output both full and simplified patterns
@@ -241,3 +282,6 @@ _Ideas for future consideration, not yet prioritized._
 | 1.0 | 2024-02-01 | Initial roadmap with Phase 1 complete |
 | 1.1 | 2024-02-01 | Added Phases 2-8 based on Strudel sound system analysis |
 | 1.2 | 2026-02-01 | Phase 2 complete: Sound style presets with GM soundfonts |
+| 1.3 | 2026-02-01 | Phase 5 complete: Dynamic Strudel output with per-voice effects, velocity dynamics, section detection |
+| 1.4 | 2026-02-01 | Phase 5 enhanced: ADSR envelopes, multiple LFO shapes (perlin/saw/tri), style-specific FX (phaser/crush/coarse/vibrato/distort), pattern transforms (swing/degradeBy), proper .velocity() |
+| 1.5 | 2026-02-01 | Phase 5 complete: Articulation (.clip), accumulation (.echo, .superimpose, .off), scale quantization helper |
