@@ -30,22 +30,22 @@ _The highest priority features that form the core audio-to-code pipeline._
 
 ---
 
-## Phase 2: Smart Sound Selection 🔄 IN PROGRESS
+## Phase 2: Smart Sound Selection ✅ COMPLETE
 
 _Intelligent instrument detection and appropriate Strudel sound mapping._
 
-- [ ] **Instrument-Aware Output**
-  - [ ] **Voice-Appropriate Sounds:** Map bass to `gm_acoustic_bass`/`gm_synth_bass_1`, mid to `gm_epiano1`, high to `gm_lead_2_sawtooth`
-  - [ ] **Sound Style Presets:** `--style piano|synth|orchestral|electronic|auto`
-  - [ ] **GM Soundfont Integration:** Use full range of 128 General MIDI instruments
-  - [ ] **Dynamic Sound Assignment:** Analyze timbre characteristics to choose appropriate sounds
+- [x] **Instrument-Aware Output**
+  - [x] **Voice-Appropriate Sounds:** Map bass to `gm_acoustic_bass`/`gm_synth_bass_1`, mid to `gm_epiano1`, high to `gm_lead_2_sawtooth`
+  - [x] **Sound Style Presets:** `--style piano|synth|orchestral|electronic|jazz|lofi`
+  - [x] **GM Soundfont Integration:** Use full range of 128 General MIDI instruments
+  - [ ] **Dynamic Sound Assignment:** Analyze timbre characteristics to choose appropriate sounds (future)
 
-- [ ] **User Sound Control**
-  - [ ] **Custom Sound Mapping:** `--bass-sound gm_synth_bass_1 --mid-sound gm_epiano1`
-  - [ ] **Sound Palette Presets:** Pre-configured sound combinations (jazz, electronic, cinematic)
-  - [ ] **Per-Voice Gain Control:** Balance volumes between bass/mid/high
+- [x] **User Sound Control**
+  - [ ] **Custom Sound Mapping:** `--bass-sound gm_synth_bass_1 --mid-sound gm_epiano1` (future)
+  - [x] **Sound Palette Presets:** Pre-configured sound combinations (piano, synth, orchestral, electronic, jazz, lofi)
+  - [x] **Per-Voice Gain Control:** Balance volumes between bass/mid/high
 
-- [ ] **Stem Selection**
+- [ ] **Stem Selection** (future enhancement)
   - [ ] **Target Instrument Flag:** `--instrument piano|vocals|bass|drums|other`
   - [ ] **Multi-Stem Output:** Extract and generate code for multiple stems separately
   - [ ] **Demucs Model Selection:** Use `htdemucs_6s` for 6-stem separation when needed
@@ -240,3 +240,4 @@ _Ideas for future consideration, not yet prioritized._
 |---------|------|---------|
 | 1.0 | 2024-02-01 | Initial roadmap with Phase 1 complete |
 | 1.1 | 2024-02-01 | Added Phases 2-8 based on Strudel sound system analysis |
+| 1.2 | 2026-02-01 | Phase 2 complete: Sound style presets with GM soundfonts |
