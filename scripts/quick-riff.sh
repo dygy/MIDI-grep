@@ -16,19 +16,16 @@ if [[ ! -f "$BINARY" ]]; then
     cd "$PROJECT_DIR" && go build -o bin/midi-grep ./cmd/midi-grep
 fi
 
-if [[ -z "$1" ]]; then
-    echo "Usage: $0 <youtube-url-or-file>" >&2
-    echo "" >&2
-    echo "Examples:" >&2
-    echo "  $0 'https://youtu.be/Q4801HzWZfg'" >&2
-    echo "  $0 track.wav" >&2
-    echo "" >&2
-    echo "Pipe to clipboard:" >&2
-    echo "  $0 'https://youtu.be/...' | pbcopy" >&2
-    exit 1
-fi
-
 INPUT="$1"
+if [[ -z "$INPUT" ]]; then
+    echo "Quick Riff - Extract Strudel code" >&2
+    echo "" >&2
+    read -p "Enter YouTube URL or file path: " INPUT
+    if [[ -z "$INPUT" ]]; then
+        echo "Error: Input is required" >&2
+        exit 1
+    fi
+fi
 
 # Detect if URL or file
 if [[ "$INPUT" =~ ^https?:// ]]; then

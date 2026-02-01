@@ -16,18 +16,23 @@ if [[ ! -f "$BINARY" ]]; then
     cd "$PROJECT_DIR" && go build -o bin/midi-grep ./cmd/midi-grep
 fi
 
-# Check arguments
-if [[ -z "$1" ]]; then
-    echo "Usage: $0 <youtube-url> [output-file]"
+# Get URL (from argument or prompt)
+URL="$1"
+if [[ -z "$URL" ]]; then
+    echo "MIDI-grep: Extract piano from YouTube"
     echo ""
-    echo "Examples:"
-    echo "  $0 'https://youtu.be/Q4801HzWZfg'"
-    echo "  $0 'https://youtube.com/watch?v=dQw4w9WgXcQ' riff.strudel"
-    exit 1
+    read -p "Enter YouTube URL: " URL
+    if [[ -z "$URL" ]]; then
+        echo "Error: URL is required"
+        exit 1
+    fi
 fi
 
-URL="$1"
+# Get output file (from argument or prompt)
 OUTPUT="$2"
+if [[ -z "$OUTPUT" ]]; then
+    read -p "Output file (press Enter for stdout): " OUTPUT
+fi
 
 # Run extraction
 if [[ -n "$OUTPUT" ]]; then

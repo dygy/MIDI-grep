@@ -216,9 +216,41 @@ cmd_extract() {
         esac
     done
 
-    # Validate
+    # Prompt for input if not provided
     if [[ -z "$URL" && -z "$FILE" ]]; then
-        error "Either --url or --file is required"
+        echo ""
+        echo -e "${BLUE}What would you like to extract from?${NC}"
+        echo "  1) YouTube URL"
+        echo "  2) Local file"
+        echo ""
+        read -p "Choice [1/2]: " CHOICE
+
+        case "$CHOICE" in
+            1)
+                read -p "Enter YouTube URL: " URL
+                if [[ -z "$URL" ]]; then
+                    error "URL is required"
+                fi
+                ;;
+            2)
+                read -p "Enter file path: " FILE
+                if [[ -z "$FILE" ]]; then
+                    error "File path is required"
+                fi
+                ;;
+            *)
+                error "Invalid choice. Please enter 1 or 2"
+                ;;
+        esac
+
+        # Ask for output file
+        read -p "Output file (press Enter for stdout): " OUTPUT
+
+        # Ask for quantization
+        read -p "Quantization [4/8/16] (default: 16): " Q_INPUT
+        if [[ -n "$Q_INPUT" ]]; then
+            QUANTIZE="$Q_INPUT"
+        fi
     fi
 
     if [[ "$QUANTIZE" != "4" && "$QUANTIZE" != "8" && "$QUANTIZE" != "16" ]]; then

@@ -16,23 +16,28 @@ if [[ ! -f "$BINARY" ]]; then
     cd "$PROJECT_DIR" && go build -o bin/midi-grep ./cmd/midi-grep
 fi
 
-# Check arguments
-if [[ -z "$1" ]]; then
-    echo "Usage: $0 <audio-file> [output-file]"
-    echo ""
-    echo "Examples:"
-    echo "  $0 track.wav"
-    echo "  $0 song.mp3 riff.strudel"
-    exit 1
-fi
-
+# Get input file (from argument or prompt)
 INPUT="$1"
-OUTPUT="$2"
+if [[ -z "$INPUT" ]]; then
+    echo "MIDI-grep: Extract piano from audio file"
+    echo ""
+    read -p "Enter audio file path: " INPUT
+    if [[ -z "$INPUT" ]]; then
+        echo "Error: File path is required"
+        exit 1
+    fi
+fi
 
 # Check if input file exists
 if [[ ! -f "$INPUT" ]]; then
     echo "Error: File not found: $INPUT"
     exit 1
+fi
+
+# Get output file (from argument or prompt)
+OUTPUT="$2"
+if [[ -z "$OUTPUT" ]]; then
+    read -p "Output file (press Enter for stdout): " OUTPUT
 fi
 
 # Run extraction
