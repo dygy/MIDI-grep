@@ -200,7 +200,6 @@ _Making MIDI-grep accessible to more users._
 _Ideas for future consideration, not yet prioritized._
 
 - [ ] Real-time/streaming audio processing (live input)
-- [ ] Hardware MIDI controller support
 - [ ] Collaborative features (share extractions)
 - [ ] Machine learning model fine-tuning for specific genres
 - [ ] Custom model training on user's own samples
