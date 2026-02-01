@@ -1,0 +1,56 @@
+# Binaries
+bin/
+midi-grep
+
+# Go
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binary
+*.test
+
+# Output of go coverage
+*.out
+
+# Dependency directories
+vendor/
+
+# IDE
+.idea/
+*.swp
+*.swo
+.vscode/
+
+# Python
+scripts/python/.venv/
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+.eggs/
+dist/
+build/
+
+# Spleeter/ML model cache
+pretrained_models/
+.cache/
+
+# Temporary files
+*.tmp
+*.temp
+.DS_Store
+
+# Audio/MIDI files (test artifacts)
+*.wav
+*.mp3
+*.mid
+*.midi
+
+# Keep example files
+!examples/*.wav
+!examples/*.mp3

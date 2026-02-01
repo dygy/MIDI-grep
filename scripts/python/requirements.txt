@@ -1,0 +1,6 @@
+spleeter>=2.4.0
+basic-pitch>=0.3.0
+librosa>=0.10.0
+pretty_midi>=0.2.10
+numpy>=1.24.0
+soundfile>=0.12.0

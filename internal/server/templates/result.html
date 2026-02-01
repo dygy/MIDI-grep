@@ -1,0 +1,66 @@
+<article>
+    <header>
+        <h3>Extraction Complete</h3>
+        <p>{{ .Filename }}</p>
+    </header>
+
+    <div class="grid">
+        <div>
+            <strong>BPM</strong>
+            <p>{{ .BPM }} <small>({{ .BPMConf }} confidence)</small></p>
+        </div>
+        <div>
+            <strong>Key</strong>
+            <p>{{ if .Key }}{{ .Key }} <small>({{ .KeyConf }} confidence)</small>{{ else }}Unknown{{ end }}</p>
+        </div>
+        <div>
+            <strong>Notes</strong>
+            <p>{{ .NotesCount }} notes extracted</p>
+        </div>
+    </div>
+
+    <h4>Strudel.cc Code</h4>
+    <div style="position: relative;">
+        <pre id="strudel-code"><code>{{ .StrudelCode }}</code></pre>
+        <button onclick="copyCode()" class="outline" style="position: absolute; top: 0.5rem; right: 0.5rem;">
+            Copy
+        </button>
+    </div>
+
+    <div class="grid">
+        <a href="/download/{{ .JobID }}/midi" role="button" class="secondary outline">
+            Download MIDI
+        </a>
+        <a href="https://strudel.cc/" target="_blank" role="button" class="outline">
+            Open Strudel.cc
+        </a>
+        <a href="/" role="button">
+            Extract Another
+        </a>
+    </div>
+
+    <style>
+        #strudel-code {
+            background: var(--card-background-color);
+            padding: 1rem;
+            border-radius: 0.5rem;
+            overflow-x: auto;
+            margin-bottom: 1rem;
+        }
+        #strudel-code code {
+            white-space: pre-wrap;
+            word-break: break-word;
+        }
+    </style>
+
+    <script>
+        function copyCode() {
+            const code = document.getElementById('strudel-code').textContent;
+            navigator.clipboard.writeText(code).then(() => {
+                const btn = event.target;
+                btn.textContent = 'Copied!';
+                setTimeout(() => btn.textContent = 'Copy', 2000);
+            });
+        }
+    </script>
+</article>

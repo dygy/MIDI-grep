@@ -1,0 +1,35 @@
+<article>
+    <header>
+        <h3>Processing: {{ .Filename }}</h3>
+    </header>
+
+    <div id="progress-container"
+         hx-ext="sse"
+         sse-connect="/status/{{ .JobID }}"
+         sse-swap="progress"
+         hx-swap="beforeend">
+        <p>Starting...</p>
+    </div>
+
+    <progress id="progress-bar"></progress>
+
+    <div hx-trigger="sse:done"
+         hx-get="/result/{{ .JobID }}"
+         hx-target="#result-container"
+         hx-swap="innerHTML">
+    </div>
+
+    <style>
+        #progress-container p {
+            margin: 0.5rem 0;
+            padding: 0.5rem;
+            background: var(--card-background-color);
+            border-radius: 0.25rem;
+            font-family: monospace;
+            font-size: 0.9rem;
+        }
+        #progress-container p:last-child {
+            color: var(--primary);
+        }
+    </style>
+</article>

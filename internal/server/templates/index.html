@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="en" data-theme="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>MIDI-grep - Extract Piano Riffs</title>
+    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <script src="https://unpkg.com/htmx.org@1.9.10"></script>
+    <script src="https://unpkg.com/htmx.org@1.9.10/dist/ext/sse.js"></script>
+    <style>
+        :root {
+            --primary: #8b5cf6;
+            --primary-hover: #7c3aed;
+        }
+        body {
+            min-height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+        main {
+            flex: 1;
+            max-width: 800px;
+            margin: 0 auto;
+            padding: 2rem;
+        }
+        .hero {
+            text-align: center;
+            margin-bottom: 2rem;
+        }
+        .hero h1 {
+            font-size: 2.5rem;
+            margin-bottom: 0.5rem;
+        }
+        .hero p {
+            color: var(--muted-color);
+        }
+        .upload-area {
+            border: 2px dashed var(--muted-border-color);
+            border-radius: 1rem;
+            padding: 3rem;
+            text-align: center;
+            transition: all 0.2s;
+            margin-bottom: 1.5rem;
+        }
+        .upload-area:hover, .upload-area.dragover {
+            border-color: var(--primary);
+            background: rgba(139, 92, 246, 0.05);
+        }
+        .upload-area input[type="file"] {
+            display: none;
+        }
+        .upload-icon {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+        }
+        .or-divider {
+            display: flex;
+            align-items: center;
+            margin: 1.5rem 0;
+            color: var(--muted-color);
+        }
+        .or-divider::before, .or-divider::after {
+            content: "";
+            flex: 1;
+            height: 1px;
+            background: var(--muted-border-color);
+        }
+        .or-divider span {
+            padding: 0 1rem;
+        }
+        .url-input {
+            display: flex;
+            gap: 0.5rem;
+        }
+        .url-input input {
+            flex: 1;
+        }
+        .features {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+            margin-top: 3rem;
+        }
+        .feature {
+            text-align: center;
+            padding: 1rem;
+        }
+        .feature-icon {
+            font-size: 2rem;
+            margin-bottom: 0.5rem;
+        }
+        footer {
+            text-align: center;
+            padding: 2rem;
+            color: var(--muted-color);
+        }
+        #result-container {
+            min-height: 200px;
+        }
+    </style>
+</head>
+<body>
+    <main>
+        <div class="hero">
+            <h1>MIDI-grep</h1>
+            <p>Extract piano riffs from audio and generate Strudel.cc code</p>
+        </div>
+
+        <div id="result-container">
+            <form id="upload-form"
+                  hx-post="/upload"
+                  hx-target="#result-container"
+                  hx-swap="innerHTML"
+                  hx-encoding="multipart/form-data">
+
+                <div class="upload-area" onclick="document.getElementById('audio-file').click()">
+                    <div class="upload-icon">📁</div>
+                    <p><strong>Drop audio file here</strong></p>
+                    <p>or click to browse</p>
+                    <small>WAV or MP3, max 100MB</small>
+                    <input type="file" id="audio-file" name="audio" accept=".wav,.mp3,audio/wav,audio/mpeg">
+                </div>
+
+                <div class="or-divider"><span>or paste YouTube URL</span></div>
+
+                <div class="url-input">
+                    <input type="url" name="url" placeholder="https://youtube.com/watch?v=..."
+                           pattern="https?://(www\.)?(youtube\.com|youtu\.be)/.*">
+                    <button type="submit" class="secondary">Extract</button>
+                </div>
+            </form>
+        </div>
+
+        <div class="features">
+            <div class="feature">
+                <div class="feature-icon">🎹</div>
+                <h4>Piano Extraction</h4>
+                <p>AI-powered stem separation isolates piano from any mix</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">🎵</div>
+                <h4>MIDI Transcription</h4>
+                <p>Accurate note detection with BPM and key analysis</p>
+            </div>
+            <div class="feature">
+                <div class="feature-icon">💻</div>
+                <h4>Strudel.cc Code</h4>
+                <p>Ready-to-play patterns for live coding</p>
+            </div>
+        </div>
+    </main>
+
+    <footer>
+        <p>MIDI-grep v0.1.0 | No JavaScript frameworks, just HTMX + Go</p>
+    </footer>
+
+    <script>
+        // Drag and drop handling
+        const uploadArea = document.querySelector('.upload-area');
+        const fileInput = document.getElementById('audio-file');
+
+        ['dragenter', 'dragover'].forEach(event => {
+            uploadArea.addEventListener(event, (e) => {
+                e.preventDefault();
+                uploadArea.classList.add('dragover');
+            });
+        });
+
+        ['dragleave', 'drop'].forEach(event => {
+            uploadArea.addEventListener(event, (e) => {
+                e.preventDefault();
+                uploadArea.classList.remove('dragover');
+            });
+        });
+
+        uploadArea.addEventListener('drop', (e) => {
+            const files = e.dataTransfer.files;
+            if (files.length > 0) {
+                fileInput.files = files;
+                document.getElementById('upload-form').requestSubmit();
+            }
+        });
+
+        fileInput.addEventListener('change', () => {
+            if (fileInput.files.length > 0) {
+                document.getElementById('upload-form').requestSubmit();
+            }
+        });
+    </script>
+</body>
+</html>
