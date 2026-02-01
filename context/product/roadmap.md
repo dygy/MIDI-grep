@@ -195,17 +195,41 @@ _Making MIDI-grep accessible to more users._
 
 ---
 
+## Phase 9: ML Model Customization
+
+_Fine-tune transcription for specific genres and user samples._
+
+- [ ] **Genre-Specific Models**
+  - [ ] **Jazz Piano Model:** Train on jazz voicings, swing timing, blues notes
+  - [ ] **Electronic/Synth Model:** Better detection of synth leads, arps, bass
+  - [ ] **Classical Piano Model:** Handle complex classical dynamics and pedaling
+  - [ ] **Lo-Fi/Hip-Hop Model:** Recognize sampled/chopped piano patterns
+
+- [ ] **Custom Training Pipeline**
+  - [ ] **User Sample Collection:** CLI to gather training pairs (audio + correct MIDI)
+  - [ ] **Transfer Learning:** Fine-tune Basic Pitch on user's own recordings
+  - [ ] **Model Export:** Save custom models for reuse
+  - [ ] **A/B Testing:** Compare stock vs fine-tuned model accuracy
+
+- [ ] **Training Data Tools**
+  - [ ] **MIDI-Audio Alignment:** Tool to align existing MIDI with audio
+  - [ ] **Annotation Helper:** Simple UI to correct transcription errors for training
+  - [ ] **Dataset Builder:** Collect and organize training pairs
+
+- [ ] **Model Management**
+  - [ ] **Model Registry:** Store and switch between trained models
+  - [ ] **`--model` Flag:** Select which model to use for extraction
+  - [ ] **Model Sharing:** Export/import trained models
+
+---
+
 ## Future Ideas (Backlog)
 
 _Ideas for future consideration, not yet prioritized._
 
 - [ ] Real-time/streaming audio processing (live input)
 - [ ] Collaborative features (share extractions)
-- [ ] Machine learning model fine-tuning for specific genres
-- [ ] Custom model training on user's own samples
-- [ ] Integration with DAWs (Ableton Link, VST plugin)
 - [ ] Chord chart generation with lyrics sync
-- [ ] Practice mode with tempo adjustment
 - [ ] Comparison with existing transcriptions for accuracy benchmarking
 
 ---
