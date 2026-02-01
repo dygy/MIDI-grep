@@ -9,11 +9,11 @@
 
 ### 1.1. Project Vision & Purpose
 
-Enable musicians and live coders to instantly extract piano riffs from any audio source (including YouTube) and transform them into playable Strudel.cc patterns, bridging the gap between recorded music and algorithmic composition. Delivered as a Go-powered CLI and web application with a reactive HTMX interface - no JavaScript frameworks required.
+Enable musicians and live coders to instantly extract piano riffs from any audio source (including YouTube) and transform them into playable Strudel patterns, bridging the gap between recorded music and algorithmic composition. Delivered as a Go-powered CLI and web application with a reactive HTMX interface - no JavaScript frameworks required.
 
 ### 1.2. Target Audience
 
-- **Live coders** using Strudel.cc/TidalCycles who want to sample melodic ideas from existing tracks
+- **Live coders** using Strudel/TidalCycles who want to sample melodic ideas from existing tracks
 - **Music producers** learning songs by ear or seeking inspiration
 - **Hobbyist musicians** extracting riffs for practice and study
 - **Educators** demonstrating music theory concepts through real-world examples
@@ -21,7 +21,7 @@ Enable musicians and live coders to instantly extract piano riffs from any audio
 ### 1.3. User Personas
 
 - **Persona 1: "Alex the Live Coder"**
-  - **Role:** Performs algorithmic music at events using Strudel.cc
+  - **Role:** Performs algorithmic music at events using Strudel
   - **Goal:** Quickly grab a piano hook from a track and remix it live on stage
   - **Frustration:** Manually transcribing riffs is tedious and breaks creative flow
 
@@ -63,7 +63,7 @@ Enable musicians and live coders to instantly extract piano riffs from any audio
 3. HTMX triggers backend processing → live status updates via SSE
 4. Results render: BPM, Key, confidence scores, Strudel code
 5. User clicks "Copy" → code copied to clipboard
-6. Paste into strudel.cc → instant playback
+6. Paste into Strudel → instant playback
 
 **CLI Flow:**
 ```bash
@@ -93,7 +93,7 @@ Enable musicians and live coders to instantly extract piano riffs from any audio
 - MIDI cleanup: velocity threshold, duration filtering, quantization
 - BPM detection with confidence percentage
 - Key/scale detection with confidence percentage
-- Strudel.cc code generation with proper formatting
+- Strudel code generation with proper formatting
 - Copy-to-clipboard functionality
 - MIDI file download
 - Clean styling with PicoCSS

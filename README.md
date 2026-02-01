@@ -1,9 +1,9 @@
 # MIDI-grep
 
-Extract piano riffs from audio files or YouTube videos and generate [Strudel.cc](https://strudel.cc) code for live coding.
+Extract piano riffs from audio files or YouTube videos and generate [Strudel](https://strudel.dygy.app/) code for live coding.
 
 ```
-Audio/YouTube → Stem Separation → MIDI Transcription → Strudel.cc Code
+Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
 ```
 
 ## Features
@@ -12,7 +12,7 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel.cc Code
 - **AI-Powered Separation**: Demucs isolates piano/instruments from any mix
 - **Accurate Transcription**: Spotify's Basic Pitch for audio-to-MIDI
 - **BPM & Key Detection**: Automatic tempo and musical key analysis
-- **Strudel.cc Output**: Ready-to-play `note()` patterns
+- **Strudel Output**: Ready-to-play `note()` patterns
 - **Web Interface**: HTMX-powered UI, no JavaScript frameworks
 - **CLI Tool**: Full-featured command-line interface
 
@@ -130,7 +130,7 @@ $: note("[e2,e3,b3,gs4,ds5] [b3,ds4,ds5] gs5 e5 [ds4,cs5]...")
   .room(0.3).size(0.6)
 ```
 
-Paste this into [strudel.cc](https://strudel.cc) and press Ctrl+Enter to play!
+Paste this into [Strudel](https://strudel.dygy.app/) and press Ctrl+Enter to play!
 
 ## How It Works
 
@@ -248,5 +248,5 @@ MIT
 - [Demucs](https://github.com/facebookresearch/demucs) - Meta's audio source separation
 - [Basic Pitch](https://github.com/spotify/basic-pitch) - Spotify's audio-to-MIDI
 - [librosa](https://librosa.org/) - Audio analysis
-- [Strudel](https://strudel.cc) - Live coding environment
+- [Strudel](https://strudel.dygy.app/) - Live coding environment
 - [HTMX](https://htmx.org) - HTML-driven interactivity

@@ -2,11 +2,11 @@
 
 ## Vision
 
-Enable musicians and live coders to instantly extract piano riffs from audio and transform them into playable Strudel.cc patterns. Go-powered CLI + HTMX web app, no JavaScript.
+Enable musicians and live coders to instantly extract piano riffs from audio and transform them into playable Strudel patterns. Go-powered CLI + HTMX web app, no JavaScript.
 
 ## Target Audience
 
-- Live coders (Strudel.cc/TidalCycles performers)
+- Live coders (Strudel/TidalCycles performers)
 - Music producers learning songs
 - Hobbyist musicians practicing riffs
 - Music educators

@@ -26,7 +26,7 @@ def main():
 
         # Create temp directory for output
         with tempfile.TemporaryDirectory() as temp_dir:
-            # Run Basic Pitch
+            # Run Basic Pitch with high sensitivity for maximum note capture
             predict_and_save(
                 [input_path],
                 temp_dir,
@@ -35,6 +35,11 @@ def main():
                 save_model_outputs=False,
                 save_notes=False,
                 model_or_model_path=ICASSP_2022_MODEL_PATH,
+                onset_threshold=0.3,      # Lower = more onsets detected (default 0.5)
+                frame_threshold=0.2,      # Lower = more notes detected (default 0.3)
+                minimum_note_length=50,   # Minimum note length in ms (default 127.7)
+                minimum_frequency=27.5,   # A0 - capture full piano range
+                maximum_frequency=4186.0, # C8 - capture full piano range
             )
 
             # Find the generated MIDI file

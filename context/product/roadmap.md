@@ -20,7 +20,7 @@ _The highest priority features that form the core audio-to-code pipeline._
 
 - [x] **Output Generation**
   - [x] **MIDI Cleanup & Quantization:** Remove low-velocity noise, filter extremely short notes, and snap timing to grid (1/16 or 1/8 notes).
-  - [x] **Strudel Code Generator:** Transform cleaned MIDI into playable Strudel.cc `note()` patterns with proper BPM and formatting.
+  - [x] **Strudel Code Generator:** Transform cleaned MIDI into playable Strudel `note()` patterns with proper BPM and formatting.
 
 - [x] **CLI Interface**
   - [x] **Command-Line Tool:** Provide a `midi-grep extract` command with flags for input file, URL, output path, and quantization options.

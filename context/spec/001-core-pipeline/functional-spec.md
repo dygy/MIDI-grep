@@ -13,7 +13,7 @@
 Musicians and live coders who want to sample piano riffs from existing tracks face a tedious, manual process:
 1. They must use expensive DAW software to isolate instruments
 2. They transcribe notes by ear (slow, error-prone)
-3. They manually convert to their live coding syntax (Strudel.cc)
+3. They manually convert to their live coding syntax (Strudel)
 
 This workflow breaks creative flow and requires specialized skills that hobbyists may not have.
 
@@ -26,7 +26,7 @@ MIDI-grep provides a single command that automates the entire pipeline: audio in
 - Users can process an audio file and receive Strudel code with a single CLI command
 - Processing completes in under 2 minutes for a typical 3-minute track
 - Piano transcription achieves 80%+ accuracy on clear recordings
-- Output code plays correctly in Strudel.cc without manual edits
+- Output code plays correctly in Strudel without manual edits
 
 ---
 
@@ -127,11 +127,11 @@ MIDI-grep provides a single command that automates the entire pipeline: audio in
 
 ### 2.7 Strudel Code Generator
 
-**As a** user, **I want** the MIDI converted to Strudel.cc syntax, **so that** I can immediately use it in my live coding session.
+**As a** user, **I want** the MIDI converted to Strudel syntax, **so that** I can immediately use it in my live coding session.
 
 **Acceptance Criteria:**
 
-- [ ] The tool generates valid Strudel.cc code using the `note()` function
+- [ ] The tool generates valid Strudel code using the `note()` function
 - [ ] Notes are represented in scientific pitch notation (e.g., "C4", "A#3", "Gb5")
 - [ ] The generated code includes `setcps()` with the correct tempo derived from BPM
 - [ ] The generated code uses `.sound("piano")` as the default instrument
@@ -210,7 +210,7 @@ MIDI-grep provides a single command that automates the entire pipeline: audio in
 - Audio-to-MIDI transcription using Basic Pitch
 - MIDI cleanup (velocity/duration filtering)
 - MIDI quantization (1/4, 1/8, 1/16 grid)
-- Strudel.cc code generation with `note()` patterns
+- Strudel code generation with `note()` patterns
 - CLI with flags for input, output, quantization
 - Terminal progress output
 - Error messages for common failure modes

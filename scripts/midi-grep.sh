@@ -1,6 +1,6 @@
 #!/bin/bash
 #
-# MIDI-grep - Extract piano riffs from audio and generate Strudel.cc code
+# MIDI-grep - Extract piano riffs from audio and generate Strudel code
 #
 # Usage: ./scripts/midi-grep.sh [command] [options]
 #
@@ -47,7 +47,7 @@ error() { echo -e "${RED}✗${NC} $1"; exit 1; }
 # Show help
 show_help() {
     cat << 'EOF'
-MIDI-grep - Extract piano riffs from audio and generate Strudel.cc code
+MIDI-grep - Extract piano riffs from audio and generate Strudel code
 
 USAGE:
     midi-grep.sh <command> [options]

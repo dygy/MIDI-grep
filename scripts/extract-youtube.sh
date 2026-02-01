@@ -1,5 +1,5 @@
 #!/bin/bash
-# Extract piano riff from YouTube URL and generate Strudel.cc code
+# Extract piano riff from YouTube URL and generate Strudel code
 #
 # Usage: ./scripts/extract-youtube.sh <youtube-url> [output-file]
 # Example: ./scripts/extract-youtube.sh "https://youtu.be/Q4801HzWZfg" riff.strudel

@@ -4,7 +4,7 @@ This file provides context for Claude Code when working on this project.
 
 ## Project Overview
 
-**MIDI-grep** is a Go CLI and web application that extracts piano riffs from audio files or YouTube videos and generates Strudel.cc code for live coding.
+**MIDI-grep** is a Go CLI and web application that extracts piano riffs from audio files or YouTube videos and generates Strudel code for live coding.
 
 ### Core Pipeline
 
@@ -19,7 +19,7 @@ Transcription (Basic Pitch) → MIDI notes
     ↓
 Cleanup → Quantization, filtering
     ↓
-Output → Strudel.cc code
+Output → Strudel code
 ```
 
 ## Tech Stack
@@ -44,7 +44,7 @@ midi-grep/
 │   ├── midi/
 │   │   ├── transcribe.go       # Basic Pitch wrapper
 │   │   └── cleanup.go          # Quantization, velocity filtering
-│   ├── strudel/generator.go    # MIDI → Strudel.cc conversion
+│   ├── strudel/generator.go    # MIDI → Strudel conversion
 │   ├── pipeline/orchestrator.go # End-to-end CLI pipeline
 │   ├── server/
 │   │   ├── server.go           # HTTP server setup

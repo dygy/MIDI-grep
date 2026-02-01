@@ -1,5 +1,5 @@
 #!/bin/bash
-# Extract piano riff from audio file and generate Strudel.cc code
+# Extract piano riff from audio file and generate Strudel code
 #
 # Usage: ./scripts/extract-file.sh <audio-file> [output-file]
 # Example: ./scripts/extract-file.sh track.wav riff.strudel

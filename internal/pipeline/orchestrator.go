@@ -126,7 +126,14 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 	// Stage 5: Strudel generation
 	o.progress.StartStage(progress.StageGenerate)
 	generator := strudel.NewGenerator(cfg.Quantize)
-	strudelCode := generator.Generate(cleanResult.Notes, analysisResult)
+
+	// Try to use the detailed JSON output for richer generation
+	strudelCode, err := generator.GenerateFromJSON(ws.NotesJSON(), analysisResult)
+	if err != nil {
+		// Fallback to legacy method
+		o.progress.Warning("Using legacy generator: %v", err)
+		strudelCode = generator.Generate(cleanResult.Notes, analysisResult)
+	}
 
 	return &Result{
 		StrudelCode:   strudelCode,
