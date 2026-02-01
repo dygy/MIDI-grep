@@ -115,6 +115,13 @@ type FilterEnvSettings struct {
 	Amount  float64 // Filter envelope amount (semitones, 0 = off)
 }
 
+// DuckSettings defines sidechain/ducking effect parameters
+type DuckSettings struct {
+	Orbit  int     // Orbit to duck against (0 = off)
+	Attack float64 // Time for ducked signal to return (seconds)
+	Depth  float64 // Amount of ducking (0-1)
+}
+
 // VoiceEffects contains all effect settings for a voice
 type VoiceEffects struct {
 	Filter    FilterSettings
@@ -129,6 +136,7 @@ type VoiceEffects struct {
 	Harmony   HarmonySettings
 	Tremolo   TremoloSettings
 	FilterEnv FilterEnvSettings
+	Duck      DuckSettings
 }
 
 // StyleEffects defines effect variations per style
@@ -147,6 +155,7 @@ type StyleEffects struct {
 	UseOff           bool     // Whether to use .off() for harmony
 	UseTremolo       bool     // Whether to use tremolo/amplitude modulation
 	UseFilterEnv     bool     // Whether to use filter envelope
+	UseDuck          bool     // Whether to use ducking/sidechain effect
 }
 
 // Voice effect presets by voice type
@@ -328,6 +337,7 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseOff:           true,
 		UseTremolo:       true,     // Amplitude modulation for movement
 		UseFilterEnv:     true,     // Dynamic filter sweeps
+		UseDuck:          true,     // Sidechain pumping effect
 	},
 	StyleJazz: {
 		ModulationAmount: 0.4,
@@ -503,6 +513,13 @@ func GetVoiceEffects(voice string, style SoundStyle) VoiceEffects {
 		effects.FilterEnv = FilterEnvSettings{}
 	}
 
+	// Apply ducking for styles that use it (mainly on mid/high voices)
+	if styleMod.UseDuck && voice != "bass" {
+		effects.Duck = getDuckForStyle(style, voice)
+	} else {
+		effects.Duck = DuckSettings{}
+	}
+
 	return effects
 }
 
@@ -571,6 +588,28 @@ func getFilterEnvForStyle(style SoundStyle, voice string) FilterEnvSettings {
 		}
 	default:
 		return FilterEnvSettings{}
+	}
+}
+
+// getDuckForStyle returns ducking settings for a style and voice
+func getDuckForStyle(style SoundStyle, voice string) DuckSettings {
+	switch style {
+	case StyleElectronic:
+		if voice == "mid" {
+			return DuckSettings{
+				Orbit:  1,    // Duck against orbit 1 (bass)
+				Attack: 0.1,  // Quick return
+				Depth:  0.4,  // Moderate pumping
+			}
+		}
+		// High voice - more subtle ducking
+		return DuckSettings{
+			Orbit:  1,
+			Attack: 0.15,
+			Depth:  0.3,
+		}
+	default:
+		return DuckSettings{}
 	}
 }
 
@@ -733,6 +772,12 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 	if effects.Echo.Times > 0 {
 		parts = append(parts, fmt.Sprintf(".echo(%d,%.3f,%.2f)",
 			effects.Echo.Times, effects.Echo.Time, effects.Echo.Feedback))
+	}
+
+	// Ducking/Sidechain effect
+	if effects.Duck.Orbit > 0 {
+		parts = append(parts, fmt.Sprintf(".duck(%d).duckattack(%.2f).duckdepth(%.2f)",
+			effects.Duck.Orbit, effects.Duck.Attack, effects.Duck.Depth))
 	}
 
 	return strings.Join(parts, "")

@@ -153,6 +153,10 @@ _Leveraging full Strudel capabilities for expressive output._
   - [x] **Tremolo Shape:** `.tremoloshape()` for waveform selection
   - [x] **Filter Envelope:** `.lpenv()`, `.lpattack()`, `.lpdecay()` for dynamic sweeps
 
+- [x] **Sidechain/Ducking**
+  - [x] **Duck Effect:** `.duck()` for sidechain-style pumping
+  - [x] **Duck Parameters:** `.duckattack()`, `.duckdepth()` for timing/intensity
+
 - [x] **Pattern Transforms**
   - [x] **Swing:** `.swing()` for jazz style shuffle feel
   - [x] **DegradeBy:** `.degradeBy()` for lofi random note removal
@@ -297,3 +301,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.5 | 2026-02-01 | Phase 5 complete: Articulation (.clip), accumulation (.echo, .superimpose, .off), scale quantization helper |
 | 1.6 | 2026-02-01 | FM synthesis (.fm, .fmh, .fmdecay, .fmsustain) for synth/electronic styles |
 | 1.7 | 2026-02-01 | Tremolo and filter envelope for amplitude/filter modulation |
+| 1.8 | 2026-02-01 | Sidechain/ducking effect for electronic style pumping |
