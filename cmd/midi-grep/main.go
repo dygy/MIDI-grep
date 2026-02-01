@@ -117,6 +117,7 @@ var (
 	outputPath string
 	midiOutput string
 	quantize   int
+	soundStyle string
 	verbose    bool
 
 	// serve flags
@@ -156,6 +157,7 @@ func init() {
 	extractCmd.Flags().StringVarP(&outputPath, "output", "o", "", "Output file for Strudel code (default: stdout)")
 	extractCmd.Flags().StringVar(&midiOutput, "midi-out", "", "Save cleaned MIDI to file")
 	extractCmd.Flags().IntVarP(&quantize, "quantize", "q", 16, "Quantization (4, 8, or 16)")
+	extractCmd.Flags().StringVarP(&soundStyle, "style", "s", "piano", "Sound style: piano, synth, orchestral, electronic, jazz, lofi")
 	extractCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 
 	// Serve command flags
@@ -242,6 +244,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	cfg.OutputPath = outputPath
 	cfg.MIDIOutputPath = midiOutput
 	cfg.Quantize = quantize
+	cfg.SoundStyle = soundStyle
 
 	result, err := orch.Execute(ctx, cfg)
 	if err != nil {

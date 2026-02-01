@@ -17,19 +17,21 @@ import (
 
 // Config holds pipeline configuration
 type Config struct {
-	InputPath        string
-	OutputPath       string
-	MIDIOutputPath   string
-	Quantize         int
-	StemTimeout      time.Duration
+	InputPath         string
+	OutputPath        string
+	MIDIOutputPath    string
+	Quantize          int
+	SoundStyle        string
+	StemTimeout       time.Duration
 	TranscribeTimeout time.Duration
 }
 
 // DefaultConfig returns default pipeline configuration
 func DefaultConfig() Config {
 	return Config{
-		Quantize:         16,
-		StemTimeout:      5 * time.Minute,
+		Quantize:          16,
+		SoundStyle:        "piano",
+		StemTimeout:       5 * time.Minute,
 		TranscribeTimeout: 3 * time.Minute,
 	}
 }
@@ -125,7 +127,10 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 
 	// Stage 5: Strudel generation
 	o.progress.StartStage(progress.StageGenerate)
-	generator := strudel.NewGenerator(cfg.Quantize)
+
+	// Create generator with sound style
+	style := strudel.SoundStyle(cfg.SoundStyle)
+	generator := strudel.NewGeneratorWithStyle(cfg.Quantize, style)
 
 	// Try to use the detailed JSON output for richer generation
 	strudelCode, err := generator.GenerateFromJSON(ws.NotesJSON(), analysisResult)

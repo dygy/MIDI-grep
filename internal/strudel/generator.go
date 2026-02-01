@@ -12,9 +12,86 @@ import (
 	"github.com/arkadiishvartcman/midi-grep/internal/midi"
 )
 
+// SoundStyle defines preset sound combinations for different genres
+type SoundStyle string
+
+const (
+	StylePiano      SoundStyle = "piano"
+	StyleSynth      SoundStyle = "synth"
+	StyleOrchestral SoundStyle = "orchestral"
+	StyleElectronic SoundStyle = "electronic"
+	StyleJazz       SoundStyle = "jazz"
+	StyleLofi       SoundStyle = "lofi"
+	StyleAuto       SoundStyle = "auto"
+)
+
+// SoundPalette defines sounds for each voice (bass, mid, high)
+type SoundPalette struct {
+	Bass     string
+	BassGain float64
+	Mid      string
+	MidGain  float64
+	High     string
+	HighGain float64
+}
+
+// Predefined sound palettes for each style
+var soundPalettes = map[SoundStyle]SoundPalette{
+	StylePiano: {
+		Bass:     "gm_acoustic_grand_piano",
+		BassGain: 1.2,
+		Mid:      "gm_acoustic_grand_piano",
+		MidGain:  1.0,
+		High:     "gm_acoustic_grand_piano",
+		HighGain: 0.9,
+	},
+	StyleSynth: {
+		Bass:     "gm_synth_bass_1",
+		BassGain: 1.3,
+		Mid:      "gm_pad_warm",
+		MidGain:  0.8,
+		High:     "gm_lead_2_sawtooth",
+		HighGain: 0.7,
+	},
+	StyleOrchestral: {
+		Bass:     "gm_contrabass",
+		BassGain: 1.2,
+		Mid:      "gm_string_ensemble_1",
+		MidGain:  1.0,
+		High:     "gm_violin",
+		HighGain: 0.9,
+	},
+	StyleElectronic: {
+		Bass:     "gm_synth_bass_2",
+		BassGain: 1.4,
+		Mid:      "gm_pad_poly",
+		MidGain:  0.7,
+		High:     "gm_lead_1_square",
+		HighGain: 0.6,
+	},
+	StyleJazz: {
+		Bass:     "gm_acoustic_bass",
+		BassGain: 1.2,
+		Mid:      "gm_electric_piano_1",
+		MidGain:  1.0,
+		High:     "gm_vibraphone",
+		HighGain: 0.8,
+	},
+	StyleLofi: {
+		Bass:     "gm_electric_bass_finger",
+		BassGain: 1.1,
+		Mid:      "gm_electric_piano_2",
+		MidGain:  0.9,
+		High:     "gm_music_box",
+		HighGain: 0.7,
+	},
+}
+
 // Generator converts MIDI notes to Strudel code
 type Generator struct {
 	quantize int
+	style    SoundStyle
+	palette  SoundPalette
 }
 
 // VoiceNotes holds notes for a specific voice range
@@ -52,9 +129,37 @@ type NoteJSON struct {
 	VelocityNormalized float64 `json:"velocity_normalized"`
 }
 
-// NewGenerator creates a new Strudel code generator
+// NewGenerator creates a new Strudel code generator with default piano style
 func NewGenerator(quantize int) *Generator {
-	return &Generator{quantize: quantize}
+	return NewGeneratorWithStyle(quantize, StylePiano)
+}
+
+// NewGeneratorWithStyle creates a generator with specified sound style
+func NewGeneratorWithStyle(quantize int, style SoundStyle) *Generator {
+	palette, ok := soundPalettes[style]
+	if !ok {
+		palette = soundPalettes[StylePiano]
+	}
+	return &Generator{
+		quantize: quantize,
+		style:    style,
+		palette:  palette,
+	}
+}
+
+// SetStyle changes the sound style
+func (g *Generator) SetStyle(style SoundStyle) {
+	g.style = style
+	if palette, ok := soundPalettes[style]; ok {
+		g.palette = palette
+	}
+}
+
+// SetCustomPalette allows setting custom sounds for each voice
+func (g *Generator) SetCustomPalette(bass, mid, high string) {
+	g.palette.Bass = bass
+	g.palette.Mid = mid
+	g.palette.High = high
 }
 
 // GenerateFromJSON creates Strudel code from cleanup JSON file
@@ -82,7 +187,7 @@ func (g *Generator) Generate(notes []midi.Note, analysisResult *analysis.Result)
 	if analysisResult.Key != "" {
 		sb.WriteString(fmt.Sprintf(", Key: %s", analysisResult.Key))
 	}
-	sb.WriteString(fmt.Sprintf("\n// Notes: %d\n", len(notes)))
+	sb.WriteString(fmt.Sprintf("\n// Notes: %d, Style: %s\n", len(notes), g.style))
 
 	// Tempo
 	sb.WriteString(fmt.Sprintf("setcps(%.0f/60/4)\n\n", analysisResult.BPM))
@@ -118,6 +223,7 @@ func (g *Generator) generateFromCleanup(result *CleanupResult, analysisResult *a
 	}
 	sb.WriteString(fmt.Sprintf("\n// Notes: %d (bass: %d, mid: %d, high: %d)\n",
 		result.Stats.Total, result.Stats.BassCount, result.Stats.MidCount, result.Stats.HighCount))
+	sb.WriteString(fmt.Sprintf("// Style: %s\n", g.style))
 	sb.WriteString(fmt.Sprintf("// Duration: %.1f beats\n\n", result.TotalBeats))
 
 	// Tempo
@@ -147,7 +253,7 @@ func jsonToNotes(jsonNotes []NoteJSON) []midi.Note {
 	return notes
 }
 
-// generateStackedPattern creates a Strudel stack() with separate voices
+// generateStackedPattern creates a Strudel stack() with separate voices and GM sounds
 func (g *Generator) generateStackedPattern(sb *strings.Builder, bass, mid, high []midi.Note, bpm float64) {
 	// Calculate timing
 	beatDuration := 60.0 / bpm
@@ -171,16 +277,16 @@ func (g *Generator) generateStackedPattern(sb *strings.Builder, bass, mid, high 
 		numBars = 16 // Limit to 16 bars for readability
 	}
 
-	// Count non-empty voices
+	// Define voices with their sounds from palette
 	voices := []struct {
-		name   string
-		notes  []midi.Note
-		sound  string
-		octave int
+		name  string
+		notes []midi.Note
+		sound string
+		gain  float64
 	}{
-		{"bass", bass, "piano", -1},
-		{"mid", mid, "piano", 0},
-		{"high", high, "piano", 0},
+		{"bass", bass, g.palette.Bass, g.palette.BassGain},
+		{"mid", mid, g.palette.Mid, g.palette.MidGain},
+		{"high", high, g.palette.High, g.palette.HighGain},
 	}
 
 	var activeVoices []string
@@ -191,8 +297,8 @@ func (g *Generator) generateStackedPattern(sb *strings.Builder, bass, mid, high 
 				voiceCode := fmt.Sprintf("  // %s (%d notes)\n", v.name, len(v.notes))
 				voiceCode += fmt.Sprintf("  note(\"%s\")\n", pattern)
 				voiceCode += fmt.Sprintf("    .sound(\"%s\")", v.sound)
-				if v.name == "bass" {
-					voiceCode += "\n    .gain(1.2)"
+				if v.gain != 1.0 {
+					voiceCode += fmt.Sprintf("\n    .gain(%.1f)", v.gain)
 				}
 				activeVoices = append(activeVoices, voiceCode)
 			}
@@ -200,7 +306,7 @@ func (g *Generator) generateStackedPattern(sb *strings.Builder, bass, mid, high 
 	}
 
 	if len(activeVoices) == 0 {
-		sb.WriteString("$: note(\"c4\").sound(\"piano\")\n")
+		sb.WriteString(fmt.Sprintf("$: note(\"c4\").sound(\"%s\")\n", g.palette.Mid))
 		return
 	}
 
@@ -337,4 +443,29 @@ func isAllRests(pattern string) bool {
 		}
 	}
 	return true
+}
+
+// AvailableStyles returns list of available sound styles
+func AvailableStyles() []SoundStyle {
+	return []SoundStyle{
+		StylePiano,
+		StyleSynth,
+		StyleOrchestral,
+		StyleElectronic,
+		StyleJazz,
+		StyleLofi,
+	}
+}
+
+// StyleDescription returns a description for each style
+func StyleDescription(style SoundStyle) string {
+	descriptions := map[SoundStyle]string{
+		StylePiano:      "Acoustic grand piano for all voices",
+		StyleSynth:      "Synth bass, warm pad, sawtooth lead",
+		StyleOrchestral: "Contrabass, strings, violin",
+		StyleElectronic: "Synth bass, poly pad, square lead",
+		StyleJazz:       "Acoustic bass, electric piano, vibraphone",
+		StyleLofi:       "Finger bass, electric piano 2, music box",
+	}
+	return descriptions[style]
 }

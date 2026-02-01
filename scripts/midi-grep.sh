@@ -33,6 +33,7 @@ PYTHON_VENV="$SCRIPT_DIR/python/.venv"
 
 # Default values
 QUANTIZE=16
+STYLE="piano"
 PORT=8080
 OUTPUT=""
 VERBOSE=false
@@ -63,6 +64,8 @@ EXTRACT OPTIONS:
     -f, --file <path>       Local audio file (WAV/MP3)
     -o, --output <path>     Output file for Strudel code (default: stdout)
     -q, --quantize <4|8|16> Quantization level (default: 16)
+    -s, --style <style>     Sound style (default: piano)
+                            Options: piano, synth, orchestral, electronic, jazz, lofi
     -m, --midi <path>       Also save cleaned MIDI file
     -c, --copy              Copy result to clipboard (macOS)
     -v, --verbose           Show verbose output
@@ -202,6 +205,10 @@ cmd_extract() {
                 MIDI_OUT="$2"
                 shift 2
                 ;;
+            -s|--style)
+                STYLE="$2"
+                shift 2
+                ;;
             -c|--copy)
                 COPY_CLIPBOARD=true
                 shift
@@ -251,6 +258,25 @@ cmd_extract() {
         if [[ -n "$Q_INPUT" ]]; then
             QUANTIZE="$Q_INPUT"
         fi
+
+        # Ask for style
+        echo ""
+        echo "Sound style:"
+        echo "  1) piano       - Acoustic piano"
+        echo "  2) synth       - Synth bass + pad + lead"
+        echo "  3) orchestral  - Strings + contrabass"
+        echo "  4) electronic  - Synth bass + poly pad"
+        echo "  5) jazz        - Bass + electric piano + vibes"
+        echo "  6) lofi        - Electric bass + EP2 + music box"
+        read -p "Style [1-6] (default: 1): " STYLE_INPUT
+        case "$STYLE_INPUT" in
+            2) STYLE="synth" ;;
+            3) STYLE="orchestral" ;;
+            4) STYLE="electronic" ;;
+            5) STYLE="jazz" ;;
+            6) STYLE="lofi" ;;
+            *) STYLE="piano" ;;
+        esac
     fi
 
     if [[ "$QUANTIZE" != "4" && "$QUANTIZE" != "8" && "$QUANTIZE" != "16" ]]; then
@@ -261,7 +287,7 @@ cmd_extract() {
     ensure_binary
 
     # Build command
-    local CMD=("$BINARY" "extract" "--quantize" "$QUANTIZE")
+    local CMD=("$BINARY" "extract" "--quantize" "$QUANTIZE" "--style" "$STYLE")
 
     if [[ -n "$URL" ]]; then
         CMD+=("--url" "$URL")
