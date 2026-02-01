@@ -23,7 +23,7 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   - Tremolo/amplitude modulation for synth/orchestral movement
   - Filter envelope (.lpenv, .lpattack, .lpdecay) for dynamic sweeps
   - Sidechain/ducking (.duck, .duckattack, .duckdepth) for electronic pumping
-  - Pattern transforms: swing for jazz, degradeBy for lofi
+  - Pattern transforms: swing for jazz, degradeBy for lofi, iter for electronic/lofi variation
   - `.clip()` for note duration control (staccato/legato/sustained)
   - `.echo()` for rhythmic repeats
   - `.superimpose()` for detuned layering (synth richness)

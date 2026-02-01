@@ -77,6 +77,8 @@ type PatternFXSettings struct {
 	Swing     float64 // Swing amount (0 = off, 0.1 = subtle)
 	DegradeBy float64 // Random note removal (0 = off, 0.1 = subtle)
 	Ply       int     // Repeat each note n times (0 = off)
+	Iter      int     // Cycle through pattern subdivisions (0 = off)
+	Rev       bool    // Reverse pattern every other cycle
 }
 
 // LegatoSettings defines note duration/articulation
@@ -156,6 +158,7 @@ type StyleEffects struct {
 	UseTremolo       bool     // Whether to use tremolo/amplitude modulation
 	UseFilterEnv     bool     // Whether to use filter envelope
 	UseDuck          bool     // Whether to use ducking/sidechain effect
+	IterAmount       int      // Iter subdivisions (0 = off)
 }
 
 // Voice effect presets by voice type
@@ -338,6 +341,7 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseTremolo:       true,     // Amplitude modulation for movement
 		UseFilterEnv:     true,     // Dynamic filter sweeps
 		UseDuck:          true,     // Sidechain pumping effect
+		IterAmount:       4,        // Cycle through 4 subdivisions
 	},
 	StyleJazz: {
 		ModulationAmount: 0.4,
@@ -362,10 +366,11 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseEnvelope:      false,
 		UseStyleFX:       true, // Bitcrush, coarse
 		SwingAmount:      0.05,
-		LegatoAmount:     1.1, // Slightly sustained for dreamy feel
+		LegatoAmount:     1.1,    // Slightly sustained for dreamy feel
 		UseEcho:          true,
-		UseSuperimpose:   true, // Subtle detune
+		UseSuperimpose:   true,   // Subtle detune
 		UseOff:           false,
+		IterAmount:       4,      // Cycle through 4 subdivisions for variation
 	},
 }
 
@@ -461,6 +466,11 @@ func GetVoiceEffects(voice string, style SoundStyle) VoiceEffects {
 	effects.PatternFX.Swing = styleMod.SwingAmount
 	if style == StyleLofi {
 		effects.PatternFX.DegradeBy = 0.05 // Subtle random note removal
+	}
+
+	// Apply iter for styles that use it
+	if styleMod.IterAmount > 0 {
+		effects.PatternFX.Iter = styleMod.IterAmount
 	}
 
 	// Apply legato amount based on style
@@ -789,6 +799,12 @@ func BuildPatternTransforms(effects VoiceEffects) string {
 
 	if effects.PatternFX.Jux {
 		parts = append(parts, ".jux(rev)")
+	}
+	if effects.PatternFX.Iter > 0 {
+		parts = append(parts, fmt.Sprintf(".iter(%d)", effects.PatternFX.Iter))
+	}
+	if effects.PatternFX.Rev {
+		parts = append(parts, ".lastOf(2, rev)")
 	}
 	if effects.PatternFX.Swing > 0 {
 		parts = append(parts, fmt.Sprintf(".swing(%.2f)", effects.PatternFX.Swing))

@@ -136,7 +136,7 @@ The Strudel generator is split across three files:
 - `VoiceEffects` struct - filter, pan, reverb, delay, envelope, styleFX, patternFX, legato, echo, harmony, tremolo, filterEnv, duck
 - `EnvelopeSettings` - ADSR envelope (attack, decay, sustain, release)
 - `StyleFXSettings` - phaser, crush, coarse, vowel, distort, vibrato, FM synthesis (fm, fmh, fmdecay, fmsustain)
-- `PatternFXSettings` - jux, swing, degradeBy, ply
+- `PatternFXSettings` - jux, swing, degradeBy, ply, iter, rev
 - `LegatoSettings` - clip for note duration control
 - `EchoSettings` - echo/stutter effect (times, time, feedback)
 - `HarmonySettings` - superimpose (detune), off (harmonic layering)

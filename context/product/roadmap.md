@@ -160,6 +160,7 @@ _Leveraging full Strudel capabilities for expressive output._
 - [x] **Pattern Transforms**
   - [x] **Swing:** `.swing()` for jazz style shuffle feel
   - [x] **DegradeBy:** `.degradeBy()` for lofi random note removal
+  - [x] **Iter:** `.iter()` for cyclic pattern variation (electronic/lofi)
   - [ ] **Jux:** `.jux(rev)` for stereo width (future: per-style)
   - [ ] **Ply:** `.ply()` for rhythmic density (future)
 
@@ -302,3 +303,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.6 | 2026-02-01 | FM synthesis (.fm, .fmh, .fmdecay, .fmsustain) for synth/electronic styles |
 | 1.7 | 2026-02-01 | Tremolo and filter envelope for amplitude/filter modulation |
 | 1.8 | 2026-02-01 | Sidechain/ducking effect for electronic style pumping |
+| 1.9 | 2026-02-01 | Iter pattern transform for cyclic variation |
