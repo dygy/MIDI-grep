@@ -148,6 +148,11 @@ _Leveraging full Strudel capabilities for expressive output._
   - [x] **FM Harmonicity:** `.fmh()` for timbre control
   - [x] **FM Envelope:** `.fmdecay()`, `.fmsustain()` for FM dynamics
 
+- [x] **Tremolo & Filter Modulation**
+  - [x] **Tremolo:** `.tremolo()`, `.tremolodepth()` for amplitude modulation
+  - [x] **Tremolo Shape:** `.tremoloshape()` for waveform selection
+  - [x] **Filter Envelope:** `.lpenv()`, `.lpattack()`, `.lpdecay()` for dynamic sweeps
+
 - [x] **Pattern Transforms**
   - [x] **Swing:** `.swing()` for jazz style shuffle feel
   - [x] **DegradeBy:** `.degradeBy()` for lofi random note removal
@@ -291,3 +296,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.4 | 2026-02-01 | Phase 5 enhanced: ADSR envelopes, multiple LFO shapes (perlin/saw/tri), style-specific FX (phaser/crush/coarse/vibrato/distort), pattern transforms (swing/degradeBy), proper .velocity() |
 | 1.5 | 2026-02-01 | Phase 5 complete: Articulation (.clip), accumulation (.echo, .superimpose, .off), scale quantization helper |
 | 1.6 | 2026-02-01 | FM synthesis (.fm, .fmh, .fmdecay, .fmsustain) for synth/electronic styles |
+| 1.7 | 2026-02-01 | Tremolo and filter envelope for amplitude/filter modulation |

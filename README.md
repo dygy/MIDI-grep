@@ -20,6 +20,8 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   - Voice-appropriate reverb, delay, phaser, vibrato
   - Style-specific FX: bitcrush/coarse for lofi, distort for electronic
   - FM synthesis (.fm, .fmh, .fmdecay) for synth/electronic richness
+  - Tremolo/amplitude modulation for synth/orchestral movement
+  - Filter envelope (.lpenv, .lpattack, .lpdecay) for dynamic sweeps
   - Pattern transforms: swing for jazz, degradeBy for lofi
   - `.clip()` for note duration control (staccato/legato/sustained)
   - `.echo()` for rhythmic repeats

@@ -133,13 +133,15 @@ The Strudel generator is split across three files:
 - `midiToNoteName()` - pitch notation
 
 **`internal/strudel/effects.go`** - Per-voice effect settings:
-- `VoiceEffects` struct - filter, pan, reverb, delay, envelope, styleFX, patternFX, legato, echo, harmony
+- `VoiceEffects` struct - filter, pan, reverb, delay, envelope, styleFX, patternFX, legato, echo, harmony, tremolo, filterEnv
 - `EnvelopeSettings` - ADSR envelope (attack, decay, sustain, release)
 - `StyleFXSettings` - phaser, crush, coarse, vowel, distort, vibrato, FM synthesis (fm, fmh, fmdecay, fmsustain)
 - `PatternFXSettings` - jux, swing, degradeBy, ply
 - `LegatoSettings` - clip for note duration control
 - `EchoSettings` - echo/stutter effect (times, time, feedback)
 - `HarmonySettings` - superimpose (detune), off (harmonic layering)
+- `TremoloSettings` - amplitude modulation (sync, depth, shape)
+- `FilterEnvSettings` - filter envelope (attack, decay, sustain, release, amount)
 - `LFOShape` - sine, saw, tri, square, perlin, rand
 - `GetVoiceEffects()` - returns effects for voice type + style
 - `BuildEffectChain()` - generates Strudel effect method chain
@@ -156,9 +158,9 @@ The Strudel generator is split across three files:
 
 Each style has unique effect settings:
 - **piano**: Minimal effects, natural envelope, clip=1.0
-- **synth**: Phaser, vibrato, saw LFO, ADSR, FM synthesis, echo, superimpose, off
-- **orchestral**: Long attack envelope, vibrato, more reverb, clip=1.5 (sustained)
-- **electronic**: Phaser, distort, saw LFO, ADSR, FM synthesis, echo, superimpose, off, clip=0.8 (punchy)
+- **synth**: Phaser, vibrato, saw LFO, ADSR, FM synthesis, echo, superimpose, off, tremolo, filter envelope
+- **orchestral**: Long attack envelope, vibrato, more reverb, clip=1.5 (sustained), tremolo
+- **electronic**: Phaser, distort, saw LFO, ADSR, FM synthesis, echo, superimpose, off, tremolo, filter envelope, clip=0.8 (punchy)
 - **jazz**: Perlin LFO (organic), vibrato, swing
 - **lofi**: Bitcrush, coarse, perlin LFO, degradeBy, swing, echo, superimpose, clip=1.1
 

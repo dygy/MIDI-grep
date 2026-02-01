@@ -99,6 +99,22 @@ type HarmonySettings struct {
 	SuperimposeOct int     // Octave for superimpose (0 = same, 12 = octave up)
 }
 
+// TremoloSettings defines amplitude modulation parameters
+type TremoloSettings struct {
+	Sync  float64 // Tremolo sync rate (cycles, 0 = off)
+	Depth float64 // Tremolo depth (0-1)
+	Shape string  // Tremolo waveform: "sine", "tri", "saw", "square"
+}
+
+// FilterEnvSettings defines filter envelope parameters
+type FilterEnvSettings struct {
+	Attack  float64 // Filter attack time (0 = off)
+	Decay   float64 // Filter decay time
+	Sustain float64 // Filter sustain level (0-1)
+	Release float64 // Filter release time
+	Amount  float64 // Filter envelope amount (semitones, 0 = off)
+}
+
 // VoiceEffects contains all effect settings for a voice
 type VoiceEffects struct {
 	Filter    FilterSettings
@@ -111,6 +127,8 @@ type VoiceEffects struct {
 	Legato    LegatoSettings
 	Echo      EchoSettings
 	Harmony   HarmonySettings
+	Tremolo   TremoloSettings
+	FilterEnv FilterEnvSettings
 }
 
 // StyleEffects defines effect variations per style
@@ -127,6 +145,8 @@ type StyleEffects struct {
 	UseEcho          bool     // Whether to use echo effect
 	UseSuperimpose   bool     // Whether to use detuned superimpose
 	UseOff           bool     // Whether to use .off() for harmony
+	UseTremolo       bool     // Whether to use tremolo/amplitude modulation
+	UseFilterEnv     bool     // Whether to use filter envelope
 }
 
 // Voice effect presets by voice type
@@ -236,6 +256,12 @@ var voiceEffectPresets = map[string]VoiceEffects{
 			Feedback: 0.5,
 		},
 		Harmony: HarmonySettings{},
+		Tremolo: TremoloSettings{
+			Sync:  4,      // 4 cycles
+			Depth: 0.3,    // Subtle modulation
+			Shape: "sine", // Smooth
+		},
+		FilterEnv: FilterEnvSettings{},
 	},
 }
 
@@ -265,9 +291,11 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseStyleFX:       true,
 		SwingAmount:      0,
 		LegatoAmount:     1.0,
-		UseEcho:          true, // Echo for synth pads
-		UseSuperimpose:   true, // Detuned layers for richness
-		UseOff:           true, // Harmonic layering
+		UseEcho:          true,        // Echo for synth pads
+		UseSuperimpose:   true,        // Detuned layers for richness
+		UseOff:           true,        // Harmonic layering
+		UseTremolo:       true,        // Amplitude modulation for movement
+		UseFilterEnv:     true,        // Dynamic filter sweeps
 	},
 	StyleOrchestral: {
 		ModulationAmount: 0.2, // Very subtle
@@ -278,10 +306,12 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseEnvelope:      true, // Long attacks for strings
 		UseStyleFX:       false,
 		SwingAmount:      0,
-		LegatoAmount:     1.5, // Long sustained notes
+		LegatoAmount:     1.5,    // Long sustained notes
 		UseEcho:          false,
 		UseSuperimpose:   false,
 		UseOff:           false,
+		UseTremolo:       true,   // Subtle tremolo for strings effect
+		UseFilterEnv:     false,
 	},
 	StyleElectronic: {
 		ModulationAmount: 1.0, // Full modulation
@@ -292,10 +322,12 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseEnvelope:      true,
 		UseStyleFX:       true,
 		SwingAmount:      0,
-		LegatoAmount:     0.8, // Tighter, punchier
+		LegatoAmount:     0.8,      // Tighter, punchier
 		UseEcho:          true,
 		UseSuperimpose:   true,
 		UseOff:           true,
+		UseTremolo:       true,     // Amplitude modulation for movement
+		UseFilterEnv:     true,     // Dynamic filter sweeps
 	},
 	StyleJazz: {
 		ModulationAmount: 0.4,
@@ -455,7 +487,91 @@ func GetVoiceEffects(voice string, style SoundStyle) VoiceEffects {
 		effects.Harmony.Off = 0
 	}
 
+	// Apply tremolo for styles that use it (mainly on mid/high voices)
+	if styleMod.UseTremolo && voice != "bass" {
+		if effects.Tremolo.Sync == 0 {
+			effects.Tremolo = getTremoloForStyle(style)
+		}
+	} else if !styleMod.UseTremolo {
+		effects.Tremolo = TremoloSettings{}
+	}
+
+	// Apply filter envelope for styles that use it (mainly on bass/mid)
+	if styleMod.UseFilterEnv && voice != "high" {
+		effects.FilterEnv = getFilterEnvForStyle(style, voice)
+	} else if !styleMod.UseFilterEnv {
+		effects.FilterEnv = FilterEnvSettings{}
+	}
+
 	return effects
+}
+
+// getTremoloForStyle returns tremolo settings for a style
+func getTremoloForStyle(style SoundStyle) TremoloSettings {
+	switch style {
+	case StyleSynth:
+		return TremoloSettings{
+			Sync:  8,      // 8 cycles - slow
+			Depth: 0.2,    // Subtle
+			Shape: "sine", // Smooth
+		}
+	case StyleElectronic:
+		return TremoloSettings{
+			Sync:  4,     // Faster
+			Depth: 0.4,   // More pronounced
+			Shape: "tri", // Slightly edgier
+		}
+	case StyleOrchestral:
+		return TremoloSettings{
+			Sync:  6,      // Moderate
+			Depth: 0.15,   // Very subtle
+			Shape: "sine", // Smooth like strings
+		}
+	default:
+		return TremoloSettings{}
+	}
+}
+
+// getFilterEnvForStyle returns filter envelope settings for a style and voice
+func getFilterEnvForStyle(style SoundStyle, voice string) FilterEnvSettings {
+	switch style {
+	case StyleSynth:
+		if voice == "bass" {
+			return FilterEnvSettings{
+				Attack:  0.01,
+				Decay:   0.3,
+				Sustain: 0.4,
+				Release: 0.2,
+				Amount:  2000, // 2000 Hz sweep
+			}
+		}
+		return FilterEnvSettings{
+			Attack:  0.05,
+			Decay:   0.4,
+			Sustain: 0.5,
+			Release: 0.3,
+			Amount:  3000, // 3000 Hz sweep
+		}
+	case StyleElectronic:
+		if voice == "bass" {
+			return FilterEnvSettings{
+				Attack:  0.005,
+				Decay:   0.2,
+				Sustain: 0.3,
+				Release: 0.1,
+				Amount:  2500, // Punchy bass sweep
+			}
+		}
+		return FilterEnvSettings{
+			Attack:  0.02,
+			Decay:   0.3,
+			Sustain: 0.4,
+			Release: 0.2,
+			Amount:  4000, // Wide sweep
+		}
+	default:
+		return FilterEnvSettings{}
+	}
 }
 
 // buildPanLFO creates an LFO pan expression with the specified shape
@@ -538,6 +654,13 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 		}
 	}
 
+	// Filter envelope (for synth/electronic styles)
+	if effects.FilterEnv.Amount > 0 {
+		parts = append(parts, fmt.Sprintf(".lpattack(%.3f).lpdecay(%.2f).lpsustain(%.2f).lprelease(%.2f).lpenv(%.0f)",
+			effects.FilterEnv.Attack, effects.FilterEnv.Decay,
+			effects.FilterEnv.Sustain, effects.FilterEnv.Release, effects.FilterEnv.Amount))
+	}
+
 	// ADSR Envelope
 	if effects.Envelope.Attack > 0 || effects.Envelope.Release > 0 {
 		parts = append(parts, fmt.Sprintf(".attack(%.3f).decay(%.2f).sustain(%.2f).release(%.2f)",
@@ -584,6 +707,15 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 	// Legato/Clip for note duration
 	if effects.Legato.Clip > 0 && effects.Legato.Clip != 1.0 {
 		parts = append(parts, fmt.Sprintf(".clip(%.2f)", effects.Legato.Clip))
+	}
+
+	// Tremolo (amplitude modulation)
+	if effects.Tremolo.Sync > 0 {
+		parts = append(parts, fmt.Sprintf(".tremolo(%.1f).tremolodepth(%.2f)",
+			effects.Tremolo.Sync, effects.Tremolo.Depth))
+		if effects.Tremolo.Shape != "" && effects.Tremolo.Shape != "sine" {
+			parts = append(parts, fmt.Sprintf(".tremoloshape(\"%s\")", effects.Tremolo.Shape))
+		}
 	}
 
 	// Reverb
