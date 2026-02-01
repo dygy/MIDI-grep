@@ -16,6 +16,100 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
 - **Web Interface**: HTMX-powered UI, no JavaScript frameworks
 - **CLI Tool**: Full-featured command-line interface
 
+## Architecture
+
+```
+┌─────────────────────────────────────────────────────────────────────────────┐
+│                              MIDI-grep                                      │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
+│  │   INPUT     │    │  SEPARATE   │    │  TRANSCRIBE │    │   OUTPUT    │  │
+│  │             │    │             │    │             │    │             │  │
+│  │ • YouTube   │───▶│ • Demucs    │───▶│ • Basic     │───▶│ • Strudel   │  │
+│  │   (yt-dlp)  │    │   (PyTorch) │    │   Pitch     │    │   code      │  │
+│  │ • WAV/MP3   │    │ • Stems:    │    │   (TF)      │    │ • MIDI file │  │
+│  │             │    │   piano,    │    │ • librosa   │    │ • JSON      │  │
+│  │             │    │   bass,     │    │   (BPM/Key) │    │             │  │
+│  │             │    │   drums     │    │             │    │             │  │
+│  └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘  │
+│                                                                             │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                           TECHNOLOGY STACK                                  │
+├─────────────────────────────────────────────────────────────────────────────┤
+│                                                                             │
+│  ┌─────────────────────────────┐    ┌─────────────────────────────────────┐│
+│  │         GO (1.21+)          │    │           PYTHON (3.11+)            ││
+│  │                             │    │                                     ││
+│  │  • CLI (Cobra)              │    │  • demucs      - Stem separation    ││
+│  │  • HTTP Server (Chi)        │    │  • basic-pitch - Audio → MIDI       ││
+│  │  • Pipeline orchestration   │    │  • librosa     - Audio analysis     ││
+│  │  • Strudel code generation  │    │  • pretty_midi - MIDI processing    ││
+│  │                             │    │  • tensorflow  - ML inference       ││
+│  └─────────────────────────────┘    └─────────────────────────────────────┘│
+│                                                                             │
+│  ┌─────────────────────────────┐    ┌─────────────────────────────────────┐│
+│  │        WEB FRONTEND         │    │            EXTERNAL                 ││
+│  │                             │    │                                     ││
+│  │  • HTMX (no JS frameworks)  │    │  • yt-dlp     - YouTube download    ││
+│  │  • PicoCSS (styling)        │    │  • ffmpeg     - Audio conversion    ││
+│  │  • SSE (real-time updates)  │    │                                     ││
+│  │  • Go templates             │    │                                     ││
+│  └─────────────────────────────┘    └─────────────────────────────────────┘│
+│                                                                             │
+└─────────────────────────────────────────────────────────────────────────────┘
+```
+
+### Module Structure
+
+```
+midi-grep/
+├── cmd/midi-grep/           # CLI entrypoint (Go)
+│   └── main.go              # Cobra commands: extract, serve, train
+│
+├── internal/                # Go packages
+│   ├── audio/               # Input validation, YouTube download, stem separation
+│   ├── analysis/            # BPM & key detection (calls Python)
+│   ├── midi/                # Transcription & cleanup (calls Python)
+│   ├── strudel/             # MIDI → Strudel code generation
+│   ├── pipeline/            # Orchestrates the full extraction flow
+│   ├── server/              # HTTP server, HTMX templates, SSE
+│   └── exec/                # Python subprocess runner
+│
+├── scripts/
+│   ├── midi-grep.sh         # Main CLI wrapper (Bash)
+│   └── python/              # Python ML scripts
+│       ├── separate.py      # Demucs stem separation
+│       ├── transcribe.py    # Basic Pitch audio → MIDI
+│       ├── analyze.py       # librosa BPM/key detection
+│       ├── cleanup.py       # MIDI quantization & filtering
+│       └── training/        # Model fine-tuning (Phase 9)
+│
+└── context/                 # AWOS documentation
+    ├── product/             # Product definition, roadmap
+    └── spec/                # Feature specifications
+```
+
+### Data Flow
+
+```
+1. INPUT
+   YouTube URL ──▶ yt-dlp ──▶ audio.wav
+   Local file ─────────────▶ audio.wav
+
+2. STEM SEPARATION
+   audio.wav ──▶ Demucs ──▶ piano.mp3 (isolated instrument)
+
+3. ANALYSIS
+   piano.mp3 ──▶ librosa ──▶ { bpm: 120, key: "A minor" }
+
+4. TRANSCRIPTION
+   piano.mp3 ──▶ Basic Pitch ──▶ raw.mid ──▶ cleanup ──▶ notes.json
+
+5. GENERATION
+   notes.json + analysis ──▶ Strudel Generator ──▶ code.strudel
+```
+
 ## Quick Start
 
 ```bash
