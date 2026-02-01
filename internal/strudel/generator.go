@@ -36,13 +36,14 @@ type SoundPalette struct {
 }
 
 // Predefined sound palettes for each style
+// Sound names must match exactly what's in strudel-client/packages/soundfonts/gm.mjs
 var soundPalettes = map[SoundStyle]SoundPalette{
 	StylePiano: {
-		Bass:     "gm_acoustic_grand_piano",
+		Bass:     "gm_piano",
 		BassGain: 1.2,
-		Mid:      "gm_acoustic_grand_piano",
+		Mid:      "gm_piano",
 		MidGain:  1.0,
-		High:     "gm_acoustic_grand_piano",
+		High:     "gm_piano",
 		HighGain: 0.9,
 	},
 	StyleSynth: {
@@ -72,7 +73,7 @@ var soundPalettes = map[SoundStyle]SoundPalette{
 	StyleJazz: {
 		Bass:     "gm_acoustic_bass",
 		BassGain: 1.2,
-		Mid:      "gm_electric_piano_1",
+		Mid:      "gm_epiano1",
 		MidGain:  1.0,
 		High:     "gm_vibraphone",
 		HighGain: 0.8,
@@ -80,7 +81,7 @@ var soundPalettes = map[SoundStyle]SoundPalette{
 	StyleLofi: {
 		Bass:     "gm_electric_bass_finger",
 		BassGain: 1.1,
-		Mid:      "gm_electric_piano_2",
+		Mid:      "gm_epiano2",
 		MidGain:  0.9,
 		High:     "gm_music_box",
 		HighGain: 0.7,
@@ -468,4 +469,173 @@ func StyleDescription(style SoundStyle) string {
 		StyleLofi:       "Finger bass, electric piano 2, music box",
 	}
 	return descriptions[style]
+}
+
+// ValidGMSounds contains all valid GM soundfont names from strudel-client
+// Source: strudel-client/packages/soundfonts/gm.mjs
+var ValidGMSounds = map[string]bool{
+	// Piano
+	"gm_piano":       true,
+	"gm_epiano1":     true,
+	"gm_epiano2":     true,
+	"gm_harpsichord": true,
+	"gm_clavinet":    true,
+	// Chromatic Percussion
+	"gm_celesta":      true,
+	"gm_glockenspiel": true,
+	"gm_music_box":    true,
+	"gm_vibraphone":   true,
+	"gm_marimba":      true,
+	"gm_xylophone":    true,
+	"gm_tubular_bells": true,
+	"gm_dulcimer":     true,
+	// Organ
+	"gm_drawbar_organ":    true,
+	"gm_percussive_organ": true,
+	"gm_rock_organ":       true,
+	"gm_church_organ":     true,
+	"gm_reed_organ":       true,
+	"gm_accordion":        true,
+	"gm_harmonica":        true,
+	"gm_bandoneon":        true,
+	// Guitar
+	"gm_acoustic_guitar_nylon": true,
+	"gm_acoustic_guitar_steel": true,
+	"gm_electric_guitar_jazz":  true,
+	"gm_electric_guitar_clean": true,
+	"gm_electric_guitar_muted": true,
+	"gm_overdriven_guitar":     true,
+	"gm_distortion_guitar":     true,
+	"gm_guitar_harmonics":      true,
+	// Bass
+	"gm_acoustic_bass":        true,
+	"gm_electric_bass_finger": true,
+	"gm_electric_bass_pick":   true,
+	"gm_fretless_bass":        true,
+	"gm_slap_bass_1":          true,
+	"gm_slap_bass_2":          true,
+	"gm_synth_bass_1":         true,
+	"gm_synth_bass_2":         true,
+	// Strings
+	"gm_violin":            true,
+	"gm_viola":             true,
+	"gm_cello":             true,
+	"gm_contrabass":        true,
+	"gm_tremolo_strings":   true,
+	"gm_pizzicato_strings": true,
+	"gm_orchestral_harp":   true,
+	"gm_timpani":           true,
+	"gm_string_ensemble_1": true,
+	"gm_string_ensemble_2": true,
+	"gm_synth_strings_1":   true,
+	"gm_synth_strings_2":   true,
+	// Choir
+	"gm_choir_aahs":     true,
+	"gm_voice_oohs":     true,
+	"gm_synth_choir":    true,
+	"gm_orchestra_hit":  true,
+	// Brass
+	"gm_trumpet":       true,
+	"gm_trombone":      true,
+	"gm_tuba":          true,
+	"gm_muted_trumpet": true,
+	"gm_french_horn":   true,
+	"gm_brass_section": true,
+	"gm_synth_brass_1": true,
+	"gm_synth_brass_2": true,
+	// Reed
+	"gm_soprano_sax":  true,
+	"gm_alto_sax":     true,
+	"gm_tenor_sax":    true,
+	"gm_baritone_sax": true,
+	"gm_oboe":         true,
+	"gm_english_horn": true,
+	"gm_bassoon":      true,
+	"gm_clarinet":     true,
+	// Pipe
+	"gm_piccolo":       true,
+	"gm_flute":         true,
+	"gm_recorder":      true,
+	"gm_pan_flute":     true,
+	"gm_blown_bottle":  true,
+	"gm_shakuhachi":    true,
+	"gm_whistle":       true,
+	"gm_ocarina":       true,
+	// Synth Lead
+	"gm_lead_1_square":    true,
+	"gm_lead_2_sawtooth":  true,
+	"gm_lead_3_calliope":  true,
+	"gm_lead_4_chiff":     true,
+	"gm_lead_5_charang":   true,
+	"gm_lead_6_voice":     true,
+	"gm_lead_7_fifths":    true,
+	"gm_lead_8_bass_lead": true,
+	// Synth Pad
+	"gm_pad_new_age":  true,
+	"gm_pad_warm":     true,
+	"gm_pad_poly":     true,
+	"gm_pad_choir":    true,
+	"gm_pad_bowed":    true,
+	"gm_pad_metallic": true,
+	"gm_pad_halo":     true,
+	"gm_pad_sweep":    true,
+	// Synth Effects
+	"gm_fx_rain":       true,
+	"gm_fx_soundtrack": true,
+	"gm_fx_crystal":    true,
+	"gm_fx_atmosphere": true,
+	"gm_fx_brightness": true,
+	"gm_fx_goblins":    true,
+	"gm_fx_echoes":     true,
+	"gm_fx_sci_fi":     true,
+	// Ethnic
+	"gm_sitar":    true,
+	"gm_banjo":    true,
+	"gm_shamisen": true,
+	"gm_koto":     true,
+	"gm_kalimba":  true,
+	"gm_bagpipe":  true,
+	"gm_fiddle":   true,
+	"gm_shanai":   true,
+	// Percussive
+	"gm_tinkle_bell":    true,
+	"gm_agogo":          true,
+	"gm_steel_drums":    true,
+	"gm_woodblock":      true,
+	"gm_taiko_drum":     true,
+	"gm_melodic_tom":    true,
+	"gm_synth_drum":     true,
+	"gm_reverse_cymbal": true,
+	// Sound Effects
+	"gm_guitar_fret_noise": true,
+	"gm_breath_noise":      true,
+	"gm_seashore":          true,
+	"gm_bird_tweet":        true,
+	"gm_telephone":         true,
+	"gm_helicopter":        true,
+	"gm_applause":          true,
+	"gm_gunshot":           true,
+}
+
+// IsValidSound checks if a sound name is valid in Strudel
+func IsValidSound(sound string) bool {
+	return ValidGMSounds[sound]
+}
+
+// ValidateSound returns the sound if valid, otherwise returns a fallback
+func ValidateSound(sound, fallback string) string {
+	if IsValidSound(sound) {
+		return sound
+	}
+	return fallback
+}
+
+// ListValidSounds returns all valid GM sound names
+func ListValidSounds() []string {
+	sounds := make([]string, 0, len(ValidGMSounds))
+	for sound := range ValidGMSounds {
+		sounds = append(sounds, sound)
+	}
+	sort.Strings(sounds)
+	return sounds
 }
