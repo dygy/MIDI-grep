@@ -159,6 +159,7 @@ type StyleEffects struct {
 	UseFilterEnv     bool     // Whether to use filter envelope
 	UseDuck          bool     // Whether to use ducking/sidechain effect
 	IterAmount       int      // Iter subdivisions (0 = off)
+	UseJux           bool     // Whether to use jux(rev) for stereo width
 }
 
 // Voice effect presets by voice type
@@ -308,6 +309,7 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseOff:           true,        // Harmonic layering
 		UseTremolo:       true,        // Amplitude modulation for movement
 		UseFilterEnv:     true,        // Dynamic filter sweeps
+		UseJux:           true,        // Stereo width via reversed right channel
 	},
 	StyleOrchestral: {
 		ModulationAmount: 0.2, // Very subtle
@@ -471,6 +473,11 @@ func GetVoiceEffects(voice string, style SoundStyle) VoiceEffects {
 	// Apply iter for styles that use it
 	if styleMod.IterAmount > 0 {
 		effects.PatternFX.Iter = styleMod.IterAmount
+	}
+
+	// Apply jux for styles that use it (only on high voice to avoid muddiness)
+	if styleMod.UseJux && voice == "high" {
+		effects.PatternFX.Jux = true
 	}
 
 	// Apply legato amount based on style
