@@ -1,0 +1,21 @@
+# Training requirements for MIDI-grep model fine-tuning
+# Install with: pip install -r requirements.txt
+
+# TensorFlow (CPU or GPU)
+tensorflow>=2.10.0
+
+# Basic Pitch with TF support
+basic-pitch[tf]
+
+# Data processing
+apache-beam
+mirdata
+sox
+
+# Analysis
+numpy
+librosa
+pretty_midi
+
+# Utilities
+tqdm

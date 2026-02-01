@@ -1,6 +1,6 @@
 # Binaries
 bin/
-midi-grep
+/midi-grep
 
 # Go
 *.exe
