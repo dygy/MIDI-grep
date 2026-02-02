@@ -132,6 +132,35 @@ type DuckSettings struct {
 	Depth  float64 // Amount of ducking (0-1)
 }
 
+// SlideSettings defines pitch slide/portamento parameters
+type SlideSettings struct {
+	Slide      float64 // Pitch slide amount (+/- semitones, 0 = off)
+	DeltaSlide float64 // Additional pitch slide
+}
+
+// FilterTypeSettings defines filter type selection
+type FilterTypeSettings struct {
+	Type string // Filter type: "12db", "ladder", "24db"
+}
+
+// OrbitSettings defines effect bus routing
+type OrbitSettings struct {
+	Orbit int // Effect bus number (0-11, each has separate effects)
+}
+
+// SampleSettings defines sample playback parameters
+type SampleSettings struct {
+	Begin float64 // Sample start position (0-1)
+	End   float64 // Sample end position (0-1)
+	Speed float64 // Playback speed (1 = normal, 2 = double, 0.5 = half)
+	Unit  string  // Speed unit: "rate" or "cycle"
+}
+
+// ScrubSettings defines sample scrubbing
+type ScrubSettings struct {
+	Scrub float64 // Scrub position (0-1)
+}
+
 // AccentSettings defines beat emphasis patterns
 type AccentSettings struct {
 	Pattern     string  // Accent pattern: "downbeat", "backbeat", "all-fours", "offbeat"
@@ -173,6 +202,10 @@ type VoiceEffects struct {
 	Accent     AccentSettings
 	Compressor CompressorSettings
 	Dynamics   DynamicsSettings
+	Slide      SlideSettings
+	FilterType FilterTypeSettings
+	Orbit      OrbitSettings
+	Sample     SampleSettings
 }
 
 // StyleEffects defines effect variations per style
@@ -205,6 +238,11 @@ type StyleEffects struct {
 	EchoWithFX       string   // EchoWith custom function (e.g., "add(7)")
 	EchoWithTimes    int      // EchoWith iterations (0 = off)
 	UseRangex        bool     // Use exponential range for filter LFOs
+	UseSlide         bool     // Whether to use pitch slide
+	SlideAmount      float64  // Pitch slide amount
+	FilterType       string   // Filter type: "12db", "ladder", "24db"
+	UseOrbit         bool     // Whether to use separate orbit
+	OrbitNumber      int      // Orbit bus number
 }
 
 // Voice effect presets by voice type
@@ -644,6 +682,9 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		AccentAmount:     0.15,
 		DynamicRange:     1.2,
 		UseCompressor:    true,       // Punchy compression
+		FilterType:       "ladder",   // Analog ladder filter
+		UseSlide:         true,       // Portamento for smooth bass
+		SlideAmount:      0.1,        // Subtle slide
 	},
 	StyleDarkwave: {
 		ModulationAmount: 0.6,
@@ -704,6 +745,7 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		AccentPattern:    "all-fours",
 		AccentAmount:     0.2,
 		DynamicRange:     0.7,        // Compressed
+		FilterType:       "ladder",   // Aggressive ladder filter
 	},
 	StyleNewAge: {
 		ModulationAmount: 0.3,
@@ -996,6 +1038,27 @@ func GetVoiceEffects(voice string, style SoundStyle) VoiceEffects {
 		effects.Duck = getDuckForStyle(style, voice)
 	} else {
 		effects.Duck = DuckSettings{}
+	}
+
+	// Apply filter type for styles that specify it
+	if styleMod.FilterType != "" {
+		effects.FilterType = FilterTypeSettings{
+			Type: styleMod.FilterType,
+		}
+	}
+
+	// Apply slide/portamento for styles that use it (mainly on bass)
+	if styleMod.UseSlide && voice == "bass" {
+		effects.Slide = SlideSettings{
+			Slide: styleMod.SlideAmount,
+		}
+	}
+
+	// Apply orbit routing for styles that use it
+	if styleMod.UseOrbit {
+		effects.Orbit = OrbitSettings{
+			Orbit: styleMod.OrbitNumber,
+		}
 	}
 
 	return effects
@@ -1483,6 +1546,35 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 		parts = append(parts, fmt.Sprintf(".compressor(\"%.0f:%.0f:%.0f:%.3f:%.2f\")",
 			effects.Compressor.Threshold, effects.Compressor.Ratio, effects.Compressor.Knee,
 			effects.Compressor.Attack, effects.Compressor.Release))
+	}
+
+	// Pitch slide/portamento
+	if effects.Slide.Slide != 0 {
+		parts = append(parts, fmt.Sprintf(".slide(%.2f)", effects.Slide.Slide))
+	}
+	if effects.Slide.DeltaSlide != 0 {
+		parts = append(parts, fmt.Sprintf(".deltaSlide(%.2f)", effects.Slide.DeltaSlide))
+	}
+
+	// Filter type selection (ladder filter for analog style)
+	if effects.FilterType.Type != "" && effects.FilterType.Type != "12db" {
+		parts = append(parts, fmt.Sprintf(".ftype(\"%s\")", effects.FilterType.Type))
+	}
+
+	// Orbit routing (for separate effect buses)
+	if effects.Orbit.Orbit > 0 {
+		parts = append(parts, fmt.Sprintf(".orbit(%d)", effects.Orbit.Orbit))
+	}
+
+	// Sample playback settings
+	if effects.Sample.Begin > 0 {
+		parts = append(parts, fmt.Sprintf(".begin(%.2f)", effects.Sample.Begin))
+	}
+	if effects.Sample.End > 0 && effects.Sample.End < 1 {
+		parts = append(parts, fmt.Sprintf(".end(%.2f)", effects.Sample.End))
+	}
+	if effects.Sample.Speed != 0 && effects.Sample.Speed != 1 {
+		parts = append(parts, fmt.Sprintf(".speed(%.2f)", effects.Sample.Speed))
 	}
 
 	// Join with newline and indentation for pretty output

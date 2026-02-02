@@ -319,3 +319,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.18 | 2026-02-02 | Raw synthesizer styles: raw, chiptune, ambient, drone using Strudel oscillators (sawtooth, square, triangle, sine) |
 | 1.19 | 2026-02-02 | Sample-based styles: mallets (vibraphone/marimba), plucked (harp), keys (Salamander piano), pad (warm/choir), percussive (timpani) |
 | 1.20 | 2026-02-02 | Genre-specific styles: synthwave (80s retro), darkwave (atmospheric), minimal (sparse), industrial (harsh), newage (ethereal) |
+| 1.21 | 2026-02-02 | Advanced effects: slide/portamento, ftype (ladder/24db filter), orbit routing, begin/end sample position, speed control |
