@@ -2,6 +2,7 @@ package strudel
 
 import (
 	"fmt"
+	"math"
 	"strings"
 )
 
@@ -126,21 +127,47 @@ type DuckSettings struct {
 	Depth  float64 // Amount of ducking (0-1)
 }
 
+// AccentSettings defines beat emphasis patterns
+type AccentSettings struct {
+	Pattern     string  // Accent pattern: "downbeat", "backbeat", "all-fours", "offbeat"
+	Amount      float64 // Gain boost on accented beats (0.1-0.3 typical)
+	Enabled     bool    // Whether accents are enabled
+}
+
+// CompressorSettings defines dynamics compression
+type CompressorSettings struct {
+	Threshold float64 // Threshold in dB (e.g., -20)
+	Ratio     float64 // Compression ratio (e.g., 4 for 4:1)
+	Knee      float64 // Knee softness
+	Attack    float64 // Attack time in seconds
+	Release   float64 // Release time in seconds
+	Enabled   bool    // Whether compressor is enabled
+}
+
+// DynamicsSettings defines overall dynamics processing
+type DynamicsSettings struct {
+	RangeExpansion float64 // Expand velocity range (1.0 = none, 1.5 = more dynamic)
+	VelocityCurve  string  // Curve type: "linear", "exponential", "logarithmic"
+}
+
 // VoiceEffects contains all effect settings for a voice
 type VoiceEffects struct {
-	Filter    FilterSettings
-	Pan       PanSettings
-	Reverb    ReverbSettings
-	Delay     DelaySettings
-	Envelope  EnvelopeSettings
-	StyleFX   StyleFXSettings
-	PatternFX PatternFXSettings
-	Legato    LegatoSettings
-	Echo      EchoSettings
-	Harmony   HarmonySettings
-	Tremolo   TremoloSettings
-	FilterEnv FilterEnvSettings
-	Duck      DuckSettings
+	Filter     FilterSettings
+	Pan        PanSettings
+	Reverb     ReverbSettings
+	Delay      DelaySettings
+	Envelope   EnvelopeSettings
+	StyleFX    StyleFXSettings
+	PatternFX  PatternFXSettings
+	Legato     LegatoSettings
+	Echo       EchoSettings
+	Harmony    HarmonySettings
+	Tremolo    TremoloSettings
+	FilterEnv  FilterEnvSettings
+	Duck       DuckSettings
+	Accent     AccentSettings
+	Compressor CompressorSettings
+	Dynamics   DynamicsSettings
 }
 
 // StyleEffects defines effect variations per style
@@ -165,6 +192,10 @@ type StyleEffects struct {
 	PlyAmount        int      // Ply repetitions (0 = off)
 	SometimesFX      string   // Effect to apply sometimes (50%)
 	RarelyFX         string   // Effect to apply rarely (25%)
+	AccentPattern    string   // Accent pattern: "downbeat", "backbeat", "offbeat"
+	AccentAmount     float64  // Gain boost for accents (0 = off)
+	UseCompressor    bool     // Whether to use compressor
+	DynamicRange     float64  // Velocity range expansion (1.0 = none)
 }
 
 // Voice effect presets by voice type
@@ -298,6 +329,7 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseEcho:          false,
 		UseSuperimpose:   false,
 		UseOff:           false,
+		DynamicRange:     1.2,       // Slight expansion for expression
 	},
 	StyleSynth: {
 		ModulationAmount: 0.7,
@@ -315,6 +347,7 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseTremolo:       true,        // Amplitude modulation for movement
 		UseFilterEnv:     true,        // Dynamic filter sweeps
 		UseJux:           true,        // Stereo width via reversed right channel
+		DynamicRange:     1.3,         // More dynamic range for expression
 	},
 	StyleOrchestral: {
 		ModulationAmount: 0.2, // Very subtle
@@ -332,6 +365,9 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseTremolo:       true,      // Subtle tremolo for strings effect
 		UseFilterEnv:     false,
 		SometimesFX:      "add(12)", // Sometimes double an octave up
+		AccentPattern:    "downbeat", // Accent on beats 1 and 3
+		AccentAmount:     0.12,      // Moderate accent for orchestral dynamics
+		DynamicRange:     1.5,       // Wide dynamics for orchestral expression
 	},
 	StyleElectronic: {
 		ModulationAmount: 1.0, // Full modulation
@@ -351,6 +387,10 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseDuck:          true,     // Sidechain pumping effect
 		IterAmount:       4,        // Cycle through 4 subdivisions
 		PlyAmount:        2,        // Double each bass note for drive
+		AccentPattern:    "downbeat", // Accent 1 and 3
+		AccentAmount:     0.15,     // Moderate accent
+		UseCompressor:    true,     // Tight compression for punch
+		DynamicRange:     0.8,      // Tighter dynamics for consistency
 	},
 	StyleJazz: {
 		ModulationAmount: 0.4,
@@ -367,6 +407,9 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseOff:           true,       // Harmonic layering for rich chords
 		SometimesFX:      "add(7)",   // Sometimes add a fifth
 		RarelyFX:         "room(0.6)", // Rarely more reverb
+		AccentPattern:    "backbeat", // Accent 2 and 4 (jazz feel)
+		AccentAmount:     0.1,        // Subtle accent
+		DynamicRange:     1.4,        // Wide dynamics for expression
 	},
 	StyleLofi: {
 		ModulationAmount: 0.5,
@@ -384,6 +427,9 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		IterAmount:       4,         // Cycle through 4 subdivisions for variation
 		SometimesFX:      "lpf(800)", // Sometimes muffle the sound
 		RarelyFX:         "rev",     // Rarely reverse for tape-like effect
+		AccentPattern:    "offbeat", // Subtle offbeat accents for groove
+		AccentAmount:     0.08,      // Very subtle
+		DynamicRange:     1.1,       // Slightly compressed lofi feel
 	},
 }
 
@@ -502,6 +548,28 @@ func GetVoiceEffects(voice string, style SoundStyle) VoiceEffects {
 	}
 	if styleMod.RarelyFX != "" {
 		effects.PatternFX.Rarely = styleMod.RarelyFX
+	}
+
+	// Apply accent settings
+	if styleMod.AccentAmount > 0 && styleMod.AccentPattern != "" {
+		effects.Accent = AccentSettings{
+			Pattern: styleMod.AccentPattern,
+			Amount:  styleMod.AccentAmount,
+			Enabled: true,
+		}
+	}
+
+	// Apply compressor for styles that use it
+	if styleMod.UseCompressor {
+		effects.Compressor = getCompressorForStyle(style)
+	}
+
+	// Apply dynamic range settings
+	if styleMod.DynamicRange > 0 && styleMod.DynamicRange != 1.0 {
+		effects.Dynamics = DynamicsSettings{
+			RangeExpansion: styleMod.DynamicRange,
+			VelocityCurve:  "exponential",
+		}
 	}
 
 	// Apply legato amount based on style
@@ -629,6 +697,32 @@ func getFilterEnvForStyle(style SoundStyle, voice string) FilterEnvSettings {
 		}
 	default:
 		return FilterEnvSettings{}
+	}
+}
+
+// getCompressorForStyle returns compressor settings for a style
+func getCompressorForStyle(style SoundStyle) CompressorSettings {
+	switch style {
+	case StyleElectronic:
+		return CompressorSettings{
+			Threshold: -20,
+			Ratio:     4,
+			Knee:      10,
+			Attack:    0.003,
+			Release:   0.1,
+			Enabled:   true,
+		}
+	case StyleLofi:
+		return CompressorSettings{
+			Threshold: -15,
+			Ratio:     3,
+			Knee:      15,
+			Attack:    0.01,
+			Release:   0.2,
+			Enabled:   true,
+		}
+	default:
+		return CompressorSettings{}
 	}
 }
 
@@ -821,6 +915,13 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 			effects.Duck.Orbit, effects.Duck.Attack, effects.Duck.Depth))
 	}
 
+	// Compressor for dynamics control
+	if effects.Compressor.Enabled {
+		parts = append(parts, fmt.Sprintf(".compressor(\"%.0f:%.0f:%.0f:%.3f:%.2f\")",
+			effects.Compressor.Threshold, effects.Compressor.Ratio, effects.Compressor.Knee,
+			effects.Compressor.Attack, effects.Compressor.Release))
+	}
+
 	return strings.Join(parts, "")
 }
 
@@ -922,6 +1023,87 @@ func BuildHarmonyEffects(effects VoiceEffects) string {
 	}
 
 	return strings.Join(parts, "")
+}
+
+// BuildAccentPattern generates gain pattern for beat accents
+// Returns a gain pattern string like "1.1 1 1.1 1" for downbeat accents
+func BuildAccentPattern(pattern string, amount float64, beatsPerBar int) string {
+	if pattern == "" || amount <= 0 {
+		return ""
+	}
+
+	baseGain := 1.0
+	accentGain := baseGain + amount
+
+	var gains []string
+	for i := 0; i < beatsPerBar; i++ {
+		beat := i + 1 // 1-indexed beat
+		isAccented := false
+
+		switch pattern {
+		case "downbeat":
+			// Accent beats 1 and 3 (in 4/4)
+			isAccented = beat == 1 || beat == 3
+		case "backbeat":
+			// Accent beats 2 and 4 (jazz/rock)
+			isAccented = beat == 2 || beat == 4
+		case "offbeat":
+			// Accent the "and" of each beat (requires 8th note resolution)
+			isAccented = beat%2 == 0
+		case "all-fours":
+			// Accent all four beats equally
+			isAccented = true
+		}
+
+		if isAccented {
+			gains = append(gains, fmt.Sprintf("%.2f", accentGain))
+		} else {
+			gains = append(gains, fmt.Sprintf("%.2f", baseGain))
+		}
+	}
+
+	return strings.Join(gains, " ")
+}
+
+// ApplyDynamicRange expands or compresses velocity values
+func ApplyDynamicRange(velocity float64, expansion float64) float64 {
+	if expansion == 1.0 {
+		return velocity
+	}
+
+	// Center point for expansion (0.5)
+	center := 0.5
+	deviation := velocity - center
+
+	// Expand deviation from center
+	newVelocity := center + (deviation * expansion)
+
+	// Clamp to valid range
+	if newVelocity < 0.1 {
+		newVelocity = 0.1
+	}
+	if newVelocity > 1.0 {
+		newVelocity = 1.0
+	}
+
+	return newVelocity
+}
+
+// ApplyVelocityCurve applies a curve to velocity for more expression
+func ApplyVelocityCurve(velocity float64, curveType string) float64 {
+	switch curveType {
+	case "exponential":
+		// More dramatic - soft notes softer, loud notes louder
+		return velocity * velocity
+	case "logarithmic":
+		// Less dramatic - brings up quieter notes
+		if velocity <= 0 {
+			return 0
+		}
+		return 0.5 + (0.5 * (1 + math.Log10(velocity*10)/2))
+	default: // linear
+		return velocity
+	}
 }
 
 // BuildScaleEffect generates scale quantization effect

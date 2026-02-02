@@ -143,6 +143,9 @@ The Strudel generator is split across three files:
 - `TremoloSettings` - amplitude modulation (sync, depth, shape)
 - `FilterEnvSettings` - filter envelope (attack, decay, sustain, release, amount)
 - `DuckSettings` - sidechain ducking (orbit, attack, depth)
+- `AccentSettings` - beat emphasis (pattern, amount)
+- `CompressorSettings` - dynamics compression (threshold, ratio, knee, attack, release)
+- `DynamicsSettings` - velocity processing (range expansion, velocity curve)
 - `LFOShape` - sine, saw, tri, square, perlin, rand
 - `GetVoiceEffects()` - returns effects for voice type + style
 - `BuildEffectChain()` - generates Strudel effect method chain

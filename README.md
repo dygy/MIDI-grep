@@ -13,7 +13,9 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
 - **Accurate Transcription**: Spotify's Basic Pitch for audio-to-MIDI
 - **BPM & Key Detection**: Automatic tempo and musical key analysis
 - **Dynamic Strudel Output**: Rich patterns with per-voice effects
-  - `.velocity()` patterns for authentic dynamics
+  - `.velocity()` patterns with dynamic range expansion for expressive dynamics
+  - Style-specific accent patterns (downbeat, backbeat, offbeat)
+  - Compressor effect for dynamics control (electronic)
   - Per-voice filtering (HPF/LPF by register)
   - Stereo panning with style-appropriate LFO shapes (sine, perlin, saw)
   - ADSR envelopes for synth/orchestral styles

@@ -111,8 +111,9 @@ _Leveraging full Strudel capabilities for expressive output._
 - [x] **Dynamic Expression**
   - [x] **Velocity Mapping:** Proper `.velocity()` patterns (0-1 range) per voice
   - [x] **Per-Voice Gain:** Base gain for voice level balance
-  - [ ] **Dynamic Contours:** Represent crescendo/diminuendo patterns (future)
-  - [ ] **Accent Patterns:** Highlight emphasized notes (future)
+  - [x] **Dynamic Range Expansion:** Style-specific velocity curve expansion
+  - [x] **Accent Patterns:** Beat emphasis (downbeat, backbeat, offbeat) per style
+  - [x] **Compressor:** `.compressor()` for dynamics control (electronic)
 
 - [x] **ADSR Envelopes**
   - [x] **Per-Voice Envelopes:** Attack/decay/sustain/release per voice type
@@ -310,3 +311,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.12 | 2026-02-01 | Sometimes/rarely modifiers for lofi variations |
 | 1.13 | 2026-02-01 | Enhanced jazz style with off, sometimes/rarely |
 | 1.14 | 2026-02-01 | Enhanced orchestral style with superimpose, off, sometimes |
+| 1.15 | 2026-02-01 | Enhanced dynamics: accent patterns, range expansion, compressor |

@@ -324,8 +324,8 @@ func (g *Generator) generateStackedPatternWithVelocity(sb *strings.Builder, bass
 				// Add velocity pattern for dynamics (proper Strudel way)
 				// Also add base gain for voice level balance
 				if len(v.jsonData) > 0 {
-					// Build velocity pattern (0-1 range)
-					velocityPattern := g.buildVelocityPattern(v.jsonData, gridSize, numBars)
+					// Build velocity pattern with dynamic range expansion
+					velocityPattern := g.buildVelocityPatternWithDynamics(v.jsonData, gridSize, numBars, effects.Dynamics)
 					if velocityPattern != "" {
 						voiceCode += fmt.Sprintf("\n    .velocity(\"%s\")", velocityPattern)
 					}
@@ -445,6 +445,12 @@ func (g *Generator) buildVelocityGainPattern(notes []NoteJSON, gridSize float64,
 
 // buildVelocityPattern creates a velocity pattern (0-1 range) matching the note pattern
 func (g *Generator) buildVelocityPattern(notes []NoteJSON, gridSize float64, numBars int) string {
+	// Use default dynamics (no expansion)
+	return g.buildVelocityPatternWithDynamics(notes, gridSize, numBars, DynamicsSettings{RangeExpansion: 1.0})
+}
+
+// buildVelocityPatternWithDynamics creates a velocity pattern with dynamic range processing
+func (g *Generator) buildVelocityPatternWithDynamics(notes []NoteJSON, gridSize float64, numBars int, dynamics DynamicsSettings) string {
 	if len(notes) == 0 {
 		return ""
 	}
@@ -461,11 +467,23 @@ func (g *Generator) buildVelocityPattern(notes []NoteJSON, gridSize float64, num
 	for _, n := range notes {
 		slot := int(n.Start / gridSize)
 		if slot >= 0 && slot < totalSlots {
+			velocity := n.VelocityNormalized
+
+			// Apply dynamic range expansion
+			if dynamics.RangeExpansion > 0 && dynamics.RangeExpansion != 1.0 {
+				velocity = ApplyDynamicRange(velocity, dynamics.RangeExpansion)
+			}
+
+			// Apply velocity curve for more expression
+			if dynamics.VelocityCurve != "" && dynamics.VelocityCurve != "linear" {
+				velocity = ApplyVelocityCurve(velocity, dynamics.VelocityCurve)
+			}
+
 			// For chords, use average velocity
 			if hasNote[slot] {
-				slots[slot] = (slots[slot] + n.VelocityNormalized) / 2
+				slots[slot] = (slots[slot] + velocity) / 2
 			} else {
-				slots[slot] = n.VelocityNormalized
+				slots[slot] = velocity
 			}
 			hasNote[slot] = true
 		}
