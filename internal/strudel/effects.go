@@ -11,6 +11,7 @@ type LFOShape string
 
 const (
 	LFOSine   LFOShape = "sine"
+	LFOCosine LFOShape = "cosine" // Phase-shifted sine for smoother transitions
 	LFOSaw    LFOShape = "saw"
 	LFOTri    LFOShape = "tri"
 	LFOSquare LFOShape = "square"
@@ -102,6 +103,10 @@ type HarmonySettings struct {
 	OffInterval    int     // Semitone interval for .off() (e.g., 7 = 5th)
 	Superimpose    float64 // Detune amount for .superimpose() (0 = off)
 	SuperimposeOct int     // Octave for superimpose (0 = same, 12 = octave up)
+	Layer          string  // Layer transformation function (e.g., "add(12).lpf(2000)")
+	EchoWith       string  // Custom echo function (e.g., "add(7)")
+	EchoWithTimes  int     // Number of echoWith iterations
+	EchoWithTime   float64 // Time between echoWith iterations
 }
 
 // TremoloSettings defines amplitude modulation parameters
@@ -196,6 +201,10 @@ type StyleEffects struct {
 	AccentAmount     float64  // Gain boost for accents (0 = off)
 	UseCompressor    bool     // Whether to use compressor
 	DynamicRange     float64  // Velocity range expansion (1.0 = none)
+	LayerFX          string   // Layer transformation (e.g., "add(12).lpf(1000)")
+	EchoWithFX       string   // EchoWith custom function (e.g., "add(7)")
+	EchoWithTimes    int      // EchoWith iterations (0 = off)
+	UseRangex        bool     // Use exponential range for filter LFOs
 }
 
 // Voice effect presets by voice type
@@ -368,6 +377,7 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		AccentPattern:    "downbeat", // Accent on beats 1 and 3
 		AccentAmount:     0.12,      // Moderate accent for orchestral dynamics
 		DynamicRange:     1.5,       // Wide dynamics for orchestral expression
+		LayerFX:          "add(12).gain(0.5)", // Octave layer for fullness
 	},
 	StyleElectronic: {
 		ModulationAmount: 1.0, // Full modulation
@@ -391,6 +401,9 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		AccentAmount:     0.15,     // Moderate accent
 		UseCompressor:    true,     // Tight compression for punch
 		DynamicRange:     0.8,      // Tighter dynamics for consistency
+		EchoWithFX:       "add(12).gain(0.6)", // Octave echo for space
+		EchoWithTimes:    3,        // 3 echo iterations
+		UseRangex:        true,     // Exponential filter sweeps
 	},
 	StyleJazz: {
 		ModulationAmount: 0.4,
@@ -570,6 +583,18 @@ func GetVoiceEffects(voice string, style SoundStyle) VoiceEffects {
 			RangeExpansion: styleMod.DynamicRange,
 			VelocityCurve:  "exponential",
 		}
+	}
+
+	// Apply layer for styles that use it
+	if styleMod.LayerFX != "" {
+		effects.Harmony.Layer = styleMod.LayerFX
+	}
+
+	// Apply echoWith for styles that use it
+	if styleMod.EchoWithFX != "" && styleMod.EchoWithTimes > 0 {
+		effects.Harmony.EchoWith = styleMod.EchoWithFX
+		effects.Harmony.EchoWithTimes = styleMod.EchoWithTimes
+		effects.Harmony.EchoWithTime = 0.125 // Default 1/8 note
 	}
 
 	// Apply legato amount based on style
@@ -763,6 +788,8 @@ func buildPanLFO(pan PanSettings, modAmount float64) PanSettings {
 	// Build LFO expression based on shape
 	var position string
 	switch pan.Shape {
+	case LFOCosine:
+		position = fmt.Sprintf("cosine.range(%.2f,%.2f).slow(%.0f)", minPan, maxPan, pan.Speed)
 	case LFOPerlin:
 		position = fmt.Sprintf("perlin.range(%.2f,%.2f).slow(%.0f)", minPan, maxPan, pan.Speed)
 	case LFOSaw:
@@ -1020,6 +1047,18 @@ func BuildHarmonyEffects(effects VoiceEffects) string {
 	if effects.Harmony.Off > 0 && effects.Harmony.OffInterval != 0 {
 		parts = append(parts, fmt.Sprintf(".off(%.3f, add(%d))",
 			effects.Harmony.Off, effects.Harmony.OffInterval))
+	}
+
+	// Layer for parallel transformations (without original)
+	if effects.Harmony.Layer != "" {
+		parts = append(parts, fmt.Sprintf(".layer(x => x.%s)",
+			effects.Harmony.Layer))
+	}
+
+	// EchoWith for sophisticated echo with custom function per iteration
+	if effects.Harmony.EchoWith != "" && effects.Harmony.EchoWithTimes > 0 {
+		parts = append(parts, fmt.Sprintf(".echoWith(%d, %.3f, (p,i) => p.%s.gain(1/(i+1)))",
+			effects.Harmony.EchoWithTimes, effects.Harmony.EchoWithTime, effects.Harmony.EchoWith))
 	}
 
 	return strings.Join(parts, "")

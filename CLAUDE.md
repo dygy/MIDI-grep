@@ -146,7 +146,7 @@ The Strudel generator is split across three files:
 - `AccentSettings` - beat emphasis (pattern, amount)
 - `CompressorSettings` - dynamics compression (threshold, ratio, knee, attack, release)
 - `DynamicsSettings` - velocity processing (range expansion, velocity curve)
-- `LFOShape` - sine, saw, tri, square, perlin, rand
+- `LFOShape` - sine, cosine, saw, tri, square, perlin, rand
 - `GetVoiceEffects()` - returns effects for voice type + style
 - `BuildEffectChain()` - generates Strudel effect method chain
 - `BuildPatternTransforms()` - generates pattern-level transforms (.swing, .degradeBy)

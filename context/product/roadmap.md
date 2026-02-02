@@ -175,6 +175,8 @@ _Leveraging full Strudel capabilities for expressive output._
   - [x] **Superimpose:** `.superimpose(add(0.03))` for detuned layering
   - [x] **Off:** `.off(time, add(interval))` for harmonic layering with offset
   - [x] **Scale:** `.scale("E:minor")` helper for key-aware quantization
+  - [x] **Layer:** `.layer()` for parallel transformations (orchestral)
+  - [x] **EchoWith:** `.echoWith()` for pitch-shifted echoes (electronic)
 
 - [x] **Section Analysis**
   - [x] **Section Detection:** Auto-detect intro, verse, chorus based on energy
@@ -312,3 +314,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.13 | 2026-02-01 | Enhanced jazz style with off, sometimes/rarely |
 | 1.14 | 2026-02-01 | Enhanced orchestral style with superimpose, off, sometimes |
 | 1.15 | 2026-02-01 | Enhanced dynamics: accent patterns, range expansion, compressor |
+| 1.16 | 2026-02-02 | Added layer(), echoWith(), cosine LFO from Strudel utilities |

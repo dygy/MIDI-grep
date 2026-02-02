@@ -30,6 +30,8 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   - `.echo()` for rhythmic repeats
   - `.superimpose()` for detuned layering (synth richness)
   - `.off()` for harmonic layering with time offset
+  - `.layer()` for parallel transformations (orchestral octave doubling)
+  - `.echoWith()` for sophisticated pitch-shifted echoes (electronic)
   - `.scale()` for key-aware quantization
   - Section detection with time markers
 - **Sound Style Presets**: `--style piano|synth|orchestral|electronic|jazz|lofi`
