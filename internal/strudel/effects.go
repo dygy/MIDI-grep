@@ -839,6 +839,7 @@ func adjustEnvelopeForVoice(env EnvelopeSettings, voice string, style SoundStyle
 }
 
 // BuildEffectChain generates Strudel effect method chain for a voice
+// Each method is placed on its own line for readability
 func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 	var parts []string
 
@@ -855,28 +856,31 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 		}
 	}
 
-	// Filter envelope (for synth/electronic styles)
+	// Filter envelope (for synth/electronic styles) - each param on own line
 	if effects.FilterEnv.Amount > 0 {
-		parts = append(parts, fmt.Sprintf(".lpattack(%.3f).lpdecay(%.2f).lpsustain(%.2f).lprelease(%.2f).lpenv(%.0f)",
-			effects.FilterEnv.Attack, effects.FilterEnv.Decay,
-			effects.FilterEnv.Sustain, effects.FilterEnv.Release, effects.FilterEnv.Amount))
+		parts = append(parts, fmt.Sprintf(".lpattack(%.3f)", effects.FilterEnv.Attack))
+		parts = append(parts, fmt.Sprintf(".lpdecay(%.2f)", effects.FilterEnv.Decay))
+		parts = append(parts, fmt.Sprintf(".lpsustain(%.2f)", effects.FilterEnv.Sustain))
+		parts = append(parts, fmt.Sprintf(".lprelease(%.2f)", effects.FilterEnv.Release))
+		parts = append(parts, fmt.Sprintf(".lpenv(%.0f)", effects.FilterEnv.Amount))
 	}
 
-	// ADSR Envelope
+	// ADSR Envelope - each param on own line
 	if effects.Envelope.Attack > 0 || effects.Envelope.Release > 0 {
-		parts = append(parts, fmt.Sprintf(".attack(%.3f).decay(%.2f).sustain(%.2f).release(%.2f)",
-			effects.Envelope.Attack, effects.Envelope.Decay,
-			effects.Envelope.Sustain, effects.Envelope.Release))
+		parts = append(parts, fmt.Sprintf(".attack(%.3f)", effects.Envelope.Attack))
+		parts = append(parts, fmt.Sprintf(".decay(%.2f)", effects.Envelope.Decay))
+		parts = append(parts, fmt.Sprintf(".sustain(%.2f)", effects.Envelope.Sustain))
+		parts = append(parts, fmt.Sprintf(".release(%.2f)", effects.Envelope.Release))
 	}
 
 	// Style-specific effects
 	if effects.StyleFX.Vibrato > 0 {
-		parts = append(parts, fmt.Sprintf(".vib(%.1f).vibmod(%.2f)",
-			effects.StyleFX.Vibrato, effects.StyleFX.VibratoDepth))
+		parts = append(parts, fmt.Sprintf(".vib(%.1f)", effects.StyleFX.Vibrato))
+		parts = append(parts, fmt.Sprintf(".vibmod(%.2f)", effects.StyleFX.VibratoDepth))
 	}
 	if effects.StyleFX.Phaser > 0 {
-		parts = append(parts, fmt.Sprintf(".phaser(%.2f).phaserdepth(%.2f)",
-			effects.StyleFX.Phaser, effects.StyleFX.PhaserDepth))
+		parts = append(parts, fmt.Sprintf(".phaser(%.2f)", effects.StyleFX.Phaser))
+		parts = append(parts, fmt.Sprintf(".phaserdepth(%.2f)", effects.StyleFX.PhaserDepth))
 	}
 	if effects.StyleFX.Crush > 0 {
 		parts = append(parts, fmt.Sprintf(".crush(%d)", effects.StyleFX.Crush))
@@ -891,7 +895,7 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 		parts = append(parts, fmt.Sprintf(".vowel(\"%s\")", effects.StyleFX.Vowel))
 	}
 
-	// FM Synthesis
+	// FM Synthesis - each param on own line
 	if effects.StyleFX.FM > 0 {
 		parts = append(parts, fmt.Sprintf(".fm(%.1f)", effects.StyleFX.FM))
 		if effects.StyleFX.FMH > 0 {
@@ -912,8 +916,8 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 
 	// Tremolo (amplitude modulation)
 	if effects.Tremolo.Sync > 0 {
-		parts = append(parts, fmt.Sprintf(".tremolo(%.1f).tremolodepth(%.2f)",
-			effects.Tremolo.Sync, effects.Tremolo.Depth))
+		parts = append(parts, fmt.Sprintf(".tremolo(%.1f)", effects.Tremolo.Sync))
+		parts = append(parts, fmt.Sprintf(".tremolodepth(%.2f)", effects.Tremolo.Depth))
 		if effects.Tremolo.Shape != "" && effects.Tremolo.Shape != "sine" {
 			parts = append(parts, fmt.Sprintf(".tremoloshape(\"%s\")", effects.Tremolo.Shape))
 		}
@@ -921,25 +925,28 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 
 	// Reverb
 	if effects.Reverb.Room > 0 {
-		parts = append(parts, fmt.Sprintf(".room(%.2f).size(%.2f)", effects.Reverb.Room, effects.Reverb.Size))
+		parts = append(parts, fmt.Sprintf(".room(%.2f)", effects.Reverb.Room))
+		parts = append(parts, fmt.Sprintf(".size(%.2f)", effects.Reverb.Size))
 	}
 
 	// Delay
 	if effects.Delay.Mix > 0 {
-		parts = append(parts, fmt.Sprintf(".delay(%.2f).delaytime(%.3f).delayfeedback(%.2f)",
-			effects.Delay.Mix, effects.Delay.Time, effects.Delay.Feedback))
+		parts = append(parts, fmt.Sprintf(".delay(%.2f)", effects.Delay.Mix))
+		parts = append(parts, fmt.Sprintf(".delaytime(%.3f)", effects.Delay.Time))
+		parts = append(parts, fmt.Sprintf(".delayfeedback(%.2f)", effects.Delay.Feedback))
 	}
 
 	// Echo/Stutter effect
 	if effects.Echo.Times > 0 {
-		parts = append(parts, fmt.Sprintf(".echo(%d,%.3f,%.2f)",
+		parts = append(parts, fmt.Sprintf(".echo(%d, %.3f, %.2f)",
 			effects.Echo.Times, effects.Echo.Time, effects.Echo.Feedback))
 	}
 
 	// Ducking/Sidechain effect
 	if effects.Duck.Orbit > 0 {
-		parts = append(parts, fmt.Sprintf(".duck(%d).duckattack(%.2f).duckdepth(%.2f)",
-			effects.Duck.Orbit, effects.Duck.Attack, effects.Duck.Depth))
+		parts = append(parts, fmt.Sprintf(".duck(%d)", effects.Duck.Orbit))
+		parts = append(parts, fmt.Sprintf(".duckattack(%.2f)", effects.Duck.Attack))
+		parts = append(parts, fmt.Sprintf(".duckdepth(%.2f)", effects.Duck.Depth))
 	}
 
 	// Compressor for dynamics control
@@ -949,10 +956,12 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 			effects.Compressor.Attack, effects.Compressor.Release))
 	}
 
-	return strings.Join(parts, "")
+	// Join with newline and indentation for pretty output
+	return strings.Join(parts, "\n    ")
 }
 
 // BuildPatternTransforms generates pattern-level transformation chain
+// Each transform is placed on its own line for readability
 func BuildPatternTransforms(effects VoiceEffects) string {
 	var parts []string
 
@@ -981,7 +990,8 @@ func BuildPatternTransforms(effects VoiceEffects) string {
 		parts = append(parts, fmt.Sprintf(".rarely(x => x.%s)", effects.PatternFX.Rarely))
 	}
 
-	return strings.Join(parts, "")
+	// Join with newline and indentation for pretty output
+	return strings.Join(parts, "\n    ")
 }
 
 // FormatGain formats a gain value for Strudel output
@@ -1029,6 +1039,7 @@ func BuildVelocityPattern(velocities []float64) string {
 }
 
 // BuildHarmonyEffects generates harmony/layering effects (.off, .superimpose)
+// Each effect is placed on its own line for readability
 func BuildHarmonyEffects(effects VoiceEffects) string {
 	var parts []string
 
@@ -1061,7 +1072,8 @@ func BuildHarmonyEffects(effects VoiceEffects) string {
 			effects.Harmony.EchoWithTimes, effects.Harmony.EchoWithTime, effects.Harmony.EchoWith))
 	}
 
-	return strings.Join(parts, "")
+	// Join with newline and indentation for pretty output
+	return strings.Join(parts, "\n    ")
 }
 
 // BuildAccentPattern generates gain pattern for beat accents
