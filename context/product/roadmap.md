@@ -317,3 +317,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.16 | 2026-02-02 | Added layer(), echoWith(), cosine LFO from Strudel utilities |
 | 1.17 | 2026-02-02 | Prettified code output: each method on its own line |
 | 1.18 | 2026-02-02 | Raw synthesizer styles: raw, chiptune, ambient, drone using Strudel oscillators (sawtooth, square, triangle, sine) |
+| 1.19 | 2026-02-02 | Sample-based styles: mallets (vibraphone/marimba), plucked (harp), keys (Salamander piano), pad (warm/choir), percussive (timpani) |

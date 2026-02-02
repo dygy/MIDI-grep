@@ -526,6 +526,103 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		AccentAmount:     0,
 		DynamicRange:     1.0,        // Steady dynamics
 	},
+	// Sample-based styles
+	StyleMallets: {
+		ModulationAmount: 0.3,
+		FilterDynamic:    false,
+		DelayEnabled:     true,
+		ReverbAmount:     1.0,        // Natural room reverb
+		LFOShape:         LFOSine,    // Subtle movement
+		UseEnvelope:      false,      // Samples have natural envelope
+		UseStyleFX:       true,       // Subtle vibrato
+		SwingAmount:      0,
+		LegatoAmount:     0.8,        // Slightly shorter for mallet attack
+		UseEcho:          false,
+		UseSuperimpose:   false,
+		UseOff:           false,
+		UseTremolo:       true,       // Subtle tremolo for vibes effect
+		UseFilterEnv:     false,
+		AccentPattern:    "downbeat",
+		AccentAmount:     0.12,
+		DynamicRange:     1.3,        // Wide dynamics for expression
+	},
+	StylePlucked: {
+		ModulationAmount: 0.2,
+		FilterDynamic:    false,
+		DelayEnabled:     true,
+		ReverbAmount:     1.1,        // Soft reverb
+		LFOShape:         LFOSine,    // Gentle
+		UseEnvelope:      false,      // Natural pluck envelope
+		UseStyleFX:       false,
+		SwingAmount:      0,
+		LegatoAmount:     0.7,        // Short plucked notes
+		UseEcho:          true,       // Gentle echo
+		UseSuperimpose:   false,
+		UseOff:           true,       // Octave doubling for harp
+		UseTremolo:       false,
+		UseFilterEnv:     false,
+		AccentPattern:    "",
+		AccentAmount:     0,
+		DynamicRange:     1.4,        // Very expressive
+	},
+	StyleKeys: {
+		ModulationAmount: 0.1,
+		FilterDynamic:    false,
+		DelayEnabled:     false,
+		ReverbAmount:     1.0,        // Concert hall reverb
+		LFOShape:         LFOSine,
+		UseEnvelope:      false,      // Piano has natural envelope
+		UseStyleFX:       false,      // Pure piano sound
+		SwingAmount:      0,
+		LegatoAmount:     1.0,        // Natural sustain
+		UseEcho:          false,
+		UseSuperimpose:   false,
+		UseOff:           false,
+		UseTremolo:       false,
+		UseFilterEnv:     false,
+		AccentPattern:    "downbeat",
+		AccentAmount:     0.1,
+		DynamicRange:     1.5,        // Wide dynamics like real piano
+	},
+	StylePad: {
+		ModulationAmount: 0.5,
+		FilterDynamic:    false,
+		DelayEnabled:     true,
+		ReverbAmount:     1.4,        // Lush reverb
+		LFOShape:         LFOSine,    // Smooth
+		UseEnvelope:      true,       // Long envelopes
+		UseStyleFX:       true,       // Subtle vibrato
+		SwingAmount:      0,
+		LegatoAmount:     2.0,        // Long sustained
+		UseEcho:          true,
+		UseSuperimpose:   true,       // Layered pads
+		UseOff:           true,       // Harmonic thickness
+		UseTremolo:       true,       // Slow movement
+		UseFilterEnv:     false,
+		SometimesFX:      "room(0.7)",
+		AccentPattern:    "",
+		AccentAmount:     0,
+		DynamicRange:     1.1,        // Gentle dynamics
+	},
+	StylePercussive: {
+		ModulationAmount: 0.2,
+		FilterDynamic:    false,
+		DelayEnabled:     true,
+		ReverbAmount:     1.2,        // Concert hall
+		LFOShape:         LFOSine,
+		UseEnvelope:      false,      // Natural percussion envelope
+		UseStyleFX:       false,
+		SwingAmount:      0,
+		LegatoAmount:     0.6,        // Short, punchy
+		UseEcho:          true,       // Timpani rolls
+		UseSuperimpose:   false,
+		UseOff:           false,
+		UseTremolo:       false,
+		UseFilterEnv:     false,
+		AccentPattern:    "downbeat",
+		AccentAmount:     0.2,        // Strong accents
+		DynamicRange:     1.6,        // Very wide dynamics
+	},
 }
 
 // Style-specific FX presets
@@ -585,6 +682,18 @@ var styleFXPresets = map[SoundStyle]StyleFXSettings{
 		Phaser:       0.2,  // Slow phaser
 		PhaserDepth:  0.3,
 	},
+	// Sample-based styles
+	StyleMallets: {
+		Vibrato:      4,    // Motor-driven vibraphone effect
+		VibratoDepth: 0.1,
+	},
+	StylePlucked: {},       // Pure plucked sound
+	StyleKeys: {},          // Pure piano sound
+	StylePad: {
+		Vibrato:      2,    // Slow subtle vibrato
+		VibratoDepth: 0.05,
+	},
+	StylePercussive: {},    // Pure percussion
 }
 
 // GetVoiceEffects returns effect settings for a voice, adjusted for style
@@ -795,6 +904,18 @@ func getTremoloForStyle(style SoundStyle) TremoloSettings {
 			Depth: 0.2,    // Subtle movement
 			Shape: "sine", // Smooth
 		}
+	case StyleMallets:
+		return TremoloSettings{
+			Sync:  6,      // Vibraphone motor speed
+			Depth: 0.3,    // Noticeable vibrato
+			Shape: "sine", // Smooth like real vibes
+		}
+	case StylePad:
+		return TremoloSettings{
+			Sync:  12,     // Slow
+			Depth: 0.15,   // Subtle
+			Shape: "sine", // Smooth
+		}
 	default:
 		return TremoloSettings{}
 	}
@@ -1000,6 +1121,12 @@ func adjustEnvelopeForVoice(env EnvelopeSettings, voice string, style SoundStyle
 		env.Decay = 2.0
 		env.Sustain = 0.9
 		env.Release = 3.0
+	case StylePad:
+		// Long pad envelopes
+		env.Attack = 0.3
+		env.Decay = 0.8
+		env.Sustain = 0.85
+		env.Release = 1.5
 	}
 
 	// Voice-specific adjustments

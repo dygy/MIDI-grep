@@ -28,6 +28,12 @@ const (
 	StyleChiptune SoundStyle = "chiptune" // 8-bit style with square/triangle waves
 	StyleAmbient  SoundStyle = "ambient"  // Sine waves with heavy reverb/delay
 	StyleDrone    SoundStyle = "drone"    // Sustained tones with slow modulation
+	// Sample-based styles using Strudel sample libraries
+	StyleMallets   SoundStyle = "mallets"   // Vibraphone, marimba, xylophone samples
+	StylePlucked   SoundStyle = "plucked"   // Harp, kalimba, music box samples
+	StyleKeys      SoundStyle = "keys"      // Salamander piano, rhodes, wurlitzer
+	StylePad       SoundStyle = "pad"       // Soft pad sounds with long tails
+	StylePercussive SoundStyle = "percussive" // Timpani, mallet percussion
 )
 
 // SoundPalette defines sounds for each voice (bass, mid, high)
@@ -123,6 +129,47 @@ var soundPalettes = map[SoundStyle]SoundPalette{
 		MidGain:  0.5,
 		High:     "triangle", // Soft high harmonics
 		HighGain: 0.4,
+	},
+	// Sample-based styles using Strudel sample libraries
+	StyleMallets: {
+		Bass:     "gm_marimba",     // Warm marimba bass
+		BassGain: 1.1,
+		Mid:      "gm_vibraphone",  // Classic vibes
+		MidGain:  0.9,
+		High:     "gm_xylophone",   // Bright xylophone
+		HighGain: 0.7,
+	},
+	StylePlucked: {
+		Bass:     "gm_acoustic_bass", // Upright bass
+		BassGain: 1.2,
+		Mid:      "harp",             // VCSL harp samples
+		MidGain:  0.9,
+		High:     "gm_music_box",     // Delicate music box
+		HighGain: 0.6,
+	},
+	StyleKeys: {
+		Bass:     "piano",           // Salamander grand piano
+		BassGain: 1.1,
+		Mid:      "piano",           // Salamander grand piano
+		MidGain:  1.0,
+		High:     "piano",           // Salamander grand piano
+		HighGain: 0.9,
+	},
+	StylePad: {
+		Bass:     "gm_pad_warm",     // Warm analog pad
+		BassGain: 0.8,
+		Mid:      "gm_pad_choir",    // Choir pad
+		MidGain:  0.7,
+		High:     "gm_pad_halo",     // Ethereal pad
+		HighGain: 0.6,
+	},
+	StylePercussive: {
+		Bass:     "timpani",         // VCSL timpani
+		BassGain: 1.3,
+		Mid:      "gm_marimba",      // Marimba
+		MidGain:  1.0,
+		High:     "gm_tubular_bells", // Tubular bells
+		HighGain: 0.8,
 	},
 }
 
