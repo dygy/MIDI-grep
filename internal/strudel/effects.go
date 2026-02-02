@@ -148,18 +148,6 @@ type OrbitSettings struct {
 	Orbit int // Effect bus number (0-11, each has separate effects)
 }
 
-// SampleSettings defines sample playback parameters
-type SampleSettings struct {
-	Begin float64 // Sample start position (0-1)
-	End   float64 // Sample end position (0-1)
-	Speed float64 // Playback speed (1 = normal, 2 = double, 0.5 = half)
-	Unit  string  // Speed unit: "rate" or "cycle"
-}
-
-// ScrubSettings defines sample scrubbing
-type ScrubSettings struct {
-	Scrub float64 // Scrub position (0-1)
-}
 
 // AccentSettings defines beat emphasis patterns
 type AccentSettings struct {
@@ -205,7 +193,6 @@ type VoiceEffects struct {
 	Slide      SlideSettings
 	FilterType FilterTypeSettings
 	Orbit      OrbitSettings
-	Sample     SampleSettings
 }
 
 // StyleEffects defines effect variations per style
@@ -442,6 +429,8 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		EchoWithFX:       "add(12).gain(0.6)", // Octave echo for space
 		EchoWithTimes:    3,        // 3 echo iterations
 		UseRangex:        true,     // Exponential filter sweeps
+		UseOrbit:         true,     // Separate orbits for sidechain
+		FilterType:       "ladder", // Analog ladder filter
 	},
 	StyleJazz: {
 		ModulationAmount: 0.4,
@@ -563,6 +552,8 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		AccentPattern:    "",
 		AccentAmount:     0,
 		DynamicRange:     1.0,        // Steady dynamics
+		UseSlide:         true,       // Slow pitch glide
+		SlideAmount:      0.2,        // Very slow slide for drones
 	},
 	// Sample-based styles
 	StyleMallets: {
@@ -706,6 +697,9 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		AccentPattern:    "",
 		AccentAmount:     0,
 		DynamicRange:     1.1,
+		UseSlide:         true,       // Moody portamento
+		SlideAmount:      0.15,       // Slower slide for atmosphere
+		FilterType:       "ladder",   // Dark analog filter
 	},
 	StyleMinimal: {
 		ModulationAmount: 0.2,        // Very subtle
@@ -1054,10 +1048,20 @@ func GetVoiceEffects(voice string, style SoundStyle) VoiceEffects {
 		}
 	}
 
-	// Apply orbit routing for styles that use it
+	// Apply orbit routing for styles that use it (separates voices for sidechain)
 	if styleMod.UseOrbit {
+		// Assign different orbits per voice for independent effects
+		orbitNum := 0
+		switch voice {
+		case "bass":
+			orbitNum = 1 // Bass on orbit 1 (sidechain trigger)
+		case "mid":
+			orbitNum = 2 // Mid on orbit 2 (ducks against bass)
+		case "high":
+			orbitNum = 3 // High on orbit 3 (ducks against bass)
+		}
 		effects.Orbit = OrbitSettings{
-			Orbit: styleMod.OrbitNumber,
+			Orbit: orbitNum,
 		}
 	}
 
@@ -1561,20 +1565,9 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 		parts = append(parts, fmt.Sprintf(".ftype(\"%s\")", effects.FilterType.Type))
 	}
 
-	// Orbit routing (for separate effect buses)
+	// Orbit routing (for separate effect buses per voice)
 	if effects.Orbit.Orbit > 0 {
 		parts = append(parts, fmt.Sprintf(".orbit(%d)", effects.Orbit.Orbit))
-	}
-
-	// Sample playback settings
-	if effects.Sample.Begin > 0 {
-		parts = append(parts, fmt.Sprintf(".begin(%.2f)", effects.Sample.Begin))
-	}
-	if effects.Sample.End > 0 && effects.Sample.End < 1 {
-		parts = append(parts, fmt.Sprintf(".end(%.2f)", effects.Sample.End))
-	}
-	if effects.Sample.Speed != 0 && effects.Sample.Speed != 1 {
-		parts = append(parts, fmt.Sprintf(".speed(%.2f)", effects.Sample.Speed))
 	}
 
 	// Join with newline and indentation for pretty output
