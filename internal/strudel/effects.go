@@ -73,12 +73,14 @@ type StyleFXSettings struct {
 
 // PatternFXSettings defines pattern-level transformations
 type PatternFXSettings struct {
-	Jux       bool    // Apply jux(rev) for stereo width
-	Swing     float64 // Swing amount (0 = off, 0.1 = subtle)
-	DegradeBy float64 // Random note removal (0 = off, 0.1 = subtle)
-	Ply       int     // Repeat each note n times (0 = off)
-	Iter      int     // Cycle through pattern subdivisions (0 = off)
-	Rev       bool    // Reverse pattern every other cycle
+	Jux        bool    // Apply jux(rev) for stereo width
+	Swing      float64 // Swing amount (0 = off, 0.1 = subtle)
+	DegradeBy  float64 // Random note removal (0 = off, 0.1 = subtle)
+	Ply        int     // Repeat each note n times (0 = off)
+	Iter       int     // Cycle through pattern subdivisions (0 = off)
+	Rev        bool    // Reverse pattern every other cycle
+	Sometimes  string  // Effect to apply sometimes (e.g., "crush(8)")
+	Rarely     string  // Effect to apply rarely (e.g., "rev")
 }
 
 // LegatoSettings defines note duration/articulation
@@ -161,6 +163,8 @@ type StyleEffects struct {
 	IterAmount       int      // Iter subdivisions (0 = off)
 	UseJux           bool     // Whether to use jux(rev) for stereo width
 	PlyAmount        int      // Ply repetitions (0 = off)
+	SometimesFX      string   // Effect to apply sometimes (50%)
+	RarelyFX         string   // Effect to apply rarely (25%)
 }
 
 // Voice effect presets by voice type
@@ -370,11 +374,13 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseEnvelope:      false,
 		UseStyleFX:       true, // Bitcrush, coarse
 		SwingAmount:      0.05,
-		LegatoAmount:     1.1,    // Slightly sustained for dreamy feel
+		LegatoAmount:     1.1,       // Slightly sustained for dreamy feel
 		UseEcho:          true,
-		UseSuperimpose:   true,   // Subtle detune
+		UseSuperimpose:   true,      // Subtle detune
 		UseOff:           false,
-		IterAmount:       4,      // Cycle through 4 subdivisions for variation
+		IterAmount:       4,         // Cycle through 4 subdivisions for variation
+		SometimesFX:      "lpf(800)", // Sometimes muffle the sound
+		RarelyFX:         "rev",     // Rarely reverse for tape-like effect
 	},
 }
 
@@ -485,6 +491,14 @@ func GetVoiceEffects(voice string, style SoundStyle) VoiceEffects {
 	// Apply ply for styles that use it (only on bass for rhythmic drive)
 	if styleMod.PlyAmount > 0 && voice == "bass" {
 		effects.PatternFX.Ply = styleMod.PlyAmount
+	}
+
+	// Apply sometimes/rarely effects
+	if styleMod.SometimesFX != "" {
+		effects.PatternFX.Sometimes = styleMod.SometimesFX
+	}
+	if styleMod.RarelyFX != "" {
+		effects.PatternFX.Rarely = styleMod.RarelyFX
 	}
 
 	// Apply legato amount based on style
@@ -828,6 +842,12 @@ func BuildPatternTransforms(effects VoiceEffects) string {
 	}
 	if effects.PatternFX.Ply > 1 {
 		parts = append(parts, fmt.Sprintf(".ply(%d)", effects.PatternFX.Ply))
+	}
+	if effects.PatternFX.Sometimes != "" {
+		parts = append(parts, fmt.Sprintf(".sometimes(x => x.%s)", effects.PatternFX.Sometimes))
+	}
+	if effects.PatternFX.Rarely != "" {
+		parts = append(parts, fmt.Sprintf(".rarely(x => x.%s)", effects.PatternFX.Rarely))
 	}
 
 	return strings.Join(parts, "")
