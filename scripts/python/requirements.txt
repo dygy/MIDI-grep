@@ -5,3 +5,5 @@ pretty_midi>=0.2.10
 numpy>=1.24.0,<2.0.0
 soundfile>=0.12.0
 scikit-learn>=0.17,<=1.5.1
+# Pin keras for TensorFlow 2.15 compatibility (Keras 3.x breaks basic-pitch)
+keras>=2.15.0,<3.0.0
