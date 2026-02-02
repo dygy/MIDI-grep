@@ -461,103 +461,103 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		DynamicRange:     1.2,       // Slight expansion for expression
 	},
 	StyleSynth: {
-		ModulationAmount: 0.7,
+		ModulationAmount: 0.6,
 		FilterDynamic:    true,
 		DelayEnabled:     true,
-		ReverbAmount:     0.8,
+		ReverbAmount:     0.6,
 		LFOShape:         LFOSaw, // Sawtooth for rhythmic feel
 		UseEnvelope:      true,
 		UseStyleFX:       true,
 		SwingAmount:      0,
 		LegatoAmount:     1.0,
-		UseEcho:          true,        // Echo for synth pads
-		UseSuperimpose:   true,        // Detuned layers for richness
-		UseOff:           true,        // Harmonic layering
-		UseTremolo:       true,        // Amplitude modulation for movement
-		UseFilterEnv:     true,        // Dynamic filter sweeps
-		UseJux:           true,        // Stereo width via reversed right channel
-		DynamicRange:     1.3,         // More dynamic range for expression
+		UseEcho:          false,       // Disabled - too many effects
+		UseSuperimpose:   false,       // DISABLED - causes arithmetic errors
+		UseOff:           false,       // DISABLED - causes arithmetic errors
+		UseTremolo:       false,       // Disabled
+		UseFilterEnv:     false,       // Disabled
+		UseJux:           false,       // Disabled - conflicts with pan
+		DynamicRange:     1.0,
 	},
 	StyleOrchestral: {
 		ModulationAmount: 0.2, // Very subtle
 		FilterDynamic:    false,
 		DelayEnabled:     false,
-		ReverbAmount:     1.3, // More reverb
+		ReverbAmount:     1.0, // Moderate reverb
 		LFOShape:         LFOSine,
 		UseEnvelope:      true,      // Long attacks for strings
 		UseStyleFX:       true,      // Enable vibrato
 		SwingAmount:      0,
 		LegatoAmount:     1.5,       // Long sustained notes
 		UseEcho:          false,
-		UseSuperimpose:   true,      // Slight detune for string section width
-		UseOff:           true,      // Octave doubling for fullness
-		UseTremolo:       true,      // Subtle tremolo for strings effect
+		UseSuperimpose:   false,     // DISABLED - causes arithmetic errors
+		UseOff:           false,     // DISABLED - causes arithmetic errors
+		UseTremolo:       false,     // Disabled
 		UseFilterEnv:     false,
-		SometimesFX:      "add(12)", // Sometimes double an octave up
-		AccentPattern:    "downbeat", // Accent on beats 1 and 3
-		AccentAmount:     0.12,      // Moderate accent for orchestral dynamics
-		DynamicRange:     1.5,       // Wide dynamics for orchestral expression
-		LayerFX:          "add(12).gain(0.5)", // Octave layer for fullness
+		SometimesFX:      "",        // Disabled - add() causes errors
+		AccentPattern:    "",
+		AccentAmount:     0,
+		DynamicRange:     1.0,
+		LayerFX:          "",        // Disabled - add() causes errors
 	},
 	StyleElectronic: {
-		ModulationAmount: 1.0, // Full modulation
+		ModulationAmount: 0.6,
 		FilterDynamic:    true,
 		DelayEnabled:     true,
-		ReverbAmount:     0.7,
+		ReverbAmount:     0.5,
 		LFOShape:         LFOSaw, // Rhythmic filter sweeps
 		UseEnvelope:      true,
 		UseStyleFX:       true,
 		SwingAmount:      0,
 		LegatoAmount:     0.8,      // Tighter, punchier
-		UseEcho:          true,
-		UseSuperimpose:   true,
-		UseOff:           true,
-		UseTremolo:       true,     // Amplitude modulation for movement
-		UseFilterEnv:     true,     // Dynamic filter sweeps
-		UseDuck:          true,     // Sidechain pumping effect
-		IterAmount:       4,        // Cycle through 4 subdivisions
-		PlyAmount:        2,        // Double each bass note for drive
-		AccentPattern:    "downbeat", // Accent 1 and 3
-		AccentAmount:     0.15,     // Moderate accent
-		UseCompressor:    true,     // Tight compression for punch
-		DynamicRange:     0.8,      // Tighter dynamics for consistency
-		EchoWithFX:       "add(12).gain(0.6)", // Octave echo for space
-		EchoWithTimes:    3,        // 3 echo iterations
-		UseRangex:        true,     // Exponential filter sweeps
-		UseOrbit:         true,     // Separate orbits for sidechain
-		FilterType:       "ladder", // Analog ladder filter
-		UseRing:          true,     // Ring modulation for metallic tones
-		RingFreq:         150,      // Ring mod frequency
-		UseChorus:        true,     // Chorus for width
-		ChorusAmount:     0.4,
-		UseShape:         true,     // Saturation for punch
-		ShapeAmount:      0.25,
-		UsePitchEnv:      true,     // Pitch envelope for bass punch
-		PitchEnvAmount:   -12,      // Drop pitch at start
+		UseEcho:          false,    // Disabled
+		UseSuperimpose:   false,    // DISABLED - causes arithmetic errors
+		UseOff:           false,    // DISABLED - causes arithmetic errors
+		UseTremolo:       false,    // Disabled
+		UseFilterEnv:     false,    // Disabled
+		UseDuck:          false,    // Disabled
+		IterAmount:       0,
+		PlyAmount:        0,
+		AccentPattern:    "",
+		AccentAmount:     0,
+		UseCompressor:    false,
+		DynamicRange:     1.0,
+		EchoWithFX:       "",       // Disabled - add() causes errors
+		EchoWithTimes:    0,
+		UseRangex:        false,
+		UseOrbit:         false,
+		FilterType:       "",
+		UseRing:          false,
+		RingFreq:         0,
+		UseChorus:        false,
+		ChorusAmount:     0,
+		UseShape:         false,    // Disabled - postgain makes it too quiet
+		ShapeAmount:      0,
+		UsePitchEnv:      false,
+		PitchEnvAmount:   0,
 	},
 	StyleJazz: {
-		ModulationAmount: 0.6,
+		ModulationAmount: 0.4,
 		FilterDynamic:    true,
 		DelayEnabled:     true,
-		ReverbAmount:     1.1,
+		ReverbAmount:     0.8,
 		LFOShape:         LFOPerlin, // Organic movement
 		UseEnvelope:      true,      // Smooth envelope for jazz
-		UseStyleFX:       true,      // Enable vibrato, leslie
-		SwingAmount:      0.12,      // Classic jazz swing
+		UseStyleFX:       true,      // Enable vibrato
+		SwingAmount:      0.08,      // Subtle jazz swing
 		LegatoAmount:     1.1,       // Slightly sustained
-		UseEcho:          true,      // Jazz echo for space
-		UseSuperimpose:   true,      // Slight detune for warmth
-		UseOff:           true,      // Harmonic layering for rich chords
-		UseTremolo:       true,      // Subtle tremolo for vibes
-		UseFilterEnv:     true,      // Dynamic filter for expression
-		UseJux:           true,      // Stereo width
-		SometimesFX:      "add(7)",  // Sometimes add a fifth
-		RarelyFX:         "speed(0.5).room(0.7)", // Rarely slow + reverb
-		AccentPattern:    "backbeat", // Accent 2 and 4 (jazz feel)
-		AccentAmount:     0.12,      // Moderate accent
-		DynamicRange:     1.5,       // Wide dynamics for expression
-		UseLeslie:        true,      // Leslie speaker for organ feel
-		LeslieSpeed:      2.5,       // Moderate rotation
+		UseEcho:          false,     // Disabled
+		UseSuperimpose:   false,     // DISABLED - causes arithmetic errors
+		UseOff:           false,     // DISABLED - causes arithmetic errors
+		UseTremolo:       false,     // Disabled
+		UseFilterEnv:     false,     // Disabled
+		UseJux:           false,     // Disabled - conflicts with pan
+		SometimesFX:      "",        // Disabled - add() causes errors
+		RarelyFX:         "",        // Disabled
+		AccentPattern:    "",
+		AccentAmount:     0,
+		DynamicRange:     1.0,
+		UseLeslie:        false,     // Disabled
+		LeslieSpeed:      0,
 		UseChorus:        true,      // Chorus for warmth
 		ChorusAmount:     0.35,      // Moderate chorus
 		UseShape:         true,      // Subtle warmth
@@ -926,63 +926,63 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 	},
 	// Dance music styles
 	StyleHouse: {
-		ModulationAmount: 0.9,
+		ModulationAmount: 0.7,
 		FilterDynamic:    true,
 		DelayEnabled:     true,
-		ReverbAmount:     0.8,
+		ReverbAmount:     0.6,
 		LFOShape:         LFOSaw,     // Rhythmic sweeps
 		UseEnvelope:      true,
 		UseStyleFX:       true,
 		LegatoAmount:     0.8,
-		UseEcho:          true,       // House echo
-		UseSuperimpose:   true,       // Detune for width
-		UseOff:           true,       // Octave layers
-		UseTremolo:       true,       // Pumping tremolo
-		UseDuck:          true,       // Sidechain pumping
-		UseFilterEnv:     true,
-		UseJux:           true,       // Stereo width
-		AccentPattern:    "all-fours",
-		AccentAmount:     0.15,
-		UseCompressor:    true,
-		DynamicRange:     0.8,
-		FilterType:       "ladder",
-		UseOrbit:         true,
-		SometimesFX:      "speed(2).lpf(2000)", // Sometimes octave up filtered
-		RarelyFX:         "crush(10)",          // Rarely bitcrush
-		UseShape:         true,       // Punchy saturation
-		ShapeAmount:      0.2,
-		UseChorus:        true,
-		ChorusAmount:     0.35,
-		PlyAmount:        2,          // Double bass hits
+		UseEcho:          false,      // Disable - too many effects
+		UseSuperimpose:   false,      // DISABLED - causes "Can't do arithmetic on control pattern"
+		UseOff:           false,      // DISABLED - causes arithmetic errors with velocity
+		UseTremolo:       false,      // Disable for cleaner sound
+		UseDuck:          false,      // Disable sidechain
+		UseFilterEnv:     false,
+		UseJux:           false,      // Disable - conflicts with pan
+		AccentPattern:    "",         // Disable accents
+		AccentAmount:     0,
+		UseCompressor:    false,
+		DynamicRange:     1.0,
+		FilterType:       "",         // Use default filter
+		UseOrbit:         false,
+		SometimesFX:      "",         // Disable sometimes
+		RarelyFX:         "",         // Disable rarely
+		UseShape:         false,      // Disable shape (was making sound quiet with postgain)
+		ShapeAmount:      0,
+		UseChorus:        false,
+		ChorusAmount:     0,
+		PlyAmount:        0,          // Disable ply
 	},
 	StyleTrance: {
-		ModulationAmount: 1.0,        // Heavy modulation
+		ModulationAmount: 0.8,        // Moderate modulation
 		FilterDynamic:    true,
 		DelayEnabled:     true,
-		ReverbAmount:     1.1,
+		ReverbAmount:     0.8,
 		LFOShape:         LFOSaw,
 		UseEnvelope:      true,
 		UseStyleFX:       true,
 		LegatoAmount:     1.0,
-		UseEcho:          true,       // Trance echo
-		UseFilterEnv:     true,       // Classic trance filter
-		UseSuperimpose:   true,       // Supersaw-style
-		UseOff:           true,       // Octave layers for supersaws
-		UseTremolo:       true,       // Gated tremolo
-		UseJux:           true,       // Wide stereo
-		AccentPattern:    "all-fours",
-		AccentAmount:     0.12,
-		UseCompressor:    true,
+		UseEcho:          false,      // Disable - too many effects
+		UseFilterEnv:     false,      // Disable
+		UseSuperimpose:   false,      // DISABLED - causes arithmetic errors
+		UseOff:           false,      // DISABLED - causes arithmetic errors
+		UseTremolo:       false,      // Disable
+		UseJux:           false,      // Disable - conflicts with pan
+		AccentPattern:    "",
+		AccentAmount:     0,
+		UseCompressor:    false,
 		DynamicRange:     1.0,
-		FilterType:       "ladder",
-		UseChorus:        true,
-		ChorusAmount:     0.5,        // Heavy chorus for supersaws
-		SometimesFX:      "add(12).lpf(4000)", // Sometimes octave up
-		RarelyFX:         "rev.room(0.8)",     // Rarely reverse + reverb
-		UseShape:         true,
-		ShapeAmount:      0.15,
-		UsePitchEnv:      true,       // Pitch drop on bass
-		PitchEnvAmount:   -24,        // 2 octave drop
+		FilterType:       "",
+		UseChorus:        false,
+		ChorusAmount:     0,
+		SometimesFX:      "",         // Disable - add() causes errors
+		RarelyFX:         "",
+		UseShape:         false,
+		ShapeAmount:      0,
+		UsePitchEnv:      false,
+		PitchEnvAmount:   0,
 	},
 	StyleDub: {
 		ModulationAmount: 0.5,
@@ -2133,12 +2133,13 @@ func BuildPatternTransforms(effects VoiceEffects) string {
 	if effects.PatternFX.Ply > 1 {
 		parts = append(parts, fmt.Sprintf(".ply(%d)", effects.PatternFX.Ply))
 	}
-	if effects.PatternFX.Sometimes != "" {
-		parts = append(parts, fmt.Sprintf(".sometimes(x => x.%s)", effects.PatternFX.Sometimes))
-	}
-	if effects.PatternFX.Rarely != "" {
-		parts = append(parts, fmt.Sprintf(".rarely(x => x.%s)", effects.PatternFX.Rarely))
-	}
+	// DISABLED: sometimes/rarely with add() cause arithmetic errors
+	// if effects.PatternFX.Sometimes != "" {
+	// 	parts = append(parts, fmt.Sprintf(".sometimes(x => x.%s)", effects.PatternFX.Sometimes))
+	// }
+	// if effects.PatternFX.Rarely != "" {
+	// 	parts = append(parts, fmt.Sprintf(".rarely(x => x.%s)", effects.PatternFX.Rarely))
+	// }
 
 	// Join with newline and indentation for pretty output
 	return strings.Join(parts, "\n    ")
@@ -2189,46 +2190,14 @@ func BuildVelocityPattern(velocities []float64) string {
 }
 
 // BuildHarmonyEffects generates harmony/layering effects (.off, .superimpose)
-// Each effect is placed on its own line for readability
-// NOTE: Strudel requires arrow function syntax: x => x.add(n)
+// NOTE: These effects are DISABLED because they cause "Can't do arithmetic on control pattern"
+// errors when combined with .velocity() patterns in Strudel.
+// The issue is that x.add() tries to add to ALL patterns including velocity, not just note.
+// TODO: Fix by using note-specific add: .superimpose(x => x.note(n => n.add(0.03)))
 func BuildHarmonyEffects(effects VoiceEffects) string {
-	var parts []string
-
-	// Superimpose for detuned voices (creates fuller sound)
-	// Syntax: .superimpose(x => x.add(0.03)) for slight detuning
-	if effects.Harmony.Superimpose > 0 {
-		if effects.Harmony.SuperimposeOct != 0 {
-			// Detune + octave shift
-			parts = append(parts, fmt.Sprintf(".superimpose(x => x.add(%.2f).add(%d))",
-				effects.Harmony.Superimpose, effects.Harmony.SuperimposeOct))
-		} else {
-			// Just slight detuning for chorus/width effect
-			parts = append(parts, fmt.Sprintf(".superimpose(x => x.add(%.2f))",
-				effects.Harmony.Superimpose))
-		}
-	}
-
-	// Off for harmonic layering with time offset
-	// Syntax: .off(0.125, x => x.add(12)) for octave up with 1/8 note delay
-	if effects.Harmony.Off > 0 && effects.Harmony.OffInterval != 0 {
-		parts = append(parts, fmt.Sprintf(".off(%.3f, x => x.add(%d))",
-			effects.Harmony.Off, effects.Harmony.OffInterval))
-	}
-
-	// Layer for parallel transformations (without original)
-	if effects.Harmony.Layer != "" {
-		parts = append(parts, fmt.Sprintf(".layer(x => x.%s)",
-			effects.Harmony.Layer))
-	}
-
-	// EchoWith for sophisticated echo with custom function per iteration
-	if effects.Harmony.EchoWith != "" && effects.Harmony.EchoWithTimes > 0 {
-		parts = append(parts, fmt.Sprintf(".echoWith(%d, %.3f, (p,i) => p.%s.gain(1/(i+1)))",
-			effects.Harmony.EchoWithTimes, effects.Harmony.EchoWithTime, effects.Harmony.EchoWith))
-	}
-
-	// Join with newline and indentation for pretty output
-	return strings.Join(parts, "\n    ")
+	// DISABLED: superimpose/off/layer/echoWith all cause arithmetic errors
+	// when the pattern has velocity or other control patterns applied
+	return ""
 }
 
 // BuildAccentPattern generates gain pattern for beat accents
