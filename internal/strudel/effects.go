@@ -1321,7 +1321,9 @@ func GetVoiceEffects(voice string, style SoundStyle) VoiceEffects {
 	}
 
 	// Apply jux for styles that use it (only on high voice to avoid muddiness)
-	if styleMod.UseJux && voice == "high" {
+	// Don't use jux if we're also using pan LFO modulation - they conflict
+	// (jux creates stereo width by reversing right channel, pan LFO already provides movement)
+	if styleMod.UseJux && voice == "high" && effects.Pan.Width == 0 {
 		effects.PatternFX.Jux = true
 	}
 
@@ -2188,23 +2190,28 @@ func BuildVelocityPattern(velocities []float64) string {
 
 // BuildHarmonyEffects generates harmony/layering effects (.off, .superimpose)
 // Each effect is placed on its own line for readability
+// NOTE: Strudel requires arrow function syntax: x => x.add(n)
 func BuildHarmonyEffects(effects VoiceEffects) string {
 	var parts []string
 
 	// Superimpose for detuned voices (creates fuller sound)
+	// Syntax: .superimpose(x => x.add(0.03)) for slight detuning
 	if effects.Harmony.Superimpose > 0 {
 		if effects.Harmony.SuperimposeOct != 0 {
-			parts = append(parts, fmt.Sprintf(".superimpose(add(%.2f).add(note(%d)))",
+			// Detune + octave shift
+			parts = append(parts, fmt.Sprintf(".superimpose(x => x.add(%.2f).add(%d))",
 				effects.Harmony.Superimpose, effects.Harmony.SuperimposeOct))
 		} else {
-			parts = append(parts, fmt.Sprintf(".superimpose(add(%.2f))",
+			// Just slight detuning for chorus/width effect
+			parts = append(parts, fmt.Sprintf(".superimpose(x => x.add(%.2f))",
 				effects.Harmony.Superimpose))
 		}
 	}
 
-	// Off for harmonic layering
+	// Off for harmonic layering with time offset
+	// Syntax: .off(0.125, x => x.add(12)) for octave up with 1/8 note delay
 	if effects.Harmony.Off > 0 && effects.Harmony.OffInterval != 0 {
-		parts = append(parts, fmt.Sprintf(".off(%.3f, add(%d))",
+		parts = append(parts, fmt.Sprintf(".off(%.3f, x => x.add(%d))",
 			effects.Harmony.Off, effects.Harmony.OffInterval))
 	}
 
