@@ -60,10 +60,13 @@ type EnvelopeSettings struct {
 type StyleFXSettings struct {
 	Phaser       float64 // Phaser speed (0 = off)
 	PhaserDepth  float64 // Phaser depth (0-1)
+	PhaserCenter float64 // Phaser center frequency (Hz)
+	PhaserSweep  float64 // Phaser sweep range (Hz)
 	Crush        int     // Bit crush depth (0 = off, 1-16)
 	Coarse       int     // Sample rate reduction (0 = off)
-	Vowel        string  // Formant filter vowel (empty = off)
+	Vowel        string  // Formant filter vowel (empty = off): a, e, i, o, u
 	Distort      float64 // Distortion amount (0 = off)
+	Shape        float64 // Waveshaping/saturation (0 = off, 0-1)
 	Vibrato      float64 // Vibrato speed (0 = off)
 	VibratoDepth float64 // Vibrato depth in semitones
 	// FM Synthesis parameters
@@ -71,6 +74,11 @@ type StyleFXSettings struct {
 	FMH       float64 // FM harmonicity ratio (0 = off, use default)
 	FMDecay   float64 // FM envelope decay in seconds (0 = off)
 	FMSustain float64 // FM envelope sustain level (0-1)
+	// Additional modulation effects
+	Ring       float64 // Ring modulation frequency in Hz (0 = off)
+	Chorus     float64 // Chorus depth (0 = off, 0.5 = moderate)
+	Leslie     float64 // Leslie speaker simulation (0 = off, 1 = full)
+	LeslieRate float64 // Leslie rotation speed
 }
 
 // PatternFXSettings defines pattern-level transformations
@@ -148,6 +156,71 @@ type OrbitSettings struct {
 	Orbit int // Effect bus number (0-11, each has separate effects)
 }
 
+// ShapeSettings defines waveshaping/saturation parameters
+type ShapeSettings struct {
+	Shape    float64 // Waveshaping amount (0-1, subtle saturation to hard clipping)
+	Postgain float64 // Gain after shaping to compensate for level changes
+}
+
+// RingSettings defines ring modulation parameters
+type RingSettings struct {
+	Ring     float64 // Ring modulation frequency in Hz (0 = off)
+	RingMix  float64 // Wet/dry mix for ring mod (0-1)
+}
+
+// ChorusSettings defines chorus effect parameters
+type ChorusSettings struct {
+	Chorus      float64 // Chorus depth/amount (0 = off, 0.5 = moderate)
+	ChorusRate  float64 // Chorus LFO rate in Hz
+	ChorusDelay float64 // Chorus delay time in ms
+}
+
+// LeslieSettings defines Leslie speaker simulation
+type LeslieSettings struct {
+	Leslie float64 // Leslie effect amount (0 = off, 1 = full)
+	LRate  float64 // Leslie rotation speed (slow=0.5, fast=5)
+	LSize  float64 // Leslie cabinet size/depth
+}
+
+// BandPassSettings defines band-pass filter parameters
+type BandPassSettings struct {
+	BPF int     // Band-pass center frequency in Hz (0 = off)
+	BPQ float64 // Band-pass Q/resonance (0.1-50)
+}
+
+// PitchEnvSettings defines pitch envelope parameters
+type PitchEnvSettings struct {
+	PAttack  float64 // Pitch envelope attack time
+	PDecay   float64 // Pitch envelope decay time
+	PRelease float64 // Pitch envelope release time
+	PEnv     float64 // Pitch envelope depth in semitones (can be negative)
+	PCurve   string  // Envelope curve type: "lin" or "exp"
+	PAnchor  float64 // Envelope anchor point (0, 0.5, or 1)
+}
+
+// GranularSettings defines granular synthesis parameters
+type GranularSettings struct {
+	Striate int     // Cut sample into n parts, trigger progressively (0 = off)
+	Chop    int     // Cut sample into n parts for granular exploration (0 = off)
+	Slice   int     // Number of slices for slice pattern (0 = off)
+	Speed   float64 // Playback speed multiplier (1.0 = normal, -1 = reverse)
+	Begin   float64 // Sample start point (0-1)
+	End     float64 // Sample end point (0-1)
+	Loop    bool    // Enable sample looping
+	Cut     int     // Cutgroup number (same group samples cut each other)
+}
+
+// ZZFXSettings defines ZZFX synth engine parameters
+type ZZFXSettings struct {
+	Curve         float64 // Envelope curve shape
+	ZMod          float64 // Modulation amount
+	ZCrush        float64 // ZZFX-specific crush
+	ZDelay        float64 // ZZFX delay
+	PitchJump     float64 // Pitch jump amount in semitones
+	PitchJumpTime float64 // When pitch jump occurs
+	LFO           float64 // LFO rate for ZZFX
+	Noise         float64 // Noise amount in ZZFX synth
+}
 
 // AccentSettings defines beat emphasis patterns
 type AccentSettings struct {
@@ -175,6 +248,7 @@ type DynamicsSettings struct {
 // VoiceEffects contains all effect settings for a voice
 type VoiceEffects struct {
 	Filter     FilterSettings
+	BandPass   BandPassSettings
 	Pan        PanSettings
 	Reverb     ReverbSettings
 	Delay      DelaySettings
@@ -186,6 +260,7 @@ type VoiceEffects struct {
 	Harmony    HarmonySettings
 	Tremolo    TremoloSettings
 	FilterEnv  FilterEnvSettings
+	PitchEnv   PitchEnvSettings
 	Duck       DuckSettings
 	Accent     AccentSettings
 	Compressor CompressorSettings
@@ -193,6 +268,12 @@ type VoiceEffects struct {
 	Slide      SlideSettings
 	FilterType FilterTypeSettings
 	Orbit      OrbitSettings
+	Shape      ShapeSettings
+	Ring       RingSettings
+	Chorus     ChorusSettings
+	Leslie     LeslieSettings
+	Granular   GranularSettings
+	ZZFX       ZZFXSettings
 }
 
 // StyleEffects defines effect variations per style
@@ -230,6 +311,20 @@ type StyleEffects struct {
 	FilterType       string   // Filter type: "12db", "ladder", "24db"
 	UseOrbit         bool     // Whether to use separate orbit
 	OrbitNumber      int      // Orbit bus number
+	// New modulation effects
+	UseShape       bool    // Whether to use waveshaping/saturation
+	ShapeAmount    float64 // Waveshaping amount (0-1)
+	UseRing        bool    // Whether to use ring modulation
+	RingFreq       float64 // Ring mod frequency in Hz
+	UseChorus      bool    // Whether to use chorus
+	ChorusAmount   float64 // Chorus depth
+	UseLeslie      bool    // Whether to use Leslie speaker sim
+	LeslieSpeed    float64 // Leslie rotation speed
+	UsePitchEnv    bool    // Whether to use pitch envelope
+	PitchEnvAmount float64 // Pitch envelope depth in semitones
+	UseBandPass    bool    // Whether to use band-pass filter
+	BandPassFreq   int     // Band-pass center frequency
+	BandPassQ      float64 // Band-pass resonance
 }
 
 // Voice effect presets by voice type
@@ -431,25 +526,42 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseRangex:        true,     // Exponential filter sweeps
 		UseOrbit:         true,     // Separate orbits for sidechain
 		FilterType:       "ladder", // Analog ladder filter
+		UseRing:          true,     // Ring modulation for metallic tones
+		RingFreq:         150,      // Ring mod frequency
+		UseChorus:        true,     // Chorus for width
+		ChorusAmount:     0.4,
+		UseShape:         true,     // Saturation for punch
+		ShapeAmount:      0.25,
+		UsePitchEnv:      true,     // Pitch envelope for bass punch
+		PitchEnvAmount:   -12,      // Drop pitch at start
 	},
 	StyleJazz: {
-		ModulationAmount: 0.4,
-		FilterDynamic:    false,
+		ModulationAmount: 0.6,
+		FilterDynamic:    true,
 		DelayEnabled:     true,
-		ReverbAmount:     1.0,
+		ReverbAmount:     1.1,
 		LFOShape:         LFOPerlin, // Organic movement
-		UseEnvelope:      false,
-		UseStyleFX:       true, // Enable vibrato
-		SwingAmount:      0.1,  // Subtle swing
-		LegatoAmount:     1.0,
-		UseEcho:          false,
-		UseSuperimpose:   false,
-		UseOff:           true,       // Harmonic layering for rich chords
-		SometimesFX:      "add(7)",   // Sometimes add a fifth
-		RarelyFX:         "room(0.6)", // Rarely more reverb
+		UseEnvelope:      true,      // Smooth envelope for jazz
+		UseStyleFX:       true,      // Enable vibrato, leslie
+		SwingAmount:      0.12,      // Classic jazz swing
+		LegatoAmount:     1.1,       // Slightly sustained
+		UseEcho:          true,      // Jazz echo for space
+		UseSuperimpose:   true,      // Slight detune for warmth
+		UseOff:           true,      // Harmonic layering for rich chords
+		UseTremolo:       true,      // Subtle tremolo for vibes
+		UseFilterEnv:     true,      // Dynamic filter for expression
+		UseJux:           true,      // Stereo width
+		SometimesFX:      "add(7)",  // Sometimes add a fifth
+		RarelyFX:         "speed(0.5).room(0.7)", // Rarely slow + reverb
 		AccentPattern:    "backbeat", // Accent 2 and 4 (jazz feel)
-		AccentAmount:     0.1,        // Subtle accent
-		DynamicRange:     1.4,        // Wide dynamics for expression
+		AccentAmount:     0.12,      // Moderate accent
+		DynamicRange:     1.5,       // Wide dynamics for expression
+		UseLeslie:        true,      // Leslie speaker for organ feel
+		LeslieSpeed:      2.5,       // Moderate rotation
+		UseChorus:        true,      // Chorus for warmth
+		ChorusAmount:     0.35,      // Moderate chorus
+		UseShape:         true,      // Subtle warmth
+		ShapeAmount:      0.1,       // Very subtle saturation
 	},
 	StyleLofi: {
 		ModulationAmount: 0.5,
@@ -761,6 +873,198 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		AccentAmount:     0,
 		DynamicRange:     1.2,
 	},
+	// Noise and texture styles
+	StyleNoise: {
+		ModulationAmount: 0.2,
+		FilterDynamic:    true,       // Filter noise dynamically
+		DelayEnabled:     true,
+		ReverbAmount:     1.5,        // Lots of reverb
+		LFOShape:         LFOPerlin,  // Organic noise movement
+		UseEnvelope:      true,
+		UseStyleFX:       false,
+		LegatoAmount:     2.0,
+		DynamicRange:     0.8,        // Keep consistent
+	},
+	StyleGlitch: {
+		ModulationAmount: 1.0,        // Heavy modulation
+		FilterDynamic:    true,
+		DelayEnabled:     true,
+		ReverbAmount:     0.5,
+		LFOShape:         LFORand,    // Random modulation
+		UseEnvelope:      true,
+		UseStyleFX:       true,       // Crush, coarse
+		LegatoAmount:     0.5,        // Short, choppy
+		IterAmount:       4,          // Pattern variation
+		SometimesFX:      "crush(4)",
+		RarelyFX:         "speed(-1)",
+		DynamicRange:     0.7,
+	},
+	StyleTexture: {
+		ModulationAmount: 0.4,
+		FilterDynamic:    true,
+		DelayEnabled:     true,
+		ReverbAmount:     1.8,        // Deep reverb for texture
+		LFOShape:         LFOPerlin,
+		UseEnvelope:      true,
+		UseStyleFX:       false,
+		LegatoAmount:     3.0,        // Very long sustain
+		UseSuperimpose:   true,
+		DynamicRange:     1.0,
+	},
+	StyleRetro: {
+		ModulationAmount: 0.6,
+		FilterDynamic:    false,
+		DelayEnabled:     true,
+		ReverbAmount:     0.4,        // Tight reverb
+		LFOShape:         LFOSquare,  // 8-bit style
+		UseEnvelope:      true,
+		UseStyleFX:       true,       // Crush for retro
+		LegatoAmount:     0.7,
+		AccentPattern:    "downbeat",
+		AccentAmount:     0.15,
+		DynamicRange:     0.9,
+	},
+	// Dance music styles
+	StyleHouse: {
+		ModulationAmount: 0.9,
+		FilterDynamic:    true,
+		DelayEnabled:     true,
+		ReverbAmount:     0.8,
+		LFOShape:         LFOSaw,     // Rhythmic sweeps
+		UseEnvelope:      true,
+		UseStyleFX:       true,
+		LegatoAmount:     0.8,
+		UseEcho:          true,       // House echo
+		UseSuperimpose:   true,       // Detune for width
+		UseOff:           true,       // Octave layers
+		UseTremolo:       true,       // Pumping tremolo
+		UseDuck:          true,       // Sidechain pumping
+		UseFilterEnv:     true,
+		UseJux:           true,       // Stereo width
+		AccentPattern:    "all-fours",
+		AccentAmount:     0.15,
+		UseCompressor:    true,
+		DynamicRange:     0.8,
+		FilterType:       "ladder",
+		UseOrbit:         true,
+		SometimesFX:      "speed(2).lpf(2000)", // Sometimes octave up filtered
+		RarelyFX:         "crush(10)",          // Rarely bitcrush
+		UseShape:         true,       // Punchy saturation
+		ShapeAmount:      0.2,
+		UseChorus:        true,
+		ChorusAmount:     0.35,
+		PlyAmount:        2,          // Double bass hits
+	},
+	StyleTrance: {
+		ModulationAmount: 1.0,        // Heavy modulation
+		FilterDynamic:    true,
+		DelayEnabled:     true,
+		ReverbAmount:     1.1,
+		LFOShape:         LFOSaw,
+		UseEnvelope:      true,
+		UseStyleFX:       true,
+		LegatoAmount:     1.0,
+		UseEcho:          true,       // Trance echo
+		UseFilterEnv:     true,       // Classic trance filter
+		UseSuperimpose:   true,       // Supersaw-style
+		UseOff:           true,       // Octave layers for supersaws
+		UseTremolo:       true,       // Gated tremolo
+		UseJux:           true,       // Wide stereo
+		AccentPattern:    "all-fours",
+		AccentAmount:     0.12,
+		UseCompressor:    true,
+		DynamicRange:     1.0,
+		FilterType:       "ladder",
+		UseChorus:        true,
+		ChorusAmount:     0.5,        // Heavy chorus for supersaws
+		SometimesFX:      "add(12).lpf(4000)", // Sometimes octave up
+		RarelyFX:         "rev.room(0.8)",     // Rarely reverse + reverb
+		UseShape:         true,
+		ShapeAmount:      0.15,
+		UsePitchEnv:      true,       // Pitch drop on bass
+		PitchEnvAmount:   -24,        // 2 octave drop
+	},
+	StyleDub: {
+		ModulationAmount: 0.5,
+		FilterDynamic:    true,
+		DelayEnabled:     true,       // Heavy delay for dub
+		ReverbAmount:     1.2,        // Spring reverb feel
+		LFOShape:         LFOSine,
+		UseEnvelope:      false,
+		UseStyleFX:       true,
+		SwingAmount:      0.08,       // Reggae swing
+		LegatoAmount:     1.2,
+		UseEcho:          true,       // Dub delay
+		AccentPattern:    "offbeat",  // Reggae offbeat
+		AccentAmount:     0.15,
+		DynamicRange:     1.3,
+	},
+	StyleFunk: {
+		ModulationAmount: 0.6,
+		FilterDynamic:    true,
+		DelayEnabled:     true,
+		ReverbAmount:     0.7,
+		LFOShape:         LFOSaw,     // Funky filter sweeps
+		UseEnvelope:      true,       // Punchy envelope
+		UseStyleFX:       true,       // Phaser, wah-like
+		SwingAmount:      0.15,       // Heavy funky swing
+		LegatoAmount:     0.7,        // Tight, punchy
+		UseEcho:          true,       // Funky echo
+		UseFilterEnv:     true,       // Wah-like filter
+		UseJux:           true,       // Stereo funk
+		AccentPattern:    "backbeat",
+		AccentAmount:     0.25,       // Strong accents
+		DynamicRange:     1.5,        // Wide dynamics
+		SometimesFX:      "speed(2)",  // Sometimes octave up
+		RarelyFX:         "crush(12).coarse(2)", // Rarely lo-fi
+		UseShape:         true,       // Funky saturation
+		ShapeAmount:      0.2,
+		PlyAmount:        2,          // Double bass notes
+	},
+	StyleSoul: {
+		ModulationAmount: 0.5,
+		FilterDynamic:    true,
+		DelayEnabled:     true,
+		ReverbAmount:     1.1,        // Warm reverb
+		LFOShape:         LFOSine,
+		UseEnvelope:      true,       // Smooth soul envelope
+		UseStyleFX:       true,       // Vibrato, phaser, chorus
+		SwingAmount:      0.08,       // Subtle groove
+		LegatoAmount:     1.1,        // Slightly sustained
+		UseEcho:          true,       // Echo for depth
+		UseSuperimpose:   true,       // Slight detune for warmth
+		UseOff:           true,       // Harmonic layering
+		UseTremolo:       true,       // Soul tremolo
+		UseFilterEnv:     true,       // Dynamic wah-like filter
+		UseJux:           true,       // Stereo width
+		AccentPattern:    "backbeat",
+		AccentAmount:     0.15,       // Soul backbeat
+		DynamicRange:     1.4,        // Wide dynamics
+		SometimesFX:      "add(7).gain(0.4)", // Sometimes add a fifth
+		RarelyFX:         "speed(2).lpf(1500)", // Rarely octave up filtered
+		UseChorus:        true,       // Warm chorus
+		ChorusAmount:     0.4,
+		UseShape:         true,       // Warm saturation
+		ShapeAmount:      0.12,
+		UseLeslie:        true,       // Leslie for organ sounds
+		LeslieSpeed:      2,
+	},
+	StyleCinematic: {
+		ModulationAmount: 0.2,
+		FilterDynamic:    false,
+		DelayEnabled:     true,
+		ReverbAmount:     1.5,        // Big hall reverb
+		LFOShape:         LFOSine,
+		UseEnvelope:      true,       // Long cinematic envelopes
+		UseStyleFX:       true,
+		LegatoAmount:     2.0,        // Long sustained notes
+		UseSuperimpose:   true,       // Layered strings
+		UseOff:           true,       // Octave doubling
+		UseTremolo:       true,       // Subtle movement
+		AccentPattern:    "downbeat",
+		AccentAmount:     0.15,
+		DynamicRange:     1.6,        // Very wide dynamics
+	},
 }
 
 // Style-specific FX presets
@@ -775,27 +1079,45 @@ var styleFXPresets = map[SoundStyle]StyleFXSettings{
 		FMH:          1,    // Unison harmonicity
 		FMDecay:      0.3,
 		FMSustain:    0.5,
+		Chorus:       0.3,  // Subtle chorus for width
 	},
 	StyleOrchestral: {
 		Vibrato:      5,
 		VibratoDepth: 0.15,
+		Chorus:       0.2,  // Subtle ensemble chorus
 	},
 	StyleElectronic: {
-		Phaser:      0.8,
-		PhaserDepth: 0.5,
-		Distort:     0.1,
-		FM:          2,    // Moderate FM for brightness
-		FMH:         2,    // Octave harmonicity
-		FMDecay:     0.2,
-		FMSustain:   0.3,
+		Phaser:       0.8,
+		PhaserDepth:  0.5,
+		Distort:      0.15,
+		Shape:        0.2,   // Punchy saturation
+		FM:           2.5,   // Strong FM for brightness
+		FMH:          2,     // Octave harmonicity
+		FMDecay:      0.15,
+		FMSustain:    0.2,
+		Ring:         150,   // Ring mod for metallic edge
+		Chorus:       0.4,   // Wide chorus
+		Vibrato:      5,
+		VibratoDepth: 0.15,
 	},
 	StyleJazz: {
-		Vibrato:      3,
-		VibratoDepth: 0.08,
+		Vibrato:      4,
+		VibratoDepth: 0.1,
+		Leslie:       0.5,      // Noticeable Leslie on organ sounds
+		LeslieRate:   3,        // Medium rotation
+		Phaser:       0.3,      // Subtle phaser for richness
+		PhaserDepth:  0.25,
+		Chorus:       0.3,      // Warm chorus
+		FM:           0.8,      // Subtle FM for harmonic richness
+		FMH:          1,        // Unison
+		FMDecay:      0.5,
+		FMSustain:    0.7,
+		Shape:        0.08,     // Very subtle warmth
 	},
 	StyleLofi: {
 		Crush:  10, // Subtle bit reduction
 		Coarse: 4,  // Sample rate reduction
+		Shape:  0.1, // Gentle saturation for warmth
 	},
 	// Raw synthesizer styles
 	StyleRaw: {
@@ -805,6 +1127,7 @@ var styleFXPresets = map[SoundStyle]StyleFXSettings{
 		FMH:          1.5,
 		FMDecay:      0.4,
 		FMSustain:    0.6,
+		Shape:        0.2,  // Subtle waveshaping
 	},
 	StyleChiptune: {
 		Crush:  8,    // 8-bit reduction
@@ -813,23 +1136,31 @@ var styleFXPresets = map[SoundStyle]StyleFXSettings{
 	StyleAmbient: {
 		Vibrato:      2,    // Slow subtle vibrato
 		VibratoDepth: 0.05,
+		Chorus:       0.4,  // Lush chorus
 	},
 	StyleDrone: {
 		Vibrato:      1,    // Very slow vibrato
 		VibratoDepth: 0.08,
 		Phaser:       0.2,  // Slow phaser
 		PhaserDepth:  0.3,
+		Chorus:       0.5,  // Thick chorus for drones
 	},
 	// Sample-based styles
 	StyleMallets: {
 		Vibrato:      4,    // Motor-driven vibraphone effect
 		VibratoDepth: 0.1,
+		Leslie:       0.4,  // Leslie for vibraphone motor effect
+		LeslieRate:   4,    // Moderate rotation
 	},
 	StylePlucked: {},       // Pure plucked sound
-	StyleKeys: {},          // Pure piano sound
+	StyleKeys: {
+		Leslie:     0.5,    // Classic organ Leslie
+		LeslieRate: 3,
+	},
 	StylePad: {
 		Vibrato:      2,    // Slow subtle vibrato
 		VibratoDepth: 0.05,
+		Chorus:       0.5,  // Lush pad chorus
 	},
 	StylePercussive: {},    // Pure percussion
 	// Genre-specific styles
@@ -842,6 +1173,8 @@ var styleFXPresets = map[SoundStyle]StyleFXSettings{
 		FMH:          2,
 		FMDecay:      0.3,
 		FMSustain:    0.5,
+		Chorus:       0.4,  // 80s chorus sound
+		Shape:        0.15, // Subtle saturation
 	},
 	StyleDarkwave: {
 		Phaser:       0.4,
@@ -849,16 +1182,78 @@ var styleFXPresets = map[SoundStyle]StyleFXSettings{
 		Distort:      0.15,
 		Vibrato:      3,
 		VibratoDepth: 0.1,
+		Chorus:       0.3,  // Dark chorus
+		Ring:         150,  // Subtle ring mod for dissonance
 	},
 	StyleMinimal: {},       // Clean, no effects
 	StyleIndustrial: {
 		Distort:     0.3,   // Heavy distortion
 		Crush:       6,     // Bit crushing
 		Coarse:      4,     // Sample reduction
+		Shape:       0.4,   // Heavy waveshaping
+		Ring:        300,   // Harsh ring mod
 	},
 	StyleNewAge: {
 		Vibrato:      2,
 		VibratoDepth: 0.05,
+		Chorus:       0.4,  // Ethereal chorus
+	},
+	// Noise and texture styles
+	StyleNoise:   {},       // Pure noise - no extra FX
+	StyleGlitch: {
+		Crush:  4,          // Extreme bit crush
+		Coarse: 8,          // Heavy sample reduction
+		Shape:  0.3,        // Distortion
+	},
+	StyleTexture: {
+		Chorus: 0.5,        // Wide chorus for texture
+	},
+	StyleRetro: {
+		Crush:  8,          // 8-bit
+		Coarse: 4,
+	},
+	// Dance music styles
+	StyleHouse: {
+		Phaser:      0.3,
+		PhaserDepth: 0.3,
+		Shape:       0.1,   // Subtle saturation
+	},
+	StyleTrance: {
+		Phaser:       0.5,
+		PhaserDepth:  0.4,
+		FM:           1.5,  // FM for supersaw-like timbres
+		FMH:          1,
+		Chorus:       0.5,  // Wide supersaw chorus
+	},
+	StyleDub: {
+		Vibrato:      2,
+		VibratoDepth: 0.05,
+	},
+	StyleFunk: {
+		Phaser:       0.4,      // Funky phaser
+		PhaserDepth:  0.35,
+		Shape:        0.15,     // Punchy saturation
+		Vibrato:      3,
+		VibratoDepth: 0.08,
+	},
+	StyleSoul: {
+		Vibrato:      4,
+		VibratoDepth: 0.1,
+		Phaser:       0.3,      // Subtle soul phaser
+		PhaserDepth:  0.25,
+		Chorus:       0.35,     // Warm chorus
+		Leslie:       0.4,      // Leslie for organ
+		LeslieRate:   2.5,
+		Shape:        0.1,      // Warm saturation
+		FM:           0.6,      // Subtle FM warmth
+		FMH:          1,
+		FMDecay:      0.4,
+		FMSustain:    0.6,
+	},
+	StyleCinematic: {
+		Vibrato:      4,
+		VibratoDepth: 0.1,
+		Chorus:       0.3,  // Ensemble width
 	},
 }
 
@@ -1062,6 +1457,71 @@ func GetVoiceEffects(voice string, style SoundStyle) VoiceEffects {
 		}
 		effects.Orbit = OrbitSettings{
 			Orbit: orbitNum,
+		}
+	}
+
+	// Apply waveshaping for styles that use it
+	if styleMod.UseShape && styleMod.ShapeAmount > 0 {
+		effects.Shape = ShapeSettings{
+			Shape:    styleMod.ShapeAmount,
+			Postgain: -styleMod.ShapeAmount * 3, // Compensate for volume increase
+		}
+	}
+
+	// Apply ring modulation for styles that use it (mainly on high voice for leads)
+	if styleMod.UseRing && styleMod.RingFreq > 0 && voice == "high" {
+		effects.Ring = RingSettings{
+			Ring: styleMod.RingFreq,
+		}
+	}
+
+	// Apply chorus for styles that use it (mainly on mid/high voices)
+	if styleMod.UseChorus && styleMod.ChorusAmount > 0 && voice != "bass" {
+		effects.Chorus = ChorusSettings{
+			Chorus: styleMod.ChorusAmount,
+		}
+	}
+
+	// Apply Leslie speaker for styles that use it
+	if styleMod.UseLeslie && styleMod.LeslieSpeed > 0 {
+		effects.Leslie = LeslieSettings{
+			Leslie: 1.0, // Full wet
+			LRate:  styleMod.LeslieSpeed,
+		}
+	}
+
+	// Apply pitch envelope for styles that use it (mainly on bass for punch)
+	if styleMod.UsePitchEnv && voice == "bass" {
+		effects.PitchEnv = PitchEnvSettings{
+			PAttack:  0.001,
+			PDecay:   0.1,
+			PRelease: 0.05,
+			PEnv:     styleMod.PitchEnvAmount,
+		}
+	}
+
+	// Apply band-pass filter for styles that use it
+	if styleMod.UseBandPass && styleMod.BandPassFreq > 0 {
+		effects.BandPass = BandPassSettings{
+			BPF: styleMod.BandPassFreq,
+			BPQ: styleMod.BandPassQ,
+		}
+	}
+
+	// Copy new StyleFX settings to effect structs
+	if fx, ok := styleFXPresets[style]; ok {
+		if fx.Shape > 0 && effects.Shape.Shape == 0 {
+			effects.Shape.Shape = fx.Shape
+		}
+		if fx.Ring > 0 && effects.Ring.Ring == 0 && voice == "high" {
+			effects.Ring.Ring = fx.Ring
+		}
+		if fx.Chorus > 0 && effects.Chorus.Chorus == 0 && voice != "bass" {
+			effects.Chorus.Chorus = fx.Chorus
+		}
+		if fx.Leslie > 0 && effects.Leslie.Leslie == 0 {
+			effects.Leslie.Leslie = fx.Leslie
+			effects.Leslie.LRate = fx.LeslieRate
 		}
 	}
 
@@ -1563,6 +2023,80 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 	// Filter type selection (ladder filter for analog style)
 	if effects.FilterType.Type != "" && effects.FilterType.Type != "12db" {
 		parts = append(parts, fmt.Sprintf(".ftype(\"%s\")", effects.FilterType.Type))
+	}
+
+	// Band-pass filter
+	if effects.BandPass.BPF > 0 {
+		parts = append(parts, fmt.Sprintf(".bpf(%d)", effects.BandPass.BPF))
+		if effects.BandPass.BPQ > 0 {
+			parts = append(parts, fmt.Sprintf(".bpq(%.2f)", effects.BandPass.BPQ))
+		}
+	}
+
+	// Waveshaping/saturation
+	if effects.Shape.Shape > 0 {
+		parts = append(parts, fmt.Sprintf(".shape(%.2f)", effects.Shape.Shape))
+		if effects.Shape.Postgain != 0 {
+			parts = append(parts, fmt.Sprintf(".postgain(%.2f)", effects.Shape.Postgain))
+		}
+	}
+
+	// Ring modulation
+	if effects.Ring.Ring > 0 {
+		parts = append(parts, fmt.Sprintf(".ring(%.1f)", effects.Ring.Ring))
+	}
+
+	// Chorus effect
+	if effects.Chorus.Chorus > 0 {
+		parts = append(parts, fmt.Sprintf(".chorus(%.2f)", effects.Chorus.Chorus))
+	}
+
+	// Leslie speaker simulation
+	if effects.Leslie.Leslie > 0 {
+		parts = append(parts, fmt.Sprintf(".leslie(%.2f)", effects.Leslie.Leslie))
+		if effects.Leslie.LRate > 0 {
+			parts = append(parts, fmt.Sprintf(".lrate(%.1f)", effects.Leslie.LRate))
+		}
+		if effects.Leslie.LSize > 0 {
+			parts = append(parts, fmt.Sprintf(".lsize(%.2f)", effects.Leslie.LSize))
+		}
+	}
+
+	// Pitch envelope
+	if effects.PitchEnv.PEnv != 0 {
+		parts = append(parts, fmt.Sprintf(".penv(%.1f)", effects.PitchEnv.PEnv))
+		if effects.PitchEnv.PAttack > 0 {
+			parts = append(parts, fmt.Sprintf(".pattack(%.3f)", effects.PitchEnv.PAttack))
+		}
+		if effects.PitchEnv.PDecay > 0 {
+			parts = append(parts, fmt.Sprintf(".pdecay(%.2f)", effects.PitchEnv.PDecay))
+		}
+		if effects.PitchEnv.PRelease > 0 {
+			parts = append(parts, fmt.Sprintf(".prelease(%.2f)", effects.PitchEnv.PRelease))
+		}
+	}
+
+	// Granular effects
+	if effects.Granular.Striate > 0 {
+		parts = append(parts, fmt.Sprintf(".striate(%d)", effects.Granular.Striate))
+	}
+	if effects.Granular.Chop > 0 {
+		parts = append(parts, fmt.Sprintf(".chop(%d)", effects.Granular.Chop))
+	}
+	if effects.Granular.Speed != 0 && effects.Granular.Speed != 1.0 {
+		parts = append(parts, fmt.Sprintf(".speed(%.2f)", effects.Granular.Speed))
+	}
+	if effects.Granular.Begin > 0 {
+		parts = append(parts, fmt.Sprintf(".begin(%.2f)", effects.Granular.Begin))
+	}
+	if effects.Granular.End > 0 && effects.Granular.End < 1.0 {
+		parts = append(parts, fmt.Sprintf(".end(%.2f)", effects.Granular.End))
+	}
+	if effects.Granular.Loop {
+		parts = append(parts, ".loop(1)")
+	}
+	if effects.Granular.Cut > 0 {
+		parts = append(parts, fmt.Sprintf(".cut(%d)", effects.Granular.Cut))
 	}
 
 	// Orbit routing (for separate effect buses per voice)

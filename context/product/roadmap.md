@@ -52,14 +52,14 @@ _Intelligent instrument detection and appropriate Strudel sound mapping._
 
 ---
 
-## Phase 3: Intelligent Extraction
+## Phase 3: Intelligent Extraction ✅ PARTIAL
 
 _Moving from "dump all notes" to "find the actual riff."_
 
-- [ ] **Loop Detection**
-  - [ ] **Pattern Recognition:** Automatically identify repeating 1-4 bar patterns
-  - [ ] **Loop Confidence Score:** Indicate how certain we are about detected loops
-  - [ ] **Loop-Only Output:** Option to output just the core repeating pattern
+- [x] **Loop Detection** ✅
+  - [x] **Pattern Recognition:** Automatically identify repeating 1-8 bar patterns
+  - [x] **Loop Confidence Score:** Indicate how certain we are about detected loops (0.45 threshold)
+  - [x] **Loop-Only Output:** Option to output just the core repeating pattern (`--loop-only` flag)
 
 - [ ] **Motif Extraction**
   - [ ] **Melody vs Accompaniment:** Separate lead melodic line from harmonic backing
@@ -71,10 +71,11 @@ _Moving from "dump all notes" to "find the actual riff."_
   - [ ] **Bar Range:** `--bars 1-8` to extract specific measures
   - [ ] **Auto-Section Detection:** Identify intro/verse/chorus boundaries
 
-- [ ] **Smart Simplification**
-  - [ ] **Note Density Control:** `--density sparse|normal|detailed`
-  - [ ] **Chord Reduction:** Option to simplify complex voicings to triads
-  - [ ] **Octave Consolidation:** Merge octave-doubled notes for cleaner output
+- [x] **Smart Simplification** ✅
+  - [x] **Note Density Control:** MaxNotesPerBeat=1 for clear patterns (configurable)
+  - [x] **Chord Reduction:** MaxChordSize=2 to simplify complex voicings
+  - [x] **Octave Consolidation:** Merge octave-doubled notes for cleaner output
+  - [x] **Close Note Merging:** MergeThreshold=0.1 to merge notes within 100ms
 
 ---
 
@@ -320,3 +321,8 @@ _Ideas for future consideration, not yet prioritized._
 | 1.19 | 2026-02-02 | Sample-based styles: mallets (vibraphone/marimba), plucked (harp), keys (Salamander piano), pad (warm/choir), percussive (timpani) |
 | 1.20 | 2026-02-02 | Genre-specific styles: synthwave (80s retro), darkwave (atmospheric), minimal (sparse), industrial (harsh), newage (ethereal) |
 | 1.21 | 2026-02-02 | Advanced effects: slide/portamento, ftype (ladder/24db filter), orbit routing, begin/end sample position, speed control |
+| 1.22 | 2026-02-02 | Style auto-detection: analyze BPM, key (minor/major), note density to auto-select jazz/soul/funk/electronic/house/trance |
+| 1.23 | 2026-02-02 | Extended sound palette: supersaw, ZZFX synths (z_sawtooth, z_square, z_triangle), wavetables (wt_digital, wt_vgame), noise (white, pink, brown, crackle) |
+| 1.24 | 2026-02-02 | Enhanced style effects: ring modulation, chorus, leslie, shape/saturation, pitch envelope for jazz/soul/funk/electronic |
+| 1.25 | 2026-02-02 | Improved loop detection: 8-bar loops, lower confidence threshold (0.45), better pattern matching |
+| 1.26 | 2026-02-02 | Aggressive note simplification: MaxChordSize=2, MaxNotesPerBeat=1, MergeThreshold=0.1 for clearer patterns |

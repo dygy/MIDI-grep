@@ -35,11 +35,23 @@ const (
 	StylePad        SoundStyle = "pad"        // Soft pad sounds with long tails
 	StylePercussive SoundStyle = "percussive" // Timpani, mallet percussion
 	// Genre-specific styles
-	StyleSynthwave SoundStyle = "synthwave" // 80s retro synth aesthetic
-	StyleDarkwave  SoundStyle = "darkwave"  // Dark, atmospheric synths
-	StyleMinimal   SoundStyle = "minimal"   // Clean, sparse electronic
+	StyleSynthwave  SoundStyle = "synthwave"  // 80s retro synth aesthetic
+	StyleDarkwave   SoundStyle = "darkwave"   // Dark, atmospheric synths
+	StyleMinimal    SoundStyle = "minimal"    // Clean, sparse electronic
 	StyleIndustrial SoundStyle = "industrial" // Harsh, distorted sounds
-	StyleNewAge    SoundStyle = "newage"    // Soft, ethereal, meditative
+	StyleNewAge     SoundStyle = "newage"     // Soft, ethereal, meditative
+	// Noise and texture styles
+	StyleNoise   SoundStyle = "noise"   // Noise-based ambient/texture
+	StyleGlitch  SoundStyle = "glitch"  // Glitchy, broken sounds
+	StyleTexture SoundStyle = "texture" // Textural background layers
+	StyleRetro   SoundStyle = "retro"   // ZZFX retro game sounds
+	// Dance music styles
+	StyleHouse    SoundStyle = "house"    // House music sounds
+	StyleTrance   SoundStyle = "trance"   // Trance/EDM sounds
+	StyleDub      SoundStyle = "dub"      // Reggae/dub sounds
+	StyleFunk     SoundStyle = "funk"     // Funk/disco sounds
+	StyleSoul     SoundStyle = "soul"     // Soul/R&B sounds
+	StyleCinematic SoundStyle = "cinematic" // Cinematic/film score
 )
 
 // SoundPalette defines sounds for each voice (bass, mid, high)
@@ -64,11 +76,11 @@ var soundPalettes = map[SoundStyle]SoundPalette{
 		HighGain: 0.9,
 	},
 	StyleSynth: {
-		Bass:     "gm_synth_bass_1",
-		BassGain: 1.3,
-		Mid:      "gm_pad_warm",
+		Bass:     "supersaw",           // Fat supersaw bass
+		BassGain: 1.0,
+		Mid:      "gm_pad_poly",        // Poly pad
 		MidGain:  0.8,
-		High:     "gm_lead_2_sawtooth",
+		High:     "gm_lead_2_sawtooth", // Saw lead
 		HighGain: 0.7,
 	},
 	StyleOrchestral: {
@@ -80,11 +92,11 @@ var soundPalettes = map[SoundStyle]SoundPalette{
 		HighGain: 0.9,
 	},
 	StyleElectronic: {
-		Bass:     "gm_synth_bass_2",
-		BassGain: 1.4,
-		Mid:      "gm_pad_poly",
+		Bass:     "supersaw",           // Supersaw bass
+		BassGain: 1.0,
+		Mid:      "gm_pad_sweep",       // Sweeping pad
 		MidGain:  0.7,
-		High:     "gm_lead_1_square",
+		High:     "gm_lead_5_charang",  // Charang lead
 		HighGain: 0.6,
 	},
 	StyleJazz: {
@@ -113,11 +125,11 @@ var soundPalettes = map[SoundStyle]SoundPalette{
 		HighGain: 0.5,
 	},
 	StyleChiptune: {
-		Bass:     "square",   // 8-bit bass
+		Bass:     "z_square",   // ZZFX 8-bit bass
 		BassGain: 0.7,
-		Mid:      "square",   // Classic chiptune
+		Mid:      "z_square",   // ZZFX chiptune
 		MidGain:  0.5,
-		High:     "triangle", // NES-style lead
+		High:     "z_triangle", // ZZFX NES-style lead
 		HighGain: 0.4,
 	},
 	StyleAmbient: {
@@ -217,6 +229,143 @@ var soundPalettes = map[SoundStyle]SoundPalette{
 		MidGain:  0.7,
 		High:     "gm_pad_halo",    // Ethereal
 		HighGain: 0.5,
+	},
+	// Noise-based styles using Strudel's noise oscillators
+	StyleNoise: {
+		Bass:     "brown",    // Soft rumble bass
+		BassGain: 0.6,
+		Mid:      "pink",     // Mid-frequency noise
+		MidGain:  0.4,
+		High:     "white",    // High noise texture
+		HighGain: 0.3,
+	},
+	StyleGlitch: {
+		Bass:     "sawtooth", // Digital bass
+		BassGain: 0.8,
+		Mid:      "square",   // Harsh digital
+		MidGain:  0.5,
+		High:     "crackle",  // Glitchy texture
+		HighGain: 0.4,
+	},
+	// Texture styles for layering
+	StyleTexture: {
+		Bass:     "brown",          // Noise bed
+		BassGain: 0.4,
+		Mid:      "gm_pad_sweep",   // Moving pad
+		MidGain:  0.5,
+		High:     "pink",           // Bright texture
+		HighGain: 0.3,
+	},
+	// ZZFX synth styles (more aggressive/retro)
+	StyleRetro: {
+		Bass:     "z_sawtooth", // ZZFX sawtooth
+		BassGain: 0.8,
+		Mid:      "z_square",   // ZZFX square
+		MidGain:  0.6,
+		High:     "z_sine",     // ZZFX sine
+		HighGain: 0.5,
+	},
+	// House/Techno style
+	StyleHouse: {
+		Bass:     "supersaw",         // Fat supersaw bass
+		BassGain: 1.0,
+		Mid:      "gm_pad_poly",      // Poly stab
+		MidGain:  0.8,
+		High:     "gm_lead_5_charang", // Charang lead
+		HighGain: 0.6,
+	},
+	// Trance style
+	StyleTrance: {
+		Bass:     "supersaw",          // Supersaw bass
+		BassGain: 0.9,
+		Mid:      "gm_pad_sweep",      // Sweeping pad
+		MidGain:  0.7,
+		High:     "gm_lead_2_sawtooth", // Saw lead
+		HighGain: 0.6,
+	},
+	// Reggae/Dub style
+	StyleDub: {
+		Bass:     "gm_synth_bass_2", // Deep dub bass
+		BassGain: 1.4,
+		Mid:      "gm_epiano1",      // Skank keys
+		MidGain:  0.8,
+		High:     "gm_harmonica",    // Melodica/harmonica
+		HighGain: 0.6,
+	},
+	// Funk style
+	StyleFunk: {
+		Bass:     "gm_slap_bass_1",  // Slap bass
+		BassGain: 1.2,
+		Mid:      "gm_clavinet",     // Clavinet
+		MidGain:  1.0,
+		High:     "gm_brass_section", // Brass stabs
+		HighGain: 0.7,
+	},
+	// Soul/R&B style
+	StyleSoul: {
+		Bass:     "gm_electric_bass_finger", // Finger bass
+		BassGain: 1.1,
+		Mid:      "gm_epiano2",              // Wurlitzer
+		MidGain:  1.0,
+		High:     "gm_flute",                // Soft flute
+		HighGain: 0.7,
+	},
+	// Cinematic style
+	StyleCinematic: {
+		Bass:     "gm_contrabass",       // Deep strings
+		BassGain: 1.2,
+		Mid:      "gm_string_ensemble_1", // Full strings
+		MidGain:  1.0,
+		High:     "gm_choir_aahs",        // Choir
+		HighGain: 0.8,
+	},
+}
+
+// AdditionalSounds lists all available sounds from strudel-client
+// These can be used with .sound() in Strudel patterns
+var AdditionalSounds = map[string][]string{
+	// Built-in oscillators
+	"oscillators": {
+		"sine", "triangle", "square", "sawtooth",
+		"supersaw", "pulse",
+	},
+	// Noise generators
+	"noise": {
+		"white", "pink", "brown", "crackle",
+	},
+	// ZZFX synths (retro game sounds)
+	"zzfx": {
+		"z_sine", "z_sawtooth", "z_triangle", "z_square", "z_tan", "z_noise",
+	},
+	// Wavetables
+	"wavetables": {
+		"wt_digital", "wt_digital_bad_day", "wt_digital_basique",
+		"wt_digital_crickets", "wt_digital_curses", "wt_digital_echoes", "wt_vgame",
+	},
+	// Classic drum machines
+	"drum_machines": {
+		"RolandTR808", "RolandTR909", "RolandTR707", "RolandTR606", "RolandTR505",
+		"LinnDrum", "LinnLM1", "AkaiMPC60", "EmuSP12", "OberheimDMX",
+		"KorgKR55", "KorgMinipops", "AlesisHR16", "BossDR110",
+	},
+	// VCSL percussion
+	"vcsl_percussion": {
+		"Timpani", "Cajon", "Conga", "Bongos", "Cowbells", "Claves",
+		"Tambourine", "Shaker", "Agogo Bells", "Frame Drum", "Gong",
+		"Bass Drum", "Snare Drum", "Hi Hat Cymbal", "Clash Cymbals",
+	},
+	// Piano samples
+	"piano": {"piano"}, // Salamander Grand Piano
+	// Exotic/World
+	"world": {
+		"gm_sitar", "gm_banjo", "gm_shamisen", "gm_koto", "gm_kalimba",
+		"gm_bagpipe", "gm_fiddle", "gm_shanai",
+	},
+	// Sound effects
+	"fx": {
+		"gm_fx_rain", "gm_fx_soundtrack", "gm_fx_crystal", "gm_fx_atmosphere",
+		"gm_fx_brightness", "gm_fx_goblins", "gm_fx_echoes", "gm_fx_sci_fi",
+		"gm_seashore", "gm_bird_tweet", "gm_helicopter", "gm_applause",
 	},
 }
 
@@ -938,6 +1087,38 @@ var ValidGMSounds = map[string]bool{
 	"gm_helicopter":        true,
 	"gm_applause":          true,
 	"gm_gunshot":           true,
+	// Built-in Oscillators
+	"sine":      true,
+	"triangle":  true,
+	"square":    true,
+	"sawtooth":  true,
+	"supersaw":  true,
+	"pulse":     true,
+	// Noise Generators
+	"white":   true,
+	"pink":    true,
+	"brown":   true,
+	"crackle": true,
+	// ZZFX Synths (retro game sounds)
+	"z_sine":     true,
+	"z_sawtooth": true,
+	"z_triangle": true,
+	"z_square":   true,
+	"z_tan":      true,
+	"z_noise":    true,
+	// Wavetables
+	"wt_digital":           true,
+	"wt_digital_bad_day":   true,
+	"wt_digital_basique":   true,
+	"wt_digital_crickets":  true,
+	"wt_digital_curses":    true,
+	"wt_digital_echoes":    true,
+	"wt_vgame":             true,
+	// Salamander Piano
+	"piano": true,
+	// VCSL samples (use with .s())
+	"harp":    true,
+	"timpani": true,
 }
 
 // IsValidSound checks if a sound name is valid in Strudel

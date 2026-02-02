@@ -119,6 +119,8 @@ var (
 	quantize   int
 	soundStyle string
 	verbose    bool
+	simplify   bool
+	loopOnly   bool
 
 	// serve flags
 	port int
@@ -157,8 +159,10 @@ func init() {
 	extractCmd.Flags().StringVarP(&outputPath, "output", "o", "", "Output file for Strudel code (default: stdout)")
 	extractCmd.Flags().StringVar(&midiOutput, "midi-out", "", "Save cleaned MIDI to file")
 	extractCmd.Flags().IntVarP(&quantize, "quantize", "q", 16, "Quantization (4, 8, or 16)")
-	extractCmd.Flags().StringVarP(&soundStyle, "style", "s", "piano", "Sound style: piano, synth, orchestral, electronic, jazz, lofi")
+	extractCmd.Flags().StringVarP(&soundStyle, "style", "s", "auto", "Sound style (auto, piano, synth, electronic, jazz, lofi, funk, soul, house, etc.)")
 	extractCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
+	extractCmd.Flags().BoolVar(&simplify, "simplify", true, "Simplify notes (reduce chords, merge close notes)")
+	extractCmd.Flags().BoolVar(&loopOnly, "loop-only", false, "Output only the detected loop pattern")
 
 	// Serve command flags
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to listen on")
@@ -245,6 +249,8 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	cfg.MIDIOutputPath = midiOutput
 	cfg.Quantize = quantize
 	cfg.SoundStyle = soundStyle
+	cfg.Simplify = simplify
+	cfg.LoopOnly = loopOnly
 
 	result, err := orch.Execute(ctx, cfg)
 	if err != nil {
@@ -262,7 +268,19 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		fmt.Println("\n" + result.StrudelCode)
 	}
 
-	fmt.Println("Done! Strudel code generated successfully.")
+	// Show summary
+	fmt.Println("\nSummary:")
+	fmt.Printf("  BPM: %.0f, Key: %s\n", result.BPM, result.Key)
+	fmt.Printf("  Notes: %d retained", result.NotesRetained)
+	if result.NotesRemoved > 0 {
+		fmt.Printf(", %d simplified", result.NotesRemoved)
+	}
+	fmt.Println()
+	if result.LoopDetected {
+		fmt.Printf("  Loop: %d bar(s) detected (%.0f%% confidence)\n", result.LoopBars, result.LoopConfidence*100)
+	}
+
+	fmt.Println("\nDone! Strudel code generated successfully.")
 
 	return nil
 }

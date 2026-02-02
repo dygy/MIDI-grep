@@ -12,6 +12,8 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
 - **AI-Powered Separation**: Demucs isolates piano/instruments from any mix
 - **Accurate Transcription**: Spotify's Basic Pitch for audio-to-MIDI
 - **BPM & Key Detection**: Automatic tempo and musical key analysis
+- **Loop Detection**: Automatically identifies repeating patterns (1, 2, 4, or 8 bar loops) with confidence scoring
+- **Style Auto-Detection**: Automatically detects style based on BPM, key (minor/major), and note density (jazz, soul, funk, electronic, etc.)
 - **Dynamic Strudel Output**: Rich patterns with per-voice effects
   - `.velocity()` patterns with dynamic range expansion for expressive dynamics
   - Style-specific accent patterns (downbeat, backbeat, offbeat)
@@ -25,6 +27,11 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   - Tremolo/amplitude modulation for synth/orchestral movement
   - Filter envelope (.lpenv, .lpattack, .lpdecay) for dynamic sweeps
   - Sidechain/ducking (.duck, .duckattack, .duckdepth) for electronic pumping
+  - Ring modulation (.ring, .ringfreq) for metallic timbres
+  - Chorus (.chorus, .chorusDepth) for warm width (jazz/soul)
+  - Leslie effect (.leslie, .leslieSpeed) for organ-style modulation
+  - Shape/saturation (.shape) for harmonic warmth
+  - Pitch envelope (.pitchenv, .pitchattack) for synth bass punch
   - Pattern transforms: swing for jazz, degradeBy for lofi, iter for electronic/lofi variation
   - `.clip()` for note duration control (staccato/legato/sustained)
   - `.echo()` for rhythmic repeats
@@ -34,11 +41,17 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   - `.echoWith()` for sophisticated pitch-shifted echoes (electronic)
   - `.scale()` for key-aware quantization
   - Section detection with time markers
-- **Sound Style Presets**: 20 styles available
+- **Sound Style Presets**: 20+ styles with auto-detection
   - **GM Soundfont**: `piano`, `synth`, `orchestral`, `electronic`, `jazz`, `lofi`
-  - **Raw Oscillators**: `raw`, `chiptune`, `ambient`, `drone`
+  - **Groove Styles**: `funk`, `soul`, `house`, `trance` (auto-detected by BPM/key)
+  - **Raw Oscillators**: `raw`, `chiptune`, `ambient`, `drone`, plus `supersaw`, ZZFX synths
   - **Sample-based**: `mallets`, `plucked`, `keys`, `pad`, `percussive`
   - **Genre-specific**: `synthwave`, `darkwave`, `minimal`, `industrial`, `newage`
+- **Extended Sound Palette**:
+  - **Supersaw**: Fat detuned sawtooth for bass/leads
+  - **ZZFX Synths**: 8-bit style (`z_sawtooth`, `z_square`, `z_triangle`, `z_tan`, `z_noise`)
+  - **Wavetables**: Digital waveforms (`wt_digital`, `wt_vgame`, `wt_piano`)
+  - **Noise**: Textural elements (`white`, `pink`, `brown`, `crackle`)
 - **Web Interface**: HTMX-powered UI, no JavaScript frameworks
 - **CLI Tool**: Full-featured command-line interface
 
@@ -448,7 +461,8 @@ Paste this into [Strudel](https://strudel.dygy.app/) and press Ctrl+Enter to pla
 3. **Analysis**: librosa detects BPM and musical key
 4. **Transcription**: Basic Pitch converts audio to MIDI
 5. **Cleanup**: Quantization, velocity filtering, noise removal
-6. **Generation**: MIDI notes converted to Strudel mini-notation
+6. **Loop Detection**: Identifies repeating patterns with confidence scoring
+7. **Generation**: MIDI notes converted to Strudel mini-notation
 
 ## Project Structure
 

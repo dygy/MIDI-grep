@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"strings"
 	"time"
 
 	"github.com/arkadiishvartcman/midi-grep/internal/analysis"
@@ -22,6 +23,8 @@ type Config struct {
 	MIDIOutputPath    string
 	Quantize          int
 	SoundStyle        string
+	Simplify          bool // Enable note simplification for cleaner output
+	LoopOnly          bool // Output only the detected loop pattern
 	StemTimeout       time.Duration
 	TranscribeTimeout time.Duration
 }
@@ -30,7 +33,9 @@ type Config struct {
 func DefaultConfig() Config {
 	return Config{
 		Quantize:          16,
-		SoundStyle:        "piano",
+		SoundStyle:        "auto", // Auto-detect style from audio analysis
+		Simplify:          true,   // Enable by default for cleaner output
+		LoopOnly:          false,
 		StemTimeout:       5 * time.Minute,
 		TranscribeTimeout: 3 * time.Minute,
 	}
@@ -45,6 +50,9 @@ type Result struct {
 	KeyConfidence float64
 	NotesRetained int
 	NotesRemoved  int
+	LoopDetected  bool
+	LoopBars      int
+	LoopConfidence float64
 }
 
 // Orchestrator coordinates the full processing pipeline
@@ -117,36 +125,182 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 		return nil, fmt.Errorf("transcription: %w", err)
 	}
 
-	// MIDI Cleanup
-	cleanResult, err := o.cleaner.Clean(ctx, ws.RawMIDI(), ws.NotesJSON(), cfg.Quantize)
+	// MIDI Cleanup with optional simplification
+	cleanOpts := midi.DefaultCleanupOptions()
+	cleanOpts.Quantize = cfg.Quantize
+	cleanOpts.Simplify = cfg.Simplify
+
+	cleanResult, err := o.cleaner.CleanWithOptions(ctx, ws.RawMIDI(), ws.NotesJSON(), cleanOpts)
 	if err != nil {
 		return nil, fmt.Errorf("midi cleanup: %w", err)
 	}
-	o.progress.StageComplete("Cleanup complete: %d notes retained, %d notes removed",
-		cleanResult.Retained, cleanResult.Removed)
+
+	// Report cleanup results
+	if cfg.Simplify {
+		o.progress.StageComplete("Cleanup complete: %d notes (simplified from raw transcription)",
+			cleanResult.Retained)
+	} else {
+		o.progress.StageComplete("Cleanup complete: %d notes retained, %d notes removed",
+			cleanResult.Retained, cleanResult.Removed)
+	}
+
+	// Report loop detection
+	if cleanResult.Loop != nil && cleanResult.Loop.Detected {
+		o.progress.StageComplete("Loop detected: %d bar(s), %.0f%% confidence",
+			cleanResult.Loop.Bars, cleanResult.Loop.Confidence*100)
+	}
 
 	// Stage 5: Strudel generation
 	o.progress.StartStage(progress.StageGenerate)
 
-	// Create generator with sound style
+	// Auto-detect style if set to "auto" or empty
 	style := strudel.SoundStyle(cfg.SoundStyle)
-	generator := strudel.NewGeneratorWithStyle(cfg.Quantize, style)
-
-	// Try to use the detailed JSON output for richer generation
-	strudelCode, err := generator.GenerateFromJSON(ws.NotesJSON(), analysisResult)
-	if err != nil {
-		// Fallback to legacy method
-		o.progress.Warning("Using legacy generator: %v", err)
-		strudelCode = generator.Generate(cleanResult.Notes, analysisResult)
+	if style == strudel.StyleAuto || cfg.SoundStyle == "" {
+		style = detectStyle(analysisResult, cleanResult)
+		o.progress.StageComplete("Auto-detected style: %s", style)
 	}
 
-	return &Result{
+	generator := strudel.NewGeneratorWithStyle(cfg.Quantize, style)
+
+	// Determine which notes to use
+	var notesToUse []midi.Note
+	useLoopNotes := cfg.LoopOnly && cleanResult.Loop != nil && cleanResult.Loop.Detected
+
+	if useLoopNotes {
+		notesToUse = cleanResult.Loop.Notes
+		o.progress.StageComplete("Using loop pattern: %d notes (%d bar(s))",
+			len(notesToUse), cleanResult.Loop.Bars)
+	} else {
+		notesToUse = cleanResult.Notes
+	}
+
+	// Try to use the detailed JSON output for richer generation
+	var strudelCode string
+	if !useLoopNotes {
+		// Can use JSON file which has voice separation
+		var err error
+		strudelCode, err = generator.GenerateFromJSON(ws.NotesJSON(), analysisResult)
+		if err != nil {
+			// Fallback to legacy method
+			o.progress.Warning("Using legacy generator: %v", err)
+			strudelCode = generator.Generate(notesToUse, analysisResult)
+		}
+	} else {
+		// Loop notes - use direct generation
+		strudelCode = generator.Generate(notesToUse, analysisResult)
+	}
+
+	// Build result with loop info if detected
+	notesRetained := cleanResult.Retained
+	if useLoopNotes {
+		notesRetained = len(notesToUse)
+	}
+
+	result := &Result{
 		StrudelCode:   strudelCode,
 		BPM:           analysisResult.BPM,
 		BPMConfidence: analysisResult.BPMConfidence,
 		Key:           analysisResult.Key,
 		KeyConfidence: analysisResult.KeyConfidence,
-		NotesRetained: cleanResult.Retained,
+		NotesRetained: notesRetained,
 		NotesRemoved:  cleanResult.Removed,
-	}, nil
+	}
+
+	if cleanResult.Loop != nil && cleanResult.Loop.Detected {
+		result.LoopDetected = true
+		result.LoopBars = cleanResult.Loop.Bars
+		result.LoopConfidence = cleanResult.Loop.Confidence
+	}
+
+	return result, nil
 }
+
+// detectStyle auto-detects the best sound style based on analysis results
+func detectStyle(analysis *analysis.Result, cleanup *midi.CleanupResult) strudel.SoundStyle {
+	bpm := analysis.BPM
+	key := analysis.Key
+	isMinor := containsMinor(key)
+
+	// Calculate note density (notes per second)
+	var totalNotes int
+	var maxEnd float64
+	if cleanup != nil {
+		totalNotes = cleanup.Retained
+		for _, n := range cleanup.Notes {
+			if end := n.Start + n.Duration; end > maxEnd {
+				maxEnd = end
+			}
+		}
+	}
+	noteDensity := 0.0
+	if maxEnd > 0 {
+		noteDensity = float64(totalNotes) / maxEnd
+	}
+
+	// Style detection based on BPM, key, and density
+	switch {
+	// Fast electronic (>125 BPM)
+	case bpm >= 130:
+		if noteDensity > 4 {
+			return strudel.StyleTrance // Very fast + dense = trance
+		}
+		return strudel.StyleHouse // Fast + moderate = house
+
+	// Medium-fast (110-130 BPM)
+	case bpm >= 110:
+		if isMinor {
+			return strudel.StyleElectronic // Minor + upbeat = electronic
+		}
+		if noteDensity > 3 {
+			return strudel.StyleSynthwave // 80s electronic feel
+		}
+		return strudel.StyleFunk // Funky groove
+
+	// Medium (90-110 BPM)
+	case bpm >= 90:
+		if isMinor && noteDensity < 2 {
+			return strudel.StyleDarkwave // Dark, moderate tempo
+		}
+		if noteDensity > 3 {
+			return strudel.StyleElectronic
+		}
+		return strudel.StyleSynth // General synth
+
+	// Medium-slow (70-90 BPM)
+	case bpm >= 70:
+		if isMinor {
+			if noteDensity < 1 {
+				return strudel.StyleCinematic // Slow, sparse, minor
+			}
+			return strudel.StyleLofi // Chill minor
+		}
+		if noteDensity < 1 {
+			return strudel.StyleSoul // Slow, sparse, major
+		}
+		return strudel.StyleJazz // Medium jazz
+
+	// Slow (50-70 BPM)
+	case bpm >= 50:
+		if noteDensity < 0.5 {
+			return strudel.StyleAmbient // Very slow, very sparse
+		}
+		if isMinor {
+			return strudel.StyleCinematic
+		}
+		return strudel.StyleNewAge
+
+	// Very slow (<50 BPM)
+	default:
+		if noteDensity < 0.3 {
+			return strudel.StyleDrone // Extremely slow and sparse
+		}
+		return strudel.StyleAmbient
+	}
+}
+
+// containsMinor checks if the key signature contains "minor" or "m"
+func containsMinor(key string) bool {
+	key = strings.ToLower(key)
+	return strings.Contains(key, "minor") || strings.HasSuffix(key, "m")
+}
+
