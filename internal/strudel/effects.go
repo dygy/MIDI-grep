@@ -358,12 +358,14 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		ReverbAmount:     1.0,
 		LFOShape:         LFOPerlin, // Organic movement
 		UseEnvelope:      false,
-		UseStyleFX:       false,
-		SwingAmount:      0.1, // Subtle swing
+		UseStyleFX:       true, // Enable vibrato
+		SwingAmount:      0.1,  // Subtle swing
 		LegatoAmount:     1.0,
 		UseEcho:          false,
 		UseSuperimpose:   false,
-		UseOff:           false,
+		UseOff:           true,       // Harmonic layering for rich chords
+		SometimesFX:      "add(7)",   // Sometimes add a fifth
+		RarelyFX:         "room(0.6)", // Rarely more reverb
 	},
 	StyleLofi: {
 		ModulationAmount: 0.5,

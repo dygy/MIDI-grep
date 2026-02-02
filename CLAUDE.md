@@ -162,7 +162,7 @@ Each style has unique effect settings:
 - **synth**: Phaser, vibrato, saw LFO, ADSR, FM synthesis, echo, superimpose, off, tremolo, filter envelope, jux (high voice)
 - **orchestral**: Long attack envelope, vibrato, more reverb, clip=1.5 (sustained), tremolo
 - **electronic**: Phaser, distort, saw LFO, ADSR, FM synthesis, echo, superimpose, off, tremolo, filter envelope, sidechain ducking, iter, ply (bass), clip=0.8 (punchy)
-- **jazz**: Perlin LFO (organic), vibrato, swing
+- **jazz**: Perlin LFO (organic), vibrato, swing, off (harmonic), sometimes/rarely
 - **lofi**: Bitcrush, coarse, perlin LFO, degradeBy, swing, echo, superimpose, iter, sometimes/rarely, clip=1.1
 
 ### Adding CLI flags

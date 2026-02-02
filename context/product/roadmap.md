@@ -308,3 +308,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.10 | 2026-02-01 | Jux pattern transform for synth stereo width |
 | 1.11 | 2026-02-01 | Ply pattern transform for electronic bass density |
 | 1.12 | 2026-02-01 | Sometimes/rarely modifiers for lofi variations |
+| 1.13 | 2026-02-01 | Enhanced jazz style with off, sometimes/rarely |
