@@ -322,15 +322,16 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		DelayEnabled:     false,
 		ReverbAmount:     1.3, // More reverb
 		LFOShape:         LFOSine,
-		UseEnvelope:      true, // Long attacks for strings
-		UseStyleFX:       false,
+		UseEnvelope:      true,      // Long attacks for strings
+		UseStyleFX:       true,      // Enable vibrato
 		SwingAmount:      0,
-		LegatoAmount:     1.5,    // Long sustained notes
+		LegatoAmount:     1.5,       // Long sustained notes
 		UseEcho:          false,
-		UseSuperimpose:   false,
-		UseOff:           false,
-		UseTremolo:       true,   // Subtle tremolo for strings effect
+		UseSuperimpose:   true,      // Slight detune for string section width
+		UseOff:           true,      // Octave doubling for fullness
+		UseTremolo:       true,      // Subtle tremolo for strings effect
 		UseFilterEnv:     false,
+		SometimesFX:      "add(12)", // Sometimes double an octave up
 	},
 	StyleElectronic: {
 		ModulationAmount: 1.0, // Full modulation

@@ -160,7 +160,7 @@ The Strudel generator is split across three files:
 Each style has unique effect settings:
 - **piano**: Minimal effects, natural envelope, clip=1.0
 - **synth**: Phaser, vibrato, saw LFO, ADSR, FM synthesis, echo, superimpose, off, tremolo, filter envelope, jux (high voice)
-- **orchestral**: Long attack envelope, vibrato, more reverb, clip=1.5 (sustained), tremolo
+- **orchestral**: Long attack envelope, vibrato, more reverb, clip=1.5 (sustained), tremolo, superimpose, off, sometimes
 - **electronic**: Phaser, distort, saw LFO, ADSR, FM synthesis, echo, superimpose, off, tremolo, filter envelope, sidechain ducking, iter, ply (bass), clip=0.8 (punchy)
 - **jazz**: Perlin LFO (organic), vibrato, swing, off (harmonic), sometimes/rarely
 - **lofi**: Bitcrush, coarse, perlin LFO, degradeBy, swing, echo, superimpose, iter, sometimes/rarely, clip=1.1
