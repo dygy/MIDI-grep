@@ -34,7 +34,7 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   - `.echoWith()` for sophisticated pitch-shifted echoes (electronic)
   - `.scale()` for key-aware quantization
   - Section detection with time markers
-- **Sound Style Presets**: `--style piano|synth|orchestral|electronic|jazz|lofi`
+- **Sound Style Presets**: `--style piano|synth|orchestral|electronic|jazz|lofi|raw|chiptune|ambient|drone`
 - **Web Interface**: HTMX-powered UI, no JavaScript frameworks
 - **CLI Tool**: Full-featured command-line interface
 
@@ -303,6 +303,135 @@ $: stack(
     .superimpose(add(0.03))
     .off(0.125, add(12)),
   // ...
+)
+```
+
+### Raw Style (pure oscillators with FM and filter envelope)
+```javascript
+// Style: raw - using Strudel's built-in oscillators
+$: stack(
+  note("c2 ~ g2 ~ | c2 e2 ~ g2")
+    .sound("sawtooth")
+    .velocity("0.80 ~ 0.75 ~")
+    .gain(0.80)
+    .pan(0.5)
+    .hpf(50)
+    .lpf(800)
+    .lpattack(0.010)
+    .lpdecay(0.20)
+    .lpsustain(0.50)
+    .lprelease(0.15)
+    .lpenv(3000)
+    .attack(0.003)
+    .decay(0.05)
+    .sustain(0.70)
+    .release(0.10)
+    .phaser(0.60)
+    .phaserdepth(0.40)
+    .fm(2.0)
+    .fmh(1.5)
+    .room(0.10)
+    .size(0.15)
+    .superimpose(add(0.03))
+    .off(0.125, add(12)),
+
+  note("c4 e4 g4 b4")
+    .sound("square")
+    .velocity("0.65 0.70 0.75 0.68")
+    .gain(0.60)
+    .pan(saw.range(0.40,0.60).slow(4))
+    .lpf(4000)
+    .attack(0.005)
+    .decay(0.10)
+    .sustain(0.70)
+    .release(0.20)
+    .room(0.25)
+    .size(0.35),
+
+  note("c5 ~ e5 g5")
+    .sound("triangle")
+    .velocity("0.55 ~ 0.60 0.58")
+    .gain(0.50)
+    .pan(saw.range(0.30,0.70).slow(3))
+    .lpf(8000)
+    .room(0.30)
+    .size(0.40)
+    .delay(0.20)
+    .delaytime(0.375)
+    .delayfeedback(0.35)
+)
+```
+
+### Chiptune Style (8-bit retro with crush and coarse)
+```javascript
+// Style: chiptune - 8-bit video game aesthetic
+$: stack(
+  note("c3 c3 g2 g2 | a2 a2 e2 e2")
+    .sound("square")
+    .velocity("0.70 0.65 0.70 0.65")
+    .gain(0.70)
+    .pan(0.5)
+    .attack(0.001)
+    .decay(0.05)
+    .sustain(0.60)
+    .release(0.10)
+    .clip(0.70)
+    .crush(8)
+    .coarse(8)
+    .room(0.09)
+    .size(0.14)
+    .iter(2),
+
+  note("e4 g4 c5 g4 | a4 c5 e5 c5")
+    .sound("square")
+    .velocity("0.50 0.55 0.60 0.55")
+    .gain(0.50)
+    .crush(8)
+    .coarse(8)
+    .room(0.15)
+    .size(0.21)
+    .echo(3, 0.125, 0.50)
+)
+```
+
+### Ambient Style (sine waves with heavy reverb)
+```javascript
+// Style: ambient - atmospheric pads
+$: stack(
+  note("c2 ~ ~ ~ | e2 ~ ~ ~")
+    .sound("sine")
+    .velocity("0.60 ~ ~ ~")
+    .gain(1.00)
+    .pan(0.5)
+    .attack(0.50)
+    .decay(1.00)
+    .sustain(0.80)
+    .release(2.00)
+    .vib(2.0)
+    .vibmod(0.05)
+    .clip(2.00)
+    .tremolo(16.0)
+    .tremolodepth(0.25)
+    .room(0.60)
+    .size(0.78)
+    .superimpose(add(0.03))
+    .off(0.125, add(12)),
+
+  note("[c4,e4,g4] ~ ~ [d4,f4,a4]")
+    .sound("triangle")
+    .velocity("0.45 ~ ~ 0.50")
+    .gain(0.70)
+    .pan(sine.range(0.30,0.70).slow(8))
+    .attack(0.50)
+    .decay(1.00)
+    .sustain(0.80)
+    .release(2.00)
+    .clip(2.00)
+    .room(0.65)
+    .size(0.84)
+    .delay(0.30)
+    .delaytime(0.500)
+    .delayfeedback(0.45)
 )
 ```
 

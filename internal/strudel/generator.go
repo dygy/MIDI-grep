@@ -23,6 +23,11 @@ const (
 	StyleJazz       SoundStyle = "jazz"
 	StyleLofi       SoundStyle = "lofi"
 	StyleAuto       SoundStyle = "auto"
+	// Raw synthesizer styles using basic waveforms
+	StyleRaw      SoundStyle = "raw"      // Pure waveforms (sawtooth, square, triangle)
+	StyleChiptune SoundStyle = "chiptune" // 8-bit style with square/triangle waves
+	StyleAmbient  SoundStyle = "ambient"  // Sine waves with heavy reverb/delay
+	StyleDrone    SoundStyle = "drone"    // Sustained tones with slow modulation
 )
 
 // SoundPalette defines sounds for each voice (bass, mid, high)
@@ -85,6 +90,39 @@ var soundPalettes = map[SoundStyle]SoundPalette{
 		MidGain:  0.9,
 		High:     "gm_music_box",
 		HighGain: 0.7,
+	},
+	// Raw synthesizer styles using Strudel's built-in oscillators
+	StyleRaw: {
+		Bass:     "sawtooth", // Raw sawtooth oscillator
+		BassGain: 0.8,
+		Mid:      "square", // Raw square wave
+		MidGain:  0.6,
+		High:     "triangle", // Softer triangle wave
+		HighGain: 0.5,
+	},
+	StyleChiptune: {
+		Bass:     "square",   // 8-bit bass
+		BassGain: 0.7,
+		Mid:      "square",   // Classic chiptune
+		MidGain:  0.5,
+		High:     "triangle", // NES-style lead
+		HighGain: 0.4,
+	},
+	StyleAmbient: {
+		Bass:     "sine",    // Pure sine bass
+		BassGain: 1.0,
+		Mid:      "triangle", // Soft mid tones
+		MidGain:  0.7,
+		High:     "sine",    // Pure sine highs
+		HighGain: 0.6,
+	},
+	StyleDrone: {
+		Bass:     "sawtooth", // Rich drone bass
+		BassGain: 0.6,
+		Mid:      "sine",     // Clean mid drone
+		MidGain:  0.5,
+		High:     "triangle", // Soft high harmonics
+		HighGain: 0.4,
 	},
 }
 

@@ -444,6 +444,88 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		AccentAmount:     0.08,      // Very subtle
 		DynamicRange:     1.1,       // Slightly compressed lofi feel
 	},
+	// Raw synthesizer styles using basic waveforms
+	StyleRaw: {
+		ModulationAmount: 0.8,
+		FilterDynamic:    true,
+		DelayEnabled:     true,
+		ReverbAmount:     0.5,        // Less reverb to hear raw tone
+		LFOShape:         LFOSaw,     // Rhythmic filter sweeps
+		UseEnvelope:      true,       // ADSR essential for raw oscillators
+		UseStyleFX:       true,       // Enable phaser, etc.
+		SwingAmount:      0,
+		LegatoAmount:     0.9,        // Slightly punchy
+		UseEcho:          true,
+		UseSuperimpose:   true,       // Detune for thickness
+		UseOff:           true,       // Octave layering
+		UseTremolo:       false,
+		UseFilterEnv:     true,       // Filter envelope for movement
+		AccentPattern:    "downbeat",
+		AccentAmount:     0.15,
+		DynamicRange:     1.2,
+	},
+	StyleChiptune: {
+		ModulationAmount: 0.3,        // Subtle modulation
+		FilterDynamic:    false,
+		DelayEnabled:     true,
+		ReverbAmount:     0.3,        // Minimal reverb for clarity
+		LFOShape:         LFOSquare,  // Square LFO for chiptune feel
+		UseEnvelope:      true,       // Quick attack/decay
+		UseStyleFX:       true,       // Enable crush for 8-bit feel
+		SwingAmount:      0,
+		LegatoAmount:     0.7,        // Short, punchy notes
+		UseEcho:          true,       // Arpeggio-style echo
+		UseSuperimpose:   false,
+		UseOff:           false,
+		UseTremolo:       false,
+		UseFilterEnv:     false,
+		IterAmount:       2,          // Pattern cycling for variation
+		AccentPattern:    "all-fours",
+		AccentAmount:     0.1,
+		DynamicRange:     0.9,        // Tight dynamics like 8-bit
+	},
+	StyleAmbient: {
+		ModulationAmount: 0.6,
+		FilterDynamic:    false,
+		DelayEnabled:     true,
+		ReverbAmount:     1.5,        // Heavy reverb for space
+		LFOShape:         LFOSine,    // Smooth modulation
+		UseEnvelope:      true,       // Long attack/release
+		UseStyleFX:       true,       // Subtle vibrato
+		SwingAmount:      0,
+		LegatoAmount:     2.0,        // Long sustained notes
+		UseEcho:          true,       // Long echo trails
+		UseSuperimpose:   true,       // Layered harmonics
+		UseOff:           true,       // Fifth/octave layering
+		UseTremolo:       true,       // Slow amplitude modulation
+		UseFilterEnv:     false,
+		SometimesFX:      "room(0.8)", // Sometimes more reverb
+		RarelyFX:         "delay(0.5)", // Rarely extra delay
+		AccentPattern:    "",         // No accents for smooth feel
+		AccentAmount:     0,
+		DynamicRange:     1.3,        // Wide dynamics for expression
+	},
+	StyleDrone: {
+		ModulationAmount: 0.4,
+		FilterDynamic:    true,
+		DelayEnabled:     true,
+		ReverbAmount:     1.3,        // Lots of reverb
+		LFOShape:         LFOPerlin,  // Organic slow movement
+		UseEnvelope:      true,       // Very long attack/release
+		UseStyleFX:       true,       // Subtle vibrato
+		SwingAmount:      0,
+		LegatoAmount:     3.0,        // Very long sustained notes
+		UseEcho:          true,
+		UseSuperimpose:   true,       // Thick layered sound
+		UseOff:           true,       // Harmonic layering
+		UseTremolo:       true,       // Slow tremolo
+		UseFilterEnv:     true,       // Slow filter sweeps
+		SometimesFX:      "lpf(500)", // Sometimes darker
+		RarelyFX:         "hpf(200)", // Rarely thinner
+		AccentPattern:    "",
+		AccentAmount:     0,
+		DynamicRange:     1.0,        // Steady dynamics
+	},
 }
 
 // Style-specific FX presets
@@ -479,6 +561,29 @@ var styleFXPresets = map[SoundStyle]StyleFXSettings{
 	StyleLofi: {
 		Crush:  10, // Subtle bit reduction
 		Coarse: 4,  // Sample rate reduction
+	},
+	// Raw synthesizer styles
+	StyleRaw: {
+		Phaser:       0.6,
+		PhaserDepth:  0.4,
+		FM:           2.0,  // FM for harmonic richness
+		FMH:          1.5,
+		FMDecay:      0.4,
+		FMSustain:    0.6,
+	},
+	StyleChiptune: {
+		Crush:  8,    // 8-bit reduction
+		Coarse: 8,    // Lower sample rate for retro feel
+	},
+	StyleAmbient: {
+		Vibrato:      2,    // Slow subtle vibrato
+		VibratoDepth: 0.05,
+	},
+	StyleDrone: {
+		Vibrato:      1,    // Very slow vibrato
+		VibratoDepth: 0.08,
+		Phaser:       0.2,  // Slow phaser
+		PhaserDepth:  0.3,
 	},
 }
 
@@ -678,6 +783,18 @@ func getTremoloForStyle(style SoundStyle) TremoloSettings {
 			Depth: 0.15,   // Very subtle
 			Shape: "sine", // Smooth like strings
 		}
+	case StyleAmbient:
+		return TremoloSettings{
+			Sync:  16,     // Very slow
+			Depth: 0.25,   // Gentle pulsing
+			Shape: "sine", // Smooth
+		}
+	case StyleDrone:
+		return TremoloSettings{
+			Sync:  32,     // Extremely slow
+			Depth: 0.2,    // Subtle movement
+			Shape: "sine", // Smooth
+		}
 	default:
 		return TremoloSettings{}
 	}
@@ -719,6 +836,41 @@ func getFilterEnvForStyle(style SoundStyle, voice string) FilterEnvSettings {
 			Sustain: 0.4,
 			Release: 0.2,
 			Amount:  4000, // Wide sweep
+		}
+	case StyleRaw:
+		if voice == "bass" {
+			return FilterEnvSettings{
+				Attack:  0.01,
+				Decay:   0.2,
+				Sustain: 0.5,
+				Release: 0.15,
+				Amount:  3000, // Wide sweep for raw bass
+			}
+		}
+		return FilterEnvSettings{
+			Attack:  0.02,
+			Decay:   0.3,
+			Sustain: 0.6,
+			Release: 0.25,
+			Amount:  4000, // Bright sweep
+		}
+	case StyleDrone:
+		// Very slow filter movements for drones
+		if voice == "bass" {
+			return FilterEnvSettings{
+				Attack:  1.0,
+				Decay:   3.0,
+				Sustain: 0.6,
+				Release: 2.0,
+				Amount:  1500, // Subtle bass sweep
+			}
+		}
+		return FilterEnvSettings{
+			Attack:  2.0,
+			Decay:   4.0,
+			Sustain: 0.7,
+			Release: 3.0,
+			Amount:  2000, // Slow wide sweep
 		}
 	default:
 		return FilterEnvSettings{}
@@ -824,6 +976,30 @@ func adjustEnvelopeForVoice(env EnvelopeSettings, voice string, style SoundStyle
 		// Punchy attacks
 		env.Attack *= 0.5
 		env.Decay *= 0.8
+	case StyleRaw:
+		// Clean punchy envelopes for raw oscillators
+		env.Attack = 0.005
+		env.Decay = 0.1
+		env.Sustain = 0.7
+		env.Release = 0.2
+	case StyleChiptune:
+		// Very short, punchy 8-bit style
+		env.Attack = 0.001
+		env.Decay = 0.05
+		env.Sustain = 0.6
+		env.Release = 0.1
+	case StyleAmbient:
+		// Long, slow envelopes for pads
+		env.Attack = 0.5
+		env.Decay = 1.0
+		env.Sustain = 0.8
+		env.Release = 2.0
+	case StyleDrone:
+		// Very long, sustained envelopes
+		env.Attack = 1.0
+		env.Decay = 2.0
+		env.Sustain = 0.9
+		env.Release = 3.0
 	}
 
 	// Voice-specific adjustments

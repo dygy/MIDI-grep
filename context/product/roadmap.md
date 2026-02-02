@@ -315,3 +315,5 @@ _Ideas for future consideration, not yet prioritized._
 | 1.14 | 2026-02-01 | Enhanced orchestral style with superimpose, off, sometimes |
 | 1.15 | 2026-02-01 | Enhanced dynamics: accent patterns, range expansion, compressor |
 | 1.16 | 2026-02-02 | Added layer(), echoWith(), cosine LFO from Strudel utilities |
+| 1.17 | 2026-02-02 | Prettified code output: each method on its own line |
+| 1.18 | 2026-02-02 | Raw synthesizer styles: raw, chiptune, ambient, drone using Strudel oscillators (sawtooth, square, triangle, sine) |
