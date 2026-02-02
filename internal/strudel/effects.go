@@ -623,6 +623,108 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		AccentAmount:     0.2,        // Strong accents
 		DynamicRange:     1.6,        // Very wide dynamics
 	},
+	// Genre-specific styles
+	StyleSynthwave: {
+		ModulationAmount: 0.8,
+		FilterDynamic:    true,
+		DelayEnabled:     true,
+		ReverbAmount:     0.9,        // Gated reverb feel
+		LFOShape:         LFOSaw,     // Rhythmic sweeps
+		UseEnvelope:      true,       // Punchy envelopes
+		UseStyleFX:       true,       // Chorus, phaser
+		SwingAmount:      0,
+		LegatoAmount:     0.9,
+		UseEcho:          true,       // 80s delay
+		UseSuperimpose:   true,       // Thick layering
+		UseOff:           true,       // Octave stacking
+		UseTremolo:       false,
+		UseFilterEnv:     true,       // Classic filter sweeps
+		UseDuck:          true,       // Sidechain pumping
+		AccentPattern:    "downbeat",
+		AccentAmount:     0.15,
+		DynamicRange:     1.2,
+		UseCompressor:    true,       // Punchy compression
+	},
+	StyleDarkwave: {
+		ModulationAmount: 0.6,
+		FilterDynamic:    true,
+		DelayEnabled:     true,
+		ReverbAmount:     1.4,        // Dark, deep reverb
+		LFOShape:         LFOPerlin,  // Organic movement
+		UseEnvelope:      true,
+		UseStyleFX:       true,       // Phaser, distortion
+		SwingAmount:      0,
+		LegatoAmount:     1.2,        // Sustained, moody
+		UseEcho:          true,
+		UseSuperimpose:   true,
+		UseOff:           true,
+		UseTremolo:       true,       // Slow tremolo
+		UseFilterEnv:     true,
+		SometimesFX:      "lpf(600)", // Sometimes darker
+		RarelyFX:         "distort(0.2)",
+		AccentPattern:    "",
+		AccentAmount:     0,
+		DynamicRange:     1.1,
+	},
+	StyleMinimal: {
+		ModulationAmount: 0.2,        // Very subtle
+		FilterDynamic:    false,
+		DelayEnabled:     true,
+		ReverbAmount:     0.6,        // Clean, sparse reverb
+		LFOShape:         LFOSine,    // Simple
+		UseEnvelope:      true,
+		UseStyleFX:       false,      // No extra effects
+		SwingAmount:      0,
+		LegatoAmount:     0.8,
+		UseEcho:          false,
+		UseSuperimpose:   false,
+		UseOff:           false,
+		UseTremolo:       false,
+		UseFilterEnv:     false,
+		AccentPattern:    "all-fours",
+		AccentAmount:     0.08,
+		DynamicRange:     0.9,        // Tight dynamics
+	},
+	StyleIndustrial: {
+		ModulationAmount: 1.0,        // Full modulation
+		FilterDynamic:    true,
+		DelayEnabled:     true,
+		ReverbAmount:     0.5,        // Tight, metallic
+		LFOShape:         LFOSquare,  // Harsh stepping
+		UseEnvelope:      true,       // Punchy
+		UseStyleFX:       true,       // Heavy distortion
+		SwingAmount:      0,
+		LegatoAmount:     0.6,        // Short, aggressive
+		UseEcho:          true,
+		UseSuperimpose:   false,
+		UseOff:           false,
+		UseTremolo:       false,
+		UseFilterEnv:     true,       // Aggressive sweeps
+		UseCompressor:    true,       // Crushed dynamics
+		AccentPattern:    "all-fours",
+		AccentAmount:     0.2,
+		DynamicRange:     0.7,        // Compressed
+	},
+	StyleNewAge: {
+		ModulationAmount: 0.3,
+		FilterDynamic:    false,
+		DelayEnabled:     true,
+		ReverbAmount:     1.6,        // Huge reverb
+		LFOShape:         LFOSine,    // Smooth
+		UseEnvelope:      true,       // Long, soft envelopes
+		UseStyleFX:       true,       // Subtle vibrato
+		SwingAmount:      0,
+		LegatoAmount:     2.5,        // Very sustained
+		UseEcho:          true,       // Long echo trails
+		UseSuperimpose:   true,       // Layered
+		UseOff:           true,       // Harmonic richness
+		UseTremolo:       true,       // Slow breathing
+		UseFilterEnv:     false,
+		SometimesFX:      "room(0.8)",
+		AccentPattern:    "",
+		AccentAmount:     0,
+		DynamicRange:     1.2,
+	},
 }
 
 // Style-specific FX presets
@@ -694,6 +796,34 @@ var styleFXPresets = map[SoundStyle]StyleFXSettings{
 		VibratoDepth: 0.05,
 	},
 	StylePercussive: {},    // Pure percussion
+	// Genre-specific styles
+	StyleSynthwave: {
+		Phaser:       0.6,
+		PhaserDepth:  0.4,
+		Vibrato:      5,
+		VibratoDepth: 0.12,
+		FM:           1.8,
+		FMH:          2,
+		FMDecay:      0.3,
+		FMSustain:    0.5,
+	},
+	StyleDarkwave: {
+		Phaser:       0.4,
+		PhaserDepth:  0.5,
+		Distort:      0.15,
+		Vibrato:      3,
+		VibratoDepth: 0.1,
+	},
+	StyleMinimal: {},       // Clean, no effects
+	StyleIndustrial: {
+		Distort:     0.3,   // Heavy distortion
+		Crush:       6,     // Bit crushing
+		Coarse:      4,     // Sample reduction
+	},
+	StyleNewAge: {
+		Vibrato:      2,
+		VibratoDepth: 0.05,
+	},
 }
 
 // GetVoiceEffects returns effect settings for a voice, adjusted for style
@@ -916,6 +1046,18 @@ func getTremoloForStyle(style SoundStyle) TremoloSettings {
 			Depth: 0.15,   // Subtle
 			Shape: "sine", // Smooth
 		}
+	case StyleDarkwave:
+		return TremoloSettings{
+			Sync:  8,      // Moody
+			Depth: 0.25,   // Noticeable
+			Shape: "sine", // Smooth
+		}
+	case StyleNewAge:
+		return TremoloSettings{
+			Sync:  16,     // Very slow
+			Depth: 0.2,    // Gentle breathing
+			Shape: "sine", // Smooth
+		}
 	default:
 		return TremoloSettings{}
 	}
@@ -992,6 +1134,60 @@ func getFilterEnvForStyle(style SoundStyle, voice string) FilterEnvSettings {
 			Sustain: 0.7,
 			Release: 3.0,
 			Amount:  2000, // Slow wide sweep
+		}
+	case StyleSynthwave:
+		// Classic 80s filter sweep
+		if voice == "bass" {
+			return FilterEnvSettings{
+				Attack:  0.01,
+				Decay:   0.25,
+				Sustain: 0.4,
+				Release: 0.2,
+				Amount:  3000, // Big bass sweep
+			}
+		}
+		return FilterEnvSettings{
+			Attack:  0.02,
+			Decay:   0.3,
+			Sustain: 0.5,
+			Release: 0.25,
+			Amount:  4000, // Bright sweep
+		}
+	case StyleDarkwave:
+		// Dark, slow filter movement
+		if voice == "bass" {
+			return FilterEnvSettings{
+				Attack:  0.1,
+				Decay:   0.6,
+				Sustain: 0.3,
+				Release: 0.5,
+				Amount:  1500, // Subtle dark sweep
+			}
+		}
+		return FilterEnvSettings{
+			Attack:  0.2,
+			Decay:   0.8,
+			Sustain: 0.4,
+			Release: 0.6,
+			Amount:  2000,
+		}
+	case StyleIndustrial:
+		// Aggressive, harsh filter
+		if voice == "bass" {
+			return FilterEnvSettings{
+				Attack:  0.001,
+				Decay:   0.1,
+				Sustain: 0.2,
+				Release: 0.05,
+				Amount:  4000, // Aggressive sweep
+			}
+		}
+		return FilterEnvSettings{
+			Attack:  0.005,
+			Decay:   0.15,
+			Sustain: 0.3,
+			Release: 0.1,
+			Amount:  5000, // Very aggressive
 		}
 	default:
 		return FilterEnvSettings{}
@@ -1127,6 +1323,36 @@ func adjustEnvelopeForVoice(env EnvelopeSettings, voice string, style SoundStyle
 		env.Decay = 0.8
 		env.Sustain = 0.85
 		env.Release = 1.5
+	case StyleSynthwave:
+		// Punchy 80s envelopes
+		env.Attack = 0.01
+		env.Decay = 0.15
+		env.Sustain = 0.7
+		env.Release = 0.3
+	case StyleDarkwave:
+		// Moody, sustained
+		env.Attack = 0.1
+		env.Decay = 0.5
+		env.Sustain = 0.75
+		env.Release = 0.8
+	case StyleMinimal:
+		// Clean, simple
+		env.Attack = 0.01
+		env.Decay = 0.1
+		env.Sustain = 0.6
+		env.Release = 0.2
+	case StyleIndustrial:
+		// Aggressive, punchy
+		env.Attack = 0.001
+		env.Decay = 0.05
+		env.Sustain = 0.5
+		env.Release = 0.1
+	case StyleNewAge:
+		// Very soft, long
+		env.Attack = 0.8
+		env.Decay = 1.5
+		env.Sustain = 0.9
+		env.Release = 2.5
 	}
 
 	// Voice-specific adjustments

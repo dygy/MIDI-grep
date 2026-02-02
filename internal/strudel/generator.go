@@ -29,11 +29,17 @@ const (
 	StyleAmbient  SoundStyle = "ambient"  // Sine waves with heavy reverb/delay
 	StyleDrone    SoundStyle = "drone"    // Sustained tones with slow modulation
 	// Sample-based styles using Strudel sample libraries
-	StyleMallets   SoundStyle = "mallets"   // Vibraphone, marimba, xylophone samples
-	StylePlucked   SoundStyle = "plucked"   // Harp, kalimba, music box samples
-	StyleKeys      SoundStyle = "keys"      // Salamander piano, rhodes, wurlitzer
-	StylePad       SoundStyle = "pad"       // Soft pad sounds with long tails
+	StyleMallets    SoundStyle = "mallets"    // Vibraphone, marimba, xylophone samples
+	StylePlucked    SoundStyle = "plucked"    // Harp, kalimba, music box samples
+	StyleKeys       SoundStyle = "keys"       // Salamander piano, rhodes, wurlitzer
+	StylePad        SoundStyle = "pad"        // Soft pad sounds with long tails
 	StylePercussive SoundStyle = "percussive" // Timpani, mallet percussion
+	// Genre-specific styles
+	StyleSynthwave SoundStyle = "synthwave" // 80s retro synth aesthetic
+	StyleDarkwave  SoundStyle = "darkwave"  // Dark, atmospheric synths
+	StyleMinimal   SoundStyle = "minimal"   // Clean, sparse electronic
+	StyleIndustrial SoundStyle = "industrial" // Harsh, distorted sounds
+	StyleNewAge    SoundStyle = "newage"    // Soft, ethereal, meditative
 )
 
 // SoundPalette defines sounds for each voice (bass, mid, high)
@@ -170,6 +176,47 @@ var soundPalettes = map[SoundStyle]SoundPalette{
 		MidGain:  1.0,
 		High:     "gm_tubular_bells", // Tubular bells
 		HighGain: 0.8,
+	},
+	// Genre-specific styles
+	StyleSynthwave: {
+		Bass:     "sawtooth",           // Fat analog bass
+		BassGain: 0.9,
+		Mid:      "gm_pad_poly",        // Poly synth pad
+		MidGain:  0.7,
+		High:     "gm_lead_2_sawtooth", // Bright lead
+		HighGain: 0.6,
+	},
+	StyleDarkwave: {
+		Bass:     "sawtooth",        // Dark bass
+		BassGain: 0.8,
+		Mid:      "gm_pad_metallic", // Metallic pad
+		MidGain:  0.6,
+		High:     "triangle",        // Softer high
+		HighGain: 0.4,
+	},
+	StyleMinimal: {
+		Bass:     "sine",    // Pure sine bass
+		BassGain: 0.9,
+		Mid:      "triangle", // Clean mid
+		MidGain:  0.5,
+		High:     "sine",    // Pure high
+		HighGain: 0.4,
+	},
+	StyleIndustrial: {
+		Bass:     "sawtooth",       // Aggressive bass
+		BassGain: 1.0,
+		Mid:      "square",         // Harsh mid
+		MidGain:  0.7,
+		High:     "sawtooth",       // Harsh high
+		HighGain: 0.5,
+	},
+	StyleNewAge: {
+		Bass:     "sine",           // Pure bass
+		BassGain: 0.8,
+		Mid:      "gm_pad_warm",    // Warm pad
+		MidGain:  0.7,
+		High:     "gm_pad_halo",    // Ethereal
+		HighGain: 0.5,
 	},
 }
 

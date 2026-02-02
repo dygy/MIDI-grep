@@ -34,10 +34,11 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   - `.echoWith()` for sophisticated pitch-shifted echoes (electronic)
   - `.scale()` for key-aware quantization
   - Section detection with time markers
-- **Sound Style Presets**: 15 styles available
+- **Sound Style Presets**: 20 styles available
   - **GM Soundfont**: `piano`, `synth`, `orchestral`, `electronic`, `jazz`, `lofi`
   - **Raw Oscillators**: `raw`, `chiptune`, `ambient`, `drone`
   - **Sample-based**: `mallets`, `plucked`, `keys`, `pad`, `percussive`
+  - **Genre-specific**: `synthwave`, `darkwave`, `minimal`, `industrial`, `newage`
 - **Web Interface**: HTMX-powered UI, no JavaScript frameworks
 - **CLI Tool**: Full-featured command-line interface
 
