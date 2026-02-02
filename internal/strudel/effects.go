@@ -160,6 +160,7 @@ type StyleEffects struct {
 	UseDuck          bool     // Whether to use ducking/sidechain effect
 	IterAmount       int      // Iter subdivisions (0 = off)
 	UseJux           bool     // Whether to use jux(rev) for stereo width
+	PlyAmount        int      // Ply repetitions (0 = off)
 }
 
 // Voice effect presets by voice type
@@ -344,6 +345,7 @@ var styleEffectMods = map[SoundStyle]StyleEffects{
 		UseFilterEnv:     true,     // Dynamic filter sweeps
 		UseDuck:          true,     // Sidechain pumping effect
 		IterAmount:       4,        // Cycle through 4 subdivisions
+		PlyAmount:        2,        // Double each bass note for drive
 	},
 	StyleJazz: {
 		ModulationAmount: 0.4,
@@ -478,6 +480,11 @@ func GetVoiceEffects(voice string, style SoundStyle) VoiceEffects {
 	// Apply jux for styles that use it (only on high voice to avoid muddiness)
 	if styleMod.UseJux && voice == "high" {
 		effects.PatternFX.Jux = true
+	}
+
+	// Apply ply for styles that use it (only on bass for rhythmic drive)
+	if styleMod.PlyAmount > 0 && voice == "bass" {
+		effects.PatternFX.Ply = styleMod.PlyAmount
 	}
 
 	// Apply legato amount based on style
