@@ -16,15 +16,17 @@ import os
 # Audio settings
 SAMPLE_RATE = 44100
 
-# Default mix levels - these can be overridden by analysis feedback
+# Default mix levels - tuned to match original frequency distribution
+# Voice naming is confusing: "mid" voice has low-mid notes, "high" voice has mid notes
+# Original: 7% bass, 20% low-mid, 48% mid, 13% high-mid, 5% high
 DEFAULT_MIX = {
-    'kick_gain': 0.35,      # Reduced from 0.5
-    'snare_gain': 0.4,
-    'hh_gain': 0.55,        # Increased from 0.3 (was missing highs)
-    'bass_gain': 0.15,      # Reduced from 0.5 (was 20x too loud)
-    'vox_gain': 0.6,        # Increased (was missing mids)
-    'stab_gain': 0.5,       # Increased (was missing mids)
-    'lead_gain': 0.45,      # Increased (was missing highs)
+    'kick_gain': 0.15,    # Minimal drums
+    'snare_gain': 0.2,
+    'hh_gain': 0.25,
+    'bass_gain': 0.08,    # Very low bass
+    'vox_gain': 0.3,      # "mid" voice produces 200-500Hz (reduce this)
+    'stab_gain': 0.3,
+    'lead_gain': 1.2,     # "high" voice produces 500-2000Hz (BOOST - this is the real mid!)
 }
 
 def parse_strudel_code(code):
@@ -41,10 +43,22 @@ def parse_strudel_code(code):
     if cps_match:
         result['bpm'] = int(cps_match.group(1))
 
-    # Extract let patterns
+    # Extract let patterns - OLD format: let name = "pattern"
     let_patterns = re.findall(r'let\s+(\w+)\s*=\s*["`]([^"`]+)["`]', code)
     for name, pattern in let_patterns:
         result['patterns'][name] = pattern
+
+    # Extract let patterns - NEW format: let name = ["pattern1", "pattern2", ...]
+    # Match arrays like: let bass = [\n  "pattern1",\n  "pattern2"\n]
+    array_pattern = re.compile(r'let\s+(\w+)\s*=\s*\[\s*((?:"[^"]*"(?:,\s*)?)+)\s*\]', re.MULTILINE | re.DOTALL)
+    for match in array_pattern.finditer(code):
+        name = match.group(1)
+        array_content = match.group(2)
+        # Extract all quoted strings from the array
+        patterns = re.findall(r'"([^"]*)"', array_content)
+        if patterns:
+            # Join all bar patterns into one continuous pattern
+            result['patterns'][name] = ' | '.join(patterns)
 
     # Try to extract gain values from effect chains
     for pattern_type in ['kick', 'snare', 'hh', 'bass', 'vox', 'stab', 'lead']:
@@ -63,15 +77,25 @@ def parse_mini_notation(pattern, steps=16):
     # Remove bar separators
     pattern = pattern.replace('|', ' ')
 
-    # Split by whitespace
-    tokens = pattern.split()
+    # First, expand ~*N notation to individual rests
+    # e.g., "~*3" becomes "~ ~ ~"
+    expanded_tokens = []
+    for token in pattern.split():
+        if token.startswith('~*'):
+            try:
+                count = int(token[2:])
+                expanded_tokens.extend(['~'] * count)
+            except ValueError:
+                expanded_tokens.append(token)
+        else:
+            expanded_tokens.append(token)
 
-    if not tokens:
+    if not expanded_tokens:
         return events
 
-    step_duration = 1.0 / len(tokens)
+    step_duration = 1.0 / len(expanded_tokens)
 
-    for i, token in enumerate(tokens):
+    for i, token in enumerate(expanded_tokens):
         if token == '~':
             continue
 
@@ -137,26 +161,31 @@ def note_to_freq(note_str):
     return freq
 
 def generate_kick(duration, sample_rate=SAMPLE_RATE):
-    """Generate a kick drum sound."""
+    """Generate a kick drum sound - tuned for less sub-bass to match piano stems."""
     t = np.linspace(0, duration, int(sample_rate * duration))
 
-    # Pitch envelope (starts high, drops quickly)
-    pitch_env = 150 * np.exp(-30 * t) + 50
+    # Pitch envelope (starts higher, base pitch raised to reduce sub-bass)
+    pitch_env = 200 * np.exp(-40 * t) + 80  # Higher base pitch (80Hz vs 50Hz)
 
     # Generate sine with pitch envelope
     phase = np.cumsum(pitch_env) / sample_rate * 2 * np.pi
     kick = np.sin(phase)
 
-    # Amplitude envelope
-    amp_env = np.exp(-8 * t)
+    # Amplitude envelope - shorter decay
+    amp_env = np.exp(-12 * t)
     kick *= amp_env
 
-    # Add some click/attack
-    click = np.random.randn(int(sample_rate * 0.005)) * 0.3
+    # Add click/attack for presence
+    click = np.random.randn(int(sample_rate * 0.003)) * 0.4
     kick[:len(click)] += click[:len(kick[:len(click)])]
 
-    # Distortion
-    kick = np.tanh(kick * 2) * 0.8
+    # High-pass filter to remove sub-bass
+    hpf_cutoff = 60 / (sample_rate / 2)
+    b_hp, a_hp = signal.butter(2, hpf_cutoff, 'high')
+    kick = signal.filtfilt(b_hp, a_hp, kick)
+
+    # Light distortion
+    kick = np.tanh(kick * 1.5) * 0.5  # Reduced gain
 
     return kick
 
@@ -199,20 +228,21 @@ def generate_hihat(duration, is_open=False, sample_rate=SAMPLE_RATE):
     return hihat
 
 def generate_bass(freq, duration, sample_rate=SAMPLE_RATE):
-    """Generate a bass sound (sawtooth with filter)."""
+    """Generate a bass sound (sawtooth with filter) - filtered to reduce sub-bass."""
     t = np.linspace(0, duration, int(sample_rate * duration))
 
-    # Sawtooth wave
+    # Sawtooth wave only - no sub-octave to reduce low frequencies
     saw = 2 * (t * freq % 1) - 1
+    bass = saw * 0.8
 
-    # Add sub-octave
-    sub = np.sin(2 * np.pi * freq * t)
-
-    bass = saw * 0.6 + sub * 0.4
-
-    # Low-pass filter - reduced cutoff for less harsh bass
-    cutoff = min(freq * 2, 300)
-    b, a = signal.butter(2, cutoff / (sample_rate / 2), 'low')
+    # Band-pass filter - remove sub-bass below 80Hz, cap at 250Hz
+    # This matches original stems which have almost no sub-bass energy
+    low_cutoff = 80 / (sample_rate / 2)
+    high_cutoff = min(freq * 2, 250) / (sample_rate / 2)
+    # Ensure cutoffs are valid (between 0 and 1)
+    low_cutoff = max(0.001, min(0.99, low_cutoff))
+    high_cutoff = max(low_cutoff + 0.01, min(0.99, high_cutoff))
+    b, a = signal.butter(2, [low_cutoff, high_cutoff], 'band')
     bass = signal.filtfilt(b, a, bass)
 
     # Envelope
@@ -224,23 +254,29 @@ def generate_bass(freq, duration, sample_rate=SAMPLE_RATE):
         env[-release:] = np.linspace(1, 0, release)
 
     bass *= env
-    bass = np.tanh(bass * 1.5) * 0.5  # Reduced gain
+    bass = np.tanh(bass * 1.2) * 0.3  # Reduced gain further
 
     return bass
 
 def generate_synth(freq, duration, waveform='square', sample_rate=SAMPLE_RATE):
-    """Generate a synth sound."""
+    """Generate a synth sound - with harmonics for brighter mid-range content."""
     t = np.linspace(0, duration, int(sample_rate * duration))
 
+    # Generate base waveform (keep fundamental)
     if waveform == 'square':
         wave = np.sign(np.sin(2 * np.pi * freq * t))
-    elif waveform == 'saw':
+    elif waveform == 'saw' or waveform == 'sawtooth':
         wave = 2 * (t * freq % 1) - 1
-    else:  # sine
+    else:  # sine with added harmonics for brightness
         wave = np.sin(2 * np.pi * freq * t)
+        # Add harmonics to push energy into mid range (without filtering fundamental)
+        wave += 0.5 * np.sin(2 * np.pi * freq * 2 * t)   # 2nd harmonic
+        wave += 0.35 * np.sin(2 * np.pi * freq * 3 * t)  # 3rd harmonic
+        wave += 0.25 * np.sin(2 * np.pi * freq * 4 * t)  # 4th harmonic
+        wave += 0.15 * np.sin(2 * np.pi * freq * 5 * t)  # 5th harmonic
 
-    # Low-pass filter
-    cutoff = min(freq * 4, 4000)
+    # Gentle low-pass filter (high cutoff to preserve brightness)
+    cutoff = min(freq * 8, 8000)
     b, a = signal.butter(2, cutoff / (sample_rate / 2), 'low')
     wave = signal.filtfilt(b, a, wave)
 
@@ -248,6 +284,36 @@ def generate_synth(freq, duration, waveform='square', sample_rate=SAMPLE_RATE):
     attack = int(sample_rate * 0.01)
     decay = int(sample_rate * 0.05)
     sustain_level = 0.6
+    release = int(sample_rate * 0.05)
+
+    env = np.ones(len(t)) * sustain_level
+    if attack > 0 and attack < len(env):
+        env[:attack] = np.linspace(0, 1, attack)
+    if attack + decay < len(env):
+        env[attack:attack+decay] = np.linspace(1, sustain_level, decay)
+    if release > 0 and release < len(env):
+        env[-release:] = np.linspace(sustain_level, 0, release)
+
+    wave *= env * 0.4
+
+    return wave
+
+def generate_bright_synth(freq, duration, sample_rate=SAMPLE_RATE):
+    """Generate a bright synth sound - sawtooth with more harmonics."""
+    t = np.linspace(0, duration, int(sample_rate * duration))
+
+    # Sawtooth is naturally bright with rich harmonics
+    wave = 2 * (t * freq % 1) - 1
+
+    # Higher cutoff for brighter sound (but still keep fundamental)
+    cutoff = min(freq * 6, 8000)
+    b, a = signal.butter(2, cutoff / (sample_rate / 2), 'low')
+    wave = signal.filtfilt(b, a, wave)
+
+    # ADSR envelope - slightly faster attack for brightness
+    attack = int(sample_rate * 0.005)
+    decay = int(sample_rate * 0.03)
+    sustain_level = 0.7
     release = int(sample_rate * 0.05)
 
     env = np.ones(len(t)) * sustain_level
@@ -293,6 +359,9 @@ def render_pattern(events, bar_duration, num_bars, sound_type='synth', sample_ra
             elif sound_type == 'bass':
                 freq = note_to_freq(note)
                 sound = generate_bass(freq, min(duration, 0.5))
+            elif sound_type == 'synth_bright':
+                freq = note_to_freq(note)
+                sound = generate_bright_synth(freq, duration)
             else:
                 freq = note_to_freq(note)
                 sound = generate_synth(freq, duration)
@@ -355,13 +424,31 @@ def render_strudel_to_wav(code, output_path, duration_seconds=None, mix_override
         elif 'hh' in name or 'hat' in name:
             audio = render_pattern(events, bar_duration, num_bars, 'drum')
             gain = mix['hh_gain']
-            left += audio * gain * 0.8  # Slight pan
+            left += audio * gain * 0.8
             right += audio * gain * 1.2
-        elif 'bass' in name:
+        elif name == 'drums':
+            # Combined drum pattern with bd, sd, hh, oh
+            audio = render_pattern(events, bar_duration, num_bars, 'drum')
+            gain = mix['kick_gain']  # Use kick gain for combined drums
+            left += audio * gain
+            right += audio * gain
+        elif name == 'bass' or 'bass' in name:
             audio = render_pattern(events, bar_duration, num_bars, 'bass')
             gain = mix['bass_gain']
             left += audio * gain
             right += audio * gain
+        elif name == 'mid':
+            # Mid voice - use synth with mid-range focus
+            audio = render_pattern(events, bar_duration, num_bars, 'synth')
+            gain = mix['vox_gain']  # Use vox gain for mids
+            left += audio * gain * 1.1
+            right += audio * gain * 0.9
+        elif name == 'high':
+            # High voice - use bright synth
+            audio = render_pattern(events, bar_duration, num_bars, 'synth_bright')
+            gain = mix['lead_gain']
+            left += audio * gain * 0.8
+            right += audio * gain * 1.2
         elif 'vox' in name or 'vocal' in name:
             audio = render_pattern(events, bar_duration, num_bars, 'synth')
             gain = mix['vox_gain']
@@ -381,7 +468,7 @@ def render_strudel_to_wav(code, output_path, duration_seconds=None, mix_override
     # Mix to stereo
     stereo = np.column_stack([left, right])
 
-    # Normalize
+    # Simple normalization - no aggressive filtering or compression
     max_val = np.max(np.abs(stereo))
     if max_val > 0:
         stereo = stereo / max_val * 0.9

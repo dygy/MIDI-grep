@@ -48,8 +48,13 @@ func (s *StemSeparator) Separate(ctx context.Context, inputPath, outputDir strin
 
 // SeparateWithMode extracts stems based on the specified mode
 func (s *StemSeparator) SeparateWithMode(ctx context.Context, inputPath, outputDir string, mode StemMode) (*StemResult, error) {
-	// Run separation script with mode argument
-	result, err := s.runner.RunScript(ctx, "separate.py", inputPath, outputDir, "--mode", string(mode))
+	return s.SeparateWithModeAndQuality(ctx, inputPath, outputDir, mode, "normal")
+}
+
+// SeparateWithModeAndQuality extracts stems with specified quality setting
+func (s *StemSeparator) SeparateWithModeAndQuality(ctx context.Context, inputPath, outputDir string, mode StemMode, quality string) (*StemResult, error) {
+	// Run separation script with mode and quality arguments
+	result, err := s.runner.RunScript(ctx, "separate.py", inputPath, outputDir, "--mode", string(mode), "--quality", quality)
 	if err != nil {
 		if result != nil && result.ExitCode == 1 {
 			return nil, apperrors.NewProcessError("demucs", "stem_separation", result.ExitCode, result.Stderr, err)

@@ -24,6 +24,10 @@
 - **MIDI Manipulation:** pretty_midi (Python library for cleanup, quantization)
 - **BPM Detection:** librosa.beat.beat_track (robust tempo estimation)
 - **Key Detection:** librosa + Krumhansl-Schmuckler algorithm (key profile matching)
+- **Genre Detection:** Multi-method approach:
+  - Heuristic: BPM ranges, note durations, spectral characteristics
+  - Deep Learning: CLAP (Contrastive Language-Audio Pretraining) zero-shot classification
+  - Essentia: Pre-trained ML models for genre/style classification
 
 ### Pipeline Flow
 
@@ -90,40 +94,60 @@
       └─────────────────┘
 ```
 
-### Audio Rendering (Optional)
+### Audio Rendering & AI Analysis
 
-The `--render` flag synthesizes WAV audio preview from Strudel patterns:
+The `--render` flag synthesizes WAV audio preview from Strudel patterns with AI-driven parameter optimization:
 
 ```
-Strudel Code
-     │
-     ▼
-┌─────────────────┐
-│ Parse Patterns  │ (extract mini-notation)
-│ - let name = `..`
-│ - BPM from setcps
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Synthesize      │
+Original Audio                    Strudel Code
+     │                                 │
+     ▼                                 ▼
+┌─────────────────┐          ┌─────────────────┐
+│ AI Analysis     │          │ Parse Patterns  │
+│ (audio_to_      │          │ - let name = `..`
+│  strudel_params)│          │ - BPM from setcps
+│ - Spectral      │          └────────┬────────┘
+│ - Dynamics      │                   │
+│ - Timbre        │                   │
+└────────┬────────┘                   │
+         │          ┌─────────────────┘
+         ▼          ▼
+┌─────────────────────────┐
+│ Synthesize (render_audio)│
 │ - Kick: pitch env + distort
 │ - Snare: tone + noise
 │ - HH: filtered noise
 │ - Bass: saw + sub + LPF
-│ - Synth: square/saw + ADSR
-└────────┬────────┘
-         │
-         ▼
-┌─────────────────┐
-│ Mix to Stereo   │ (44.1kHz, 16-bit)
+│ - Vox: square + fast attack
+│ - Stabs: filtered sawtooth
+│ - Lead: triangle + vibrato
+│ + AI-suggested mix levels
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│ Mix to Stereo           │ (44.1kHz, 16-bit)
 │ - Pan per voice
+│ - AI-driven gain staging
 │ - Normalize
-└────────┬────────┘
-         │
-         ▼
-    render_vXXX.wav
+└────────────┬────────────┘
+             │
+             ▼
+      render_vXXX.wav
+             │
+             ▼
+┌─────────────────────────┐
+│ Compare (compare_audio) │
+│ - Spectral similarity
+│ - Rhythmic alignment
+│ - Timbral distance
+│ - Overall score (0-100%)
+└─────────────────────────┘
 ```
+
+**AI Scripts:**
+- `audio_to_strudel_params.py` - Analyzes original audio to suggest Strudel effect parameters
+- `compare_audio.py` - Compares rendered vs original for quality feedback
 
 ---
 
@@ -260,8 +284,11 @@ midi-grep/
 │   │   ├── smart_analyze.py  # Chord/section detection
 │   │   ├── chord_to_strudel.py # Chord-based generation
 │   │   ├── render_audio.py   # Basic WAV synthesis (preview only)
-│   │   ├── compare_audio.py  # Audio similarity comparison
-│   │   └── audio_to_strudel_params.py # AI-driven parameter suggestion
+│   │   ├── compare_audio.py  # Audio similarity comparison (spectral/rhythmic/timbral)
+│   │   ├── audio_to_strudel_params.py # AI-driven Strudel effect parameter suggestion
+│   │   ├── aggregate_genre_analysis.py # Batch genre analysis aggregation
+│   │   ├── detect_genre_dl.py    # CLAP deep learning genre detection (zero-shot)
+│   │   └── detect_genre_essentia.py # Essentia ML model genre classification
 │   │
 │   └── node/                 # Future: Strudel-native rendering
 │       └── package.json      # @strudel/core, @strudel/webaudio deps
@@ -296,6 +323,12 @@ midi-grep extract --url "..." --drums-only --drum-kit tr808
 
 # Custom style
 midi-grep extract --url "..." --style house
+
+# Manual genre override (when auto-detection fails)
+midi-grep extract --url "..." --genre retro_wave
+
+# Deep learning genre detection (CLAP model)
+midi-grep extract --url "..." --deep-genre
 
 # Start web server
 midi-grep serve --port 8080

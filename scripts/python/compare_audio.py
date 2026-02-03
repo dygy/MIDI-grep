@@ -8,6 +8,7 @@ import argparse
 import json
 import numpy as np
 import librosa
+import librosa.display
 import sys
 from scipy import signal
 from scipy.spatial.distance import cosine
@@ -315,6 +316,130 @@ def print_report(results):
 
     print("=" * 60)
 
+def generate_comparison_chart(results, original_path, rendered_path, output_path):
+    """Generate a comprehensive comparison chart as PNG."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+
+    fig, axes = plt.subplots(3, 2, figsize=(16, 14))
+    fig.patch.set_facecolor('#0d1117')
+
+    # Style setup
+    plt.rcParams['text.color'] = '#c9d1d9'
+    plt.rcParams['axes.labelcolor'] = '#c9d1d9'
+    plt.rcParams['axes.edgecolor'] = '#30363d'
+    plt.rcParams['xtick.color'] = '#8b949e'
+    plt.rcParams['ytick.color'] = '#8b949e'
+
+    # Load audio for visualizations
+    orig_y = load_audio(original_path, duration=30)
+    rend_y = load_audio(rendered_path, duration=30)
+
+    # 1. Frequency band comparison
+    ax1 = axes[0, 0]
+    ax1.set_facecolor('#161b22')
+    bands = ['sub_bass', 'bass', 'low_mid', 'mid', 'high_mid', 'high']
+    band_labels = ['Sub\nBass', 'Bass', 'Low\nMid', 'Mid', 'High\nMid', 'High']
+    x = np.arange(len(bands))
+    width = 0.35
+
+    orig_vals = [results['original']['bands'].get(b, 0) * 100 for b in bands]
+    rend_vals = [results['rendered']['bands'].get(b, 0) * 100 for b in bands]
+
+    ax1.bar(x - width/2, orig_vals, width, label='Original', color='#58a6ff', alpha=0.8)
+    ax1.bar(x + width/2, rend_vals, width, label='Rendered', color='#3fb950', alpha=0.8)
+
+    ax1.set_ylabel('Energy %', fontsize=10)
+    ax1.set_title('Frequency Band Distribution', fontsize=12, color='#c9d1d9', pad=10)
+    ax1.set_xticks(x)
+    ax1.set_xticklabels(band_labels, fontsize=9)
+    ax1.legend(loc='upper right', facecolor='#21262d', edgecolor='#30363d')
+    ax1.grid(True, alpha=0.2, axis='y')
+
+    # 2. Similarity scores
+    ax2 = axes[0, 1]
+    ax2.set_facecolor('#161b22')
+    metrics = ['mfcc_similarity', 'chroma_similarity', 'brightness_similarity',
+               'tempo_similarity', 'frequency_balance_similarity', 'energy_similarity']
+    metric_labels = ['Timbre', 'Harmony', 'Brightness', 'Tempo', 'Freq Balance', 'Energy']
+    values = [results['comparison'].get(m, 0) * 100 for m in metrics]
+    colors = ['#3fb950' if v >= 70 else '#d29922' if v >= 50 else '#f85149' for v in values]
+
+    bars = ax2.barh(metric_labels, values, color=colors, alpha=0.8)
+    ax2.set_xlim(0, 100)
+    ax2.set_xlabel('Similarity %', fontsize=10)
+    ax2.set_title('Similarity Scores', fontsize=12, color='#c9d1d9', pad=10)
+    ax2.grid(True, alpha=0.2, axis='x')
+
+    for bar, val in zip(bars, values):
+        ax2.text(val + 2, bar.get_y() + bar.get_height()/2, f'{val:.0f}%',
+                va='center', fontsize=9, color='#c9d1d9')
+
+    # 3. Spectrogram - Original
+    ax3 = axes[1, 0]
+    ax3.set_facecolor('#161b22')
+    try:
+        if orig_y is not None:
+            D_orig = librosa.amplitude_to_db(np.abs(librosa.stft(orig_y)), ref=np.max)
+            img = librosa.display.specshow(D_orig, sr=22050, x_axis='time', y_axis='hz', ax=ax3, cmap='magma')
+            ax3.set_title('Original - Spectrogram', fontsize=12, color='#c9d1d9', pad=10)
+            ax3.set_ylim(0, 8000)
+    except Exception as e:
+        ax3.text(0.5, 0.5, f'Spectrogram unavailable', ha='center', va='center',
+                transform=ax3.transAxes, color='#8b949e')
+
+    # 4. Spectrogram - Rendered
+    ax4 = axes[1, 1]
+    ax4.set_facecolor('#161b22')
+    try:
+        if rend_y is not None:
+            D_rend = librosa.amplitude_to_db(np.abs(librosa.stft(rend_y)), ref=np.max)
+            librosa.display.specshow(D_rend, sr=22050, x_axis='time', y_axis='hz', ax=ax4, cmap='magma')
+            ax4.set_title('Rendered - Spectrogram', fontsize=12, color='#c9d1d9', pad=10)
+            ax4.set_ylim(0, 8000)
+    except Exception as e:
+        ax4.text(0.5, 0.5, f'Spectrogram unavailable', ha='center', va='center',
+                transform=ax4.transAxes, color='#8b949e')
+
+    # 5. Chromagram - Original
+    ax5 = axes[2, 0]
+    ax5.set_facecolor('#161b22')
+    try:
+        if orig_y is not None:
+            chroma_orig = librosa.feature.chroma_cqt(y=orig_y, sr=22050)
+            librosa.display.specshow(chroma_orig, sr=22050, x_axis='time', y_axis='chroma', ax=ax5, cmap='coolwarm')
+            ax5.set_title('Original - Chromagram (Pitch)', fontsize=12, color='#c9d1d9', pad=10)
+    except Exception as e:
+        ax5.text(0.5, 0.5, f'Chromagram unavailable', ha='center', va='center',
+                transform=ax5.transAxes, color='#8b949e')
+
+    # 6. Chromagram - Rendered
+    ax6 = axes[2, 1]
+    ax6.set_facecolor('#161b22')
+    try:
+        if rend_y is not None:
+            chroma_rend = librosa.feature.chroma_cqt(y=rend_y, sr=22050)
+            librosa.display.specshow(chroma_rend, sr=22050, x_axis='time', y_axis='chroma', ax=ax6, cmap='coolwarm')
+            ax6.set_title('Rendered - Chromagram (Pitch)', fontsize=12, color='#c9d1d9', pad=10)
+    except Exception as e:
+        ax6.text(0.5, 0.5, f'Chromagram unavailable', ha='center', va='center',
+                transform=ax6.transAxes, color='#8b949e')
+
+    # Overall title with score
+    overall = results['comparison'].get('overall_similarity', 0) * 100
+    color = '#3fb950' if overall >= 70 else '#d29922' if overall >= 50 else '#f85149'
+    fig.suptitle(f'Audio Comparison Report  —  Overall Match: {overall:.0f}%',
+                 fontsize=16, color=color, y=0.98, fontweight='bold')
+
+    # Adjust layout
+    plt.tight_layout(rect=[0, 0, 1, 0.96])
+
+    # Save
+    plt.savefig(output_path, dpi=150, facecolor='#0d1117', edgecolor='none', bbox_inches='tight')
+    plt.close()
+    print(f"Chart saved: {output_path}")
+
 def main():
     parser = argparse.ArgumentParser(description='Compare rendered audio with original')
     parser.add_argument('original', help='Path to original audio file')
@@ -323,6 +448,7 @@ def main():
                        help='Max duration to analyze in seconds')
     parser.add_argument('-j', '--json', action='store_true',
                        help='Output as JSON')
+    parser.add_argument('-c', '--chart', help='Output path for comparison chart PNG')
 
     args = parser.parse_args()
 
@@ -331,9 +457,13 @@ def main():
     if results is None:
         sys.exit(1)
 
+    # Generate chart if requested
+    if args.chart:
+        generate_comparison_chart(results, args.original, args.rendered, args.chart)
+
     if args.json:
         print(json.dumps(results, indent=2))
-    else:
+    elif not args.chart:
         print_report(results)
 
 if __name__ == '__main__':

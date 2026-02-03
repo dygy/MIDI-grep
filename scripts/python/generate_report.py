@@ -32,6 +32,120 @@ def encode_image_base64(path):
     mime = 'image/png' if ext == 'png' else f'image/{ext}'
     return f"data:{mime};base64,{data}"
 
+def extract_info_from_strudel(code):
+    """Extract BPM, key, notes from strudel code comments."""
+    import re
+    info = {}
+
+    # Extract BPM
+    bpm_match = re.search(r'BPM:\s*(\d+)', code)
+    if bpm_match:
+        info['bpm'] = int(bpm_match.group(1))
+
+    # Extract key
+    key_match = re.search(r'Key:\s*([A-G][#b]?\s*(?:major|minor)?)', code, re.IGNORECASE)
+    if key_match:
+        info['key'] = key_match.group(1)
+
+    # Extract notes count
+    notes_match = re.search(r'Notes:\s*(\d+)', code)
+    if notes_match:
+        info['notes'] = int(notes_match.group(1))
+
+    # Extract drum hits
+    drums_match = re.search(r'Drums:\s*(\d+)\s*hits', code)
+    if drums_match:
+        info['drum_hits'] = int(drums_match.group(1))
+
+    # Extract style
+    style_match = re.search(r'Style:\s*(\w+)', code)
+    if style_match:
+        info['style'] = style_match.group(1)
+
+    # Extract genre
+    genre_match = re.search(r'Genre:\s*([^\n]+)', code)
+    if genre_match:
+        info['genre'] = genre_match.group(1).strip()
+
+    return info
+
+def clean_track_name(folder_name):
+    """Clean up folder name for display."""
+    import re
+    # If it's a yt_xxx format, make it more readable
+    if folder_name.startswith('yt_'):
+        return f"YouTube Track ({folder_name[3:]})"
+    # If it has the [xxx] format, it's already using track name
+    if '[' in folder_name and ']' in folder_name:
+        return re.sub(r'\s*\[[^\]]+\]$', '', folder_name)
+    return folder_name
+
+def generate_ai_analysis_card(ai_params):
+    """Generate AI Analysis card HTML if params available."""
+    if not ai_params:
+        return ''
+
+    analysis = ai_params.get('analysis', {})
+    suggestions = ai_params.get('suggestions', {})
+
+    if not analysis and not suggestions:
+        return ''
+
+    # Get frequency band data
+    bands = analysis.get('spectrum', {}).get('band_energy', {})
+    dynamics = analysis.get('dynamics', {})
+    rhythm = analysis.get('rhythm', {})
+
+    # Format band percentages
+    band_bars = ''
+    for band_name, value in bands.items():
+        pct = value * 100
+        label = band_name.replace('_', ' ').title()
+        band_bars += f'''
+            <div style="display: flex; align-items: center; margin-bottom: 0.5rem;">
+                <span style="width: 80px; font-size: 0.75rem; color: var(--text-secondary);">{label}</span>
+                <div style="flex: 1; height: 12px; background: var(--bg-tertiary); border-radius: 3px; overflow: hidden;">
+                    <div style="width: {min(pct * 2, 100):.0f}%; height: 100%; background: var(--accent);"></div>
+                </div>
+                <span style="width: 50px; text-align: right; font-size: 0.75rem; color: var(--text-secondary);">{pct:.1f}%</span>
+            </div>'''
+
+    # Get suggested sounds
+    sound_chips = ''
+    for voice, settings in suggestions.items():
+        if voice in ['bass', 'mid', 'high'] and isinstance(settings, dict):
+            sound = settings.get('sound', '')
+            if sound:
+                sound_chips += f'<span class="badge badge-blue" style="margin-right: 0.3rem;">{voice}: {sound}</span>'
+
+    # Dynamics info
+    dynamics_info = ''
+    if dynamics:
+        rms = dynamics.get('rms_mean', 0)
+        dr = dynamics.get('dynamic_range_db', 0)
+        dynamics_info = f'RMS: {rms:.3f} | Dynamic Range: {dr:.1f}dB'
+
+    return f'''
+        <div class="card">
+            <div class="card-title">
+                <svg viewBox="0 0 16 16"><path d="M8.5 1.5a.5.5 0 0 0-1 0V7H2a.5.5 0 0 0 0 1h5.5v5.5a.5.5 0 0 0 1 0V8H14a.5.5 0 0 0 0-1H8.5V1.5z"/></svg>
+                AI Analysis
+            </div>
+            <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 1.5rem;">
+                <div>
+                    <h4 style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">Frequency Distribution</h4>
+                    {band_bars}
+                </div>
+                <div>
+                    <h4 style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem;">Suggested Sounds</h4>
+                    <div style="margin-bottom: 1rem;">{sound_chips if sound_chips else '<span style="color: var(--text-secondary);">N/A</span>'}</div>
+                    <h4 style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.5rem;">Dynamics</h4>
+                    <p style="font-size: 0.85rem; color: var(--text-primary);">{dynamics_info if dynamics_info else 'N/A'}</p>
+                </div>
+            </div>
+        </div>
+    '''
+
 def generate_report(cache_dir, version_dir, output_path=None):
     """Generate HTML report for a version."""
 
@@ -63,6 +177,10 @@ def generate_report(cache_dir, version_dir, output_path=None):
 
     metadata_path = version_path / "metadata.json"
     track_meta_path = cache_path / "metadata.json"
+    # AI params: check version dir first, then cache root (for old caches)
+    ai_params_path = version_path / "ai_params.json"
+    if not ai_params_path.exists():
+        ai_params_path = cache_path / "ai_params.json"
 
     # Load metadata
     metadata = {}
@@ -75,11 +193,20 @@ def generate_report(cache_dir, version_dir, output_path=None):
         with open(track_meta_path) as f:
             track_info = json.load(f)
 
+    # Load AI params
+    ai_params = {}
+    if ai_params_path.exists():
+        with open(ai_params_path) as f:
+            ai_params = json.load(f)
+
     # Read Strudel code
     strudel_code = ""
     if strudel_path.exists():
         with open(strudel_path) as f:
             strudel_code = f.read()
+
+    # Extract info from strudel comments as fallback
+    strudel_info = extract_info_from_strudel(strudel_code) if strudel_code else {}
 
     # Encode files as base64
     melodic_data = encode_audio_base64(str(melodic_path)) if melodic_path.exists() else None
@@ -88,14 +215,29 @@ def generate_report(cache_dir, version_dir, output_path=None):
     comparison_data = encode_image_base64(str(comparison_path)) if comparison_path.exists() else None
 
     # Generate HTML
-    track_name = track_info.get('title', cache_path.name)
+    track_name = track_info.get('title') or clean_track_name(cache_path.name)
     version = metadata.get('version', 1)
-    bpm = metadata.get('bpm', 'N/A')
-    key = metadata.get('key', 'N/A')
-    style = metadata.get('style', 'N/A')
-    notes = metadata.get('notes', 'N/A')
-    drum_hits = metadata.get('drum_hits', 'N/A')
+
+    # Format BPM (round to integer) - use strudel_info as fallback
+    bpm_raw = metadata.get('bpm') or strudel_info.get('bpm', 0)
+    bpm = round(bpm_raw) if isinstance(bpm_raw, (int, float)) and bpm_raw > 0 else 'N/A'
+
+    key = metadata.get('key') or strudel_info.get('key', 'N/A') or 'N/A'
+    style = metadata.get('style') or strudel_info.get('style', 'N/A') or 'N/A'
+    genre = metadata.get('genre') or strudel_info.get('genre', '') or ''
+
+    notes = metadata.get('notes') or strudel_info.get('notes', 0)
+    notes = notes if notes and notes > 0 else 'N/A'
+
+    drum_hits_raw = metadata.get('drum_hits') or strudel_info.get('drum_hits', 0)
+    drum_hits = drum_hits_raw if drum_hits_raw and drum_hits_raw > 0 else 'N/A'
+
     created = metadata.get('created_at', datetime.now().isoformat())
+
+    # AI-detected style if available
+    ai_style = ai_params.get('suggestions', {}).get('global', {}).get('style', '')
+    if ai_style and style == 'N/A':
+        style = ai_style
 
     html = f'''<!DOCTYPE html>
 <html lang="en">
@@ -350,12 +492,14 @@ def generate_report(cache_dir, version_dir, output_path=None):
                     <div class="stat-label">Drum Hits</div>
                 </div>
                 <div class="stat">
-                    <div class="stat-value">{style}</div>
+                    <div class="stat-value">{style if style != 'N/A' else (genre if genre else 'N/A')}</div>
                     <div class="stat-label">Style</div>
                 </div>
             </div>
-            {f'<img class="comparison-img" src="{comparison_data}" alt="Frequency Comparison">' if comparison_data else ''}
+            {f'<img class="comparison-img" src="{comparison_data}" alt="Frequency Comparison">' if comparison_data else '<div class="no-data" style="margin-top: 1rem;">No comparison chart available (render audio first)</div>'}
         </div>
+
+        {generate_ai_analysis_card(ai_params)}
 
         <div class="card">
             <div class="card-title">

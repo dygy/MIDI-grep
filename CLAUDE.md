@@ -67,7 +67,7 @@ All outputs are cached in `.cache/stems/{key}/` by URL or file hash:
 - **Output versioning**: Each run creates new version (v001, v002, ...)
 - **Metadata stored**: BPM, key, style, genre, notes, drum hits, timestamp
 
-### Audio Rendering
+### Audio Rendering & AI Analysis
 
 The `--render` flag synthesizes WAV audio from patterns:
 
@@ -76,12 +76,26 @@ The `--render` flag synthesizes WAV audio from patterns:
 ./bin/midi-grep extract --url "..." --render out.wav  # Custom path
 ```
 
-Implemented in `scripts/python/render_audio.py`:
+**Synthesis (`scripts/python/render_audio.py`):**
 - Kick: Pitch envelope + distortion (808 style)
 - Snare: Body tone + high-passed noise
 - Hi-hat: Filtered noise with decay
 - Bass: Sawtooth + sub-octave, LPF
-- Synth: Square/saw with ADSR
+- Vocal chops: Square wave with fast attack
+- Chord stabs: Filtered sawtooth
+- Lead: Triangle wave with vibrato
+
+**AI Parameter Suggestion (`scripts/python/audio_to_strudel_params.py`):**
+- Analyzes original audio spectral/dynamic characteristics
+- Suggests optimal Strudel effect parameters (filters, compression, reverb)
+- Feeds back into renderer for AI-driven mix balance
+
+**Audio Comparison (`scripts/python/compare_audio.py`):**
+- Compares rendered output vs original stems
+- Spectral similarity (centroid, bandwidth, rolloff)
+- Rhythmic similarity (onset alignment)
+- Timbral similarity (MFCC distance)
+- Overall similarity score for quality feedback
 
 ## Tech Stack
 
@@ -138,6 +152,11 @@ midi-grep/
 │       ├── transcribe.py       # Basic Pitch transcription
 │       ├── cleanup.py          # MIDI quantization
 │       ├── detect_drums.py     # Drum pattern detection
+│       ├── detect_genre_dl.py  # CLAP-based deep learning genre detection
+│       ├── detect_genre_essentia.py # Essentia-based genre detection
+│       ├── render_audio.py     # WAV synthesis from Strudel patterns
+│       ├── audio_to_strudel_params.py # AI-driven effect parameter suggestion
+│       ├── compare_audio.py    # Rendered vs original audio comparison
 │       └── requirements.txt
 ├── internal/cache/cache.go     # Stem caching (by URL/file hash)
 ├── context/                    # AWOS product documentation
@@ -358,8 +377,38 @@ go build -o bin/midi-grep ./cmd/midi-grep
 | `--quantize` | Quantization (4, 8, 16) |
 | `--simplify` | Simplify notes (default: on) |
 | `--drum-kit` | Drum kit (tr808, tr909, linn, acoustic, lofi) |
-| `--render` | Render audio to WAV (`auto` saves to cache, or specify path) |
+| `--render` | Render audio to WAV (default: `auto`, use `none` to disable) |
 | `--brazilian-funk` | Force Brazilian funk mode (auto-detected normally) |
+| `--genre` | Manual genre override (`brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz`) |
+| `--deep-genre` | Use deep learning (CLAP) for genre detection |
+
+## Genre Auto-Detection
+
+The pipeline includes intelligent genre detection in `internal/pipeline/orchestrator.go`:
+
+**Detection Functions:**
+- `shouldUseBrazilianFunkMode()` - Detects Brazilian funk (BPM 130-145 or half-time 85-95, rejects long synth notes)
+- `shouldUseBrazilianPhonkMode()` - Detects Brazilian phonk (BPM 80-100 or 145-180, darker sound)
+- `shouldUseRetroWaveMode()` - Detects synthwave/retro wave (longer note durations, BPM 130-170)
+
+**Manual Override:**
+The `--genre` flag bypasses auto-detection and forces a specific genre:
+```go
+switch cfg.GenreOverride {
+case "brazilian_funk":
+    cfg.BrazilianFunk = true
+case "retro_wave", "synthwave":
+    cfg.SoundStyle = "synthwave"
+    skipAutoDetection = true
+// ...
+}
+```
+
+**Deep Learning Detection:**
+Optional CLAP (Contrastive Language-Audio Pretraining) model for zero-shot classification:
+- Script: `scripts/python/detect_genre_dl.py`
+- Uses laion-clap or transformers CLAP implementation
+- Compares audio embeddings against text descriptions of genres
 
 ## Dependencies
 

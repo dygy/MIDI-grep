@@ -62,11 +62,15 @@ _Moving from "dump all notes" to "find the actual riff."_
   - [x] **Loop Confidence Score:** Indicate how certain we are about detected loops (0.45 threshold)
   - [x] **Loop-Only Output:** Option to output just the core repeating pattern (`--loop-only` flag)
 
-- [x] **Genre Auto-Detection** ✅ NEW
-  - [x] **Brazilian Funk/Phonk Detection:** Scoring system analyzes BPM (125-155), vocal-range note clustering, short note durations, low bass content
-  - [x] **Template-Based Generation:** When funk detected, use authentic tamborzão drum patterns + 808 bass instead of transcription
+- [x] **Genre Auto-Detection** ✅ COMPLETE
+  - [x] **Multi-Genre Detection:** Separate detection functions for Brazilian funk, Brazilian phonk, and retro wave/synthwave
+  - [x] **Brazilian Funk Detection:** BPM 130-145 (or half-time 85-95), rejects long synth notes
+  - [x] **Brazilian Phonk Detection:** BPM 80-100 or 145-180, darker sound profile
+  - [x] **Retro Wave Detection:** Longer note durations, synthwave-style arpeggios
+  - [x] **Template-Based Generation:** When funk detected, use authentic tamborzão drum patterns + 808 bass
   - [x] **Style Auto-Detection:** Analyze BPM, key (minor/major), note density to auto-select jazz/soul/funk/electronic/house/trance
-  - [x] **`--brazilian-funk` Override:** Manual flag to force Brazilian funk mode when auto-detection misses
+  - [x] **Manual Genre Override:** `--genre` flag to force specific genre (`brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz`)
+  - [x] **Deep Learning Detection:** Optional CLAP (Contrastive Language-Audio Pretraining) via `--deep-genre` flag for zero-shot genre classification
 
 - [ ] **Motif Extraction**
   - [ ] **Melody vs Accompaniment:** Separate lead melodic line from harmonic backing
@@ -250,12 +254,21 @@ _Making the tool more interactive and user-friendly._
   - [x] **Latest Symlink:** `output_latest.strudel` always points to newest version
   - [x] **Iteration Support:** Compare previous outputs to track improvements
 
-- [x] **Audio Rendering** ✅ NEW
+- [x] **Audio Rendering** ✅ COMPLETE
   - [x] **WAV Synthesis:** `--render` flag generates audio preview from patterns
   - [x] **Drum Synthesis:** Kick (808 pitch envelope), snare, hi-hat with proper envelopes
   - [x] **Bass Synthesis:** Sawtooth + sub-octave, low-pass filtered
-  - [x] **Synth Voices:** Square/saw with ADSR envelopes
+  - [x] **Synth Voices:** Square/saw with ADSR envelopes, vocal chops, chord stabs, lead
   - [x] **Cache Integration:** `--render auto` saves to cache directory with versioning
+
+- [x] **AI-Driven Audio Analysis** ✅ NEW
+  - [x] **Parameter Suggestion:** `audio_to_strudel_params.py` analyzes original audio for optimal Strudel effects
+  - [x] **Spectral Analysis:** Determines filter cutoffs, brightness levels
+  - [x] **Dynamics Analysis:** Suggests compression, gain staging, distortion amounts
+  - [x] **Timbre Matching:** Recommends FM synthesis, filter envelope parameters
+  - [x] **Spatial Analysis:** Determines reverb size, delay times based on original
+  - [x] **Audio Comparison:** `compare_audio.py` compares rendered vs original (spectral, rhythmic, timbral similarity)
+  - [x] **Feedback Loop:** Comparison results improve renderer mix balance
 
 - [ ] **Interactive Mode**
   - [ ] **Audio Preview:** Listen to extracted stem before generating code
@@ -383,3 +396,12 @@ _Ideas for future consideration, not yet prioritized._
 | 1.41 | 2026-02-03 | Output caching with versioning: save Strudel code + metadata (v001, v002, ...) to .cache/stems/{key}/ |
 | 1.42 | 2026-02-03 | Audio rendering: --render flag to synthesize WAV from patterns (kick, snare, hh, bass, synth voices) |
 | 1.43 | 2026-02-03 | Block comment variations (/* */) for easier live coding uncommenting |
+| 1.44 | 2026-02-03 | Multi-genre detection: separate functions for Brazilian funk, phonk, and retro wave |
+| 1.45 | 2026-02-03 | Manual genre override: `--genre` flag to bypass auto-detection |
+| 1.46 | 2026-02-03 | Deep learning genre detection: CLAP model via `--deep-genre` flag |
+| 1.47 | 2026-02-03 | Render progress display: show [6/7] and [7/7] stages for audio rendering |
+| 1.48 | 2026-02-03 | AI-driven mix parameters: audio_to_strudel_params.py analyzes original for effect suggestions |
+| 1.49 | 2026-02-03 | Audio comparison: compare_audio.py for rendered vs original similarity scoring |
+| 1.50 | 2026-02-03 | Render by default: `--render auto` is now default, use `--render none` to disable |
+| 1.51 | 2026-02-03 | Stem quality presets: `--quality` flag with fast/normal/high/best options |
+| 1.52 | 2026-02-03 | High-quality separation: htdemucs_ft model, TTA shifts, WAV output, GPU acceleration |

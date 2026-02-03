@@ -17,14 +17,63 @@ from pathlib import Path
 import subprocess
 
 
+def check_gpu_available():
+    """Check if CUDA GPU is available for acceleration."""
+    try:
+        import torch
+        return torch.cuda.is_available()
+    except ImportError:
+        return False
+
+
 def main():
     parser = argparse.ArgumentParser(description='Separate audio into stems using Demucs')
     parser.add_argument('input_audio', help='Input audio file path')
     parser.add_argument('output_dir', help='Output directory for stems')
     parser.add_argument('--mode', choices=['piano', 'drums', 'full'], default='piano',
                         help='Separation mode: piano (default), drums, or full')
+    parser.add_argument('--quality', choices=['fast', 'normal', 'high', 'best'], default='normal',
+                        help='Quality preset: fast (quick), normal (default), high (better, slower), best (highest quality, slowest)')
 
     args = parser.parse_args()
+
+    # Quality presets
+    quality_settings = {
+        'fast': {
+            'model': 'htdemucs',
+            'shifts': 0,
+            'overlap': 0.25,
+            'format': 'mp3',
+        },
+        'normal': {
+            'model': 'htdemucs',
+            'shifts': 1,
+            'overlap': 0.25,
+            'format': 'mp3',
+        },
+        'high': {
+            'model': 'htdemucs_ft',  # Fine-tuned model
+            'shifts': 3,              # Test-time augmentation
+            'overlap': 0.5,           # More overlap
+            'format': 'wav',          # Lossless
+        },
+        'best': {
+            'model': 'htdemucs_ft',  # Fine-tuned model
+            'shifts': 5,              # Maximum TTA
+            'overlap': 0.75,          # Maximum overlap
+            'format': 'wav',          # Lossless
+        },
+    }
+
+    quality = quality_settings[args.quality]
+    use_gpu = check_gpu_available()
+
+    if args.quality in ['high', 'best']:
+        print(f"Using high-quality mode: model={quality['model']}, shifts={quality['shifts']}, overlap={quality['overlap']}")
+        if use_gpu:
+            print("GPU acceleration: enabled")
+        else:
+            print("GPU acceleration: disabled (no CUDA GPU found)")
 
     input_path = args.input_audio
     output_dir = args.output_dir
@@ -40,26 +89,42 @@ def main():
 
         input_name = Path(input_path).stem
 
-        if mode == 'piano':
-            # Original behavior: try two-stem first, then full separation
-            result = subprocess.run([
+        # Build base demucs command with quality settings
+        def build_demucs_cmd(extra_args=None):
+            cmd = [
                 sys.executable, '-m', 'demucs',
-                '--two-stems=vocals',
-                '-n', 'htdemucs',
-                '--mp3',
+                '-n', quality['model'],
                 '-o', demucs_out,
-                input_path
-            ], capture_output=True, text=True)
+            ]
+            # Add quality options
+            if quality['shifts'] > 0:
+                cmd.extend(['--shifts', str(quality['shifts'])])
+            if quality['overlap'] > 0:
+                cmd.extend(['--overlap', str(quality['overlap'])])
+            if quality['format'] == 'mp3':
+                cmd.append('--mp3')
+            # GPU acceleration
+            if use_gpu:
+                cmd.extend(['--device', 'cuda'])
+            # Extra args
+            if extra_args:
+                cmd.extend(extra_args)
+            cmd.append(input_path)
+            return cmd
+
+        if mode == 'piano':
+            # Try two-stem first, then full separation
+            result = subprocess.run(
+                build_demucs_cmd(['--two-stems=vocals']),
+                capture_output=True, text=True
+            )
 
             if result.returncode != 0:
                 # Fallback to full separation
-                result = subprocess.run([
-                    sys.executable, '-m', 'demucs',
-                    '-n', 'htdemucs',
-                    '--mp3',
-                    '-o', demucs_out,
-                    input_path
-                ], capture_output=True, text=True)
+                result = subprocess.run(
+                    build_demucs_cmd(),
+                    capture_output=True, text=True
+                )
 
                 if result.returncode != 0:
                     print(f"Error: Demucs failed: {result.stderr}", file=sys.stderr)
@@ -79,13 +144,10 @@ def main():
 
         elif mode == 'drums':
             # Full separation to get drums
-            result = subprocess.run([
-                sys.executable, '-m', 'demucs',
-                '-n', 'htdemucs',
-                '--mp3',
-                '-o', demucs_out,
-                input_path
-            ], capture_output=True, text=True)
+            result = subprocess.run(
+                build_demucs_cmd(),
+                capture_output=True, text=True
+            )
 
             if result.returncode != 0:
                 print(f"Error: Demucs failed: {result.stderr}", file=sys.stderr)
@@ -105,13 +167,10 @@ def main():
 
         else:  # mode == 'full'
             # Full separation to get all stems
-            result = subprocess.run([
-                sys.executable, '-m', 'demucs',
-                '-n', 'htdemucs',
-                '--mp3',
-                '-o', demucs_out,
-                input_path
-            ], capture_output=True, text=True)
+            result = subprocess.run(
+                build_demucs_cmd(),
+                capture_output=True, text=True
+            )
 
             if result.returncode != 0:
                 print(f"Error: Demucs failed: {result.stderr}", file=sys.stderr)
@@ -187,11 +246,12 @@ def find_and_copy_stem(demucs_out, input_name, output_dir, stem_names, output_na
     """
     # Build list of possible paths
     possible_paths = []
-    for stem in stem_names:
-        for ext in ['.mp3', '.wav']:
-            possible_paths.append(
-                os.path.join(demucs_out, 'htdemucs', input_name, f'{stem}{ext}')
-            )
+    for model_name in ['htdemucs_ft', 'htdemucs']:  # Check both models
+        for stem in stem_names:
+            for ext in ['.mp3', '.wav']:
+                possible_paths.append(
+                    os.path.join(demucs_out, model_name, input_name, f'{stem}{ext}')
+                )
 
     # Try each path
     for src_path in possible_paths:
