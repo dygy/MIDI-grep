@@ -17,17 +17,16 @@ import os
 # Audio settings
 SAMPLE_RATE = 44100
 
-# Default mix levels - tuned to match original frequency distribution
-# Voice naming is confusing: "mid" voice has low-mid notes, "high" voice has mid notes
-# Original: 7% bass, 20% low-mid, 48% mid, 13% high-mid, 5% high
+# Default mix levels - will be overridden by AI analysis (ai_params.json)
+# These are fallback values if AI params not available
 DEFAULT_MIX = {
-    'kick_gain': 0.15,    # Minimal drums
-    'snare_gain': 0.2,
-    'hh_gain': 0.25,
-    'bass_gain': 0.08,    # Very low bass
-    'vox_gain': 0.3,      # "mid" voice produces 200-500Hz (reduce this)
+    'kick_gain': 0.3,
+    'snare_gain': 0.3,
+    'hh_gain': 0.3,
+    'bass_gain': 0.2,
+    'vox_gain': 0.4,
     'stab_gain': 0.3,
-    'lead_gain': 1.2,     # "high" voice produces 500-2000Hz (BOOST - this is the real mid!)
+    'lead_gain': 0.8,
 }
 
 def parse_strudel_code(code):
@@ -162,17 +161,17 @@ def note_to_freq(note_str):
     return freq
 
 def generate_kick(duration, sample_rate=SAMPLE_RATE):
-    """Generate a kick drum sound - tuned for less sub-bass to match piano stems."""
+    """Generate a kick drum sound."""
     t = np.linspace(0, duration, int(sample_rate * duration))
 
-    # Pitch envelope (starts higher, base pitch raised to reduce sub-bass)
-    pitch_env = 200 * np.exp(-40 * t) + 80  # Higher base pitch (80Hz vs 50Hz)
+    # Pitch envelope (starts high, drops to base)
+    pitch_env = 200 * np.exp(-40 * t) + 60
 
     # Generate sine with pitch envelope
     phase = np.cumsum(pitch_env) / sample_rate * 2 * np.pi
     kick = np.sin(phase)
 
-    # Amplitude envelope - shorter decay
+    # Amplitude envelope
     amp_env = np.exp(-12 * t)
     kick *= amp_env
 
@@ -180,13 +179,8 @@ def generate_kick(duration, sample_rate=SAMPLE_RATE):
     click = np.random.randn(int(sample_rate * 0.003)) * 0.4
     kick[:len(click)] += click[:len(kick[:len(click)])]
 
-    # High-pass filter to remove sub-bass
-    hpf_cutoff = 60 / (sample_rate / 2)
-    b_hp, a_hp = signal.butter(2, hpf_cutoff, 'high')
-    kick = signal.filtfilt(b_hp, a_hp, kick)
-
     # Light distortion
-    kick = np.tanh(kick * 1.5) * 0.5  # Reduced gain
+    kick = np.tanh(kick * 1.5) * 0.7
 
     return kick
 
@@ -229,21 +223,17 @@ def generate_hihat(duration, is_open=False, sample_rate=SAMPLE_RATE):
     return hihat
 
 def generate_bass(freq, duration, sample_rate=SAMPLE_RATE):
-    """Generate a bass sound (sawtooth with filter) - filtered to reduce sub-bass."""
+    """Generate a bass sound (sawtooth with filter)."""
     t = np.linspace(0, duration, int(sample_rate * duration))
 
-    # Sawtooth wave only - no sub-octave to reduce low frequencies
+    # Sawtooth wave with sub-octave
     saw = 2 * (t * freq % 1) - 1
-    bass = saw * 0.8
+    sub = np.sin(2 * np.pi * freq * 0.5 * t)  # Sub-octave
+    bass = saw * 0.6 + sub * 0.4
 
-    # Band-pass filter - remove sub-bass below 80Hz, cap at 250Hz
-    # This matches original stems which have almost no sub-bass energy
-    low_cutoff = 80 / (sample_rate / 2)
-    high_cutoff = min(freq * 2, 250) / (sample_rate / 2)
-    # Ensure cutoffs are valid (between 0 and 1)
-    low_cutoff = max(0.001, min(0.99, low_cutoff))
-    high_cutoff = max(low_cutoff + 0.01, min(0.99, high_cutoff))
-    b, a = signal.butter(2, [low_cutoff, high_cutoff], 'band')
+    # Low-pass filter
+    cutoff = min(freq * 3, 800) / (sample_rate / 2)
+    b, a = signal.butter(2, cutoff, 'low')
     bass = signal.filtfilt(b, a, bass)
 
     # Envelope
@@ -255,7 +245,7 @@ def generate_bass(freq, duration, sample_rate=SAMPLE_RATE):
         env[-release:] = np.linspace(1, 0, release)
 
     bass *= env
-    bass = np.tanh(bass * 1.2) * 0.3  # Reduced gain further
+    bass = np.tanh(bass * 1.5) * 0.6
 
     return bass
 
@@ -300,22 +290,39 @@ def generate_synth(freq, duration, waveform='square', sample_rate=SAMPLE_RATE):
     return wave
 
 def generate_bright_synth(freq, duration, sample_rate=SAMPLE_RATE):
-    """Generate a bright synth sound - sawtooth with more harmonics."""
+    """Generate a bright synth sound focused on 500-2000Hz mid range."""
     t = np.linspace(0, duration, int(sample_rate * duration))
 
-    # Sawtooth is naturally bright with rich harmonics
-    wave = 2 * (t * freq % 1) - 1
+    # Multiple oscillators at different octaves to fill mid range
+    wave = np.zeros_like(t)
 
-    # Higher cutoff for brighter sound (but still keep fundamental)
-    cutoff = min(freq * 6, 8000)
-    b, a = signal.butter(2, cutoff / (sample_rate / 2), 'low')
+    # Main frequency
+    wave += np.sin(2 * np.pi * freq * t) * 1.0
+
+    # Add harmonics that fall in the 500-2000Hz mid range
+    for harmonic in range(2, 8):
+        harmonic_freq = freq * harmonic
+        if 500 <= harmonic_freq <= 2000:
+            # Boost harmonics in the target range
+            wave += np.sin(2 * np.pi * harmonic_freq * t) * (0.6 / harmonic)
+        elif harmonic_freq < 500:
+            # Reduce sub-mid harmonics
+            wave += np.sin(2 * np.pi * harmonic_freq * t) * (0.2 / harmonic)
+        else:
+            # Reduce high harmonics
+            wave += np.sin(2 * np.pi * harmonic_freq * t) * (0.1 / harmonic)
+
+    # Band-pass filter to concentrate energy in 500-2000Hz
+    low_cut = 400 / (sample_rate / 2)
+    high_cut = 2500 / (sample_rate / 2)
+    b, a = signal.butter(2, [low_cut, high_cut], 'band')
     wave = signal.filtfilt(b, a, wave)
 
-    # ADSR envelope - slightly faster attack for brightness
-    attack = int(sample_rate * 0.005)
-    decay = int(sample_rate * 0.03)
-    sustain_level = 0.7
-    release = int(sample_rate * 0.05)
+    # ADSR envelope with longer sustain for more mid energy
+    attack = int(sample_rate * 0.01)
+    decay = int(sample_rate * 0.05)
+    sustain_level = 0.8  # Higher sustain
+    release = int(sample_rate * 0.1)
 
     env = np.ones(len(t)) * sustain_level
     if attack > 0 and attack < len(env):
@@ -325,7 +332,7 @@ def generate_bright_synth(freq, duration, sample_rate=SAMPLE_RATE):
     if release > 0 and release < len(env):
         env[-release:] = np.linspace(sustain_level, 0, release)
 
-    wave *= env * 0.4
+    wave *= env * 0.6  # Higher output level
 
     return wave
 

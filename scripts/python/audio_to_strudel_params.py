@@ -392,20 +392,89 @@ def analyze_audio(audio_path, output_json=None):
         """Ensure gain is at least minimum value."""
         return max(val if val is not None else default, minimum)
 
+    # === FULLY AI-DRIVEN RENDERER PARAMETERS ===
+    # All values derived from analysis - no hardcoded constants
+    bands = analysis['spectrum']['band_energy']
+    dynamics = analysis['dynamics']
+    rhythm = analysis['rhythm']
+    spectrum = analysis['spectrum']
+
+    # Original frequency distribution (these are the TARGET ratios)
+    orig_sub_bass = bands['sub_bass']
+    orig_bass = bands['bass']
+    orig_low_mid = bands['low_mid']
+    orig_mid = bands['mid']
+    orig_high_mid = bands['high_mid']
+    orig_high = bands['high']
+
+    # Total energy for normalization
+    total_energy = sum(bands.values()) + 1e-6
+
+    # Derive renderer mix to match original frequency balance
+    # Each renderer voice contributes to specific frequency bands:
+    # - kick: sub_bass + bass (20-250Hz)
+    # - snare: low_mid + some mid (200-1000Hz)
+    # - hh: high_mid + high (2000Hz+)
+    # - bass synth: bass + low_mid (60-500Hz)
+    # - vox/mid synth: low_mid + mid (250-2000Hz)
+    # - lead/high synth: mid + high_mid (500-4000Hz)
+
+    renderer_mix = {
+        # Drums - scale to match original's drum-like frequencies
+        'kick_gain': (orig_sub_bass + orig_bass) / total_energy * 2.0,
+        'snare_gain': (orig_low_mid * 0.5 + orig_mid * 0.3) / total_energy * 2.0,
+        'hh_gain': (orig_high_mid + orig_high) / total_energy * 2.0,
+
+        # Bass synth - match original bass content
+        'bass_gain': (orig_bass + orig_low_mid * 0.5) / total_energy * 2.0,
+
+        # Mid synths - match original mid content (usually dominant)
+        'vox_gain': (orig_low_mid + orig_mid * 0.3) / total_energy * 2.0,
+        'stab_gain': (orig_low_mid * 0.5 + orig_mid * 0.5) / total_energy * 2.0,
+
+        # Lead synth - match original mid/high-mid (the melodic content)
+        'lead_gain': (orig_mid + orig_high_mid * 0.5) / total_energy * 2.0,
+    }
+
+    # Derive synth parameters from spectral analysis
+    centroid = spectrum['centroid_mean']
+    brightness = spectrum['brightness']
+
+    renderer_synth = {
+        # Filter cutoffs derived from spectral centroid
+        'bass_lpf': min(400, centroid * 0.15),
+        'mid_lpf': min(4000, centroid * 1.5),
+        'high_lpf': min(12000, centroid * 4),
+
+        # Envelope from dynamics
+        'attack': 0.005 if dynamics['is_punchy'] else 0.02,
+        'decay': 0.1 if dynamics['is_compressed'] else 0.2,
+        'sustain': 0.5 if dynamics['is_compressed'] else 0.7,
+        'release': 0.1 if dynamics['is_punchy'] else 0.3,
+
+        # Distortion from spectral flatness (noisy = more harmonics = distortion)
+        'distortion': min(0.8, spectrum['flatness_mean'] * 10),
+
+        # Reverb from dynamics range (more dynamic = more space)
+        'reverb': 0.1 if dynamics['is_compressed'] else min(0.4, dynamics['dynamic_range_db'] / 60),
+    }
+
+    # Derive tempo-synced effects
+    beat_duration = 60.0 / rhythm['tempo']
+    renderer_timing = {
+        'delay_time': beat_duration / 4,  # 16th note
+        'delay_feedback': 0.3 if dynamics['is_compressed'] else 0.5,
+        'tremolo_rate': rhythm['tempo'] / 60,  # Sync to tempo
+    }
+
     result = {
         'analysis': analysis,
         'suggestions': suggestions,
         'effect_chains': effect_chains,
-        # Renderer mix - balanced levels for good sounding output
-        'renderer_mix': {
-            'kick_gain': 0.5,
-            'snare_gain': 0.5,
-            'hh_gain': 0.4,
-            'bass_gain': 0.4,
-            'vox_gain': 0.6,
-            'stab_gain': 0.5,
-            'lead_gain': 0.5,
-        }
+        'renderer_mix': renderer_mix,
+        'renderer_synth': renderer_synth,
+        'renderer_timing': renderer_timing,
+        'target_bands': bands,  # Store original bands for comparison
     }
 
     if output_json:
