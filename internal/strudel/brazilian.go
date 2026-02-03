@@ -110,33 +110,34 @@ func (g *BrazilianFunkGenerator) Generate(analysisResult *analysis.Result) strin
 		r, third, fifth, fifth, r, third, r, third, fifth, r))
 
 	// ========== EFFECTS ==========
+	// Tuned for better frequency balance (based on audio analysis)
 	sb.WriteString("// ===== EFFECTS =====\n")
 
-	// Heavy 808 kick
-	sb.WriteString("let kickFx = p => p.bank(\"RolandTR808\").gain(1.4).lpf(100).distort(0.6)\n")
-	sb.WriteString("let snareFx = p => p.bank(\"RolandTR808\").gain(1.1).room(0.08).hpf(200)\n")
-	sb.WriteString("let hhFx = p => p.bank(\"RolandTR808\").gain(0.5).hpf(8000)\n\n")
+	// Drums - balanced for mix
+	sb.WriteString("let kickFx = p => p.bank(\"RolandTR808\").gain(0.9).lpf(120).distort(0.4)\n")
+	sb.WriteString("let snareFx = p => p.bank(\"RolandTR808\").gain(0.85).room(0.08).hpf(200)\n")
+	sb.WriteString("let hhFx = p => p.bank(\"RolandTR808\").gain(0.9).hpf(6000)\n\n")
 
-	// Fat 808 bass with slide
+	// 808 bass - reduced to balance with mids
 	sb.WriteString("let bassFx = p => p.sound(\"sawtooth\")\n")
-	sb.WriteString("  .lpf(80).gain(1.8).distort(0.7)\n")
+	sb.WriteString("  .lpf(100).gain(0.6).distort(0.4)\n")
 	sb.WriteString("  .attack(0.001).decay(0.2).sustain(0.4).release(0.15)\n")
 	sb.WriteString("  .slide(0.1)\n\n")
 
-	// Vocal chop sound
+	// Vocal chop - increased for mid presence
 	sb.WriteString("let voxFx = p => p.sound(\"square\")\n")
-	sb.WriteString("  .lpf(2500).gain(0.45).room(0.12)\n")
+	sb.WriteString("  .lpf(3500).gain(0.75).room(0.12)\n")
 	sb.WriteString("  .attack(0.005).decay(0.06).sustain(0.5).release(0.04)\n")
-	sb.WriteString("  .phaser(0.4).phaserdepth(0.6).crush(12)\n\n")
+	sb.WriteString("  .phaser(0.3).phaserdepth(0.4).crush(14)\n\n")
 
-	// Stab sound
+	// Stab - increased for mid presence
 	sb.WriteString("let stabFx = p => p.sound(\"sawtooth\")\n")
-	sb.WriteString("  .lpf(3000).gain(0.35).distort(0.25).room(0.15)\n")
-	sb.WriteString("  .attack(0.003).decay(0.08).sustain(0.2).release(0.06)\n\n")
+	sb.WriteString("  .lpf(4000).gain(0.55).distort(0.2).room(0.15)\n")
+	sb.WriteString("  .attack(0.003).decay(0.08).sustain(0.3).release(0.06)\n\n")
 
-	// Lead sound
+	// Lead - boosted highs
 	sb.WriteString("let leadFx = p => p.sound(\"square\")\n")
-	sb.WriteString("  .lpf(5000).gain(0.3).room(0.2)\n")
+	sb.WriteString("  .lpf(6000).gain(0.45).room(0.2)\n")
 	sb.WriteString("  .attack(0.008).decay(0.1).sustain(0.4).release(0.1)\n")
 	sb.WriteString("  .delay(0.25).delaytime(0.375).delayfeedback(0.35)\n\n")
 

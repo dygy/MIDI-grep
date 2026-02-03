@@ -2,6 +2,7 @@
 """
 Render Strudel-style patterns to WAV audio.
 Synthesizes drums, bass, and melodic content.
+Now with adjustable mix parameters based on analysis.
 """
 
 import argparse
@@ -15,12 +16,24 @@ import os
 # Audio settings
 SAMPLE_RATE = 44100
 
+# Default mix levels - these can be overridden by analysis feedback
+DEFAULT_MIX = {
+    'kick_gain': 0.35,      # Reduced from 0.5
+    'snare_gain': 0.4,
+    'hh_gain': 0.55,        # Increased from 0.3 (was missing highs)
+    'bass_gain': 0.15,      # Reduced from 0.5 (was 20x too loud)
+    'vox_gain': 0.6,        # Increased (was missing mids)
+    'stab_gain': 0.5,       # Increased (was missing mids)
+    'lead_gain': 0.45,      # Increased (was missing highs)
+}
+
 def parse_strudel_code(code):
     """Extract patterns and BPM from Strudel code."""
     result = {
         'bpm': 120,
         'patterns': {},
-        'duration_bars': 16
+        'duration_bars': 16,
+        'mix': DEFAULT_MIX.copy()
     }
 
     # Extract BPM from setcps
@@ -32,6 +45,14 @@ def parse_strudel_code(code):
     let_patterns = re.findall(r'let\s+(\w+)\s*=\s*["`]([^"`]+)["`]', code)
     for name, pattern in let_patterns:
         result['patterns'][name] = pattern
+
+    # Try to extract gain values from effect chains
+    for pattern_type in ['kick', 'snare', 'hh', 'bass', 'vox', 'stab', 'lead']:
+        gain_match = re.search(rf'{pattern_type}Fx.*?\.gain\(([0-9.]+)\)', code)
+        if gain_match:
+            # Scale the gain - Strudel uses 0-2+, we use 0-1
+            strudel_gain = float(gain_match.group(1))
+            result['mix'][f'{pattern_type}_gain'] = min(strudel_gain / 2.0, 1.0)
 
     return result
 
@@ -173,7 +194,7 @@ def generate_hihat(duration, is_open=False, sample_rate=SAMPLE_RATE):
     decay = 5 if is_open else 30
     env = np.exp(-decay * t)
 
-    hihat = noise * env * 0.3
+    hihat = noise * env * 0.5  # Increased base level
 
     return hihat
 
@@ -189,8 +210,8 @@ def generate_bass(freq, duration, sample_rate=SAMPLE_RATE):
 
     bass = saw * 0.6 + sub * 0.4
 
-    # Low-pass filter
-    cutoff = min(freq * 3, 500)
+    # Low-pass filter - reduced cutoff for less harsh bass
+    cutoff = min(freq * 2, 300)
     b, a = signal.butter(2, cutoff / (sample_rate / 2), 'low')
     bass = signal.filtfilt(b, a, bass)
 
@@ -203,7 +224,7 @@ def generate_bass(freq, duration, sample_rate=SAMPLE_RATE):
         env[-release:] = np.linspace(1, 0, release)
 
     bass *= env
-    bass = np.tanh(bass * 2) * 0.7  # Distortion
+    bass = np.tanh(bass * 1.5) * 0.5  # Reduced gain
 
     return bass
 
@@ -283,10 +304,15 @@ def render_pattern(events, bar_duration, num_bars, sound_type='synth', sample_ra
 
     return audio
 
-def render_strudel_to_wav(code, output_path, duration_seconds=None):
+def render_strudel_to_wav(code, output_path, duration_seconds=None, mix_overrides=None):
     """Render Strudel code to WAV file."""
     parsed = parse_strudel_code(code)
     bpm = parsed['bpm']
+    mix = parsed['mix']
+
+    # Apply any mix overrides (from comparison feedback)
+    if mix_overrides:
+        mix.update(mix_overrides)
 
     # Calculate bar duration
     bar_duration = 60.0 / bpm * 4  # 4 beats per bar
@@ -301,6 +327,7 @@ def render_strudel_to_wav(code, output_path, duration_seconds=None):
     total_samples = int(SAMPLE_RATE * total_duration)
 
     print(f"Rendering: BPM={bpm}, {num_bars} bars, {total_duration:.1f}s")
+    print(f"Mix levels: kick={mix['kick_gain']:.2f}, bass={mix['bass_gain']:.2f}, hh={mix['hh_gain']:.2f}, vox={mix['vox_gain']:.2f}")
 
     # Initialize stereo output
     left = np.zeros(total_samples)
@@ -308,41 +335,48 @@ def render_strudel_to_wav(code, output_path, duration_seconds=None):
 
     patterns = parsed['patterns']
 
-    # Render each pattern type
+    # Render each pattern type with appropriate gain
     for name, pattern in patterns.items():
         events = parse_mini_notation(pattern)
         if not events:
             continue
 
-        # Determine sound type and panning
+        # Determine sound type and panning based on pattern name
         if 'kick' in name or name.startswith('kick'):
             audio = render_pattern(events, bar_duration, num_bars, 'drum')
-            left += audio * 0.5
-            right += audio * 0.5
+            gain = mix['kick_gain']
+            left += audio * gain
+            right += audio * gain
         elif 'snare' in name or name.startswith('snare'):
             audio = render_pattern(events, bar_duration, num_bars, 'drum')
-            left += audio * 0.5
-            right += audio * 0.5
+            gain = mix['snare_gain']
+            left += audio * gain
+            right += audio * gain
         elif 'hh' in name or 'hat' in name:
             audio = render_pattern(events, bar_duration, num_bars, 'drum')
-            left += audio * 0.4
-            right += audio * 0.6
+            gain = mix['hh_gain']
+            left += audio * gain * 0.8  # Slight pan
+            right += audio * gain * 1.2
         elif 'bass' in name:
             audio = render_pattern(events, bar_duration, num_bars, 'bass')
-            left += audio * 0.5
-            right += audio * 0.5
+            gain = mix['bass_gain']
+            left += audio * gain
+            right += audio * gain
         elif 'vox' in name or 'vocal' in name:
             audio = render_pattern(events, bar_duration, num_bars, 'synth')
-            left += audio * 0.6
-            right += audio * 0.4
+            gain = mix['vox_gain']
+            left += audio * gain * 1.1
+            right += audio * gain * 0.9
         elif 'stab' in name:
             audio = render_pattern(events, bar_duration, num_bars, 'synth')
-            left += audio * 0.45
-            right += audio * 0.55
+            gain = mix['stab_gain']
+            left += audio * gain * 0.9
+            right += audio * gain * 1.1
         elif 'lead' in name:
             audio = render_pattern(events, bar_duration, num_bars, 'synth')
-            left += audio * 0.4
-            right += audio * 0.6
+            gain = mix['lead_gain']
+            left += audio * gain * 0.8
+            right += audio * gain * 1.2
 
     # Mix to stereo
     stereo = np.column_stack([left, right])
@@ -361,11 +395,23 @@ def render_strudel_to_wav(code, output_path, duration_seconds=None):
 
     return output_path
 
+def load_comparison_feedback(cache_dir):
+    """Load previous comparison results to adjust mix."""
+    feedback_file = os.path.join(cache_dir, 'comparison_feedback.json')
+    if os.path.exists(feedback_file):
+        with open(feedback_file, 'r') as f:
+            return json.load(f)
+    return None
+
 def main():
     parser = argparse.ArgumentParser(description='Render Strudel patterns to WAV')
     parser.add_argument('input', help='Input Strudel file or - for stdin')
     parser.add_argument('-o', '--output', default='output.wav', help='Output WAV file')
     parser.add_argument('-d', '--duration', type=float, help='Duration in seconds')
+    parser.add_argument('--feedback', help='Path to comparison feedback JSON')
+    parser.add_argument('--bass-gain', type=float, help='Override bass gain (0-1)')
+    parser.add_argument('--hh-gain', type=float, help='Override hi-hat gain (0-1)')
+    parser.add_argument('--vox-gain', type=float, help='Override vox gain (0-1)')
 
     args = parser.parse_args()
 
@@ -377,7 +423,28 @@ def main():
         with open(args.input, 'r') as f:
             code = f.read()
 
-    render_strudel_to_wav(code, args.output, args.duration)
+    # Build mix overrides from command line
+    mix_overrides = {}
+    if args.bass_gain is not None:
+        mix_overrides['bass_gain'] = args.bass_gain
+    if args.hh_gain is not None:
+        mix_overrides['hh_gain'] = args.hh_gain
+    if args.vox_gain is not None:
+        mix_overrides['vox_gain'] = args.vox_gain
+
+    # Load AI-derived feedback if provided
+    if args.feedback and os.path.exists(args.feedback):
+        print(f"Loading AI parameters from: {args.feedback}")
+        with open(args.feedback, 'r') as f:
+            feedback = json.load(f)
+            # Use the renderer_mix from AI analysis
+            if 'renderer_mix' in feedback:
+                ai_mix = feedback['renderer_mix']
+                print(f"AI-derived mix levels: {ai_mix}")
+                for key, value in ai_mix.items():
+                    mix_overrides[key] = value
+
+    render_strudel_to_wav(code, args.output, args.duration, mix_overrides if mix_overrides else None)
 
 if __name__ == '__main__':
     main()

@@ -131,6 +131,7 @@ var (
 	chordMode     bool
 	brazilianFunk bool
 	renderAudio   string // Output path for rendered WAV
+	compareAudio  bool   // Compare rendered with original
 
 	// serve flags
 	port int
@@ -181,6 +182,7 @@ func init() {
 	extractCmd.Flags().BoolVar(&chordMode, "chords", false, "Use chord-based generation (better for electronic/non-piano music)")
 	extractCmd.Flags().BoolVar(&brazilianFunk, "brazilian-funk", false, "Use Brazilian funk/phonk mode (tamborzão drums, 808 bass)")
 	extractCmd.Flags().StringVar(&renderAudio, "render", "", "Render output to WAV (use 'auto' to save in cache dir)")
+	extractCmd.Flags().BoolVar(&compareAudio, "compare", false, "Compare rendered audio with original stems (requires --render)")
 
 	// Serve command flags
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to listen on")
@@ -347,6 +349,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	}
 
 	// Render audio if requested
+	var renderedPath string
 	if renderAudio != "" {
 		// Determine output path
 		audioPath := renderAudio
@@ -359,19 +362,147 @@ func runExtract(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		fmt.Printf("\nRendering audio to %s...\n", audioPath)
+		// AI Analysis: Analyze original audio to get optimal parameters
+		var feedbackPath string
+		if result.CacheDir != "" {
+			pianoStem := filepath.Join(result.CacheDir, "piano.wav")
+			if _, err := os.Stat(pianoStem); err == nil {
+				feedbackPath = filepath.Join(result.CacheDir, "ai_params.json")
+				fmt.Println("\nAnalyzing original audio for optimal Strudel parameters...")
+				if err := analyzeAudioForParams(pianoStem, feedbackPath, findScriptsDir()); err != nil {
+					fmt.Printf("Warning: AI analysis failed: %v\n", err)
+					feedbackPath = ""
+				}
+			}
+		}
+
+		fmt.Printf("Rendering audio to %s...\n", audioPath)
 		// Use 16 bars by default
 		duration := 0.0
-		if err := renderStrudelToWav(result.StrudelCode, audioPath, duration); err != nil {
+		if err := renderStrudelToWavWithFeedback(result.StrudelCode, audioPath, duration, feedbackPath); err != nil {
 			fmt.Printf("Warning: Audio render failed: %v\n", err)
 		} else {
 			fmt.Printf("Audio rendered: %s\n", audioPath)
+			renderedPath = audioPath
+		}
+	}
+
+	// Compare rendered audio with original stems
+	if compareAudio && renderedPath != "" && result.CacheDir != "" {
+		fmt.Println("\n--- AUDIO COMPARISON ---")
+
+		// Compare with piano/melodic stem
+		pianoPath := filepath.Join(result.CacheDir, "piano.wav")
+		if _, err := os.Stat(pianoPath); err == nil {
+			fmt.Println("\nComparing with piano/melodic stem:")
+			if err := runAudioComparison(pianoPath, renderedPath, findScriptsDir()); err != nil {
+				fmt.Printf("Warning: Comparison failed: %v\n", err)
+			}
+		}
+
+		// Compare with drums stem
+		drumsPath := filepath.Join(result.CacheDir, "drums.wav")
+		if _, err := os.Stat(drumsPath); err == nil {
+			fmt.Println("\nComparing with drums stem:")
+			if err := runAudioComparison(drumsPath, renderedPath, findScriptsDir()); err != nil {
+				fmt.Printf("Warning: Comparison failed: %v\n", err)
+			}
 		}
 	}
 
 	fmt.Println("\nDone! Strudel code generated successfully.")
 
 	return nil
+}
+
+// analyzeAudioForParams calls the AI analyzer to get optimal Strudel parameters
+func analyzeAudioForParams(audioPath, outputJSON, scriptsDir string) error {
+	analyzeScript := filepath.Join(scriptsDir, "audio_to_strudel_params.py")
+	if _, err := os.Stat(analyzeScript); os.IsNotExist(err) {
+		return fmt.Errorf("audio_to_strudel_params.py not found")
+	}
+
+	python := findPython(scriptsDir)
+	cmd := exec.Command(python, analyzeScript, audioPath, "-o", outputJSON)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// renderStrudelToWavWithFeedback renders with AI-derived parameters
+func renderStrudelToWavWithFeedback(code, outputPath string, duration float64, feedbackPath string) error {
+	// Find scripts directory
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("find executable: %w", err)
+	}
+	exeDir := filepath.Dir(exePath)
+
+	// Try different script locations
+	scriptPaths := []string{
+		filepath.Join(exeDir, "..", "scripts", "python", "render_audio.py"),
+		filepath.Join(exeDir, "scripts", "python", "render_audio.py"),
+		"scripts/python/render_audio.py",
+	}
+
+	var scriptPath string
+	for _, p := range scriptPaths {
+		if _, err := os.Stat(p); err == nil {
+			scriptPath = p
+			break
+		}
+	}
+
+	if scriptPath == "" {
+		return fmt.Errorf("render_audio.py not found")
+	}
+
+	// Write code to temp file
+	tmpFile, err := os.CreateTemp("", "strudel-*.txt")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(code); err != nil {
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	tmpFile.Close()
+
+	// Find Python
+	pythonPaths := []string{
+		filepath.Join(exeDir, "..", "scripts", "python", ".venv", "bin", "python3"),
+		filepath.Join(exeDir, "scripts", "python", ".venv", "bin", "python3"),
+		"scripts/python/.venv/bin/python3",
+		"python3",
+	}
+
+	var pythonPath string
+	for _, p := range pythonPaths {
+		if _, err := os.Stat(p); err == nil {
+			pythonPath = p
+			break
+		}
+	}
+
+	if pythonPath == "" {
+		pythonPath = "python3"
+	}
+
+	// Run render script with feedback
+	args := []string{scriptPath, tmpFile.Name(), "-o", outputPath}
+	if duration > 0 {
+		args = append(args, "-d", fmt.Sprintf("%.1f", duration))
+	}
+	if feedbackPath != "" {
+		args = append(args, "--feedback", feedbackPath)
+	}
+
+	cmd := exec.Command(pythonPath, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
 }
 
 // renderStrudelToWav calls the Python script to render Strudel code to WAV
@@ -603,5 +734,21 @@ func runPythonScript(python string, args []string) error {
 	cmd := exec.Command(python, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// runAudioComparison runs the compare_audio.py script
+func runAudioComparison(originalPath, renderedPath, scriptsDir string) error {
+	compareScript := filepath.Join(scriptsDir, "compare_audio.py")
+	if _, err := os.Stat(compareScript); os.IsNotExist(err) {
+		return fmt.Errorf("compare_audio.py not found at %s", compareScript)
+	}
+
+	python := findPython(scriptsDir)
+
+	cmd := exec.Command(python, compareScript, originalPath, renderedPath, "-d", "30")
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
 	return cmd.Run()
 }
