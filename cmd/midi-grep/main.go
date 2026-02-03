@@ -7,7 +7,6 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
-	"strings"
 	"syscall"
 	"time"
 
@@ -130,8 +129,11 @@ var (
 	noCache       bool
 	chordMode     bool
 	brazilianFunk bool
+	genreOverride string // Manual genre override (brazilian_funk, brazilian_phonk, retro_wave, etc.)
+	useDeepGenre  bool   // Use deep learning for genre detection
 	renderAudio   string // Output path for rendered WAV
 	compareAudio  bool   // Compare rendered with original
+	stemQuality   string // Stem separation quality (fast, normal, high, best)
 
 	// serve flags
 	port int
@@ -181,8 +183,11 @@ func init() {
 	extractCmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip stem cache (force fresh extraction)")
 	extractCmd.Flags().BoolVar(&chordMode, "chords", false, "Use chord-based generation (better for electronic/non-piano music)")
 	extractCmd.Flags().BoolVar(&brazilianFunk, "brazilian-funk", false, "Use Brazilian funk/phonk mode (tamborzão drums, 808 bass)")
-	extractCmd.Flags().StringVar(&renderAudio, "render", "", "Render output to WAV (use 'auto' to save in cache dir)")
+	extractCmd.Flags().StringVar(&genreOverride, "genre", "", "Override genre detection (brazilian_funk, brazilian_phonk, retro_wave, trance, house, lofi)")
+	extractCmd.Flags().BoolVar(&useDeepGenre, "deep-genre", false, "Use deep learning (CLAP) for genre detection")
+	extractCmd.Flags().StringVar(&renderAudio, "render", "auto", "Render output to WAV ('auto' saves in cache dir, 'none' to disable)")
 	extractCmd.Flags().BoolVar(&compareAudio, "compare", false, "Compare rendered audio with original stems (requires --render)")
+	extractCmd.Flags().StringVar(&stemQuality, "quality", "normal", "Stem separation quality: fast, normal, high (better, slower), best (highest, slowest)")
 
 	// Serve command flags
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to listen on")
@@ -232,10 +237,44 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	actualInput := inputPath
 	var tempDir string
 	var cachedStemsPath string
+	var trackTitle string
 
 	if inputURL != "" {
 		if !audio.IsYouTubeURL(inputURL) {
 			return fmt.Errorf("invalid YouTube URL: %s", inputURL)
+		}
+
+		// Get track title from YouTube with spinner
+		downloader := audio.NewYouTubeDownloader()
+		fmt.Print("[0/5] Fetching track info...")
+
+		// Start spinner in background
+		spinnerDone := make(chan bool)
+		go func() {
+			spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+			i := 0
+			for {
+				select {
+				case <-spinnerDone:
+					return
+				default:
+					fmt.Printf("\r[0/5] Fetching track info... %s", spinner[i%len(spinner)])
+					i++
+					time.Sleep(100 * time.Millisecond)
+				}
+			}
+		}()
+
+		titleCtx, titleCancel := context.WithTimeout(ctx, 30*time.Second)
+		title, err := downloader.GetVideoTitle(titleCtx, inputURL)
+		titleCancel()
+		spinnerDone <- true
+
+		if err == nil && title != "" {
+			trackTitle = title
+			fmt.Printf("\r[0/5] Track: %s\n", trackTitle)
+		} else {
+			fmt.Print("\r[0/5] Fetching track info... done\n")
 		}
 
 		// Check cache before downloading
@@ -243,11 +282,39 @@ func runExtract(cmd *cobra.Command, args []string) error {
 			stemCache, err := cache.NewStemCache()
 			if err == nil {
 				cacheKey := cache.KeyForURL(inputURL)
-				if cached, ok := stemCache.Get(cacheKey); ok {
-					fmt.Printf("[0/5] Using cached stems (key: %s)\n", cacheKey[:8])
-					cachedStemsPath = filepath.Dir(cached.PianoPath)
-					if cachedStemsPath == "" && cached.DrumsPath != "" {
-						cachedStemsPath = filepath.Dir(cached.DrumsPath)
+				cached, ok := stemCache.Get(cacheKey)
+
+				// If not found by URL key but we have track title, try by track name
+				// (folder may have been renamed from yt_xxx to track name)
+				if !ok && trackTitle != "" {
+					trackFolderName := cache.FolderNameForTrack(trackTitle, cache.ExtractVideoID(inputURL))
+					if cachedByName, okByName := stemCache.Get(trackFolderName); okByName {
+						cached = cachedByName
+						cacheKey = trackFolderName
+						ok = true
+					}
+				}
+
+				if ok {
+					displayName := cacheKey[:8]
+					if cached.TrackName != "" {
+						displayName = cached.TrackName
+					} else if trackTitle != "" {
+						// Update metadata and rename folder for existing cache entry
+						displayName = trackTitle
+						newKey, _ := stemCache.UpdateTrackMetadata(cacheKey, trackTitle, inputURL)
+						if newKey != cacheKey {
+							// Folder was renamed, update paths
+							cacheKey = newKey
+							cached, _ = stemCache.Get(cacheKey)
+						}
+					}
+					fmt.Printf("\r[0/5] Using cached stems (%s)\n", displayName)
+					if cached != nil {
+						cachedStemsPath = filepath.Dir(cached.MelodicPath)
+						if cachedStemsPath == "" && cached.DrumsPath != "" {
+							cachedStemsPath = filepath.Dir(cached.DrumsPath)
+						}
 					}
 				}
 			}
@@ -255,7 +322,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 
 		// Only download if not cached
 		if cachedStemsPath == "" {
-			fmt.Println("[0/5] Downloading from YouTube...")
+			fmt.Print("[0/5] Downloading from YouTube...")
 
 			var err error
 			tempDir, err = os.MkdirTemp("", "midi-grep-*")
@@ -264,15 +331,34 @@ func runExtract(cmd *cobra.Command, args []string) error {
 			}
 			defer os.RemoveAll(tempDir)
 
-			downloader := audio.NewYouTubeDownloader()
+			// Start download spinner
+			downloadSpinnerDone := make(chan bool)
+			go func() {
+				spinner := []string{"⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"}
+				i := 0
+				for {
+					select {
+					case <-downloadSpinnerDone:
+						return
+					default:
+						fmt.Printf("\r[0/5] Downloading from YouTube... %s", spinner[i%len(spinner)])
+						i++
+						time.Sleep(100 * time.Millisecond)
+					}
+				}
+			}()
+
 			downloadCtx, downloadCancel := context.WithTimeout(ctx, 5*time.Minute)
 			defer downloadCancel()
 
 			actualInput, err = downloader.Download(downloadCtx, inputURL, tempDir)
+			downloadSpinnerDone <- true
+
 			if err != nil {
+				fmt.Println()
 				return fmt.Errorf("download failed: %w", err)
 			}
-			fmt.Println("       Download complete")
+			fmt.Println("\r[0/5] Downloading from YouTube... done")
 		}
 	}
 
@@ -285,6 +371,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	cfg := pipeline.DefaultConfig()
 	cfg.InputPath = actualInput
 	cfg.InputURL = inputURL // For cache key generation
+	cfg.TrackTitle = trackTitle
 	cfg.CachedStemsDir = cachedStemsPath
 	cfg.OutputPath = outputPath
 	cfg.MIDIOutputPath = midiOutput
@@ -298,7 +385,9 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	cfg.Arrange = arrange
 	cfg.ChordMode = chordMode
 	cfg.BrazilianFunk = brazilianFunk
+	cfg.GenreOverride = genreOverride
 	cfg.UseCache = !noCache
+	cfg.StemQuality = stemQuality
 
 	result, err := orch.Execute(ctx, cfg)
 	if err != nil {
@@ -306,56 +395,43 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		return err
 	}
 
-	// Output Strudel code
+	// Get version directory from orchestrator result (it already saved the output)
+	var versionDir string
+	if result.CacheKey != "" && result.OutputVersion > 0 && !noCache {
+		stemCache, err := cache.NewStemCache()
+		if err == nil {
+			versionDir = stemCache.GetVersionDir(result.CacheKey, result.OutputVersion)
+		}
+	}
+
+	// Output Strudel code (only to file if specified, skip console when report is generated)
 	if outputPath != "" {
 		if err := os.WriteFile(outputPath, []byte(result.StrudelCode), 0644); err != nil {
 			return fmt.Errorf("write output: %w", err)
 		}
-		fmt.Printf("Output saved to: %s\n", outputPath)
-	} else {
+	} else if versionDir == "" {
+		// Only print code to console when no report is being generated
 		fmt.Println("\n" + result.StrudelCode)
 	}
 
-	// Show summary
-	fmt.Println("\nSummary:")
-	fmt.Printf("  BPM: %.0f", result.BPM)
-	if result.Key != "" {
-		fmt.Printf(", Key: %s", result.Key)
-	}
-	if result.TimeSignature != "" && result.TimeSignature != "4/4" {
-		fmt.Printf(", Time: %s", result.TimeSignature)
-	}
-	if result.SwingRatio > 1.1 {
-		fmt.Printf(", Swing: %.2f", result.SwingRatio)
+	// Show brief summary
+	fmt.Printf("  %d notes, %.0f BPM, %s", result.NotesRetained, result.BPM, result.Key)
+	if result.DrumHits > 0 {
+		fmt.Printf(", %d drum hits", result.DrumHits)
 	}
 	fmt.Println()
-	if result.NotesRetained > 0 {
-		fmt.Printf("  Notes: %d retained", result.NotesRetained)
-		if result.NotesRemoved > 0 {
-			fmt.Printf(", %d simplified", result.NotesRemoved)
-		}
-		fmt.Println()
-	}
-	if result.LoopDetected {
-		fmt.Printf("  Loop: %d bar(s) detected (%.0f%% confidence)\n", result.LoopBars, result.LoopConfidence*100)
-	}
-	if result.DrumHits > 0 {
-		fmt.Printf("  Drums: %d hits", result.DrumHits)
-		if len(result.DrumTypes) > 0 {
-			fmt.Printf(" (bd: %d, sd: %d, hh: %d)",
-				result.DrumTypes["bd"], result.DrumTypes["sd"], result.DrumTypes["hh"])
-		}
-		fmt.Println()
-	}
 
-	// Render audio if requested
+	// Render audio if requested (default: auto, use "none" to disable)
 	var renderedPath string
-	if renderAudio != "" {
-		// Determine output path
+	if renderAudio != "" && renderAudio != "none" {
+		fmt.Println("[6/7] Rendering audio preview...")
+
+		// Determine output path - save to version directory if available
 		audioPath := renderAudio
-		if renderAudio == "auto" || (result.CacheDir != "" && !filepath.IsAbs(renderAudio) && !strings.Contains(renderAudio, "/")) {
-			if result.CacheDir != "" {
-				// Save to cache directory with version
+		if renderAudio == "auto" {
+			if versionDir != "" {
+				audioPath = filepath.Join(versionDir, "render.wav")
+			} else if result.CacheDir != "" {
 				audioPath = filepath.Join(result.CacheDir, fmt.Sprintf("render_v%03d.wav", result.OutputVersion))
 			} else {
 				audioPath = "output.wav"
@@ -365,52 +441,98 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		// AI Analysis: Analyze original audio to get optimal parameters
 		var feedbackPath string
 		if result.CacheDir != "" {
-			pianoStem := filepath.Join(result.CacheDir, "piano.wav")
-			if _, err := os.Stat(pianoStem); err == nil {
-				feedbackPath = filepath.Join(result.CacheDir, "ai_params.json")
-				fmt.Println("\nAnalyzing original audio for optimal Strudel parameters...")
-				if err := analyzeAudioForParams(pianoStem, feedbackPath, findScriptsDir()); err != nil {
-					fmt.Printf("Warning: AI analysis failed: %v\n", err)
+			melodicStem := filepath.Join(result.CacheDir, "melodic.wav")
+			// Also check for legacy piano.wav
+			if _, err := os.Stat(melodicStem); os.IsNotExist(err) {
+				melodicStem = filepath.Join(result.CacheDir, "piano.wav")
+			}
+			if _, err := os.Stat(melodicStem); err == nil {
+				// Save AI params in version directory
+				aiParamsDir := versionDir
+				if aiParamsDir == "" {
+					aiParamsDir = result.CacheDir
+				}
+				feedbackPath = filepath.Join(aiParamsDir, "ai_params.json")
+				fmt.Println("       Analyzing audio for AI-driven mix parameters...")
+				if err := analyzeAudioForParams(melodicStem, feedbackPath, findScriptsDir()); err != nil {
+					fmt.Printf("       Warning: AI analysis failed: %v\n", err)
 					feedbackPath = ""
+				} else {
+					fmt.Println("       AI parameters extracted")
 				}
 			}
 		}
 
-		fmt.Printf("Rendering audio to %s...\n", audioPath)
-		// Use 16 bars by default
+		fmt.Printf("       Rendering to %s...\n", audioPath)
 		duration := 0.0
 		if err := renderStrudelToWavWithFeedback(result.StrudelCode, audioPath, duration, feedbackPath); err != nil {
-			fmt.Printf("Warning: Audio render failed: %v\n", err)
+			fmt.Printf("       Warning: Audio render failed: %v\n", err)
 		} else {
-			fmt.Printf("Audio rendered: %s\n", audioPath)
+			fmt.Printf("       Render complete: %s\n", audioPath)
 			renderedPath = audioPath
 		}
 	}
 
-	// Compare rendered audio with original stems
-	if compareAudio && renderedPath != "" && result.CacheDir != "" {
-		fmt.Println("\n--- AUDIO COMPARISON ---")
+	// Compare rendered audio with original stems and generate chart (automatic when render exists)
+	var comparisonChartPath string
+	if renderedPath != "" && result.CacheDir != "" {
+		fmt.Println("[+] Generating comparison chart...")
 
-		// Compare with piano/melodic stem
-		pianoPath := filepath.Join(result.CacheDir, "piano.wav")
-		if _, err := os.Stat(pianoPath); err == nil {
-			fmt.Println("\nComparing with piano/melodic stem:")
-			if err := runAudioComparison(pianoPath, renderedPath, findScriptsDir()); err != nil {
-				fmt.Printf("Warning: Comparison failed: %v\n", err)
-			}
+		// Get melodic stem path
+		melodicPath := filepath.Join(result.CacheDir, "melodic.wav")
+		if _, err := os.Stat(melodicPath); os.IsNotExist(err) {
+			melodicPath = filepath.Join(result.CacheDir, "piano.wav")
 		}
 
-		// Compare with drums stem
-		drumsPath := filepath.Join(result.CacheDir, "drums.wav")
-		if _, err := os.Stat(drumsPath); err == nil {
-			fmt.Println("\nComparing with drums stem:")
-			if err := runAudioComparison(drumsPath, renderedPath, findScriptsDir()); err != nil {
-				fmt.Printf("Warning: Comparison failed: %v\n", err)
+		if _, err := os.Stat(melodicPath); err == nil {
+			// Generate comparison chart
+			chartPath := filepath.Join(versionDir, "comparison.png")
+			if versionDir == "" {
+				chartPath = filepath.Join(result.CacheDir, "comparison.png")
+			}
+			if err := generateComparisonChart(melodicPath, renderedPath, chartPath, findScriptsDir()); err != nil {
+				fmt.Printf("       Warning: Chart generation failed: %v\n", err)
+			} else {
+				fmt.Printf("       Comparison chart: %s\n", chartPath)
+				comparisonChartPath = chartPath
 			}
 		}
 	}
 
-	fmt.Println("\nDone! Strudel code generated successfully.")
+	// Generate HTML report
+	var reportPath string
+	if versionDir != "" || result.CacheDir != "" {
+		reportDir := versionDir
+		if reportDir == "" {
+			reportDir = result.CacheDir
+		}
+		reportPath = filepath.Join(reportDir, "report.html")
+		if err := generateHTMLReport(result.CacheDir, reportDir, reportPath, findScriptsDir()); err != nil {
+			fmt.Printf("Warning: Report generation failed: %v\n", err)
+			reportPath = ""
+		}
+	}
+
+	// Final output - show report link as primary result
+	fmt.Println("")
+	fmt.Println("========================================")
+	if reportPath != "" {
+		fmt.Println("Done! Report generated:")
+		fmt.Printf("  file://%s\n", reportPath)
+		fmt.Println("")
+		fmt.Println("Open the report to:")
+		fmt.Println("  - Listen to original vs rendered audio")
+		fmt.Println("  - View frequency comparison chart")
+		fmt.Println("  - Copy Strudel code to clipboard")
+	} else {
+		fmt.Println("Done! Strudel code generated.")
+		if outputPath != "" {
+			fmt.Printf("Output: %s\n", outputPath)
+		}
+	}
+	fmt.Println("========================================")
+
+	_ = comparisonChartPath // silence unused warning
 
 	return nil
 }
@@ -575,6 +697,41 @@ func renderStrudelToWav(code, outputPath string, duration float64) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
+	return cmd.Run()
+}
+
+// generateComparisonChart generates a frequency comparison chart
+func generateComparisonChart(originalPath, renderedPath, outputPath, scriptsDir string) error {
+	script := filepath.Join(scriptsDir, "compare_audio.py")
+	if _, err := os.Stat(script); os.IsNotExist(err) {
+		return fmt.Errorf("compare_audio.py not found")
+	}
+
+	python := findPython(scriptsDir)
+	cmd := exec.Command(python, script, originalPath, renderedPath, "--chart", outputPath)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// generateHTMLReport generates an HTML report for the extraction
+func generateHTMLReport(cacheDir, versionDir, outputPath, scriptsDir string) error {
+	script := filepath.Join(scriptsDir, "generate_report.py")
+	if _, err := os.Stat(script); os.IsNotExist(err) {
+		return fmt.Errorf("generate_report.py not found")
+	}
+
+	python := findPython(scriptsDir)
+	args := []string{script, cacheDir}
+	if versionDir != "" && versionDir != cacheDir {
+		args = append(args, "-v", filepath.Base(versionDir)[1:]) // strip 'v' prefix
+	}
+	if outputPath != "" {
+		args = append(args, "-o", outputPath)
+	}
+	cmd := exec.Command(python, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 

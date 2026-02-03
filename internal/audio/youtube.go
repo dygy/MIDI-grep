@@ -107,6 +107,7 @@ func (d *YouTubeDownloader) checkYtDlp() error {
 // GetVideoTitle fetches the video title for display
 func (d *YouTubeDownloader) GetVideoTitle(ctx context.Context, url string) (string, error) {
 	cmd := exec.CommandContext(ctx, "yt-dlp",
+		"--no-playlist", // Only get title for single video, not entire playlist
 		"--get-title",
 		"--no-warnings",
 		url,

@@ -175,8 +175,8 @@ def analyze_rhythm(y, sr):
         'tempo': float(tempo),
         'beat_count': len(beats),
         'rhythm_regularity': float(np.mean(np.max(tempogram, axis=0))),
-        'swing_ratio': swing_ratio,
-        'has_swing': swing_ratio > 1.15
+        'swing_ratio': float(swing_ratio),
+        'has_swing': bool(swing_ratio > 1.15)
     }
 
 def analyze_timbre(y, sr):
@@ -255,7 +255,7 @@ def suggest_strudel_params(analysis):
         suggestions['bass']['lpf'] = 400  # Lighter bass
         suggestions['bass']['distort'] = 0.2
 
-    suggestions['bass']['gain'] = bass_energy  # Actual value, not capped
+    suggestions['bass']['gain'] = max(bass_energy, 0.15)  # Floor at 0.15 to prevent silence
     suggestions['bass']['attack'] = 0.001
     suggestions['bass']['decay'] = 0.15
     suggestions['bass']['sustain'] = 0.5
@@ -263,7 +263,7 @@ def suggest_strudel_params(analysis):
 
     # === MID VOICE ===
     suggestions['mid']['lpf'] = 4000 if spectrum['brightness'] == 'bright' else 2500
-    suggestions['mid']['gain'] = mid_energy  # Actual value
+    suggestions['mid']['gain'] = max(mid_energy, 0.4)  # Floor at 0.4 to prevent weak mids
     suggestions['mid']['room'] = 0.2 if mid_energy > 0.2 else 0.1
 
     if timbre['is_tonal']:
@@ -278,7 +278,7 @@ def suggest_strudel_params(analysis):
 
     # === HIGH VOICE ===
     suggestions['high']['lpf'] = 8000 if spectrum['brightness'] == 'bright' else 5000
-    suggestions['high']['gain'] = high_energy  # Actual value
+    suggestions['high']['gain'] = max(high_energy, 0.3)  # Floor at 0.3 to prevent weak highs
     suggestions['high']['room'] = 0.3
     suggestions['high']['delay'] = 0.2 if high_energy > 0.1 else 0
     suggestions['high']['delaytime'] = 60 / rhythm['tempo'] / 4  # Sixteenth note
@@ -387,18 +387,24 @@ def analyze_audio(audio_path, output_json=None):
     for voice in ['bass', 'mid', 'high', 'drums']:
         effect_chains[voice] = generate_effect_chain(voice, suggestions[voice])
 
+    # Apply minimum gain floors to prevent silence
+    def floor_gain(val, minimum, default):
+        """Ensure gain is at least minimum value."""
+        return max(val if val is not None else default, minimum)
+
     result = {
         'analysis': analysis,
         'suggestions': suggestions,
         'effect_chains': effect_chains,
+        # Renderer mix - balanced levels for good sounding output
         'renderer_mix': {
-            'kick_gain': suggestions['drums'].get('gain', 0.5),
-            'snare_gain': suggestions['drums'].get('gain', 0.5),
-            'hh_gain': suggestions['high'].get('gain', 0.5),
-            'bass_gain': suggestions['bass'].get('gain', 0.3),
-            'vox_gain': suggestions['mid'].get('gain', 0.6),
-            'stab_gain': suggestions['mid'].get('gain', 0.5),
-            'lead_gain': suggestions['high'].get('gain', 0.4),
+            'kick_gain': 0.5,
+            'snare_gain': 0.5,
+            'hh_gain': 0.4,
+            'bass_gain': 0.4,
+            'vox_gain': 0.6,
+            'stab_gain': 0.5,
+            'lead_gain': 0.5,
         }
     }
 

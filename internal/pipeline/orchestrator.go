@@ -25,6 +25,7 @@ import (
 type Config struct {
 	InputPath         string
 	InputURL          string // Original URL (for cache key generation)
+	TrackTitle        string // Track title (from YouTube or filename)
 	CachedStemsDir    string // Pre-cached stems directory (skip download + separation)
 	OutputPath        string
 	MIDIOutputPath    string
@@ -38,7 +39,9 @@ type Config struct {
 	Arrange           bool   // Use arrangement-based generation with chord detection
 	ChordMode         bool   // Use chord-based generation (better for electronic music)
 	BrazilianFunk     bool   // Use Brazilian funk/phonk mode (tamborzão, 808 bass)
+	GenreOverride     string // Manual genre override (brazilian_funk, brazilian_phonk, retro_wave, etc.)
 	UseCache          bool   // Use stem cache (skip separation if cached)
+	StemQuality       string // Stem separation quality (fast, normal, high, best)
 	StemTimeout       time.Duration
 	TranscribeTimeout time.Duration
 }
@@ -54,7 +57,8 @@ func DefaultConfig() Config {
 		DrumsOnly:         false,
 		DrumKit:           "tr808",
 		Arrange:           false,
-		UseCache:          true, // Use stem cache by default
+		UseCache:          true,        // Use stem cache by default
+		StemQuality:       "normal",    // Normal quality by default
 		StemTimeout:       5 * time.Minute,
 		TranscribeTimeout: 3 * time.Minute,
 	}
@@ -130,11 +134,15 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 		// Initialize stem cache for output saving
 		stemCache, _ = cache.NewStemCache()
 
-		pianoPath := filepath.Join(cfg.CachedStemsDir, "piano.wav")
+		// Try melodic.wav first, fall back to piano.wav
+		melodicPath := filepath.Join(cfg.CachedStemsDir, "melodic.wav")
+		if !fileExists(melodicPath) {
+			melodicPath = filepath.Join(cfg.CachedStemsDir, "piano.wav")
+		}
 		drumsPath := filepath.Join(cfg.CachedStemsDir, "drums.wav")
 		stemResult = &audio.StemResult{}
-		if fileExists(pianoPath) {
-			stemResult.PianoPath = pianoPath
+		if fileExists(melodicPath) {
+			stemResult.PianoPath = melodicPath
 		}
 		if fileExists(drumsPath) {
 			stemResult.DrumsPath = drumsPath
@@ -185,7 +193,7 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 					if cached, ok := stemCache.Get(cacheKey); ok {
 						o.progress.StartStage(progress.StageSeparate)
 						stemResult = &audio.StemResult{
-							PianoPath: cached.PianoPath,
+							PianoPath: cached.MelodicPath,
 							DrumsPath: cached.DrumsPath,
 						}
 						usedCache = true
@@ -201,7 +209,16 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 			stemCtx, stemCancel := context.WithTimeout(ctx, cfg.StemTimeout)
 			defer stemCancel()
 
-			stemResult, err = o.separator.SeparateWithMode(stemCtx, cfg.InputPath, ws.Dir, stemMode)
+			// Use quality setting (default to normal if not set)
+			quality := cfg.StemQuality
+			if quality == "" {
+				quality = "normal"
+			}
+			if quality == "high" || quality == "best" {
+				o.progress.StageComplete(fmt.Sprintf("Using %s quality (this may take longer)", quality))
+			}
+
+			stemResult, err = o.separator.SeparateWithModeAndQuality(stemCtx, cfg.InputPath, ws.Dir, stemMode, quality)
 			if err != nil {
 				return nil, fmt.Errorf("stem separation: %w", err)
 			}
@@ -213,12 +230,21 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 				o.progress.StageComplete("Drums stem extracted")
 			}
 
-			// Save to cache
+			// Save to cache with track metadata
 			if stemCache != nil && cacheKey != "" {
-				if _, err := stemCache.Put(cacheKey, stemResult.PianoPath, stemResult.DrumsPath); err != nil {
+				cached, err := stemCache.PutWithMetadata(cacheKey, stemResult.PianoPath, stemResult.DrumsPath, cfg.TrackTitle, cfg.InputURL)
+				if err != nil {
 					o.progress.Warning("Cache save failed: %v", err)
 				} else {
-					o.progress.StageComplete("Cached stems (key: %s)", cacheKey[:8])
+					// Update cacheKey to the actual folder name used (may be track name)
+					if cached.CacheKey != "" {
+						cacheKey = cached.CacheKey
+					}
+					displayKey := cacheKey
+					if cached.TrackName != "" {
+						displayKey = cached.TrackName
+					}
+					o.progress.StageComplete("Cached stems (%s)", displayKey)
 				}
 			}
 		}
@@ -313,10 +339,78 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 		// Stage 5: Strudel generation for melodic content
 		o.progress.StartStage(progress.StageGenerate)
 
-		// Auto-detect Brazilian funk/phonk based on characteristics
-		// Criteria: BPM 125-150 + sparse transcription + vocal-range notes (not real melody)
-		if shouldUseBrazilianFunkMode(analysisResult, cleanResult) || cfg.BrazilianFunk {
-			o.progress.StageComplete("Auto-detected Brazilian Funk/Phonk - using tamborzão templates")
+		// Check for manual genre override first
+		skipAutoDetection := false
+		if cfg.GenreOverride != "" {
+			switch cfg.GenreOverride {
+			case "brazilian_funk":
+				o.progress.StageComplete("Using manual genre: Brazilian Funk")
+				cfg.BrazilianFunk = true
+			case "brazilian_phonk":
+				o.progress.StageComplete("Using manual genre: Brazilian Phonk")
+				bfGen := strudel.NewBrazilianFunkGenerator(analysisResult.BPM, analysisResult.Key)
+				result.StrudelCode = bfGen.Generate(analysisResult)
+				result.BPM = analysisResult.BPM
+				result.Key = analysisResult.Key
+				result.NotesRetained = cleanResult.Retained
+				result.Style = "brazilian_phonk"
+				result.Genre = "brazilian_phonk"
+
+				// Save output to cache
+				if cacheKey != "" {
+					if stemCache == nil {
+						stemCache, _ = cache.NewStemCache()
+					}
+					if stemCache != nil {
+						previousOutputs, _ := stemCache.GetOutputHistory(cacheKey)
+						result.PreviousOutputs = len(previousOutputs)
+						result.CacheKey = cacheKey
+						result.CacheDir = stemCache.GetCacheDir(cacheKey)
+
+						cachedOutput := &cache.CachedOutput{
+							Code:     result.StrudelCode,
+							BPM:      result.BPM,
+							Key:      result.Key,
+							Style:    result.Style,
+							Genre:    result.Genre,
+							Notes:    result.NotesRetained,
+							DrumHits: result.DrumHits,
+						}
+						if err := stemCache.SaveOutput(cacheKey, cachedOutput); err != nil {
+							o.progress.Warning("Failed to cache output: %v", err)
+						} else {
+							result.OutputVersion = cachedOutput.Version
+							o.progress.StageComplete("Output saved (v%d) to %s", cachedOutput.Version, result.CacheDir)
+						}
+					}
+				}
+				return result, nil
+
+			case "retro_wave", "synthwave":
+				o.progress.StageComplete("Using manual genre: Retro Wave / Synthwave")
+				cfg.SoundStyle = "synthwave"
+				skipAutoDetection = true // Skip Brazilian funk/phonk auto-detection
+			case "trance":
+				o.progress.StageComplete("Using manual genre: Trance")
+				cfg.SoundStyle = "trance"
+				skipAutoDetection = true
+			case "house":
+				o.progress.StageComplete("Using manual genre: House")
+				cfg.SoundStyle = "house"
+				skipAutoDetection = true
+			case "lofi":
+				o.progress.StageComplete("Using manual genre: Lo-fi")
+				cfg.SoundStyle = "lofi"
+				skipAutoDetection = true
+			}
+		}
+
+		// Auto-detect genre based on audio characteristics (unless skipped by manual override)
+		// Priority: Brazilian Funk > Brazilian Phonk > Retro Wave > Standard styles
+
+		// 1. Check for Brazilian Funk (funk carioca) - BPM 130-145 or half-time 85-95
+		if !skipAutoDetection && (shouldUseBrazilianFunkMode(analysisResult, cleanResult) || cfg.BrazilianFunk) {
+			o.progress.StageComplete("Auto-detected Brazilian Funk (Funk Carioca) - using tamborzão templates")
 
 			bfGen := strudel.NewBrazilianFunkGenerator(analysisResult.BPM, analysisResult.Key)
 			result.StrudelCode = bfGen.Generate(analysisResult)
@@ -356,6 +450,57 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 			}
 
 			return result, nil
+		}
+
+		// 2. Check for Brazilian Phonk - BPM 80-100 or 145-180
+		if !skipAutoDetection && shouldUseBrazilianPhonkMode(analysisResult, cleanResult) {
+			o.progress.StageComplete("Auto-detected Brazilian Phonk - using phonk templates")
+
+			// Use Brazilian funk generator but with phonk style indication
+			bfGen := strudel.NewBrazilianFunkGenerator(analysisResult.BPM, analysisResult.Key)
+			result.StrudelCode = bfGen.Generate(analysisResult)
+			result.BPM = analysisResult.BPM
+			result.Key = analysisResult.Key
+			result.NotesRetained = cleanResult.Retained
+			result.Style = "brazilian_phonk"
+			result.Genre = "brazilian_phonk"
+
+			// Save output to cache
+			if cacheKey != "" {
+				if stemCache == nil {
+					stemCache, _ = cache.NewStemCache()
+				}
+				if stemCache != nil {
+					previousOutputs, _ := stemCache.GetOutputHistory(cacheKey)
+					result.PreviousOutputs = len(previousOutputs)
+					result.CacheKey = cacheKey
+					result.CacheDir = stemCache.GetCacheDir(cacheKey)
+
+					cachedOutput := &cache.CachedOutput{
+						Code:     result.StrudelCode,
+						BPM:      result.BPM,
+						Key:      result.Key,
+						Style:    result.Style,
+						Genre:    result.Genre,
+						Notes:    result.NotesRetained,
+						DrumHits: result.DrumHits,
+					}
+					if err := stemCache.SaveOutput(cacheKey, cachedOutput); err != nil {
+						o.progress.Warning("Failed to cache output: %v", err)
+					} else {
+						result.OutputVersion = cachedOutput.Version
+						o.progress.StageComplete("Output saved (v%d) to %s", cachedOutput.Version, result.CacheDir)
+					}
+				}
+			}
+
+			return result, nil
+		}
+
+		// 3. Check for Retro Wave (Polish, Russian, etc.) - BPM 130-170, longer synth notes
+		if !skipAutoDetection && shouldUseRetroWaveMode(analysisResult, cleanResult) {
+			o.progress.StageComplete("Auto-detected Retro Wave/Synthwave")
+			cfg.SoundStyle = "synthwave"
 		}
 
 		// Auto-detect style if set to "auto" or empty
@@ -717,12 +862,11 @@ func containsMinor(key string) bool {
 	return strings.Contains(key, "minor") || strings.HasSuffix(key, "m")
 }
 
-// shouldUseBrazilianFunkMode auto-detects if Brazilian funk/phonk mode is appropriate
-// Criteria:
-// 1. BPM in 125-155 range (typical for Brazilian funk/phonk)
-// 2. Notes are fragmented (short durations, characteristic of vocal chop transcription)
-// 3. Notes clustered in mid-range (vocal frequencies, not bass or high melody)
-// 4. Low bass content (real melodies have bass, vocal chops don't)
+// shouldUseBrazilianFunkMode auto-detects if Brazilian funk (funk carioca) mode is appropriate
+// Based on analysis of Brazilian funk tracks (NOT phonk or retro wave):
+// - Brazilian Funk: 130-145 BPM (136 typical), tamborzão drums, vocal chops, mid-heavy
+// - Half-time: 85-95 BPM (half of 170-190)
+// Key differentiators from retro wave: vocal chop fragmentation (SHORT notes), specific BPM range
 func shouldUseBrazilianFunkMode(analysis *analysis.Result, cleanup *midi.CleanupResult) bool {
 	if analysis == nil || cleanup == nil {
 		return false
@@ -730,8 +874,14 @@ func shouldUseBrazilianFunkMode(analysis *analysis.Result, cleanup *midi.Cleanup
 
 	bpm := analysis.BPM
 
-	// Check BPM range (Brazilian funk is typically 125-155 BPM)
-	if bpm < 125 || bpm > 155 {
+	// Brazilian funk has specific BPM ranges:
+	// Primary: 130-145 BPM (funk carioca, 136 most common)
+	// Half-time: 85-95 BPM (half of ~170-190)
+	inFunkRange := bpm >= 130 && bpm <= 145
+	inHalfTimeRange := bpm >= 85 && bpm <= 95
+
+	// Reject if outside Brazilian funk BPM ranges
+	if !inFunkRange && !inHalfTimeRange {
 		return false
 	}
 
@@ -745,6 +895,7 @@ func shouldUseBrazilianFunkMode(analysis *analysis.Result, cleanup *midi.Cleanup
 	var midRangeCount int  // Vocal range (MIDI 55-90, ~G3 to F#6)
 	var bassCount int      // Bass range (MIDI < 50)
 	var shortNoteCount int // Notes shorter than 0.15 seconds
+	var longNoteCount int  // Notes longer than 0.3 seconds (synth pads - retro wave indicator)
 
 	for _, n := range cleanup.Notes {
 		if end := n.Start + n.Duration; end > maxEnd {
@@ -764,6 +915,10 @@ func shouldUseBrazilianFunkMode(analysis *analysis.Result, cleanup *midi.Cleanup
 		if n.Duration < 0.15 {
 			shortNoteCount++
 		}
+		// Count long notes (characteristic of synth pads - retro wave)
+		if n.Duration > 0.3 {
+			longNoteCount++
+		}
 	}
 
 	// Calculate ratios
@@ -771,63 +926,253 @@ func shouldUseBrazilianFunkMode(analysis *analysis.Result, cleanup *midi.Cleanup
 	midRatio := float64(midRangeCount) / totalNotes
 	bassRatio := float64(bassCount) / totalNotes
 	shortNoteRatio := float64(shortNoteCount) / totalNotes
+	longNoteRatio := float64(longNoteCount) / totalNotes
 	avgDuration := totalDuration / totalNotes
 
-	// Calculate notes per beat
-	notesPerBeat := 0.0
-	if maxEnd > 0 {
-		trackBeats := maxEnd * bpm / 60
-		notesPerBeat = totalNotes / trackBeats
+	// REJECTION: If track has many long notes or high avg duration, it's likely retro wave/synthwave
+	// Retro wave has sustained synth pads, Brazilian funk has fragmented vocal chops
+	if longNoteRatio > 0.25 {
+		return false // Too many long notes - likely retro wave
+	}
+	if avgDuration > 0.3 {
+		return false // Average duration too long - likely retro wave
 	}
 
 	// Brazilian funk detection scoring
 	score := 0.0
 
-	// High percentage of notes in vocal range (>60%) - vocal chops
-	if midRatio > 0.7 {
-		score += 3.0
-	} else if midRatio > 0.6 {
+	// BPM scoring
+	if bpm >= 134 && bpm <= 138 {
+		score += 3.0 // Perfect funk carioca range
+	} else if inFunkRange {
 		score += 2.0
+	} else if inHalfTimeRange {
+		score += 2.0 // Half-time funk
+	}
+
+	// Mid-range dominance (vocal chops are mid-heavy)
+	if midRatio > 0.6 {
+		score += 2.5
 	} else if midRatio > 0.5 {
+		score += 2.0
+	} else if midRatio > 0.4 {
 		score += 1.0
 	}
 
-	// Low bass content (<10%) - real melodies have bass, vocal chops don't
+	// Low bass content (Brazilian funk is mid-heavy, not bass-heavy)
 	if bassRatio < 0.05 {
-		score += 2.0
+		score += 1.5
 	} else if bassRatio < 0.10 {
 		score += 1.0
 	}
 
-	// Fragmented notes (short durations) - vocal chops produce short transcribed notes
-	if shortNoteRatio > 0.7 {
-		score += 2.0
-	} else if shortNoteRatio > 0.5 {
-		score += 1.0
-	}
-
-	// Very short average duration (<0.2s) - fragmented transcription
-	if avgDuration < 0.15 {
-		score += 2.0
-	} else if avgDuration < 0.25 {
-		score += 1.0
-	}
-
-	// Moderate note density (0.3-2.0 notes/beat) - too sparse = silence, too dense = real melody
-	// Vocal chops produce scattered notes, not coherent melodies
-	if notesPerBeat >= 0.3 && notesPerBeat <= 2.0 {
+	// Fragmented notes - REQUIRED for Brazilian funk (vocal chop transcription)
+	if shortNoteRatio > 0.5 {
+		score += 2.5
+	} else if shortNoteRatio > 0.3 {
 		score += 1.5
-	} else if notesPerBeat > 2.0 && notesPerBeat <= 3.0 {
-		score += 0.5 // Could still be Brazilian funk
+	} else {
+		score -= 1.0 // Not fragmented enough - penalty
 	}
 
-	// BPM sweet spot for Brazilian funk (130-145)
-	if bpm >= 130 && bpm <= 145 {
+	// Very short average duration - fragmented vocal chop transcription
+	if avgDuration < 0.15 {
+		score += 1.5
+	} else if avgDuration < 0.2 {
 		score += 1.0
 	}
 
-	// Threshold: score >= 5.0 suggests Brazilian funk
-	// High mid-range (3) + low bass (2) + fragmented (1) = 6 typical case
+	// No swing (Brazilian funk has straight rhythms)
+	if !analysis.HasSwing() {
+		score += 0.5
+	}
+
+	// Threshold: score >= 6.0 for Brazilian funk
+	return score >= 6.0
+}
+
+// shouldUseBrazilianPhonkMode detects Brazilian phonk (distinct from funk carioca)
+// Brazilian phonk: wider BPM range, darker sound, phonk-style drums, KORDHELL/6YNTHMANE style
+func shouldUseBrazilianPhonkMode(analysis *analysis.Result, cleanup *midi.CleanupResult) bool {
+	if analysis == nil || cleanup == nil {
+		return false
+	}
+
+	bpm := analysis.BPM
+
+	// Brazilian phonk has wider BPM range than funk:
+	// Slow phonk: 80-100 BPM
+	// Fast phonk: 145-180 BPM
+	// Excludes 130-145 which is funk carioca territory
+	inSlowPhonkRange := bpm >= 80 && bpm <= 100
+	inFastPhonkRange := bpm >= 145 && bpm <= 180
+
+	if !inSlowPhonkRange && !inFastPhonkRange {
+		return false
+	}
+
+	if cleanup.Retained == 0 || len(cleanup.Notes) == 0 {
+		return false
+	}
+
+	// Calculate note statistics
+	var totalDuration float64
+	var midRangeCount int
+	var bassCount int
+	var shortNoteCount int
+	var longNoteCount int // Retro wave indicator
+
+	for _, n := range cleanup.Notes {
+		totalDuration += n.Duration
+
+		if n.Pitch >= 55 && n.Pitch <= 90 {
+			midRangeCount++
+		}
+		if n.Pitch < 50 {
+			bassCount++
+		}
+		if n.Duration < 0.15 {
+			shortNoteCount++
+		}
+		if n.Duration > 0.3 {
+			longNoteCount++
+		}
+	}
+
+	totalNotes := float64(cleanup.Retained)
+	midRatio := float64(midRangeCount) / totalNotes
+	bassRatio := float64(bassCount) / totalNotes
+	shortNoteRatio := float64(shortNoteCount) / totalNotes
+	longNoteRatio := float64(longNoteCount) / totalNotes
+	avgDuration := totalDuration / totalNotes
+
+	// REJECTION: If track has many long notes, it's likely retro wave/synthwave, NOT phonk
+	if longNoteRatio > 0.3 {
+		return false // Too many long notes - likely retro wave
+	}
+	if avgDuration > 0.35 {
+		return false // Average duration too long - likely retro wave
+	}
+
+	// Brazilian phonk scoring
+	score := 0.0
+
+	// BPM in phonk ranges
+	if inSlowPhonkRange || inFastPhonkRange {
+		score += 2.0
+	}
+
+	// Mid-range presence (still has vocal elements)
+	if midRatio > 0.4 {
+		score += 1.5
+	} else if midRatio > 0.3 {
+		score += 1.0
+	}
+
+	// Phonk can have more bass than funk
+	if bassRatio < 0.15 {
+		score += 1.0
+	}
+
+	// Fragmented notes (vocal chops still present) - REQUIRED
+	if shortNoteRatio > 0.4 {
+		score += 2.0
+	} else if shortNoteRatio > 0.25 {
+		score += 1.0
+	} else {
+		score -= 1.0 // Not fragmented - penalty
+	}
+
+	// No swing
+	if !analysis.HasSwing() {
+		score += 0.5
+	}
+
+	// Threshold for phonk
+	return score >= 5.0
+}
+
+// shouldUseRetroWaveMode detects retro wave/synthwave (Polish, Russian, etc.)
+// Characteristics: 150-170 BPM, longer synth notes, more melodic structure
+func shouldUseRetroWaveMode(analysis *analysis.Result, cleanup *midi.CleanupResult) bool {
+	if analysis == nil || cleanup == nil {
+		return false
+	}
+
+	bpm := analysis.BPM
+
+	// Retro wave typically 130-170 BPM
+	if bpm < 130 || bpm > 170 {
+		return false
+	}
+
+	if cleanup.Retained == 0 || len(cleanup.Notes) == 0 {
+		return false
+	}
+
+	// Calculate note statistics
+	var totalDuration float64
+	var midRangeCount int
+	var bassCount int
+	var longNoteCount int // Notes longer than 0.3 seconds (synth pads/leads)
+
+	for _, n := range cleanup.Notes {
+		totalDuration += n.Duration
+
+		if n.Pitch >= 55 && n.Pitch <= 90 {
+			midRangeCount++
+		}
+		if n.Pitch < 50 {
+			bassCount++
+		}
+		if n.Duration > 0.3 {
+			longNoteCount++
+		}
+	}
+
+	totalNotes := float64(cleanup.Retained)
+	midRatio := float64(midRangeCount) / totalNotes
+	bassRatio := float64(bassCount) / totalNotes
+	longNoteRatio := float64(longNoteCount) / totalNotes
+	avgDuration := totalDuration / totalNotes
+
+	// Retro wave scoring
+	score := 0.0
+
+	// BPM in retro wave range (but not funk carioca sweet spot)
+	if bpm >= 155 && bpm <= 165 {
+		score += 2.0 // Classic retro wave tempo
+	} else if bpm >= 130 && bpm <= 145 {
+		score -= 1.0 // More likely funk carioca
+	}
+
+	// Longer notes (synth pads/leads, not vocal chops)
+	if longNoteRatio > 0.3 {
+		score += 2.5
+	} else if longNoteRatio > 0.2 {
+		score += 1.5
+	}
+
+	// Average duration longer than vocal chops
+	if avgDuration > 0.35 {
+		score += 2.0
+	} else if avgDuration > 0.25 {
+		score += 1.0
+	}
+
+	// Bass presence (retro wave often has prominent bass lines)
+	if bassRatio > 0.15 {
+		score += 1.5
+	} else if bassRatio > 0.10 {
+		score += 1.0
+	}
+
+	// Mid-range (synth leads)
+	if midRatio > 0.3 && midRatio < 0.6 {
+		score += 1.0
+	}
+
+	// Threshold for retro wave
 	return score >= 5.0
 }
 

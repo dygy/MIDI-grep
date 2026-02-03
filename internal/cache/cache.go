@@ -29,10 +29,11 @@ type StemCache struct {
 
 // CachedStems represents cached stem file paths
 type CachedStems struct {
-	PianoPath string
-	DrumsPath string
-	CacheKey  string
-	CachedAt  time.Time
+	MelodicPath string // Renamed from PianoPath
+	DrumsPath   string
+	CacheKey    string
+	TrackName   string // Human-readable track name
+	CachedAt    time.Time
 }
 
 // CachedOutput represents a cached generation result
@@ -47,6 +48,14 @@ type CachedOutput struct {
 	Version   int               `json:"version"`
 	CreatedAt time.Time         `json:"created_at"`
 	Metadata  map[string]string `json:"metadata,omitempty"`
+}
+
+// TrackMetadata stores track info for folder naming
+type TrackMetadata struct {
+	Title     string    `json:"title"`
+	URL       string    `json:"url"`
+	VideoID   string    `json:"video_id"`
+	CachedAt  time.Time `json:"cached_at"`
 }
 
 // NewStemCache creates a new stem cache in the repository's .cache directory
@@ -124,14 +133,48 @@ func findRepoCacheDir() (string, error) {
 	}
 }
 
+// sanitizeFolderName creates a safe folder name from track title
+func sanitizeFolderName(title string) string {
+	// Remove or replace problematic characters for filesystem
+	replacer := strings.NewReplacer(
+		"/", "-",
+		"\\", "-",
+		":", "-",
+		"*", "",
+		"?", "",
+		"\"", "",
+		"<", "",
+		">", "",
+		"|", "-",
+		"\n", " ",
+		"\r", "",
+	)
+	name := replacer.Replace(title)
+
+	// Trim spaces and dots from ends
+	name = strings.Trim(name, " .")
+
+	// If empty after sanitization, use fallback
+	if name == "" {
+		name = "Unknown Track"
+	}
+
+	return name
+}
+
 // KeyForURL generates a cache key from a YouTube URL
 func KeyForURL(url string) string {
-	videoID := extractYouTubeID(url)
+	videoID := ExtractVideoID(url)
 	if videoID == "" {
 		// Fallback to URL hash
 		return hashString(url)
 	}
 	return "yt_" + videoID
+}
+
+// FolderNameForTrack creates folder name from track title
+func FolderNameForTrack(title, videoID string) string {
+	return sanitizeFolderName(title)
 }
 
 // KeyForFile generates a cache key from a file's content hash
@@ -150,7 +193,7 @@ func KeyForFile(path string) (string, error) {
 	return "file_" + hex.EncodeToString(hash.Sum(nil))[:16], nil
 }
 
-// Get retrieves cached stems for the given key
+// GetByKey retrieves cached stems for the given key (legacy support)
 func (c *StemCache) Get(key string) (*CachedStems, bool) {
 	cacheSubdir := filepath.Join(c.dir, key)
 
@@ -168,24 +211,39 @@ func (c *StemCache) Get(key string) (*CachedStems, bool) {
 		return nil, false
 	}
 
-	pianoPath := filepath.Join(cacheSubdir, "piano.wav")
+	// Try new naming first (melodic.wav), fall back to old (piano.wav)
+	melodicPath := filepath.Join(cacheSubdir, "melodic.wav")
+	if !fileExists(melodicPath) {
+		melodicPath = filepath.Join(cacheSubdir, "piano.wav")
+	}
 	drumsPath := filepath.Join(cacheSubdir, "drums.wav")
 
 	// At least one stem must exist
-	pianoExists := fileExists(pianoPath)
+	melodicExists := fileExists(melodicPath)
 	drumsExists := fileExists(drumsPath)
 
-	if !pianoExists && !drumsExists {
+	if !melodicExists && !drumsExists {
 		return nil, false
 	}
 
-	result := &CachedStems{
-		CacheKey: key,
-		CachedAt: info.ModTime(),
+	// Load track metadata if exists
+	var trackName string
+	metaPath := filepath.Join(cacheSubdir, "metadata.json")
+	if metaData, err := os.ReadFile(metaPath); err == nil {
+		var meta TrackMetadata
+		if json.Unmarshal(metaData, &meta) == nil {
+			trackName = meta.Title
+		}
 	}
 
-	if pianoExists {
-		result.PianoPath = pianoPath
+	result := &CachedStems{
+		CacheKey:  key,
+		TrackName: trackName,
+		CachedAt:  info.ModTime(),
+	}
+
+	if melodicExists {
+		result.MelodicPath = melodicPath
 	}
 	if drumsExists {
 		result.DrumsPath = drumsPath
@@ -194,9 +252,89 @@ func (c *StemCache) Get(key string) (*CachedStems, bool) {
 	return result, true
 }
 
-// Put stores stems in the cache
-func (c *StemCache) Put(key string, pianoPath, drumsPath string) (*CachedStems, error) {
+// UpdateTrackMetadata updates the track metadata and renames folder if needed
+func (c *StemCache) UpdateTrackMetadata(key, title, url string) (string, error) {
 	cacheSubdir := filepath.Join(c.dir, key)
+	info, err := os.Stat(cacheSubdir)
+	if err != nil || !info.IsDir() {
+		return key, fmt.Errorf("cache entry not found: %s", key)
+	}
+
+	// Save metadata
+	meta := TrackMetadata{
+		Title:    title,
+		URL:      url,
+		VideoID:  ExtractVideoID(url),
+		CachedAt: time.Now(),
+	}
+	metaData, _ := json.MarshalIndent(meta, "", "  ")
+	metaPath := filepath.Join(cacheSubdir, "metadata.json")
+	if err := os.WriteFile(metaPath, metaData, 0644); err != nil {
+		return key, err
+	}
+
+	// Rename folder if it's using old yt_xxx format
+	if strings.HasPrefix(key, "yt_") && title != "" {
+		videoID := ExtractVideoID(url)
+		newFolderName := FolderNameForTrack(title, videoID)
+		newPath := filepath.Join(c.dir, newFolderName)
+
+		// Only rename if new path doesn't exist (check for directory, not file)
+		if _, err := os.Stat(newPath); os.IsNotExist(err) {
+			if err := os.Rename(cacheSubdir, newPath); err == nil {
+				return newFolderName, nil
+			}
+			// Rename failed, continue with old key
+		}
+		// If newPath already exists (same track cached before), return it as the key
+		// since the stems are the same
+		if info, err := os.Stat(newPath); err == nil && info.IsDir() {
+			// Check if the existing folder has valid stems
+			melodicPath := filepath.Join(newPath, "melodic.wav")
+			pianoPath := filepath.Join(newPath, "piano.wav")
+			if fileExists(melodicPath) || fileExists(pianoPath) {
+				// Return the track-named folder as key (it has valid stems)
+				return newFolderName, nil
+			}
+		}
+	}
+
+	return key, nil
+}
+
+// GetByTrackName finds cache by track name folder
+func (c *StemCache) GetByTrackName(trackName string) (*CachedStems, bool) {
+	entries, err := os.ReadDir(c.dir)
+	if err != nil {
+		return nil, false
+	}
+
+	for _, entry := range entries {
+		if !entry.IsDir() {
+			continue
+		}
+		if strings.Contains(entry.Name(), trackName) {
+			return c.Get(entry.Name())
+		}
+	}
+	return nil, false
+}
+
+// Put stores stems in the cache with track name
+func (c *StemCache) Put(key string, melodicPath, drumsPath string) (*CachedStems, error) {
+	return c.PutWithMetadata(key, melodicPath, drumsPath, "", "")
+}
+
+// PutWithMetadata stores stems with track metadata
+func (c *StemCache) PutWithMetadata(key string, melodicPath, drumsPath, trackTitle, url string) (*CachedStems, error) {
+	// Determine folder name
+	folderName := key
+	if trackTitle != "" {
+		videoID := ExtractVideoID(url)
+		folderName = FolderNameForTrack(trackTitle, videoID)
+	}
+
+	cacheSubdir := filepath.Join(c.dir, folderName)
 
 	// Create cache subdirectory
 	if err := os.MkdirAll(cacheSubdir, 0755); err != nil {
@@ -204,17 +342,18 @@ func (c *StemCache) Put(key string, pianoPath, drumsPath string) (*CachedStems, 
 	}
 
 	result := &CachedStems{
-		CacheKey: key,
-		CachedAt: time.Now(),
+		CacheKey:  folderName,
+		TrackName: trackTitle,
+		CachedAt:  time.Now(),
 	}
 
-	// Copy piano stem if exists
-	if pianoPath != "" && fileExists(pianoPath) {
-		dst := filepath.Join(cacheSubdir, "piano.wav")
-		if err := copyFile(pianoPath, dst); err != nil {
-			return nil, fmt.Errorf("cache piano stem: %w", err)
+	// Copy melodic stem if exists
+	if melodicPath != "" && fileExists(melodicPath) {
+		dst := filepath.Join(cacheSubdir, "melodic.wav")
+		if err := copyFile(melodicPath, dst); err != nil {
+			return nil, fmt.Errorf("cache melodic stem: %w", err)
 		}
-		result.PianoPath = dst
+		result.MelodicPath = dst
 	}
 
 	// Copy drums stem if exists
@@ -226,10 +365,23 @@ func (c *StemCache) Put(key string, pianoPath, drumsPath string) (*CachedStems, 
 		result.DrumsPath = dst
 	}
 
-	// Write cache version (computed from script hashes)
+	// Write cache version
 	versionPath := filepath.Join(cacheSubdir, ".version")
 	if err := os.WriteFile(versionPath, []byte(computedVersion), 0644); err != nil {
 		return nil, fmt.Errorf("write cache version: %w", err)
+	}
+
+	// Write track metadata
+	if trackTitle != "" {
+		meta := TrackMetadata{
+			Title:    trackTitle,
+			URL:      url,
+			VideoID:  ExtractVideoID(url),
+			CachedAt: time.Now(),
+		}
+		metaData, _ := json.MarshalIndent(meta, "", "  ")
+		metaPath := filepath.Join(cacheSubdir, "metadata.json")
+		os.WriteFile(metaPath, metaData, 0644)
 	}
 
 	return result, nil
@@ -272,8 +424,8 @@ func (c *StemCache) Size() (int64, int, error) {
 	return totalSize, count, nil
 }
 
-// extractYouTubeID extracts video ID from various YouTube URL formats
-func extractYouTubeID(url string) string {
+// ExtractVideoID extracts video ID from various YouTube URL formats
+func ExtractVideoID(url string) string {
 	patterns := []string{
 		`youtube\.com/watch\?v=([\w-]+)`,
 		`youtube\.com/shorts/([\w-]+)`,
@@ -317,7 +469,12 @@ func copyFile(src, dst string) error {
 	return os.WriteFile(dst, input, 0644)
 }
 
-// SaveOutput saves a generated Strudel output to the cache
+// GetVersionDir returns the path to a version directory
+func (c *StemCache) GetVersionDir(key string, version int) string {
+	return filepath.Join(c.dir, key, fmt.Sprintf("v%03d", version))
+}
+
+// SaveOutput saves a generated Strudel output to a version directory
 func (c *StemCache) SaveOutput(key string, output *CachedOutput) error {
 	cacheSubdir := filepath.Join(c.dir, key)
 
@@ -331,30 +488,26 @@ func (c *StemCache) SaveOutput(key string, output *CachedOutput) error {
 	output.Version = len(outputs) + 1
 	output.CreatedAt = time.Now()
 
-	// Save as versioned JSON file
-	filename := fmt.Sprintf("output_v%03d.json", output.Version)
-	outputPath := filepath.Join(cacheSubdir, filename)
+	// Create version directory
+	versionDir := filepath.Join(cacheSubdir, fmt.Sprintf("v%03d", output.Version))
+	if err := os.MkdirAll(versionDir, 0755); err != nil {
+		return fmt.Errorf("create version dir: %w", err)
+	}
 
+	// Save JSON metadata
+	metaPath := filepath.Join(versionDir, "metadata.json")
 	data, err := json.MarshalIndent(output, "", "  ")
 	if err != nil {
 		return fmt.Errorf("marshal output: %w", err)
 	}
-
-	if err := os.WriteFile(outputPath, data, 0644); err != nil {
-		return fmt.Errorf("write output: %w", err)
+	if err := os.WriteFile(metaPath, data, 0644); err != nil {
+		return fmt.Errorf("write metadata: %w", err)
 	}
 
-	// Also save the code as a standalone .strudel file for easy access
-	strudelPath := filepath.Join(cacheSubdir, fmt.Sprintf("output_v%03d.strudel", output.Version))
+	// Save Strudel code (only in version directory, no legacy files)
+	strudelPath := filepath.Join(versionDir, "output.strudel")
 	if err := os.WriteFile(strudelPath, []byte(output.Code), 0644); err != nil {
 		return fmt.Errorf("write strudel file: %w", err)
-	}
-
-	// Update "latest" symlink/copy
-	latestPath := filepath.Join(cacheSubdir, "output_latest.strudel")
-	_ = os.Remove(latestPath) // Ignore error if doesn't exist
-	if err := os.WriteFile(latestPath, []byte(output.Code), 0644); err != nil {
-		return fmt.Errorf("write latest: %w", err)
 	}
 
 	return nil
@@ -387,9 +540,23 @@ func (c *StemCache) GetOutputHistory(key string) ([]*CachedOutput, error) {
 	var outputs []*CachedOutput
 
 	for _, entry := range entries {
-		if entry.IsDir() {
+		// Check for version directories (v001, v002, etc.)
+		if entry.IsDir() && strings.HasPrefix(entry.Name(), "v") && len(entry.Name()) == 4 {
+			metaPath := filepath.Join(cacheSubdir, entry.Name(), "metadata.json")
+			data, err := os.ReadFile(metaPath)
+			if err != nil {
+				continue
+			}
+
+			var output CachedOutput
+			if err := json.Unmarshal(data, &output); err != nil {
+				continue
+			}
+			outputs = append(outputs, &output)
 			continue
 		}
+
+		// Legacy: check for output_v*.json files
 		name := entry.Name()
 		if !strings.HasPrefix(name, "output_v") || !strings.HasSuffix(name, ".json") {
 			continue
@@ -420,4 +587,18 @@ func (c *StemCache) GetOutputHistory(key string) ([]*CachedOutput, error) {
 // GetCacheDir returns the cache directory for a key (for external access)
 func (c *StemCache) GetCacheDir(key string) string {
 	return filepath.Join(c.dir, key)
+}
+
+// GetLatestVersion returns the latest version number for a cache key
+func (c *StemCache) GetLatestVersion(key string) int {
+	outputs, _ := c.GetOutputHistory(key)
+	if len(outputs) == 0 {
+		return 0
+	}
+	return outputs[len(outputs)-1].Version
+}
+
+// PianoPath returns the melodic path (backward compatibility)
+func (cs *CachedStems) PianoPath() string {
+	return cs.MelodicPath
 }
