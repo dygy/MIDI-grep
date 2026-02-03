@@ -463,7 +463,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 			}
 		}
 
-		fmt.Printf("       Rendering to %s...\n", audioPath)
+		fmt.Printf("       Rendering to %s (AI-driven iterative refinement)...\n", audioPath)
 
 		// Get actual duration from the melodic stem for accurate render length
 		duration := 0.0
@@ -476,10 +476,24 @@ func runExtract(cmd *cobra.Command, args []string) error {
 			fmt.Printf("       Source audio duration: %.1fs\n", duration)
 		}
 
-		if err := renderStrudelToWavWithFeedback(result.StrudelCode, audioPath, duration, feedbackPath); err != nil {
-			fmt.Printf("       Warning: Audio render failed: %v\n", err)
+		// Write Strudel code to file for iterative renderer
+		strudelFile := filepath.Join(versionDir, "output.strudel")
+		if versionDir == "" {
+			strudelFile = filepath.Join(result.CacheDir, "output.strudel")
+		}
+
+		// Use iterative rendering for better quality (AI-driven parameter optimization)
+		if err := iterativeRender(melodicForDuration, strudelFile, audioPath, feedbackPath, duration, findScriptsDir()); err != nil {
+			// Fallback to single-pass rendering if iterative fails
+			fmt.Printf("       Iterative render failed, trying single-pass: %v\n", err)
+			if err := renderStrudelToWavWithFeedback(result.StrudelCode, audioPath, duration, feedbackPath); err != nil {
+				fmt.Printf("       Warning: Audio render failed: %v\n", err)
+			} else {
+				fmt.Printf("       Render complete (single-pass): %s\n", audioPath)
+				renderedPath = audioPath
+			}
 		} else {
-			fmt.Printf("       Render complete: %s\n", audioPath)
+			fmt.Printf("       Render complete (iterative): %s\n", audioPath)
 			renderedPath = audioPath
 		}
 	}
@@ -708,6 +722,30 @@ func renderStrudelToWav(code, outputPath string, duration float64) error {
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
+	return cmd.Run()
+}
+
+// iterativeRender uses AI-driven iterative refinement for better quality
+func iterativeRender(originalPath, strudelPath, outputPath, aiParamsPath string, duration float64, scriptsDir string) error {
+	script := filepath.Join(scriptsDir, "iterative_render.py")
+	if _, err := os.Stat(script); os.IsNotExist(err) {
+		return fmt.Errorf("iterative_render.py not found")
+	}
+
+	python := findPython(scriptsDir)
+	args := []string{script, originalPath, strudelPath, "-o", outputPath}
+	if duration > 0 {
+		args = append(args, "-d", fmt.Sprintf("%.1f", duration))
+	}
+	if aiParamsPath != "" {
+		args = append(args, "-p", aiParamsPath)
+	}
+	// Use more iterations for better quality (user said they don't care about time)
+	args = append(args, "-i", "15", "-t", "0.70")
+
+	cmd := exec.Command(python, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
 	return cmd.Run()
 }
 
