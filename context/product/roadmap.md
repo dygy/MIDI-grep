@@ -70,7 +70,7 @@ _Moving from "dump all notes" to "find the actual riff."_
   - [x] **Template-Based Generation:** When funk detected, use authentic tamborzão drum patterns + 808 bass
   - [x] **Style Auto-Detection:** Analyze BPM, key (minor/major), note density to auto-select jazz/soul/funk/electronic/house/trance
   - [x] **Manual Genre Override:** `--genre` flag to force specific genre (`brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz`)
-  - [x] **Deep Learning Detection:** Optional CLAP (Contrastive Language-Audio Pretraining) via `--deep-genre` flag for zero-shot genre classification
+  - [x] **Deep Learning Detection:** CLAP (Contrastive Language-Audio Pretraining) enabled by default for zero-shot genre classification (skipped when `--genre` is specified)
 
 - [ ] **Motif Extraction**
   - [ ] **Melody vs Accompaniment:** Separate lead melodic line from harmonic backing

@@ -53,14 +53,20 @@ All outputs are cached in `.cache/stems/{key}/` by URL or file hash:
 
 ```
 .cache/stems/yt_VIDEO_ID/
-├── piano.wav              # Separated melodic stem
+├── melodic.wav            # Separated melodic stem (instruments)
 ├── drums.wav              # Separated drums stem
+├── bass.wav               # Separated bass stem
+├── vocals.wav             # Separated vocals stem
 ├── .version               # Cache version (script hash)
-├── output_v001.strudel    # Version 1 Strudel code
-├── output_v001.json       # Version 1 metadata
-├── output_v002.strudel    # Version 2...
-├── output_latest.strudel  # Symlink to latest
-└── render_v001.wav        # Rendered audio preview
+└── v001/                  # Version directory
+    ├── output.strudel     # Strudel code
+    ├── metadata.json      # BPM, key, style, notes, etc.
+    ├── render.wav         # Rendered audio preview
+    ├── comparison.json    # Audio comparison data
+    ├── comparison.png     # Combined comparison chart
+    ├── chart_*.png        # Individual analysis charts
+    ├── ai_params.json     # AI-suggested mix parameters
+    └── report.html        # Self-contained HTML report
 ```
 
 - **Stem cache**: Auto-invalidates when `separate.py` changes
@@ -96,6 +102,17 @@ The `--render` flag synthesizes WAV audio from patterns:
 - Rhythmic similarity (onset alignment)
 - Timbral similarity (MFCC distance)
 - Overall similarity score for quality feedback
+- Generates 6 individual chart images + combined comparison chart
+- Saves comparison.json for HTML report data
+
+**HTML Report (`scripts/python/generate_report.py`):**
+- Self-contained single-file HTML report with embedded audio and charts
+- Audio players for all 4 stems (melodic, drums, vocals, bass) + rendered output
+- Synchronized playback controls ("Drums + Melodic", "All Stems", "Stop All")
+- Visual comparison charts (spectrograms, chromagrams, frequency bands, similarity)
+- HTML-based data tables (copyable text, not images)
+- Strudel code block with copy button
+- Dark theme styled like Playwright/Jupyter reports
 
 ## Tech Stack
 
@@ -157,6 +174,7 @@ midi-grep/
 │       ├── render_audio.py     # WAV synthesis from Strudel patterns
 │       ├── audio_to_strudel_params.py # AI-driven effect parameter suggestion
 │       ├── compare_audio.py    # Rendered vs original audio comparison
+│       ├── generate_report.py  # HTML report generation
 │       └── requirements.txt
 ├── internal/cache/cache.go     # Stem caching (by URL/file hash)
 ├── context/                    # AWOS product documentation
@@ -380,7 +398,7 @@ go build -o bin/midi-grep ./cmd/midi-grep
 | `--render` | Render audio to WAV (default: `auto`, use `none` to disable) |
 | `--brazilian-funk` | Force Brazilian funk mode (auto-detected normally) |
 | `--genre` | Manual genre override (`brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz`) |
-| `--deep-genre` | Use deep learning (CLAP) for genre detection |
+| `--deep-genre` | Use deep learning (CLAP) for genre detection (default: enabled, skipped when `--genre` is specified) |
 
 ## Genre Auto-Detection
 
@@ -404,8 +422,8 @@ case "retro_wave", "synthwave":
 }
 ```
 
-**Deep Learning Detection:**
-Optional CLAP (Contrastive Language-Audio Pretraining) model for zero-shot classification:
+**Deep Learning Detection (enabled by default):**
+CLAP (Contrastive Language-Audio Pretraining) model for zero-shot classification:
 - Script: `scripts/python/detect_genre_dl.py`
 - Uses laion-clap or transformers CLAP implementation
 - Compares audio embeddings against text descriptions of genres

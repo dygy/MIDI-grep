@@ -178,14 +178,20 @@ def main():
 
             found_any = False
 
+            # Debug: List what demucs produced
+            print(f"Demucs output directory: {demucs_out}")
+            for root, dirs, files in os.walk(demucs_out):
+                for f in files:
+                    print(f"  Demucs produced: {os.path.join(root, f)}")
+
             # Find and copy melodic stem (from 'other')
-            piano_dst = find_and_copy_stem(
+            melodic_dst = find_and_copy_stem(
                 demucs_out, input_name, output_dir,
                 ['other'],
-                'piano'  # Keep as 'piano' for backwards compat
+                'melodic'
             )
-            if piano_dst:
-                print(f"Melodic stem saved to: {piano_dst}")
+            if melodic_dst:
+                print(f"Melodic stem saved to: {melodic_dst}")
                 found_any = True
 
             # Find and copy bass stem
@@ -220,6 +226,16 @@ def main():
 
             if not found_any:
                 print("Error: Could not find any stems in output", file=sys.stderr)
+                sys.exit(1)
+
+            # Melodic stem is required in full mode
+            if not melodic_dst:
+                print("Error: Melodic stem (other) not found in demucs output", file=sys.stderr)
+                print(f"  Looked in: {demucs_out}", file=sys.stderr)
+                # List what was found for debugging
+                for root, dirs, files in os.walk(demucs_out):
+                    for f in files:
+                        print(f"  Found: {os.path.join(root, f)}", file=sys.stderr)
                 sys.exit(1)
 
         # Cleanup temp directory

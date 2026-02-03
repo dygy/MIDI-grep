@@ -316,12 +316,189 @@ def print_report(results):
 
     print("=" * 60)
 
-def generate_comparison_chart(results, original_path, rendered_path, output_path):
-    """Generate a comprehensive comparison chart as PNG."""
+def setup_chart_style():
+    """Setup matplotlib style for dark theme charts."""
     import matplotlib
     matplotlib.use('Agg')
     import matplotlib.pyplot as plt
+    plt.rcParams['text.color'] = '#c9d1d9'
+    plt.rcParams['axes.labelcolor'] = '#c9d1d9'
+    plt.rcParams['axes.edgecolor'] = '#30363d'
+    plt.rcParams['xtick.color'] = '#8b949e'
+    plt.rcParams['ytick.color'] = '#8b949e'
+    return plt
 
+def generate_frequency_bands_chart(results, output_path):
+    """Generate frequency band distribution chart."""
+    plt = setup_chart_style()
+    fig, ax = plt.subplots(figsize=(8, 5))
+    fig.patch.set_facecolor('#0d1117')
+    ax.set_facecolor('#161b22')
+
+    bands = ['sub_bass', 'bass', 'low_mid', 'mid', 'high_mid', 'high']
+    band_labels = ['Sub Bass', 'Bass', 'Low Mid', 'Mid', 'High Mid', 'High']
+    x = np.arange(len(bands))
+    width = 0.35
+
+    orig_vals = [results['original']['bands'].get(b, 0) * 100 for b in bands]
+    rend_vals = [results['rendered']['bands'].get(b, 0) * 100 for b in bands]
+
+    ax.bar(x - width/2, orig_vals, width, label='Original', color='#58a6ff', alpha=0.8)
+    ax.bar(x + width/2, rend_vals, width, label='Rendered', color='#3fb950', alpha=0.8)
+
+    ax.set_ylabel('Energy %', fontsize=11)
+    ax.set_title('Frequency Band Distribution', fontsize=13, color='#c9d1d9', pad=10)
+    ax.set_xticks(x)
+    ax.set_xticklabels(band_labels, fontsize=10)
+    ax.legend(loc='upper right', facecolor='#21262d', edgecolor='#30363d')
+    ax.grid(True, alpha=0.2, axis='y')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=120, facecolor='#0d1117', edgecolor='none', bbox_inches='tight')
+    plt.close()
+
+def generate_similarity_chart(results, output_path):
+    """Generate similarity scores chart."""
+    plt = setup_chart_style()
+    fig, ax = plt.subplots(figsize=(8, 5))
+    fig.patch.set_facecolor('#0d1117')
+    ax.set_facecolor('#161b22')
+
+    metrics = ['mfcc_similarity', 'chroma_similarity', 'brightness_similarity',
+               'tempo_similarity', 'frequency_balance_similarity', 'energy_similarity']
+    metric_labels = ['Timbre', 'Harmony', 'Brightness', 'Tempo', 'Freq Balance', 'Energy']
+    values = [results['comparison'].get(m, 0) * 100 for m in metrics]
+    colors = ['#3fb950' if v >= 70 else '#d29922' if v >= 50 else '#f85149' for v in values]
+
+    bars = ax.barh(metric_labels, values, color=colors, alpha=0.8)
+    ax.set_xlim(0, 100)
+    ax.set_xlabel('Similarity %', fontsize=11)
+    ax.set_title('Similarity Scores', fontsize=13, color='#c9d1d9', pad=10)
+    ax.grid(True, alpha=0.2, axis='x')
+
+    for bar, val in zip(bars, values):
+        ax.text(val + 2, bar.get_y() + bar.get_height()/2, f'{val:.0f}%',
+                va='center', fontsize=10, color='#c9d1d9')
+
+    plt.tight_layout()
+    plt.savefig(output_path, dpi=120, facecolor='#0d1117', edgecolor='none', bbox_inches='tight')
+    plt.close()
+
+def generate_spectrogram_chart(audio_path, output_path, title, duration=30):
+    """Generate spectrogram chart for a single audio file."""
+    plt = setup_chart_style()
+    y = load_audio(audio_path, duration=duration)
+    if y is None:
+        return False
+
+    fig, ax = plt.subplots(figsize=(10, 4))
+    fig.patch.set_facecolor('#0d1117')
+    ax.set_facecolor('#161b22')
+
+    try:
+        D = librosa.amplitude_to_db(np.abs(librosa.stft(y)), ref=np.max)
+        librosa.display.specshow(D, sr=22050, x_axis='time', y_axis='hz', ax=ax, cmap='magma')
+        ax.set_title(title, fontsize=13, color='#c9d1d9', pad=10)
+        ax.set_ylim(0, 8000)
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=120, facecolor='#0d1117', edgecolor='none', bbox_inches='tight')
+        plt.close()
+        return True
+    except Exception as e:
+        plt.close()
+        return False
+
+def generate_chromagram_chart(audio_path, output_path, title, duration=30):
+    """Generate chromagram chart for a single audio file."""
+    plt = setup_chart_style()
+    y = load_audio(audio_path, duration=duration)
+    if y is None:
+        return False
+
+    fig, ax = plt.subplots(figsize=(10, 3))
+    fig.patch.set_facecolor('#0d1117')
+    ax.set_facecolor('#161b22')
+
+    try:
+        chroma = librosa.feature.chroma_cqt(y=y, sr=22050)
+        librosa.display.specshow(chroma, sr=22050, x_axis='time', y_axis='chroma', ax=ax, cmap='coolwarm')
+        ax.set_title(title, fontsize=13, color='#c9d1d9', pad=10)
+        plt.tight_layout()
+        plt.savefig(output_path, dpi=120, facecolor='#0d1117', edgecolor='none', bbox_inches='tight')
+        plt.close()
+        return True
+    except Exception as e:
+        plt.close()
+        return False
+
+def generate_comparison_charts(results, original_path, rendered_path, output_dir):
+    """Generate all comparison charts as separate files."""
+    import os
+    from pathlib import Path
+
+    output_dir = Path(output_dir)
+    charts = {}
+
+    print("Generating frequency bands chart...")
+    freq_path = output_dir / "chart_frequency.png"
+    generate_frequency_bands_chart(results, str(freq_path))
+    charts['frequency'] = str(freq_path)
+
+    print("Generating similarity chart...")
+    sim_path = output_dir / "chart_similarity.png"
+    generate_similarity_chart(results, str(sim_path))
+    charts['similarity'] = str(sim_path)
+
+    print("Generating original spectrogram...")
+    spec_orig_path = output_dir / "chart_spectrogram_original.png"
+    if generate_spectrogram_chart(original_path, str(spec_orig_path), "Original - Spectrogram"):
+        charts['spectrogram_original'] = str(spec_orig_path)
+
+    print("Generating rendered spectrogram...")
+    spec_rend_path = output_dir / "chart_spectrogram_rendered.png"
+    if generate_spectrogram_chart(rendered_path, str(spec_rend_path), "Rendered - Spectrogram"):
+        charts['spectrogram_rendered'] = str(spec_rend_path)
+
+    print("Generating original chromagram...")
+    chroma_orig_path = output_dir / "chart_chromagram_original.png"
+    if generate_chromagram_chart(original_path, str(chroma_orig_path), "Original - Chromagram"):
+        charts['chromagram_original'] = str(chroma_orig_path)
+
+    print("Generating rendered chromagram...")
+    chroma_rend_path = output_dir / "chart_chromagram_rendered.png"
+    if generate_chromagram_chart(rendered_path, str(chroma_rend_path), "Rendered - Chromagram"):
+        charts['chromagram_rendered'] = str(chroma_rend_path)
+
+    print(f"Generated {len(charts)} charts in {output_dir}")
+    return charts
+
+def save_comparison_json(results, output_path):
+    """Save comparison results as JSON for HTML report generation."""
+    with open(output_path, 'w') as f:
+        json.dump(results, f, indent=2)
+    print(f"Comparison JSON saved: {output_path}")
+
+def generate_comparison_chart(results, original_path, rendered_path, output_path):
+    """Generate a comprehensive comparison chart as PNG (legacy single-image mode)."""
+    import matplotlib
+    matplotlib.use('Agg')
+    import matplotlib.pyplot as plt
+    from pathlib import Path
+
+    # If output_path is a directory or ends with /, generate multiple charts
+    output_dir = Path(output_path).parent
+    if output_path.endswith('/') or Path(output_path).is_dir():
+        output_dir = Path(output_path)
+        save_comparison_json(results, str(output_dir / "comparison.json"))
+        return generate_comparison_charts(results, original_path, rendered_path, str(output_dir))
+
+    # Save comparison JSON for HTML report
+    save_comparison_json(results, str(output_dir / "comparison.json"))
+
+    # Generate individual charts in same directory
+    generate_comparison_charts(results, original_path, rendered_path, str(output_dir))
+
+    # Also generate combined chart for backwards compatibility
     fig, axes = plt.subplots(3, 2, figsize=(16, 14))
     fig.patch.set_facecolor('#0d1117')
 

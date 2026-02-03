@@ -230,9 +230,15 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 				o.progress.StageComplete("Drums stem extracted")
 			}
 
-			// Save to cache with track metadata
+			// Save to cache with track metadata (all 4 stems)
 			if stemCache != nil && cacheKey != "" {
-				cached, err := stemCache.PutWithMetadata(cacheKey, stemResult.PianoPath, stemResult.DrumsPath, cfg.TrackTitle, cfg.InputURL)
+				stems := &cache.StemPaths{
+					MelodicPath: stemResult.PianoPath,
+					DrumsPath:   stemResult.DrumsPath,
+					VocalsPath:  stemResult.VocalsPath,
+					BassPath:    stemResult.BassPath,
+				}
+				cached, err := stemCache.PutWithMetadata(cacheKey, stems, cfg.TrackTitle, cfg.InputURL)
 				if err != nil {
 					o.progress.Warning("Cache save failed: %v", err)
 				} else {

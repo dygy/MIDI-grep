@@ -327,8 +327,7 @@ midi-grep extract --url "..." --style house
 # Manual genre override (when auto-detection fails)
 midi-grep extract --url "..." --genre retro_wave
 
-# Deep learning genre detection (CLAP model)
-midi-grep extract --url "..." --deep-genre
+# CLAP genre detection runs automatically (use --genre to override)
 
 # Start web server
 midi-grep serve --port 8080

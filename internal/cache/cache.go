@@ -31,6 +31,8 @@ type StemCache struct {
 type CachedStems struct {
 	MelodicPath string // Renamed from PianoPath
 	DrumsPath   string
+	VocalsPath  string // Vocals stem
+	BassPath    string // Bass stem
 	CacheKey    string
 	TrackName   string // Human-readable track name
 	CachedAt    time.Time
@@ -217,10 +219,14 @@ func (c *StemCache) Get(key string) (*CachedStems, bool) {
 		melodicPath = filepath.Join(cacheSubdir, "piano.wav")
 	}
 	drumsPath := filepath.Join(cacheSubdir, "drums.wav")
+	vocalsPath := filepath.Join(cacheSubdir, "vocals.wav")
+	bassPath := filepath.Join(cacheSubdir, "bass.wav")
 
 	// At least one stem must exist
 	melodicExists := fileExists(melodicPath)
 	drumsExists := fileExists(drumsPath)
+	vocalsExists := fileExists(vocalsPath)
+	bassExists := fileExists(bassPath)
 
 	if !melodicExists && !drumsExists {
 		return nil, false
@@ -247,6 +253,12 @@ func (c *StemCache) Get(key string) (*CachedStems, bool) {
 	}
 	if drumsExists {
 		result.DrumsPath = drumsPath
+	}
+	if vocalsExists {
+		result.VocalsPath = vocalsPath
+	}
+	if bassExists {
+		result.BassPath = bassPath
 	}
 
 	return result, true
@@ -320,13 +332,26 @@ func (c *StemCache) GetByTrackName(trackName string) (*CachedStems, bool) {
 	return nil, false
 }
 
+// StemPaths contains all stem file paths for caching
+type StemPaths struct {
+	MelodicPath string
+	DrumsPath   string
+	VocalsPath  string
+	BassPath    string
+}
+
 // Put stores stems in the cache with track name
 func (c *StemCache) Put(key string, melodicPath, drumsPath string) (*CachedStems, error) {
-	return c.PutWithMetadata(key, melodicPath, drumsPath, "", "")
+	return c.PutWithMetadata(key, &StemPaths{MelodicPath: melodicPath, DrumsPath: drumsPath}, "", "")
+}
+
+// PutAllStems stores all 4 stems in the cache
+func (c *StemCache) PutAllStems(key string, stems *StemPaths) (*CachedStems, error) {
+	return c.PutWithMetadata(key, stems, "", "")
 }
 
 // PutWithMetadata stores stems with track metadata
-func (c *StemCache) PutWithMetadata(key string, melodicPath, drumsPath, trackTitle, url string) (*CachedStems, error) {
+func (c *StemCache) PutWithMetadata(key string, stems *StemPaths, trackTitle, url string) (*CachedStems, error) {
 	// Determine folder name
 	folderName := key
 	if trackTitle != "" {
@@ -348,21 +373,39 @@ func (c *StemCache) PutWithMetadata(key string, melodicPath, drumsPath, trackTit
 	}
 
 	// Copy melodic stem if exists
-	if melodicPath != "" && fileExists(melodicPath) {
+	if stems.MelodicPath != "" && fileExists(stems.MelodicPath) {
 		dst := filepath.Join(cacheSubdir, "melodic.wav")
-		if err := copyFile(melodicPath, dst); err != nil {
+		if err := copyFile(stems.MelodicPath, dst); err != nil {
 			return nil, fmt.Errorf("cache melodic stem: %w", err)
 		}
 		result.MelodicPath = dst
 	}
 
 	// Copy drums stem if exists
-	if drumsPath != "" && fileExists(drumsPath) {
+	if stems.DrumsPath != "" && fileExists(stems.DrumsPath) {
 		dst := filepath.Join(cacheSubdir, "drums.wav")
-		if err := copyFile(drumsPath, dst); err != nil {
+		if err := copyFile(stems.DrumsPath, dst); err != nil {
 			return nil, fmt.Errorf("cache drums stem: %w", err)
 		}
 		result.DrumsPath = dst
+	}
+
+	// Copy vocals stem if exists
+	if stems.VocalsPath != "" && fileExists(stems.VocalsPath) {
+		dst := filepath.Join(cacheSubdir, "vocals.wav")
+		if err := copyFile(stems.VocalsPath, dst); err != nil {
+			return nil, fmt.Errorf("cache vocals stem: %w", err)
+		}
+		result.VocalsPath = dst
+	}
+
+	// Copy bass stem if exists
+	if stems.BassPath != "" && fileExists(stems.BassPath) {
+		dst := filepath.Join(cacheSubdir, "bass.wav")
+		if err := copyFile(stems.BassPath, dst); err != nil {
+			return nil, fmt.Errorf("cache bass stem: %w", err)
+		}
+		result.BassPath = dst
 	}
 
 	// Write cache version

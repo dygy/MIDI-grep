@@ -464,7 +464,18 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		}
 
 		fmt.Printf("       Rendering to %s...\n", audioPath)
+
+		// Get actual duration from the melodic stem for accurate render length
 		duration := 0.0
+		melodicForDuration := filepath.Join(result.CacheDir, "melodic.wav")
+		if _, err := os.Stat(melodicForDuration); os.IsNotExist(err) {
+			melodicForDuration = filepath.Join(result.CacheDir, "piano.wav")
+		}
+		if audioDur, err := getAudioDuration(melodicForDuration); err == nil {
+			duration = audioDur
+			fmt.Printf("       Source audio duration: %.1fs\n", duration)
+		}
+
 		if err := renderStrudelToWavWithFeedback(result.StrudelCode, audioPath, duration, feedbackPath); err != nil {
 			fmt.Printf("       Warning: Audio render failed: %v\n", err)
 		} else {
@@ -786,6 +797,24 @@ func findScriptsDir() string {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+// getAudioDuration gets the duration of an audio file using ffprobe
+func getAudioDuration(audioPath string) (float64, error) {
+	cmd := exec.Command("ffprobe", "-v", "error", "-show_entries",
+		"format=duration", "-of", "default=noprint_wrappers=1:nokey=1", audioPath)
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("ffprobe failed: %w", err)
+	}
+
+	duration := 0.0
+	_, err = fmt.Sscanf(string(output), "%f", &duration)
+	if err != nil {
+		return 0, fmt.Errorf("parse duration: %w", err)
+	}
+
+	return duration, nil
 }
 
 func runTrainPrepare(cmd *cobra.Command, args []string) error {

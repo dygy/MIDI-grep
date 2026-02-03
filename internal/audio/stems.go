@@ -64,9 +64,11 @@ func (s *StemSeparator) SeparateWithModeAndQuality(ctx context.Context, inputPat
 
 	stemResult := &StemResult{}
 
-	// Look for piano stem
+	// Look for piano/melodic stem
 	if mode == StemModePiano || mode == StemModeFull {
 		pianoCandidates := []string{
+			filepath.Join(outputDir, "melodic.wav"),
+			filepath.Join(outputDir, "melodic.mp3"),
 			filepath.Join(outputDir, "piano.wav"),
 			filepath.Join(outputDir, "piano.mp3"),
 		}
@@ -123,6 +125,18 @@ func (s *StemSeparator) SeparateWithModeAndQuality(ctx context.Context, inputPat
 				stemResult.VocalsPath = path
 				break
 			}
+		}
+	}
+
+	// Validate required stems based on mode
+	if mode == StemModeFull {
+		// In full mode, melodic stem is required
+		if stemResult.PianoPath == "" {
+			return nil, fmt.Errorf("melodic stem not found in %s (expected melodic.wav or piano.wav)", outputDir)
+		}
+		// Drums also required in full mode
+		if stemResult.DrumsPath == "" {
+			return nil, fmt.Errorf("drums stem not found in %s", outputDir)
 		}
 	}
 

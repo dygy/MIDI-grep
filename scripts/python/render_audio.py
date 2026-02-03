@@ -7,6 +7,7 @@ Now with adjustable mix parameters based on analysis.
 
 import argparse
 import json
+import math
 import re
 import numpy as np
 from scipy.io import wavfile
@@ -388,7 +389,7 @@ def render_strudel_to_wav(code, output_path, duration_seconds=None, mix_override
 
     # Default to 16 bars if duration not specified
     if duration_seconds:
-        num_bars = int(duration_seconds / bar_duration)
+        num_bars = math.ceil(duration_seconds / bar_duration)
     else:
         num_bars = 16
 

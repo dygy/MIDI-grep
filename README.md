@@ -22,12 +22,18 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   - **Brazilian Phonk**: BPM 80-100 or 145-180, darker sound → phonk-style drums
   - **Retro Wave/Synthwave**: BPM 130-170, longer synth notes → synthwave style
   - **Style Detection**: Detects style based on BPM, key (minor/major), and note density
-- **Deep Learning Genre Detection**: CLAP (Contrastive Language-Audio Pretraining) model for zero-shot audio classification
+- **Deep Learning Genre Detection**: CLAP (Contrastive Language-Audio Pretraining) model for zero-shot audio classification (enabled by default)
 - **Manual Genre Override**: `--genre` flag to force specific genre when auto-detection fails
 - **AI-Driven Audio Rendering**: Synthesize WAV previews with AI-suggested mix parameters
   - Spectral/dynamics/timbre analysis of original audio
   - Automatic effect parameter optimization
   - Rendered vs original comparison with similarity scoring
+- **Self-Contained HTML Report**: Single-file report with everything embedded
+  - Audio players for all 4 stems + rendered output
+  - Synchronized playback controls (play stems together)
+  - Visual comparison charts (spectrograms, chromagrams, frequency bands)
+  - Copyable analysis data tables
+  - Strudel code with copy button
 - **Dynamic Strudel Output**: Rich patterns with per-voice effects
   - `.velocity()` patterns with dynamic range expansion for expressive dynamics
   - Style-specific accent patterns (downbeat, backbeat, offbeat)
@@ -72,51 +78,38 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
 ## Architecture
 
 ```
-┌───────────────────────────────────────────────────────────────────────────────────┐
-│                                   MIDI-grep                                       │
-├───────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                   │
-│  ┌───────────┐   ┌───────────┐   ┌───────────┐   ┌───────────┐   ┌───────────┐  │
-│  │  INPUT    │   │ SEPARATE  │   │  ANALYZE  │   │ TRANSCRIBE│   │  OUTPUT   │  │
-│  │           │   │           │   │           │   │           │   │           │  │
-│  │ • YouTube │──▶│ • Demucs  │──▶│ • BPM/Key │──▶│ • Basic   │──▶│ • Strudel │  │
-│  │   (yt-dlp)│   │ • Stems:  │   │ • Genre   │   │   Pitch   │   │   code    │  │
-│  │ • WAV/MP3 │   │   melodic,│   │   detect  │   │ • Drum    │   │ • MIDI    │  │
-│  │           │   │   bass,   │   │ • CLAP    │   │   onset   │   │ • WAV     │  │
-│  │           │   │   drums   │   │   (opt)   │   │           │   │   render  │  │
-│  └───────────┘   └───────────┘   └───────────┘   └───────────┘   └───────────┘  │
-│                                        │                                         │
-│                         ┌──────────────┴──────────────┐                         │
-│                         ▼                              ▼                         │
-│              ┌─────────────────────┐      ┌─────────────────────┐               │
-│              │  Standard Pipeline  │      │  Template Pipeline  │               │
-│              │  (note transcribe)  │      │  (Brazilian funk)   │               │
-│              └─────────────────────┘      └─────────────────────┘               │
-│                                                                                   │
-├───────────────────────────────────────────────────────────────────────────────────┤
-│                              TECHNOLOGY STACK                                     │
-├───────────────────────────────────────────────────────────────────────────────────┤
-│                                                                                   │
-│  ┌─────────────────────────────┐    ┌───────────────────────────────────────┐   │
-│  │         GO (1.21+)          │    │           PYTHON (3.11+)              │   │
-│  │                             │    │                                       │   │
-│  │  • CLI (Cobra)              │    │  • demucs      - Stem separation      │   │
-│  │  • HTTP Server (Chi)        │    │  • basic-pitch - Audio → MIDI         │   │
-│  │  • Pipeline orchestration   │    │  • librosa     - Audio analysis       │   │
-│  │  • Genre auto-detection     │    │  • CLAP        - DL genre detection   │   │
-│  │  • Strudel code generation  │    │  • pretty_midi - MIDI processing      │   │
-│  └─────────────────────────────┘    └───────────────────────────────────────┘   │
-│                                                                                   │
-│  ┌─────────────────────────────┐    ┌───────────────────────────────────────┐   │
-│  │        WEB FRONTEND         │    │            EXTERNAL                   │   │
-│  │                             │    │                                       │   │
-│  │  • HTMX (no JS frameworks)  │    │  • yt-dlp     - YouTube download      │   │
-│  │  • PicoCSS (styling)        │    │  • ffmpeg     - Audio conversion      │   │
-│  │  • SSE (real-time updates)  │    │                                       │   │
-│  │  • Go templates             │    │                                       │   │
-│  └─────────────────────────────┘    └───────────────────────────────────────┘   │
-│                                                                                   │
-└───────────────────────────────────────────────────────────────────────────────────┘
+                              MIDI-grep Pipeline
+
+  INPUT           SEPARATE         ANALYZE         TRANSCRIBE       OUTPUT
+    │                │                │                │               │
+    ▼                ▼                ▼                ▼               ▼
+┌─────────┐     ┌────────────┐     ┌───────────┐     ┌──────────────┐    ┌─────────┐
+│ YouTube │     │  Demucs    │     │  librosa  │     │ Basic Pitch  │    │ Strudel │
+│ yt-dlp  │────▶│   stem     │────▶│  BPM/Key  │────▶│ Audio → MIDI │───▶│  code   │
+│ WAV/MP3 │     │ separation │     │  + CLAP   │     │ Drum onset   │    │  + WAV  │
+└─────────┘     └────────────┘     └───────────┘     └──────────────┘    └─────────┘
+                    │                │
+                    ▼                ▼
+              ┌──────────┐    ┌───────────┐
+              │ melodic  │    │  Genre    │
+              │ bass     │    │ Detection │──┬── Standard: note transcription
+              │ drums    │    │           │  │
+              │ vocals   │    └───────────┘  └── Template: Brazilian funk/phonk
+              └──────────┘
+
+────────────────────────────────────────────────────────────────────────────────
+                              Tech Stack
+
+  Go 1.21+                              Python 3.11+
+  ├── CLI (Cobra)                       ├── demucs      - stem separation
+  ├── HTTP (Chi)                        ├── basic-pitch - audio to MIDI
+  ├── Pipeline orchestration            ├── librosa     - audio analysis
+  └── Strudel generation                └── pretty_midi - MIDI processing
+
+  Frontend                              External
+  ├── HTMX                              ├── yt-dlp  - YouTube download
+  ├── PicoCSS                           └── ffmpeg  - audio conversion
+  └── SSE updates
 ```
 
 ### Module Structure
@@ -260,7 +253,7 @@ This installs:
 | `--style` | - | Sound style (auto, piano, synth, electronic, house, etc.) |
 | `--brazilian-funk` | - | Force Brazilian funk mode (auto-detected normally) |
 | `--genre` | - | Manual genre override: `brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz` |
-| `--deep-genre` | `true` | Use deep learning (CLAP) for genre detection (enabled by default) |
+| `--deep-genre` | `true` | Use deep learning (CLAP) for genre detection (skipped when `--genre` is specified) |
 
 ### Web Interface
 
