@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -179,7 +180,7 @@ func init() {
 	extractCmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip stem cache (force fresh extraction)")
 	extractCmd.Flags().BoolVar(&chordMode, "chords", false, "Use chord-based generation (better for electronic/non-piano music)")
 	extractCmd.Flags().BoolVar(&brazilianFunk, "brazilian-funk", false, "Use Brazilian funk/phonk mode (tamborzão drums, 808 bass)")
-	extractCmd.Flags().StringVar(&renderAudio, "render", "", "Render output to WAV file (e.g., --render output.wav)")
+	extractCmd.Flags().StringVar(&renderAudio, "render", "", "Render output to WAV (use 'auto' to save in cache dir)")
 
 	// Serve command flags
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to listen on")
@@ -347,13 +348,24 @@ func runExtract(cmd *cobra.Command, args []string) error {
 
 	// Render audio if requested
 	if renderAudio != "" {
-		fmt.Printf("\nRendering audio to %s...\n", renderAudio)
-		// Use 16 bars by default, or calculate from original if available
-		duration := 0.0 // 0 means use default (16 bars)
-		if err := renderStrudelToWav(result.StrudelCode, renderAudio, duration); err != nil {
+		// Determine output path
+		audioPath := renderAudio
+		if renderAudio == "auto" || (result.CacheDir != "" && !filepath.IsAbs(renderAudio) && !strings.Contains(renderAudio, "/")) {
+			if result.CacheDir != "" {
+				// Save to cache directory with version
+				audioPath = filepath.Join(result.CacheDir, fmt.Sprintf("render_v%03d.wav", result.OutputVersion))
+			} else {
+				audioPath = "output.wav"
+			}
+		}
+
+		fmt.Printf("\nRendering audio to %s...\n", audioPath)
+		// Use 16 bars by default
+		duration := 0.0
+		if err := renderStrudelToWav(result.StrudelCode, audioPath, duration); err != nil {
 			fmt.Printf("Warning: Audio render failed: %v\n", err)
 		} else {
-			fmt.Printf("Audio rendered: %s\n", renderAudio)
+			fmt.Printf("Audio rendered: %s\n", audioPath)
 		}
 	}
 
