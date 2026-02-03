@@ -12,6 +12,7 @@ The system tests for loops of different lengths:
 - **1 bar** (4 beats)
 - **2 bars** (8 beats)
 - **4 bars** (16 beats)
+- **8 bars** (32 beats)
 
 For each length, it divides the MIDI track into chunks and compares them for similarity.
 
@@ -35,7 +36,7 @@ To determine if chunks are similar, the algorithm uses a weighted combination of
 ### 3. Confidence Scoring
 
 - Each loop candidate gets a confidence score (0.0 to 1.0)
-- Minimum threshold: **0.65** (65% similarity)
+- Minimum threshold: **0.45** (45% similarity)
 - Higher scores indicate more consistent repetition
 - The pattern with the highest confidence is selected
 

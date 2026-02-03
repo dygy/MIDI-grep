@@ -29,9 +29,11 @@ func Create() (*Workspace, error) {
 // Path helpers for workspace files
 func (w *Workspace) InputCopy() string    { return filepath.Join(w.Dir, "input.wav") }
 func (w *Workspace) PianoStem() string    { return filepath.Join(w.Dir, "piano.wav") }
+func (w *Workspace) DrumsStem() string    { return filepath.Join(w.Dir, "drums.wav") }
 func (w *Workspace) RawMIDI() string      { return filepath.Join(w.Dir, "raw.mid") }
 func (w *Workspace) CleanMIDI() string    { return filepath.Join(w.Dir, "clean.mid") }
 func (w *Workspace) NotesJSON() string    { return filepath.Join(w.Dir, "notes.json") }
+func (w *Workspace) DrumsJSON() string    { return filepath.Join(w.Dir, "drums.json") }
 func (w *Workspace) AnalysisJSON() string { return filepath.Join(w.Dir, "analysis.json") }
 func (w *Workspace) SpleeterOut() string  { return filepath.Join(w.Dir, "spleeter_out") }
 

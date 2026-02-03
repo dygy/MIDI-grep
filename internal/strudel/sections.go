@@ -20,6 +20,28 @@ const (
 	SectionBuildup SectionType = "buildup"
 )
 
+// FormType represents detected musical form
+type FormType string
+
+const (
+	FormUnknown     FormType = "unknown"
+	FormAABA        FormType = "AABA"        // Jazz standard (32-bar)
+	FormABA         FormType = "ABA"         // Ternary form
+	FormVerseChorus FormType = "verse-chorus"
+	Form12BarBlues  FormType = "12-bar blues"
+	FormAABB        FormType = "AABB"        // Binary with repeats
+	FormRondo       FormType = "rondo"       // ABACA pattern
+	FormThroughComp FormType = "through-composed"
+)
+
+// FormAnalysis contains the detected form and section labels
+type FormAnalysis struct {
+	Form       FormType
+	Confidence float64
+	Labels     []string // A, B, A, A or verse, chorus, verse, chorus
+	NumBars    int
+}
+
 // Section represents a detected musical section
 type Section struct {
 	StartBeat   float64
@@ -350,4 +372,400 @@ func GetSectionEffect(section Section) map[string]float64 {
 	}
 
 	return effects
+}
+
+// SectionFingerprint represents a section's characteristics for comparison
+type SectionFingerprint struct {
+	Energy      float64
+	Density     float64
+	Register    float64
+	Duration    float64 // In bars
+	BarIndex    int     // Position in song
+	SectionIdx  int     // Original section index
+}
+
+// AnalyzeForm detects the musical form from sections and analysis
+func AnalyzeForm(sections []Section, analysis *SectionAnalysis) *FormAnalysis {
+	if len(sections) == 0 || analysis == nil {
+		return &FormAnalysis{Form: FormUnknown, Confidence: 0}
+	}
+
+	// Create fingerprints for each section
+	fingerprints := make([]SectionFingerprint, len(sections))
+	for i, s := range sections {
+		fingerprints[i] = SectionFingerprint{
+			Energy:     s.Energy,
+			Density:    s.NoteDensity,
+			Register:   s.AvgPitch,
+			Duration:   (s.EndBeat - s.StartBeat) / 4, // In bars
+			BarIndex:   int(s.StartBeat / 4),
+			SectionIdx: i,
+		}
+	}
+
+	// Check for specific forms in order of specificity
+	if form := detect12BarBlues(fingerprints, analysis); form != nil {
+		return form
+	}
+
+	if form := detectAABA(fingerprints); form != nil {
+		return form
+	}
+
+	if form := detectVerseChorus(fingerprints, sections); form != nil {
+		return form
+	}
+
+	if form := detectABA(fingerprints); form != nil {
+		return form
+	}
+
+	if form := detectAABB(fingerprints); form != nil {
+		return form
+	}
+
+	// Default to through-composed if no pattern detected
+	labels := make([]string, len(sections))
+	for i := range labels {
+		labels[i] = string(rune('A' + i))
+		if i > 25 {
+			labels[i] = fmt.Sprintf("X%d", i-25)
+		}
+	}
+
+	return &FormAnalysis{
+		Form:       FormThroughComp,
+		Confidence: 0.3,
+		Labels:     labels,
+		NumBars:    analysis.NumBars,
+	}
+}
+
+// detect12BarBlues checks for 12-bar blues structure
+func detect12BarBlues(fps []SectionFingerprint, analysis *SectionAnalysis) *FormAnalysis {
+	// 12-bar blues: 4 + 4 + 4 structure
+	// Total should be 12 bars (or multiple of 12)
+	totalBars := analysis.NumBars
+
+	if totalBars < 12 {
+		return nil
+	}
+
+	// Check if total is multiple of 12
+	if totalBars%12 != 0 {
+		// Allow for intro/outro (check if core is 12 bars)
+		coreBars := totalBars
+		if totalBars > 12 && totalBars < 24 {
+			coreBars = 12 // Might have intro/outro
+		} else if totalBars%12 > 4 {
+			return nil
+		}
+		_ = coreBars
+	}
+
+	// Look for characteristic 4-bar phrases
+	// In 12-bar blues: bars 1-4 (I), 5-8 (IV-I), 9-12 (V-IV-I)
+	numPhrases := totalBars / 4
+
+	if numPhrases < 3 {
+		return nil
+	}
+
+	// Analyze energy pattern - blues typically has tension build in last 4 bars
+	var phraseEnergies []float64
+	for i := 0; i < numPhrases && i < 3; i++ {
+		startBar := i * 4
+		endBar := startBar + 3
+		if endBar >= len(analysis.BeatDensities) {
+			endBar = len(analysis.BeatDensities) - 1
+		}
+		phraseEnergies = append(phraseEnergies, avgDensity(analysis.BeatDensities, startBar, endBar))
+	}
+
+	// Check for blues turnaround pattern (last phrase has more movement)
+	if len(phraseEnergies) >= 3 {
+		// Blues typically has higher activity in the turnaround
+		avgFirst := (phraseEnergies[0] + phraseEnergies[1]) / 2
+		if phraseEnergies[2] >= avgFirst*0.8 { // Third phrase at least as active
+			numRepeats := totalBars / 12
+			labels := make([]string, 0)
+			for r := 0; r < numRepeats; r++ {
+				labels = append(labels, "I (bars 1-4)", "IV-I (bars 5-8)", "V-IV-I (bars 9-12)")
+			}
+			return &FormAnalysis{
+				Form:       Form12BarBlues,
+				Confidence: 0.7,
+				Labels:     labels,
+				NumBars:    totalBars,
+			}
+		}
+	}
+
+	return nil
+}
+
+// detectAABA checks for AABA form (common in jazz standards)
+func detectAABA(fps []SectionFingerprint) *FormAnalysis {
+	// AABA: 4 sections where sections 0, 1, 3 are similar, section 2 is different
+	// Typically 8 bars each = 32 bars total
+
+	if len(fps) < 4 {
+		return nil
+	}
+
+	// Check if we have 4 roughly equal sections
+	totalDuration := 0.0
+	for _, fp := range fps {
+		totalDuration += fp.Duration
+	}
+	avgDuration := totalDuration / float64(len(fps))
+
+	// All sections should be similar duration (within 50%)
+	for _, fp := range fps[:4] {
+		if fp.Duration < avgDuration*0.5 || fp.Duration > avgDuration*1.5 {
+			return nil
+		}
+	}
+
+	// Check similarity: A sections (0, 1, 3) should be similar
+	simA0A1 := sectionSimilarity(fps[0], fps[1])
+	simA1A3 := sectionSimilarity(fps[1], fps[3])
+	simA0B := sectionSimilarity(fps[0], fps[2])
+
+	// A sections similar to each other, different from B
+	if simA0A1 > 0.6 && simA1A3 > 0.6 && simA0B < 0.5 {
+		labels := []string{"A", "A", "B", "A"}
+		// Add more if there are additional sections
+		for i := 4; i < len(fps); i++ {
+			if sectionSimilarity(fps[i], fps[0]) > 0.6 {
+				labels = append(labels, "A")
+			} else if sectionSimilarity(fps[i], fps[2]) > 0.6 {
+				labels = append(labels, "B")
+			} else {
+				labels = append(labels, "C")
+			}
+		}
+		return &FormAnalysis{
+			Form:       FormAABA,
+			Confidence: (simA0A1 + simA1A3 + (1 - simA0B)) / 3,
+			Labels:     labels,
+			NumBars:    int(totalDuration),
+		}
+	}
+
+	return nil
+}
+
+// detectVerseChorus checks for verse-chorus alternation
+func detectVerseChorus(fps []SectionFingerprint, sections []Section) *FormAnalysis {
+	if len(fps) < 2 {
+		return nil
+	}
+
+	// Look for alternating energy pattern (verse=low, chorus=high)
+	// Or find two distinct recurring section types
+
+	// Group sections by similarity
+	groups := groupSimilarSections(fps)
+
+	if len(groups) < 2 {
+		return nil
+	}
+
+	// Check for alternating pattern
+	var pattern []int
+	for _, fp := range fps {
+		for groupIdx, group := range groups {
+			for _, member := range group {
+				if member == fp.SectionIdx {
+					pattern = append(pattern, groupIdx)
+					break
+				}
+			}
+		}
+	}
+
+	// Check if pattern alternates (0,1,0,1 or similar)
+	if isAlternating(pattern) {
+		// Determine which is verse (lower energy) and which is chorus (higher energy)
+		group0Energy := 0.0
+		group1Energy := 0.0
+		for _, idx := range groups[0] {
+			group0Energy += fps[idx].Energy
+		}
+		for _, idx := range groups[1] {
+			group1Energy += fps[idx].Energy
+		}
+		group0Energy /= float64(len(groups[0]))
+		group1Energy /= float64(len(groups[1]))
+
+		labels := make([]string, len(fps))
+		for i, p := range pattern {
+			if (p == 0 && group0Energy < group1Energy) || (p == 1 && group1Energy < group0Energy) {
+				labels[i] = "verse"
+			} else {
+				labels[i] = "chorus"
+			}
+		}
+
+		totalDuration := 0.0
+		for _, fp := range fps {
+			totalDuration += fp.Duration
+		}
+
+		return &FormAnalysis{
+			Form:       FormVerseChorus,
+			Confidence: 0.7,
+			Labels:     labels,
+			NumBars:    int(totalDuration),
+		}
+	}
+
+	return nil
+}
+
+// detectABA checks for ternary form
+func detectABA(fps []SectionFingerprint) *FormAnalysis {
+	if len(fps) < 3 {
+		return nil
+	}
+
+	// Check if first and last sections are similar, middle is different
+	simFirstLast := sectionSimilarity(fps[0], fps[len(fps)-1])
+	simFirstMiddle := 0.0
+	for i := 1; i < len(fps)-1; i++ {
+		simFirstMiddle = math.Max(simFirstMiddle, sectionSimilarity(fps[0], fps[i]))
+	}
+
+	if simFirstLast > 0.6 && simFirstMiddle < 0.5 {
+		labels := []string{"A"}
+		for i := 1; i < len(fps)-1; i++ {
+			labels = append(labels, "B")
+		}
+		labels = append(labels, "A")
+
+		totalDuration := 0.0
+		for _, fp := range fps {
+			totalDuration += fp.Duration
+		}
+
+		return &FormAnalysis{
+			Form:       FormABA,
+			Confidence: simFirstLast,
+			Labels:     labels,
+			NumBars:    int(totalDuration),
+		}
+	}
+
+	return nil
+}
+
+// detectAABB checks for binary form with repeats
+func detectAABB(fps []SectionFingerprint) *FormAnalysis {
+	if len(fps) < 4 {
+		return nil
+	}
+
+	// Check for AA followed by BB pattern
+	simAA := sectionSimilarity(fps[0], fps[1])
+	simBB := sectionSimilarity(fps[2], fps[3])
+	simAB := sectionSimilarity(fps[0], fps[2])
+
+	if simAA > 0.6 && simBB > 0.6 && simAB < 0.5 {
+		labels := []string{"A", "A", "B", "B"}
+		for i := 4; i < len(fps); i++ {
+			if sectionSimilarity(fps[i], fps[0]) > 0.6 {
+				labels = append(labels, "A")
+			} else {
+				labels = append(labels, "B")
+			}
+		}
+
+		totalDuration := 0.0
+		for _, fp := range fps {
+			totalDuration += fp.Duration
+		}
+
+		return &FormAnalysis{
+			Form:       FormAABB,
+			Confidence: (simAA + simBB + (1 - simAB)) / 3,
+			Labels:     labels,
+			NumBars:    int(totalDuration),
+		}
+	}
+
+	return nil
+}
+
+// sectionSimilarity computes similarity between two section fingerprints (0-1)
+func sectionSimilarity(a, b SectionFingerprint) float64 {
+	// Compare energy, density, and register
+	energyDiff := math.Abs(a.Energy - b.Energy)
+	densityDiff := math.Abs(a.Density-b.Density) / math.Max(a.Density, b.Density+0.001)
+	registerDiff := math.Abs(a.Register-b.Register) / 12.0 // Normalize by octave
+
+	// Weight the differences
+	similarity := 1.0 - (energyDiff*0.4 + densityDiff*0.3 + registerDiff*0.3)
+	return math.Max(0, similarity)
+}
+
+// groupSimilarSections clusters sections by similarity
+func groupSimilarSections(fps []SectionFingerprint) [][]int {
+	if len(fps) == 0 {
+		return nil
+	}
+
+	threshold := 0.6
+	assigned := make([]bool, len(fps))
+	var groups [][]int
+
+	for i := range fps {
+		if assigned[i] {
+			continue
+		}
+
+		group := []int{i}
+		assigned[i] = true
+
+		for j := i + 1; j < len(fps); j++ {
+			if !assigned[j] && sectionSimilarity(fps[i], fps[j]) > threshold {
+				group = append(group, j)
+				assigned[j] = true
+			}
+		}
+
+		groups = append(groups, group)
+	}
+
+	return groups
+}
+
+// isAlternating checks if a pattern alternates between values
+func isAlternating(pattern []int) bool {
+	if len(pattern) < 3 {
+		return false
+	}
+
+	// Check for A-B-A-B or similar alternating pattern
+	alternations := 0
+	for i := 1; i < len(pattern); i++ {
+		if pattern[i] != pattern[i-1] {
+			alternations++
+		}
+	}
+
+	// At least 50% of transitions should be alternations
+	return float64(alternations)/float64(len(pattern)-1) >= 0.5
+}
+
+// GenerateFormHeader creates a comment string with form info
+func GenerateFormHeader(form *FormAnalysis) string {
+	if form == nil || form.Form == FormUnknown {
+		return ""
+	}
+
+	confidence := int(form.Confidence * 100)
+	labelStr := strings.Join(form.Labels, " ")
+
+	return fmt.Sprintf("// Form: %s (%d%% confidence) - %s\n", form.Form, confidence, labelStr)
 }

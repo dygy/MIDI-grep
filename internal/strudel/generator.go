@@ -525,11 +525,18 @@ var AdditionalSounds = map[string][]string{
 	},
 }
 
+// StyleCandidate represents a style option with score
+type StyleCandidate struct {
+	Style SoundStyle
+	Score float64
+}
+
 // Generator converts MIDI notes to Strudel code
 type Generator struct {
-	quantize int
-	style    SoundStyle
-	palette  SoundPalette
+	quantize        int
+	style           SoundStyle
+	palette         SoundPalette
+	styleCandidates []StyleCandidate
 }
 
 // VoiceNotes holds notes for a specific voice range
@@ -585,6 +592,11 @@ func NewGeneratorWithStyle(quantize int, style SoundStyle) *Generator {
 	}
 }
 
+// SetStyleCandidates sets the alternative style candidates for the header
+func (g *Generator) SetStyleCandidates(candidates []StyleCandidate) {
+	g.styleCandidates = candidates
+}
+
 // SetStyle changes the sound style
 func (g *Generator) SetStyle(style SoundStyle) {
 	g.style = style
@@ -625,6 +637,12 @@ func (g *Generator) Generate(notes []midi.Note, analysisResult *analysis.Result)
 	if analysisResult.Key != "" {
 		sb.WriteString(fmt.Sprintf(", Key: %s", analysisResult.Key))
 	}
+	if analysisResult.TimeSignature != "" && analysisResult.TimeSignature != "4/4" {
+		sb.WriteString(fmt.Sprintf(", Time: %s", analysisResult.TimeSignature))
+	}
+	if analysisResult.SwingRatio > 1.1 {
+		sb.WriteString(fmt.Sprintf(", Swing: %.2f", analysisResult.SwingRatio))
+	}
 	sb.WriteString(fmt.Sprintf("\n// Notes: %d, Style: %s\n", len(notes), g.style))
 
 	// Tempo
@@ -644,7 +662,7 @@ func (g *Generator) Generate(notes []midi.Note, analysisResult *analysis.Result)
 	}
 
 	// Generate stacked pattern
-	g.generateStackedPattern(&sb, bass, mid, high, analysisResult.BPM)
+	g.generateStackedPattern(&sb, bass, mid, high, analysisResult)
 
 	return sb.String()
 }
@@ -653,8 +671,10 @@ func (g *Generator) Generate(notes []midi.Note, analysisResult *analysis.Result)
 func (g *Generator) generateFromCleanup(result *CleanupResult, analysisResult *analysis.Result) string {
 	var sb strings.Builder
 
-	// Detect sections for comments
+	// Detect sections and form for comments
 	sections := DetectSections(result)
+	sectionAnalysis := getSectionAnalysis(result)
+	formAnalysis := AnalyzeForm(sections, sectionAnalysis)
 
 	// Header with stats
 	sb.WriteString("// MIDI-grep output\n")
@@ -662,10 +682,63 @@ func (g *Generator) generateFromCleanup(result *CleanupResult, analysisResult *a
 	if analysisResult.Key != "" {
 		sb.WriteString(fmt.Sprintf(", Key: %s", analysisResult.Key))
 	}
+	if analysisResult.TimeSignature != "" && analysisResult.TimeSignature != "4/4" {
+		sb.WriteString(fmt.Sprintf(", Time: %s", analysisResult.TimeSignature))
+	}
+	if analysisResult.SwingRatio > 1.1 {
+		sb.WriteString(fmt.Sprintf(", Swing: %.2f", analysisResult.SwingRatio))
+	}
 	sb.WriteString(fmt.Sprintf("\n// Notes: %d (bass: %d, mid: %d, high: %d)\n",
 		result.Stats.Total, result.Stats.BassCount, result.Stats.MidCount, result.Stats.HighCount))
 	sb.WriteString(fmt.Sprintf("// Style: %s\n", g.style))
 	sb.WriteString(fmt.Sprintf("// Duration: %.1f beats\n", result.TotalBeats))
+
+	// Add candidates as comments for transparency
+	if len(analysisResult.KeyCandidates) > 1 {
+		sb.WriteString("// Key candidates: ")
+		for i, c := range analysisResult.KeyCandidates {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("%s (%.0f%%)", c.Key, c.Confidence*100))
+		}
+		sb.WriteString("\n")
+	}
+	if len(analysisResult.BPMCandidates) > 1 {
+		sb.WriteString("// BPM candidates: ")
+		for i, c := range analysisResult.BPMCandidates {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("%.0f (%.0f%%)", c.BPM, c.Confidence*100))
+		}
+		sb.WriteString("\n")
+	}
+	if len(analysisResult.TimeSignatureCandidates) > 1 {
+		sb.WriteString("// Time sig candidates: ")
+		for i, c := range analysisResult.TimeSignatureCandidates {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("%s (%.0f%%)", c.TimeSignature, c.Confidence*100))
+		}
+		sb.WriteString("\n")
+	}
+	if len(g.styleCandidates) > 1 {
+		sb.WriteString("// Style candidates: ")
+		for i, c := range g.styleCandidates {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("%s (%.0f%%)", c.Style, c.Score*100))
+		}
+		sb.WriteString("\n")
+	}
+
+	// Add form analysis
+	if formAnalysis != nil && formAnalysis.Form != FormUnknown && formAnalysis.Form != FormThroughComp {
+		sb.WriteString(GenerateFormHeader(formAnalysis))
+	}
 
 	// Add section markers
 	if len(sections) > 0 {
@@ -685,7 +758,7 @@ func (g *Generator) generateFromCleanup(result *CleanupResult, analysisResult *a
 	// Generate the stacked pattern with velocity data
 	g.generateStackedPatternWithVelocity(&sb, bass, mid, high,
 		result.Voices.Bass, result.Voices.Mid, result.Voices.High,
-		analysisResult.BPM)
+		analysisResult)
 
 	return sb.String()
 }
@@ -703,13 +776,75 @@ func jsonToNotes(jsonNotes []NoteJSON) []midi.Note {
 	return notes
 }
 
+// getSectionAnalysis creates a SectionAnalysis from CleanupResult for form detection
+func getSectionAnalysis(result *CleanupResult) *SectionAnalysis {
+	if result == nil || result.TotalBeats == 0 {
+		return nil
+	}
+
+	// Combine all notes for analysis
+	allNotes := make([]NoteJSON, 0, len(result.Voices.Bass)+len(result.Voices.Mid)+len(result.Voices.High))
+	allNotes = append(allNotes, result.Voices.Bass...)
+	allNotes = append(allNotes, result.Voices.Mid...)
+	allNotes = append(allNotes, result.Voices.High...)
+
+	if len(allNotes) == 0 {
+		return nil
+	}
+
+	numBars := int(math.Ceil(result.TotalBeats / 4))
+	if numBars < 1 {
+		numBars = 1
+	}
+
+	analysis := &SectionAnalysis{
+		BeatDensities:  make([]float64, numBars),
+		BeatVelocities: make([]float64, numBars),
+		BeatRegisters:  make([]float64, numBars),
+		TotalBeats:     result.TotalBeats,
+		NumBars:        numBars,
+	}
+
+	// Count notes per bar and accumulate velocity/pitch
+	noteCounts := make([]int, numBars)
+	velocitySums := make([]float64, numBars)
+	pitchSums := make([]float64, numBars)
+
+	for _, n := range allNotes {
+		bar := int(n.Start / 4)
+		if bar >= numBars {
+			bar = numBars - 1
+		}
+		if bar < 0 {
+			bar = 0
+		}
+
+		noteCounts[bar]++
+		velocitySums[bar] += n.VelocityNormalized
+		pitchSums[bar] += float64(n.Pitch)
+	}
+
+	// Calculate averages
+	for i := 0; i < numBars; i++ {
+		if noteCounts[i] > 0 {
+			analysis.BeatDensities[i] = float64(noteCounts[i]) / 4.0
+			analysis.BeatVelocities[i] = velocitySums[i] / float64(noteCounts[i])
+			analysis.BeatRegisters[i] = pitchSums[i] / float64(noteCounts[i])
+		}
+	}
+
+	return analysis
+}
+
 // generateStackedPattern creates a Strudel stack() with separate voices and GM sounds
-func (g *Generator) generateStackedPattern(sb *strings.Builder, bass, mid, high []midi.Note, bpm float64) {
-	g.generateStackedPatternWithVelocity(sb, bass, mid, high, nil, nil, nil, bpm)
+func (g *Generator) generateStackedPattern(sb *strings.Builder, bass, mid, high []midi.Note, analysisResult *analysis.Result) {
+	g.generateStackedPatternWithVelocity(sb, bass, mid, high, nil, nil, nil, analysisResult)
 }
 
 // generateStackedPatternWithVelocity creates a Strudel stack() with per-voice effects and velocity dynamics
-func (g *Generator) generateStackedPatternWithVelocity(sb *strings.Builder, bass, mid, high []midi.Note, bassJSON, midJSON, highJSON []NoteJSON, bpm float64) {
+func (g *Generator) generateStackedPatternWithVelocity(sb *strings.Builder, bass, mid, high []midi.Note, bassJSON, midJSON, highJSON []NoteJSON, analysisResult *analysis.Result) {
+	bpm := analysisResult.BPM
+
 	// Calculate timing
 	beatDuration := 60.0 / bpm
 	gridSize := beatDuration / float64(g.quantize/4)
@@ -728,9 +863,7 @@ func (g *Generator) generateStackedPatternWithVelocity(sb *strings.Builder, bass
 	if numBars < 1 {
 		numBars = 1
 	}
-	if numBars > 16 {
-		numBars = 16 // Limit to 16 bars for readability
-	}
+	// Don't cap numBars - we need accurate count for auto-chunking
 
 	// Define voices with their sounds, effects, and optional velocity data
 	voices := []struct {
@@ -746,6 +879,7 @@ func (g *Generator) generateStackedPatternWithVelocity(sb *strings.Builder, bass
 	}
 
 	var activeVoices []string
+	var voiceNames []string
 	for _, v := range voices {
 		if len(v.notes) > 0 {
 			pattern := g.voiceToPattern(v.notes, gridSize, numBars, beatDuration)
@@ -758,18 +892,24 @@ func (g *Generator) generateStackedPatternWithVelocity(sb *strings.Builder, bass
 				voiceCode += fmt.Sprintf("  note(\"%s\")\n", pattern)
 				voiceCode += fmt.Sprintf("    .sound(\"%s\")", v.sound)
 
-				// Add velocity pattern for dynamics (proper Strudel way)
-				// Also add base gain for voice level balance
-				if len(v.jsonData) > 0 {
-					// Build velocity pattern with dynamic range expansion
+				// For short tracks (<= 8 bars), use detailed velocity
+				// For long tracks, use LFO dynamics instead (cleaner output)
+				if len(v.jsonData) > 0 && numBars <= 8 {
 					velocityPattern := g.buildVelocityPatternWithDynamics(v.jsonData, gridSize, numBars, effects.Dynamics)
 					if velocityPattern != "" {
 						voiceCode += fmt.Sprintf("\n    .velocity(\"%s\")", velocityPattern)
 					}
 				}
-				// Always add base gain for voice balance
+				// Use gain with optional LFO for dynamics
 				if v.gain != 1.0 {
-					voiceCode += fmt.Sprintf("\n    .gain(%.2f)", v.gain)
+					if numBars > 8 {
+						// Long tracks: use perlin for organic dynamics
+						voiceCode += fmt.Sprintf("\n    .gain(perlin.range(%.2f, %.2f).slow(8))", v.gain*0.8, v.gain)
+					} else {
+						voiceCode += fmt.Sprintf("\n    .gain(%.2f)", v.gain)
+					}
+				} else if numBars > 8 {
+					voiceCode += "\n    .gain(perlin.range(0.8, 1.0).slow(8))"
 				}
 
 				// Add per-voice effect chain (filter, pan, reverb, delay, envelope, style FX, legato, echo)
@@ -790,6 +930,8 @@ func (g *Generator) generateStackedPatternWithVelocity(sb *strings.Builder, bass
 					voiceCode += "\n    " + patternTransforms
 				}
 
+				voiceNames = append(voiceNames, v.name)
+
 				activeVoices = append(activeVoices, voiceCode)
 			}
 		}
@@ -800,13 +942,34 @@ func (g *Generator) generateStackedPatternWithVelocity(sb *strings.Builder, bass
 		return
 	}
 
+	// Build global effects string for detected swing
+	globalEffects := ""
+	if analysisResult.SwingRatio > 1.1 && analysisResult.SwingConfidence > 0.5 {
+		// Convert swing ratio to Strudel swing amount (0-1)
+		// Swing ratio 1.0 = 0, 2.0 (triplet) = 0.33
+		swingAmount := (analysisResult.SwingRatio - 1.0) / 3.0
+		if swingAmount > 0.33 {
+			swingAmount = 0.33
+		}
+		globalEffects = fmt.Sprintf(".swing(%.2f)", swingAmount)
+	}
+
+	// Use chunked output with effects as functions (not repeated per bar)
+	g.outputChunkedPatterns(sb, activeVoices, voiceNames, globalEffects, numBars)
+}
+
+// outputStackPattern outputs all voices in a single $: stack()
+func (g *Generator) outputStackPattern(sb *strings.Builder, activeVoices []string, globalEffects string) {
 	if len(activeVoices) == 1 {
-		// Single voice - no stack needed, effects already included per-voice
+		// Single voice - no stack needed
 		sb.WriteString("$: ")
 		sb.WriteString(strings.TrimPrefix(activeVoices[0], "  "))
+		if globalEffects != "" {
+			sb.WriteString("\n    " + globalEffects)
+		}
 		sb.WriteString("\n")
 	} else {
-		// Multiple voices - use stack, effects already per-voice
+		// Multiple voices - use stack
 		sb.WriteString("$: stack(\n")
 		for i, voice := range activeVoices {
 			sb.WriteString(voice)
@@ -815,8 +978,296 @@ func (g *Generator) generateStackedPatternWithVelocity(sb *strings.Builder, bass
 			}
 			sb.WriteString("\n")
 		}
-		sb.WriteString(")\n")
+		sb.WriteString(")")
+		if globalEffects != "" {
+			sb.WriteString(globalEffects)
+		}
+		sb.WriteString("\n")
 	}
+}
+
+// outputSeparatePatterns outputs each voice as a separate $: pattern that can be hushed individually
+func (g *Generator) outputSeparatePatterns(sb *strings.Builder, activeVoices []string, voiceNames []string, globalEffects string) {
+	sb.WriteString("// Separate patterns - hush with $bass.hush(), $mid.hush(), $high.hush()\n")
+	sb.WriteString("// Or use all() to play together, silence() to stop all\n\n")
+
+	for i, voice := range activeVoices {
+		name := "pattern"
+		if i < len(voiceNames) {
+			name = voiceNames[i]
+		}
+		sb.WriteString(fmt.Sprintf("$%s: ", name))
+
+		// Extract just the note() and effects, skip the comment line
+		voiceClean := voice
+		if idx := strings.Index(voiceClean, "note("); idx >= 0 {
+			voiceClean = voiceClean[idx:]
+		}
+		sb.WriteString(strings.TrimSpace(voiceClean))
+		if globalEffects != "" {
+			sb.WriteString("\n    " + globalEffects)
+		}
+		sb.WriteString("\n\n")
+	}
+
+	// Add helper comment for combining
+	sb.WriteString("// To play all together:\n")
+	sb.WriteString("// all(")
+	for i := 0; i < len(activeVoices) && i < len(voiceNames); i++ {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(fmt.Sprintf("$%s", voiceNames[i]))
+	}
+	sb.WriteString(")\n")
+}
+
+// outputNamedPatterns outputs let-bound named patterns with an all() combiner
+func (g *Generator) outputNamedPatterns(sb *strings.Builder, activeVoices []string, voiceNames []string, globalEffects string) {
+	sb.WriteString("// Named patterns - toggle by commenting/uncommenting in all()\n")
+	sb.WriteString("// Or call individually: bass.play(), mid.hush()\n\n")
+
+	// Define each pattern with let
+	for i, voice := range activeVoices {
+		name := "pattern"
+		if i < len(voiceNames) {
+			name = voiceNames[i]
+		}
+		sb.WriteString(fmt.Sprintf("let %s = ", name))
+		// Extract just the note() and effects, skip the comment
+		voiceClean := voice
+		if idx := strings.Index(voiceClean, "note("); idx >= 0 {
+			voiceClean = voiceClean[idx:]
+		}
+		sb.WriteString(strings.TrimSpace(voiceClean))
+		if globalEffects != "" {
+			sb.WriteString("\n  " + globalEffects)
+		}
+		sb.WriteString("\n\n")
+	}
+
+	// Combine with all()
+	sb.WriteString("// Play all together:\n")
+	sb.WriteString("$: all(\n")
+	for i := range activeVoices {
+		name := "pattern"
+		if i < len(voiceNames) {
+			name = voiceNames[i]
+		}
+		sb.WriteString(fmt.Sprintf("  %s", name))
+		if i < len(activeVoices)-1 {
+			sb.WriteString(",")
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(")\n\n")
+
+	// Add individual pattern triggers as comments
+	sb.WriteString("// Solo patterns:\n")
+	for i := range activeVoices {
+		if i < len(voiceNames) {
+			sb.WriteString(fmt.Sprintf("// $: %s\n", voiceNames[i]))
+		}
+	}
+}
+
+// outputChunkedPatterns outputs per-bar arrays for mix & match composition
+func (g *Generator) outputChunkedPatterns(sb *strings.Builder, activeVoices []string, voiceNames []string, globalEffects string, numBars int) {
+	sb.WriteString("// Bar arrays - mix & match freely\n")
+	sb.WriteString("// Pick bars: bass[0], bass[3], or slice: bass.slice(0,4)\n\n")
+
+	// Collect voice data for output
+	type voiceData struct {
+		name    string
+		bars    []string
+		sound   string
+		effects string
+	}
+	var voices []voiceData
+
+	// For each voice, extract the note pattern and split by bars
+	for i, voice := range activeVoices {
+		name := "pattern"
+		if i < len(voiceNames) {
+			name = voiceNames[i]
+		}
+
+		// Extract the note pattern from voice code
+		notePattern := extractNotePatternFromVoice(voice)
+		if notePattern == "" {
+			continue
+		}
+
+		// Split by bar separator "|"
+		bars := splitBars(notePattern)
+
+		// Extract sound name
+		sound := extractSoundName(voice)
+
+		// Extract effects (everything after .sound(...) line)
+		effects := extractEffectsOnly(voice)
+
+		voices = append(voices, voiceData{name, bars, sound, effects})
+
+		// Output bars as simple string array
+		sb.WriteString(fmt.Sprintf("let %s = [\n", name))
+		for j, bar := range bars {
+			bar = strings.TrimSpace(bar)
+			if bar == "" {
+				bar = "~"
+			}
+			sb.WriteString(fmt.Sprintf("  \"%s\"", bar))
+			if j < len(bars)-1 {
+				sb.WriteString(",")
+			}
+			sb.WriteString("\n")
+		}
+		sb.WriteString("]\n\n")
+	}
+
+	// Output effect functions for each voice
+	sb.WriteString("// Effects (applied at playback)\n")
+	for _, v := range voices {
+		sb.WriteString(fmt.Sprintf("let %sFx = p => p.sound(\"%s\")%s\n", v.name, v.sound, v.effects))
+	}
+	sb.WriteString("\n")
+
+	// Play all - use cat() to concatenate bars properly
+	sb.WriteString("// Play all\n")
+	sb.WriteString("$: stack(\n")
+	for i, v := range voices {
+		sb.WriteString(fmt.Sprintf("  %sFx(cat(...%s.map(b => note(b))))", v.name, v.name))
+		if i < len(voices)-1 {
+			sb.WriteString(",")
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString(")\n\n")
+
+	// Examples
+	sb.WriteString("// Play specific bars:\n")
+	sb.WriteString("// $: bassFx(note(bass[0]))\n")
+	sb.WriteString("// $: stack(bassFx(note(bass[0])), midFx(note(mid[0])))\n")
+	sb.WriteString("// Loop first 4 bars:\n")
+	sb.WriteString("// $: bassFx(cat(...bass.slice(0,4).map(b => note(b))))\n")
+}
+
+// extractSoundName extracts just the sound name from voice code
+func extractSoundName(voice string) string {
+	start := strings.Index(voice, ".sound(\"")
+	if start == -1 {
+		return "piano"
+	}
+	start += 8 // len(".sound(\"")
+	end := strings.Index(voice[start:], "\"")
+	if end == -1 {
+		return "piano"
+	}
+	return voice[start : start+end]
+}
+
+// extractEffectsOnly extracts effects chain without the sound
+func extractEffectsOnly(voice string) string {
+	// Find .sound("...") and get everything after it
+	soundStart := strings.Index(voice, ".sound(\"")
+	if soundStart == -1 {
+		return ""
+	}
+
+	// Find the end of .sound("...")
+	afterSound := voice[soundStart+8:]
+	endQuote := strings.Index(afterSound, "\")")
+	if endQuote == -1 {
+		return ""
+	}
+
+	// Get everything after .sound("...")
+	rest := afterSound[endQuote+2:]
+
+	// Clean up - get just the effect chain
+	var effects []string
+	lines := strings.Split(rest, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "//") {
+			continue
+		}
+		// Remove trailing comma if present
+		line = strings.TrimSuffix(line, ",")
+		if line != "" {
+			effects = append(effects, line)
+		}
+	}
+
+	if len(effects) == 0 {
+		return ""
+	}
+	return "\n    " + strings.Join(effects, "\n    ")
+}
+
+// extractNotePatternFromVoice extracts the note pattern string from voice code
+func extractNotePatternFromVoice(voice string) string {
+	start := strings.Index(voice, "note(\"")
+	if start == -1 {
+		return ""
+	}
+	start += 6 // len("note(\"")
+
+	// Find closing quote - handle escaped quotes
+	end := start
+	for end < len(voice) {
+		if voice[end] == '"' && (end == 0 || voice[end-1] != '\\') {
+			break
+		}
+		end++
+	}
+
+	if end >= len(voice) {
+		return ""
+	}
+
+	return voice[start:end]
+}
+
+// splitBars splits a pattern string by bar separator "|"
+func splitBars(pattern string) []string {
+	// Split by |
+	bars := strings.Split(pattern, "|")
+
+	// Clean up each bar
+	result := make([]string, 0, len(bars))
+	for _, bar := range bars {
+		bar = strings.TrimSpace(bar)
+		if bar != "" {
+			result = append(result, bar)
+		}
+	}
+
+	return result
+}
+
+// extractSoundAndEffects extracts .sound() and all following effect chains
+func extractSoundAndEffects(voice string) string {
+	start := strings.Index(voice, ".sound(")
+	if start == -1 {
+		return ""
+	}
+
+	// Find where effects end (before any comment or newline that's not followed by a dot)
+	result := voice[start:]
+
+	// Remove trailing whitespace and comments
+	lines := strings.Split(result, "\n")
+	var effectLines []string
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || strings.HasPrefix(line, "//") {
+			continue
+		}
+		effectLines = append(effectLines, line)
+	}
+
+	return "\n    " + strings.Join(effectLines, "\n    ")
 }
 
 // buildVelocityGainPattern creates a gain pattern matching the note pattern from velocity data

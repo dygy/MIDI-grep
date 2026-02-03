@@ -9,11 +9,17 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
 ## Features
 
 - **YouTube Support**: Paste a URL, get playable code
-- **AI-Powered Separation**: Demucs isolates piano/instruments from any mix
+- **AI-Powered Separation**: Demucs isolates melodic/bass/drums/vocals stems
+- **Drum Pattern Detection**: Extracts kick, snare, hi-hat patterns automatically
 - **Accurate Transcription**: Spotify's Basic Pitch for audio-to-MIDI
-- **BPM & Key Detection**: Automatic tempo and musical key analysis
+- **BPM & Key Detection**: Automatic tempo and musical key analysis with confidence scores
+- **Detection Candidates**: Shows top 5 candidates for key, BPM, time signature, and style in output header
+- **Smart Caching**: Stems cached by URL/file hash; auto-invalidates when processing scripts change
+- **Chord Mode**: Alternative chord-based generation for electronic/funk music (`--chords`)
 - **Loop Detection**: Automatically identifies repeating patterns (1, 2, 4, or 8 bar loops) with confidence scoring
-- **Style Auto-Detection**: Automatically detects style based on BPM, key (minor/major), and note density (jazz, soul, funk, electronic, etc.)
+- **Genre Auto-Detection**: Automatically detects genre and uses specialized generators:
+  - **Brazilian Funk/Phonk**: Detected by BPM (125-155), vocal-range note clustering, short note durations, low bass content → uses tamborzão templates with 808 bass
+  - **Style Detection**: Detects style based on BPM, key (minor/major), and note density (jazz, soul, funk, electronic, etc.)
 - **Dynamic Strudel Output**: Rich patterns with per-voice effects
   - `.velocity()` patterns with dynamic range expansion for expressive dynamics
   - Style-specific accent patterns (downbeat, backbeat, offbeat)
@@ -136,17 +142,21 @@ midi-grep/
    YouTube URL ──▶ yt-dlp ──▶ audio.wav
    Local file ─────────────▶ audio.wav
 
-2. STEM SEPARATION
-   audio.wav ──▶ Demucs ──▶ piano.mp3 (isolated instrument)
+2. CACHE CHECK
+   URL/file hash ──▶ Check .cache/stems/ ──▶ Use cached if valid
 
-3. ANALYSIS
-   piano.mp3 ──▶ librosa ──▶ { bpm: 120, key: "A minor" }
+3. STEM SEPARATION
+   audio.wav ──▶ Demucs ──▶ melodic.mp3 + drums.mp3 + bass.mp3
 
-4. TRANSCRIPTION
-   piano.mp3 ──▶ Basic Pitch ──▶ raw.mid ──▶ cleanup ──▶ notes.json
+4. ANALYSIS
+   melodic.mp3 ──▶ librosa ──▶ { bpm: 120, key: "A minor" }
 
-5. GENERATION
-   notes.json + analysis ──▶ Strudel Generator ──▶ code.strudel
+5. TRANSCRIPTION (parallel)
+   melodic.mp3 ──▶ Basic Pitch ──▶ raw.mid ──▶ cleanup ──▶ notes.json
+   drums.mp3 ──▶ onset detection ──▶ drum_hits.json
+
+6. GENERATION
+   notes.json + drum_hits.json + analysis ──▶ Strudel Generator ──▶ code.strudel
 ```
 
 ## Quick Start
@@ -222,6 +232,12 @@ This installs:
 | `--midi` | `-m` | Also save cleaned MIDI file |
 | `--copy` | `-c` | Copy result to clipboard |
 | `--verbose` | `-v` | Show verbose output |
+| `--chords` | - | Use chord-based generation (better for electronic/funk) |
+| `--no-cache` | - | Skip stem cache, force fresh extraction |
+| `--drums` | - | Include drum patterns (default: on) |
+| `--drums-only` | - | Extract only drums (skip melodic processing) |
+| `--drum-kit` | - | Drum kit: tr808, tr909, linn, acoustic, lofi |
+| `--style` | - | Sound style (auto, piano, synth, electronic, house, etc.) |
 
 ### Web Interface
 
@@ -252,6 +268,111 @@ make build
 ```
 
 ## Example Output
+
+### Default Format (Bar Arrays + Effect Functions)
+
+The default output uses bar arrays for easy mixing and matching:
+
+```javascript
+// MIDI-grep output
+// BPM: 136, Key: C# minor
+// Notes: 497 (bass: 17, mid: 371, high: 109)
+// Drums: 287 hits (bd: 72, sd: 78, hh: 5)
+// Kit: tr808
+// Style: house
+
+setcps(136/60/4)
+
+// Bar arrays - mix & match freely
+let bass = [
+  "cs2 ~*7 cs2",
+  "~*6 cs2",
+  "~*7 cs2"
+]
+
+let mid = [
+  "cs4 ~*3 e4 ~*2 cs4",
+  "~*4 cs4 ~*2 ds4",
+  "cs4 ~*3 e4"
+]
+
+let drums = [
+  "bd ~ sd ~ bd sd ~ ~",
+  "bd ~ sd ~ bd ~ sd bd",
+  "~ oh ~ sd ~ oh"
+]
+
+// Effects (applied at playback)
+let bassFx = p => p.sound("supersaw").lpf(800).room(0.12)
+let midFx = p => p.sound("gm_pad_poly").lpf(4000).room(0.21)
+let drumsFx = p => p.bank("RolandTR808").room(0.15)
+
+// Play all
+$: stack(
+  bassFx(cat(...bass.map(b => note(b)))),
+  midFx(cat(...mid.map(b => note(b)))),
+  drumsFx(cat(...drums.map(b => s(b))))
+)
+
+// Mix & match:
+// $: bassFx(note(bass[0]))
+// $: cat(...bass.slice(0,4).map(b => note(b)))
+```
+
+### Brazilian Funk/Phonk (auto-detected)
+
+When the tool detects Brazilian funk characteristics (BPM 125-155, vocal chop transcription patterns, low bass content), it automatically switches to template-based generation:
+
+```javascript
+// MIDI-grep output (Brazilian Funk mode)
+// BPM: 136, Key: C# minor
+// Genre: Brazilian Funk / Phonk
+// Pattern: Tamborzão
+
+setcps(136/60/4)
+
+// Tamborzão drum pattern (2 bars)
+let tamborzao = `
+  bd ~ ~ bd ~ ~ bd ~ | ~ bd ~ ~ bd ~ ~ ~
+`
+
+let snare = `
+  ~ ~ sd ~ ~ ~ sd ~ | ~ ~ sd ~ ~ ~ sd ~
+`
+
+let hats = `
+  hh hh hh hh hh hh hh hh | hh hh oh hh hh hh oh hh
+`
+
+// 808 Bass (follows kick pattern)
+let bassPattern = `
+  c#1 ~ ~ c#1 ~ ~ c#1 ~ | ~ c#1 ~ ~ g#1 ~ ~ ~
+`
+
+// Synth stab (phonk style)
+let stab = `
+  [c#4,e4,g#4] ~ ~ ~ [c#4,e4,g#4] ~ ~ ~ | ~ ~ [c#4,e4,g#4] ~ ~ ~ ~ ~
+`
+
+// Effects
+let drumFx = p => p.bank("RolandTR808").room(0.1).gain(1.0)
+let bassFx = p => p.sound("sawtooth")
+    .lpf(200).gain(1.2).distort(0.3)
+    .attack(0.001).decay(0.3).sustain(0.2).release(0.1)
+let stabFx = p => p.sound("square")
+    .lpf(2000).gain(0.6).distort(0.2)
+    .attack(0.01).decay(0.1).sustain(0.3).release(0.05)
+    .room(0.2)
+
+// Play all
+$: stack(
+  drumFx(s(tamborzao)),
+  drumFx(s(snare)),
+  drumFx(s(hats).gain(0.6)),
+  bassFx(note(bassPattern)),
+  stabFx(note(stab))
+)
+```
 
 ### Jazz Style (with swing, perlin LFO, vibrato)
 ```javascript
@@ -457,12 +578,14 @@ Paste this into [Strudel](https://strudel.dygy.app/) and press Ctrl+Enter to pla
 ## How It Works
 
 1. **Input**: Audio file or YouTube URL (downloaded via yt-dlp)
-2. **Stem Separation**: Demucs AI model isolates instruments
-3. **Analysis**: librosa detects BPM and musical key
-4. **Transcription**: Basic Pitch converts audio to MIDI
-5. **Cleanup**: Quantization, velocity filtering, noise removal
-6. **Loop Detection**: Identifies repeating patterns with confidence scoring
-7. **Generation**: MIDI notes converted to Strudel mini-notation
+2. **Cache Check**: Skip re-processing if stems already cached
+3. **Stem Separation**: Demucs AI model extracts melodic, bass, drums, vocals stems
+4. **Analysis**: librosa detects BPM and musical key
+5. **Transcription**: Basic Pitch converts melodic audio to MIDI
+6. **Drum Detection**: Onset detection extracts kick, snare, hi-hat patterns
+7. **Cleanup**: Quantization, velocity filtering, noise removal
+8. **Loop Detection**: Identifies repeating patterns with confidence scoring
+9. **Generation**: Notes + drums converted to Strudel bar arrays with effect functions
 
 ## Project Structure
 

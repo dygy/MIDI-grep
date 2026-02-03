@@ -1,47 +1,84 @@
 #!/usr/bin/env python3
 """
 Stem separation using Demucs.
-Extracts piano/other stem from mixed audio.
+Extracts piano/other stem and/or drum stem from mixed audio.
+
+Modes:
+  - piano (default): Extract instrumental/piano stem only
+  - drums: Extract drum stem only
+  - full: Extract both piano and drums stems
 """
 
 import sys
 import os
 import shutil
+import argparse
 from pathlib import Path
 import subprocess
 
-def main():
-    if len(sys.argv) < 3:
-        print("Usage: separate.py <input_audio> <output_dir>", file=sys.stderr)
-        sys.exit(1)
 
-    input_path = sys.argv[1]
-    output_dir = sys.argv[2]
+def main():
+    parser = argparse.ArgumentParser(description='Separate audio into stems using Demucs')
+    parser.add_argument('input_audio', help='Input audio file path')
+    parser.add_argument('output_dir', help='Output directory for stems')
+    parser.add_argument('--mode', choices=['piano', 'drums', 'full'], default='piano',
+                        help='Separation mode: piano (default), drums, or full')
+
+    args = parser.parse_args()
+
+    input_path = args.input_audio
+    output_dir = args.output_dir
+    mode = args.mode
 
     if not os.path.exists(input_path):
         print(f"Error: Input file not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
     try:
-        # Use demucs for separation
-        # htdemucs separates into: drums, bass, other, vocals
-        # Piano typically ends up in "other" stem
-
         demucs_out = os.path.join(output_dir, 'demucs_temp')
         os.makedirs(demucs_out, exist_ok=True)
 
-        # Run demucs with mp3 output (more compatible)
-        result = subprocess.run([
-            sys.executable, '-m', 'demucs',
-            '--two-stems=vocals',  # Split into vocals and no_vocals (instruments)
-            '-n', 'htdemucs',
-            '--mp3',  # Use mp3 output for compatibility
-            '-o', demucs_out,
-            input_path
-        ], capture_output=True, text=True)
+        input_name = Path(input_path).stem
 
-        if result.returncode != 0:
-            # Try without two-stems for full separation
+        if mode == 'piano':
+            # Original behavior: try two-stem first, then full separation
+            result = subprocess.run([
+                sys.executable, '-m', 'demucs',
+                '--two-stems=vocals',
+                '-n', 'htdemucs',
+                '--mp3',
+                '-o', demucs_out,
+                input_path
+            ], capture_output=True, text=True)
+
+            if result.returncode != 0:
+                # Fallback to full separation
+                result = subprocess.run([
+                    sys.executable, '-m', 'demucs',
+                    '-n', 'htdemucs',
+                    '--mp3',
+                    '-o', demucs_out,
+                    input_path
+                ], capture_output=True, text=True)
+
+                if result.returncode != 0:
+                    print(f"Error: Demucs failed: {result.stderr}", file=sys.stderr)
+                    sys.exit(1)
+
+            # Find piano stem
+            piano_dst = find_and_copy_stem(
+                demucs_out, input_name, output_dir,
+                ['no_vocals', 'other'],
+                'piano'
+            )
+            if piano_dst:
+                print(f"Piano/instrumental stem saved to: {piano_dst}")
+            else:
+                print("Error: Could not find instrumental stem in output", file=sys.stderr)
+                sys.exit(1)
+
+        elif mode == 'drums':
+            # Full separation to get drums
             result = subprocess.run([
                 sys.executable, '-m', 'demucs',
                 '-n', 'htdemucs',
@@ -54,49 +91,77 @@ def main():
                 print(f"Error: Demucs failed: {result.stderr}", file=sys.stderr)
                 sys.exit(1)
 
-        # Find the output stem
-        input_name = Path(input_path).stem
-        piano_dst = os.path.join(output_dir, 'piano.wav')  # Will rename mp3 to wav
+            # Find drums stem
+            drums_dst = find_and_copy_stem(
+                demucs_out, input_name, output_dir,
+                ['drums'],
+                'drums'
+            )
+            if drums_dst:
+                print(f"Drums stem saved to: {drums_dst}")
+            else:
+                print("Error: Could not find drums stem in output", file=sys.stderr)
+                sys.exit(1)
 
-        # Look for the separated stems (mp3 format)
-        possible_paths = [
-            # Two-stem mode
-            os.path.join(demucs_out, 'htdemucs', input_name, 'no_vocals.mp3'),
-            # Full separation - "other" contains piano
-            os.path.join(demucs_out, 'htdemucs', input_name, 'other.mp3'),
-            # Also check wav just in case
-            os.path.join(demucs_out, 'htdemucs', input_name, 'no_vocals.wav'),
-            os.path.join(demucs_out, 'htdemucs', input_name, 'other.wav'),
-        ]
+        else:  # mode == 'full'
+            # Full separation to get all stems
+            result = subprocess.run([
+                sys.executable, '-m', 'demucs',
+                '-n', 'htdemucs',
+                '--mp3',
+                '-o', demucs_out,
+                input_path
+            ], capture_output=True, text=True)
 
-        found = False
-        for src_path in possible_paths:
-            if os.path.exists(src_path):
-                # Copy and rename to .wav (or keep as is for downstream)
-                if src_path.endswith('.mp3'):
-                    piano_dst = os.path.join(output_dir, 'piano.mp3')
-                shutil.copy2(src_path, piano_dst)
-                print(f"Piano/instrumental stem saved to: {piano_dst}")
-                found = True
-                break
+            if result.returncode != 0:
+                print(f"Error: Demucs failed: {result.stderr}", file=sys.stderr)
+                sys.exit(1)
 
-        if not found:
-            # Search for any audio file in output
-            for root, dirs, files in os.walk(demucs_out):
-                for f in files:
-                    if (f.endswith('.wav') or f.endswith('.mp3')) and ('other' in f or 'no_vocals' in f or 'instrumental' in f):
-                        ext = Path(f).suffix
-                        piano_dst = os.path.join(output_dir, f'piano{ext}')
-                        shutil.copy2(os.path.join(root, f), piano_dst)
-                        print(f"Instrumental stem saved to: {piano_dst}")
-                        found = True
-                        break
-                if found:
-                    break
+            found_any = False
 
-        if not found:
-            print("Error: Could not find instrumental stem in output", file=sys.stderr)
-            sys.exit(1)
+            # Find and copy melodic stem (from 'other')
+            piano_dst = find_and_copy_stem(
+                demucs_out, input_name, output_dir,
+                ['other'],
+                'piano'  # Keep as 'piano' for backwards compat
+            )
+            if piano_dst:
+                print(f"Melodic stem saved to: {piano_dst}")
+                found_any = True
+
+            # Find and copy bass stem
+            bass_dst = find_and_copy_stem(
+                demucs_out, input_name, output_dir,
+                ['bass'],
+                'bass'
+            )
+            if bass_dst:
+                print(f"Bass stem saved to: {bass_dst}")
+                found_any = True
+
+            # Find and copy drums stem
+            drums_dst = find_and_copy_stem(
+                demucs_out, input_name, output_dir,
+                ['drums'],
+                'drums'
+            )
+            if drums_dst:
+                print(f"Drums stem saved to: {drums_dst}")
+                found_any = True
+
+            # Find and copy vocals stem
+            vocals_dst = find_and_copy_stem(
+                demucs_out, input_name, output_dir,
+                ['vocals'],
+                'vocals'
+            )
+            if vocals_dst:
+                print(f"Vocals stem saved to: {vocals_dst}")
+                found_any = True
+
+            if not found_any:
+                print("Error: Could not find any stems in output", file=sys.stderr)
+                sys.exit(1)
 
         # Cleanup temp directory
         shutil.rmtree(demucs_out, ignore_errors=True)
@@ -104,6 +169,50 @@ def main():
     except Exception as e:
         print(f"Error: Stem separation failed: {e}", file=sys.stderr)
         sys.exit(1)
+
+
+def find_and_copy_stem(demucs_out, input_name, output_dir, stem_names, output_name):
+    """
+    Find a stem file from demucs output and copy it to the output directory.
+
+    Args:
+        demucs_out: Demucs output directory
+        input_name: Original input file name (without extension)
+        output_dir: Where to copy the stem
+        stem_names: List of possible stem names to look for (in order of preference)
+        output_name: Name to use for output file (e.g., 'piano', 'drums')
+
+    Returns:
+        Path to copied file, or None if not found
+    """
+    # Build list of possible paths
+    possible_paths = []
+    for stem in stem_names:
+        for ext in ['.mp3', '.wav']:
+            possible_paths.append(
+                os.path.join(demucs_out, 'htdemucs', input_name, f'{stem}{ext}')
+            )
+
+    # Try each path
+    for src_path in possible_paths:
+        if os.path.exists(src_path):
+            ext = Path(src_path).suffix
+            dst_path = os.path.join(output_dir, f'{output_name}{ext}')
+            shutil.copy2(src_path, dst_path)
+            return dst_path
+
+    # Search recursively as fallback
+    for root, dirs, files in os.walk(demucs_out):
+        for f in files:
+            if any(stem in f.lower() for stem in stem_names):
+                if f.endswith('.wav') or f.endswith('.mp3'):
+                    ext = Path(f).suffix
+                    dst_path = os.path.join(output_dir, f'{output_name}{ext}')
+                    shutil.copy2(os.path.join(root, f), dst_path)
+                    return dst_path
+
+    return None
+
 
 if __name__ == '__main__':
     main()

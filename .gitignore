@@ -54,3 +54,4 @@ pretrained_models/
 # Keep example files
 !examples/*.wav
 !examples/*.mp3
+.cache/

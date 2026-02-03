@@ -17,9 +17,10 @@
 
 *Go orchestrates external Python tools via subprocess (`os/exec`). Each tool runs in isolation with clear input/output contracts.*
 
-- **Stem Separation (Primary):** Spleeter 5-stems (outputs: vocals, drums, bass, piano, other)
-- **Stem Separation (Fallback):** Demucs htdemucs (when Spleeter piano quality is poor)
+- **Stem Separation:** Demucs htdemucs (outputs: melodic/other, drums, bass, vocals)
+- **Caching:** Stems cached by URL/file hash in `.cache/stems/`, auto-invalidates when scripts change
 - **Audio-to-MIDI Transcription:** Basic Pitch (Spotify's ML model, high accuracy)
+- **Drum Detection:** librosa onset detection + spectral analysis for kick/snare/hi-hat classification
 - **MIDI Manipulation:** pretty_midi (Python library for cleanup, quantization)
 - **BPM Detection:** librosa.beat.beat_track (robust tempo estimation)
 - **Key Detection:** librosa + Krumhansl-Schmuckler algorithm (key profile matching)
@@ -27,48 +28,65 @@
 ### Pipeline Flow
 
 ```
-[WAV/MP3 Input]
-      │
-      ▼
+[WAV/MP3/YouTube URL]
+         │
+         ▼
 ┌─────────────────┐
-│ Stem Separation │ (Spleeter/Demucs)
-│   → piano.wav   │
+│ Cache Check     │ (URL/file hash → .cache/stems/)
+│   ↓ miss        │
 └────────┬────────┘
          │
          ▼
-┌─────────────────┐     ┌──────────────┐
-│ BPM Detection   │     │ Key Detection│
-│   → 120 BPM     │     │   → A minor  │
-└────────┬────────┘     └──────┬───────┘
-         │                     │
-         └──────────┬──────────┘
-                    │
-                    ▼
-         ┌─────────────────┐
-         │ Audio → MIDI    │ (Basic Pitch)
-         │   → raw.mid     │
-         └────────┬────────┘
-                  │
-                  ▼
-         ┌─────────────────┐
-         │ MIDI Cleanup    │ (pretty_midi)
-         │ - velocity gate │
-         │ - quantize 1/16 │
-         │ - loop detect   │
-         │   → clean.mid   │
-         └────────┬────────┘
-                  │
-                  ▼
-         ┌─────────────────┐
-         │ Strudel Gen     │ (Go)
-         │   → pattern.js  │
-         └─────────────────┘
+┌─────────────────┐
+│ Stem Separation │ (Demucs htdemucs)
+│   → melodic.wav │
+│   → drums.wav   │
+│   → bass.wav    │
+└────────┬────────┘
+         │
+    ┌────┴────┐
+    ▼         ▼
+┌────────┐  ┌────────────┐
+│ Melodic│  │ Drums      │
+│ Path   │  │ Path       │
+└───┬────┘  └─────┬──────┘
+    │             │
+    ▼             ▼
+┌─────────────┐  ┌──────────────┐
+│ BPM + Key   │  │ Drum Detect  │
+│ Detection   │  │ → bd/sd/hh   │
+└──────┬──────┘  └──────┬───────┘
+       │                │
+       ▼                │
+┌─────────────┐         │
+│ Audio→MIDI  │         │
+│ (Basic Pitch)         │
+└──────┬──────┘         │
+       │                │
+       ▼                │
+┌─────────────┐         │
+│ MIDI Cleanup│         │
+│ - quantize  │         │
+│ - loop det  │         │
+└──────┬──────┘         │
+       │                │
+       └───────┬────────┘
+               │
+               ▼
+      ┌─────────────────┐
+      │ Strudel Gen     │ (Go)
+      │ → bar arrays    │
+      │ → effect funcs  │
+      │ → drums + notes │
+      └─────────────────┘
 ```
 
 ---
 
 ## 3. Data & Persistence
 
+- **Stem Cache:** `.cache/stems/` in repository root, keyed by URL/file hash
+- **Cache Versioning:** Auto-computed from script hashes, invalidates on code changes
 - **File Storage:** Local filesystem (OS temp directory for processing artifacts)
 - **Session State:** None — fully stateless request/response cycle
 - **Cleanup Strategy:** Delete temp files after response sent (or after timeout)
@@ -109,11 +127,17 @@ midi-grep/
 ├── internal/
 │   ├── audio/
 │   │   ├── input.go          # File validation, format detection
-│   │   └── stems.go          # Spleeter/Demucs orchestration
+│   │   ├── stems.go          # Demucs orchestration
+│   │   └── youtube.go        # yt-dlp integration
+│   │
+│   ├── cache/
+│   │   └── cache.go          # Stem caching by URL/file hash
+│   │
+│   ├── drums/
+│   │   └── detector.go       # Drum hit detection/classification
 │   │
 │   ├── analysis/
-│   │   ├── bpm.go            # Tempo detection wrapper
-│   │   └── key.go            # Key detection wrapper
+│   │   └── analysis.go       # BPM + key detection wrapper
 │   │
 │   ├── midi/
 │   │   ├── transcribe.go     # Basic Pitch wrapper
@@ -121,17 +145,20 @@ midi-grep/
 │   │   └── loop.go           # Loop detection
 │   │
 │   ├── strudel/
-│   │   ├── generator.go      # MIDI → Strudel conversion
-│   │   └── formatter.go      # Code formatting, mini-notation
+│   │   ├── generator.go      # MIDI → Strudel bar arrays
+│   │   ├── drums.go          # Drum pattern generation
+│   │   ├── effects.go        # Per-voice effect settings
+│   │   ├── sections.go       # Section detection
+│   │   ├── chords.go         # Chord detection/voicings
+│   │   └── arrangement.go    # Arrangement-based output
 │   │
 │   ├── pipeline/
 │   │   └── orchestrator.go   # End-to-end pipeline coordination
 │   │
 │   └── server/
 │       ├── server.go         # HTTP server setup
-│       ├── routes.go         # Route definitions
 │       ├── handlers.go       # Request handlers
-│       └── sse.go            # Server-Sent Events for progress
+│       └── jobs.go           # Background job processing
 │
 ├── web/
 │   ├── templates/
@@ -147,10 +174,13 @@ midi-grep/
 ├── scripts/
 │   └── python/
 │       ├── requirements.txt  # Python dependencies
-│       ├── separate.py       # Stem separation script
+│       ├── separate.py       # Stem separation (melodic/bass/drums/vocals)
 │       ├── transcribe.py     # Basic Pitch wrapper
 │       ├── analyze.py        # BPM + key detection
-│       └── cleanup.py        # MIDI quantization
+│       ├── cleanup.py        # MIDI quantization
+│       ├── detect_drums.py   # Drum hit detection
+│       ├── smart_analyze.py  # Chord/section detection
+│       └── chord_to_strudel.py # Chord-based generation
 │
 ├── Dockerfile
 ├── docker-compose.yml        # Local dev with volume mounts
@@ -165,16 +195,23 @@ midi-grep/
 ### CLI Interface
 
 ```bash
-# Extract piano riff from audio
+# Extract from YouTube (uses cache)
+midi-grep extract --url "https://youtu.be/VIDEO_ID"
+
+# Extract from file
 midi-grep extract --input track.wav --output riff.strudel
 
-# With options
-midi-grep extract \
-  --input track.wav \
-  --output riff.strudel \
-  --quantize 16 \
-  --format strudel \
-  --midi-out clean.mid
+# Chord mode (for electronic/funk)
+midi-grep extract --url "..." --chords
+
+# Force fresh extraction (skip cache)
+midi-grep extract --url "..." --no-cache
+
+# Drums only
+midi-grep extract --url "..." --drums-only --drum-kit tr808
+
+# Custom style
+midi-grep extract --url "..." --style house
 
 # Start web server
 midi-grep serve --port 8080

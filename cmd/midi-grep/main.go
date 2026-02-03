@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/arkadiishvartcman/midi-grep/internal/audio"
+	"github.com/arkadiishvartcman/midi-grep/internal/cache"
 	"github.com/arkadiishvartcman/midi-grep/internal/pipeline"
 	"github.com/arkadiishvartcman/midi-grep/internal/server"
 	"github.com/spf13/cobra"
@@ -112,32 +113,39 @@ var modelsListCmd = &cobra.Command{
 
 var (
 	// extract flags
-	inputPath  string
-	inputURL   string
-	outputPath string
-	midiOutput string
-	quantize   int
-	soundStyle string
-	verbose    bool
-	simplify   bool
-	loopOnly   bool
+	inputPath   string
+	inputURL    string
+	outputPath  string
+	midiOutput  string
+	quantize    int
+	soundStyle  string
+	verbose     bool
+	simplify    bool
+	loopOnly    bool
+	enableDrums bool
+	drumsOnly   bool
+	drumKit     string
+	arrange       bool
+	noCache       bool
+	chordMode     bool
+	brazilianFunk bool
 
 	// serve flags
 	port int
 
 	// train prepare flags
-	audioDir    string
-	midiDir     string
-	datasetOut  string
-	useMaestro  bool
+	audioDir   string
+	midiDir    string
+	datasetOut string
+	useMaestro bool
 
 	// train run flags
-	datasetPath string
-	modelOutput string
-	epochs      int
-	batchSize   int
+	datasetPath  string
+	modelOutput  string
+	epochs       int
+	batchSize    int
 	learningRate float64
-	baseModel   string
+	baseModel    string
 )
 
 func init() {
@@ -163,6 +171,13 @@ func init() {
 	extractCmd.Flags().BoolVarP(&verbose, "verbose", "v", false, "Verbose output")
 	extractCmd.Flags().BoolVar(&simplify, "simplify", true, "Simplify notes (reduce chords, merge close notes)")
 	extractCmd.Flags().BoolVar(&loopOnly, "loop-only", false, "Output only the detected loop pattern")
+	extractCmd.Flags().BoolVar(&enableDrums, "drums", true, "Extract and include drum patterns (default: on)")
+	extractCmd.Flags().BoolVar(&drumsOnly, "drums-only", false, "Extract only drums (skip melodic processing)")
+	extractCmd.Flags().StringVar(&drumKit, "drum-kit", "tr808", "Drum kit to use (tr808, tr909, linn, acoustic, lofi)")
+	extractCmd.Flags().BoolVar(&arrange, "arrange", false, "Use arrangement-based generation with chord detection and voicings")
+	extractCmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip stem cache (force fresh extraction)")
+	extractCmd.Flags().BoolVar(&chordMode, "chords", false, "Use chord-based generation (better for electronic/non-piano music)")
+	extractCmd.Flags().BoolVar(&brazilianFunk, "brazilian-funk", false, "Use Brazilian funk/phonk mode (tamborzão drums, 808 bass)")
 
 	// Serve command flags
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to listen on")
@@ -208,33 +223,52 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		cancel()
 	}()
 
-	// If URL provided, download first
+	// If URL provided, check cache first then download if needed
 	actualInput := inputPath
 	var tempDir string
+	var cachedStemsPath string
 
 	if inputURL != "" {
 		if !audio.IsYouTubeURL(inputURL) {
 			return fmt.Errorf("invalid YouTube URL: %s", inputURL)
 		}
 
-		fmt.Println("[0/5] Downloading from YouTube...")
-
-		var err error
-		tempDir, err = os.MkdirTemp("", "midi-grep-*")
-		if err != nil {
-			return fmt.Errorf("create temp dir: %w", err)
+		// Check cache before downloading
+		if !noCache {
+			stemCache, err := cache.NewStemCache()
+			if err == nil {
+				cacheKey := cache.KeyForURL(inputURL)
+				if cached, ok := stemCache.Get(cacheKey); ok {
+					fmt.Printf("[0/5] Using cached stems (key: %s)\n", cacheKey[:8])
+					cachedStemsPath = filepath.Dir(cached.PianoPath)
+					if cachedStemsPath == "" && cached.DrumsPath != "" {
+						cachedStemsPath = filepath.Dir(cached.DrumsPath)
+					}
+				}
+			}
 		}
-		defer os.RemoveAll(tempDir)
 
-		downloader := audio.NewYouTubeDownloader()
-		downloadCtx, downloadCancel := context.WithTimeout(ctx, 5*time.Minute)
-		defer downloadCancel()
+		// Only download if not cached
+		if cachedStemsPath == "" {
+			fmt.Println("[0/5] Downloading from YouTube...")
 
-		actualInput, err = downloader.Download(downloadCtx, inputURL, tempDir)
-		if err != nil {
-			return fmt.Errorf("download failed: %w", err)
+			var err error
+			tempDir, err = os.MkdirTemp("", "midi-grep-*")
+			if err != nil {
+				return fmt.Errorf("create temp dir: %w", err)
+			}
+			defer os.RemoveAll(tempDir)
+
+			downloader := audio.NewYouTubeDownloader()
+			downloadCtx, downloadCancel := context.WithTimeout(ctx, 5*time.Minute)
+			defer downloadCancel()
+
+			actualInput, err = downloader.Download(downloadCtx, inputURL, tempDir)
+			if err != nil {
+				return fmt.Errorf("download failed: %w", err)
+			}
+			fmt.Println("       Download complete")
 		}
-		fmt.Println("       Download complete")
 	}
 
 	// Find scripts directory
@@ -245,12 +279,21 @@ func runExtract(cmd *cobra.Command, args []string) error {
 
 	cfg := pipeline.DefaultConfig()
 	cfg.InputPath = actualInput
+	cfg.InputURL = inputURL // For cache key generation
+	cfg.CachedStemsDir = cachedStemsPath
 	cfg.OutputPath = outputPath
 	cfg.MIDIOutputPath = midiOutput
 	cfg.Quantize = quantize
 	cfg.SoundStyle = soundStyle
 	cfg.Simplify = simplify
 	cfg.LoopOnly = loopOnly
+	cfg.EnableDrums = enableDrums
+	cfg.DrumsOnly = drumsOnly
+	cfg.DrumKit = drumKit
+	cfg.Arrange = arrange
+	cfg.ChordMode = chordMode
+	cfg.BrazilianFunk = brazilianFunk
+	cfg.UseCache = !noCache
 
 	result, err := orch.Execute(ctx, cfg)
 	if err != nil {
@@ -270,14 +313,34 @@ func runExtract(cmd *cobra.Command, args []string) error {
 
 	// Show summary
 	fmt.Println("\nSummary:")
-	fmt.Printf("  BPM: %.0f, Key: %s\n", result.BPM, result.Key)
-	fmt.Printf("  Notes: %d retained", result.NotesRetained)
-	if result.NotesRemoved > 0 {
-		fmt.Printf(", %d simplified", result.NotesRemoved)
+	fmt.Printf("  BPM: %.0f", result.BPM)
+	if result.Key != "" {
+		fmt.Printf(", Key: %s", result.Key)
+	}
+	if result.TimeSignature != "" && result.TimeSignature != "4/4" {
+		fmt.Printf(", Time: %s", result.TimeSignature)
+	}
+	if result.SwingRatio > 1.1 {
+		fmt.Printf(", Swing: %.2f", result.SwingRatio)
 	}
 	fmt.Println()
+	if result.NotesRetained > 0 {
+		fmt.Printf("  Notes: %d retained", result.NotesRetained)
+		if result.NotesRemoved > 0 {
+			fmt.Printf(", %d simplified", result.NotesRemoved)
+		}
+		fmt.Println()
+	}
 	if result.LoopDetected {
 		fmt.Printf("  Loop: %d bar(s) detected (%.0f%% confidence)\n", result.LoopBars, result.LoopConfidence*100)
+	}
+	if result.DrumHits > 0 {
+		fmt.Printf("  Drums: %d hits", result.DrumHits)
+		if len(result.DrumTypes) > 0 {
+			fmt.Printf(" (bd: %d, sd: %d, hh: %d)",
+				result.DrumTypes["bd"], result.DrumTypes["sd"], result.DrumTypes["hh"])
+		}
+		fmt.Println()
 	}
 
 	fmt.Println("\nDone! Strudel code generated successfully.")

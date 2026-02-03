@@ -45,9 +45,10 @@ _Intelligent instrument detection and appropriate Strudel sound mapping._
   - [x] **Sound Palette Presets:** Pre-configured sound combinations (piano, synth, orchestral, electronic, jazz, lofi)
   - [x] **Per-Voice Gain Control:** Balance volumes between bass/mid/high
 
-- [ ] **Stem Selection** (future enhancement)
+- [x] **Stem Selection** ✅ PARTIAL
   - [ ] **Target Instrument Flag:** `--instrument piano|vocals|bass|drums|other`
-  - [ ] **Multi-Stem Output:** Extract and generate code for multiple stems separately
+  - [x] **Multi-Stem Output:** Extract piano + drums with `--drums` flag, drums-only with `--drums-only`
+  - [x] **Separation Modes:** `separate.py --mode piano|drums|full` for different extraction modes
   - [ ] **Demucs Model Selection:** Use `htdemucs_6s` for 6-stem separation when needed
 
 ---
@@ -79,29 +80,38 @@ _Moving from "dump all notes" to "find the actual riff."_
 
 ---
 
-## Phase 4: Enhanced Analysis
+## Phase 4: Enhanced Analysis ✅ MOSTLY COMPLETE
 
 _Deeper musical understanding for better output._
 
-- [ ] **Advanced Rhythm Analysis**
-  - [ ] **Time Signature Detection:** Identify 3/4, 6/8, 5/4, not just 4/4
-  - [ ] **Swing Detection:** Recognize swing feel and adjust quantization
-  - [ ] **Groove Templates:** Apply detected groove to output patterns
+- [x] **Advanced Rhythm Analysis** ✅
+  - [x] **Time Signature Detection:** Identify 3/4, 6/8, 5/4, 2/4, 7/8 (accent-based detection)
+  - [x] **Swing Detection:** Recognize swing feel (1.0=straight to 2.0=triplet), apply `.swing()`
+  - [ ] **Groove Templates:** Apply detected groove to output patterns (future)
 
-- [ ] **Harmonic Analysis**
-  - [ ] **Chord Recognition:** Output chord symbols (Cmaj7, Dm, G7)
-  - [ ] **Chord Progression Detection:** Identify common progressions (ii-V-I, I-IV-V)
-  - [ ] **Harmonic Rhythm:** Detect chord change points
+- [x] **Harmonic Analysis** ✅
+  - [x] **Chord Recognition:** Detect chord types (major, minor, 7th, 9th, dim, aug, sus)
+  - [x] **Chord Progression Detection:** Track chord changes over time with `arrange()`
+  - [x] **Harmonic Rhythm:** Detect chord change points and durations
+  - [x] **Key Detection from Chords:** Infer key from chord progression analysis
 
-- [ ] **Structural Analysis**
-  - [ ] **Section Detection:** Auto-identify intro, verse, chorus, bridge, outro
-  - [ ] **Section Labels:** Add comments marking sections in output
-  - [ ] **Form Analysis:** Recognize AABA, verse-chorus, 12-bar blues structures
+- [x] **Structural Analysis** ✅ COMPLETE
+  - [x] **Section Detection:** Auto-detect intro, verse, chorus based on energy
+  - [x] **Section Labels:** Time-stamped section markers in output header
+  - [x] **Form Analysis:** Recognize AABA, ABA, AABB, verse-chorus, 12-bar blues structures
 
 - [ ] **Confidence & Quality Metrics**
   - [ ] **Note Confidence Scores:** Per-note certainty from transcription
   - [ ] **Overall Quality Score:** Combined metric for transcription reliability
   - [ ] **Ambiguity Warnings:** Flag uncertain passages for manual review
+
+- [x] **Drum Extraction** ✅ NEW
+  - [x] **Drum Stem Separation:** Extract drum track using Demucs full mode
+  - [x] **Drum Hit Detection:** Onset detection with librosa
+  - [x] **Drum Classification:** Spectral analysis to identify bd/sd/hh/oh/cp
+  - [x] **Drum Pattern Generation:** Generate `s()` patterns with `.bank()`
+  - [x] **Drum Kit Selection:** TR-808, TR-909, LinnDrum, Acoustic, Lo-fi presets
+  - [x] **Combined Output:** Merge melodic + drum patterns in `stack()`
 
 ---
 
@@ -188,6 +198,17 @@ _Leveraging full Strudel capabilities for expressive output._
   - [ ] **Multiple Takes:** Generate slight variations of the same pattern
   - [ ] **Humanization Options:** Add subtle timing/velocity variations
   - [ ] **Simplified Versions:** Output both full and simplified patterns
+
+- [x] **Arrangement-Based Generation** ✅ NEW
+  - [x] **Chord Variable:** `let chords = arrange([16, "<Cm7!4 Bb7>"], ...).chord()`
+  - [x] **Voicings:** `.dict('ireal-ext').voicing()` for proper chord voicings
+  - [x] **Chord-Derived Parts:** Pad, bass, arpeggio, melody all from same chord source
+  - [x] **Root Notes Bass:** `chords.rootNotes(1)` for bass following chord roots
+  - [x] **Arpeggiated Parts:** `n(run(8)).set(chords).voicing()` for arpeggios
+  - [x] **Musical Variations:** `.sometimesBy()`, `.lastOf()`, `.mask()` patterns
+  - [x] **Perlin Modulation:** `perlin.range()` for organic filter/parameter movement
+  - [x] **Build Masks:** `.mask("<1!32 0!16>")` for arrangement drops/builds
+  - [x] **CLI Flag:** `--arrange` to enable arrangement-based output
 
 ---
 
@@ -326,3 +347,16 @@ _Ideas for future consideration, not yet prioritized._
 | 1.24 | 2026-02-02 | Enhanced style effects: ring modulation, chorus, leslie, shape/saturation, pitch envelope for jazz/soul/funk/electronic |
 | 1.25 | 2026-02-02 | Improved loop detection: 8-bar loops, lower confidence threshold (0.45), better pattern matching |
 | 1.26 | 2026-02-02 | Aggressive note simplification: MaxChordSize=2, MaxNotesPerBeat=1, MergeThreshold=0.1 for clearer patterns |
+| 1.27 | 2026-02-02 | Drum extraction: separate.py --mode, detect_drums.py, drum kit presets (TR-808/909, Linn, acoustic, lofi) |
+| 1.28 | 2026-02-02 | Drum pattern generation: s() patterns with .bank(), .cut(1) for hi-hats, .room() for ambience |
+| 1.29 | 2026-02-02 | Chord detection: identify major/minor/7th/9th/dim/aug/sus chords from MIDI notes |
+| 1.30 | 2026-02-02 | Arrangement-based generation: arrange(), .voicings(), .set(chords), chord-derived parts |
+| 1.31 | 2026-02-02 | Musical variations: .sometimesBy(), .lastOf(), .mask(), perlin.range() modulation |
+| 1.32 | 2026-02-02 | Time signature detection: analyze beat accent patterns for 4/4, 3/4, 6/8, 2/4, 5/4, 7/8 |
+| 1.33 | 2026-02-02 | Swing detection: eighth-note timing deviation analysis, swing ratio (1.0-2.0), .swing() effect |
+| 1.34 | 2026-02-02 | Form analysis: detect AABA, ABA, AABB, verse-chorus, 12-bar blues from section patterns |
+| 1.35 | 2026-02-02 | Separate output modes: --output-mode=stack/separate/named for hushable voices and let bindings |
+| 1.36 | 2026-02-03 | Stem caching: cache by URL/file hash in .cache/stems/, auto-invalidate when scripts change |
+| 1.37 | 2026-02-03 | Bar array output: let bass/mid/high/drums = [...] with effect functions, cat(...map()) for playback |
+| 1.38 | 2026-02-03 | Drums in default output: drumsFx with bank(), s() patterns integrated in stack |
+| 1.39 | 2026-02-03 | Chord mode: --chords flag for electronic/funk music using chord detection instead of note transcription |
