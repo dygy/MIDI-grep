@@ -250,16 +250,21 @@ midi-grep/
 │       └── pico.min.css      # PicoCSS (vendored)
 │
 ├── scripts/
-│   └── python/
-│       ├── requirements.txt  # Python dependencies
-│       ├── separate.py       # Stem separation (melodic/bass/drums/vocals)
-│       ├── transcribe.py     # Basic Pitch wrapper
-│       ├── analyze.py        # BPM + key detection
-│       ├── cleanup.py        # MIDI quantization
-│       ├── detect_drums.py   # Drum hit detection
-│       ├── smart_analyze.py  # Chord/section detection
-│       ├── chord_to_strudel.py # Chord-based generation
-│       └── render_audio.py   # WAV audio synthesis from patterns
+│   ├── python/
+│   │   ├── requirements.txt  # Python dependencies
+│   │   ├── separate.py       # Stem separation (melodic/bass/drums/vocals)
+│   │   ├── transcribe.py     # Basic Pitch wrapper
+│   │   ├── analyze.py        # BPM + key detection
+│   │   ├── cleanup.py        # MIDI quantization
+│   │   ├── detect_drums.py   # Drum hit detection
+│   │   ├── smart_analyze.py  # Chord/section detection
+│   │   ├── chord_to_strudel.py # Chord-based generation
+│   │   ├── render_audio.py   # Basic WAV synthesis (preview only)
+│   │   ├── compare_audio.py  # Audio similarity comparison
+│   │   └── audio_to_strudel_params.py # AI-driven parameter suggestion
+│   │
+│   └── node/                 # Future: Strudel-native rendering
+│       └── package.json      # @strudel/core, @strudel/webaudio deps
 │
 ├── Dockerfile
 ├── docker-compose.yml        # Local dev with volume mounts

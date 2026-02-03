@@ -53,43 +53,41 @@ func (g *BrazilianFunkGenerator) Generate(analysisResult *analysis.Result) strin
 	fifth := strings.ToLower(getFifth(root))          // e.g., "g#"
 
 	// ========== DRUMS ==========
-	sb.WriteString("// ===== DRUMS (Tamborzão) =====\n")
+	// Original: sparse feel, ~2 hits/second, irregular timing
+	sb.WriteString("// ===== DRUMS (Sparse Tamborzão) =====\n")
 
-	// Authentic tamborzão patterns - syncopated, driving
-	sb.WriteString("// Kick - heavy 808 with tamborzão syncopation\n")
-	sb.WriteString("let kick1 = \"bd ~ ~ bd ~ ~ bd ~ ~ bd ~ ~ bd bd ~ bd\"\n")
-	sb.WriteString("let kick2 = \"bd ~ ~ bd ~ bd ~ ~ bd ~ ~ bd ~ bd bd ~\"\n")
-	sb.WriteString("let kick3 = \"~ bd ~ ~ bd ~ bd ~ ~ bd ~ bd ~ ~ bd bd\"\n\n")
+	// Sparser kick - matches original's loose feel
+	sb.WriteString("// Kick - syncopated but sparse\n")
+	sb.WriteString("let kick1 = \"bd ~ ~ ~ ~ ~ bd ~ ~ ~ ~ ~ bd ~ ~ ~\"\n")
+	sb.WriteString("let kick2 = \"~ ~ bd ~ ~ ~ ~ ~ bd ~ ~ ~ ~ ~ bd ~\"\n")
+	sb.WriteString("let kick3 = \"bd ~ ~ ~ bd ~ ~ ~ ~ ~ bd ~ ~ ~ ~ ~\"\n\n")
 
-	// Snare on 2 and 4 with variations
-	sb.WriteString("// Snare - backbeat with ghost notes\n")
+	// Snare on 2 and 4 only
+	sb.WriteString("// Snare - simple backbeat\n")
 	sb.WriteString("let snare1 = \"~ ~ ~ ~ sd ~ ~ ~ ~ ~ ~ ~ sd ~ ~ ~\"\n")
-	sb.WriteString("let snare2 = \"~ ~ ~ ~ sd ~ ~ sd ~ ~ ~ ~ sd ~ sd ~\"\n")
-	sb.WriteString("let snare3 = \"~ ~ sd ~ sd ~ ~ ~ ~ ~ sd ~ sd ~ ~ sd\"\n\n")
+	sb.WriteString("let snare2 = \"~ ~ ~ ~ sd ~ ~ ~ ~ ~ ~ ~ sd ~ ~ ~\"\n")
+	sb.WriteString("let snare3 = \"~ ~ ~ ~ sd ~ ~ ~ ~ ~ ~ ~ sd ~ ~ ~\"\n\n")
 
-	// Busy hi-hats
-	sb.WriteString("// Hi-hats - constant drive\n")
-	sb.WriteString("let hh1 = \"hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh hh\"\n")
-	sb.WriteString("let hh2 = \"hh hh oh hh hh hh oh hh hh hh hh oh hh hh oh hh\"\n")
-	sb.WriteString("let hh3 = \"oh hh hh hh oh hh hh oh hh oh hh hh oh hh hh hh\"\n\n")
+	// Sparse hi-hats - not constant 16ths
+	sb.WriteString("// Hi-hats - sparse, accent on offbeats\n")
+	sb.WriteString("let hh1 = \"~ hh ~ ~ ~ hh ~ ~ ~ hh ~ ~ ~ hh ~ ~\"\n")
+	sb.WriteString("let hh2 = \"~ ~ hh ~ ~ ~ oh ~ ~ ~ hh ~ ~ ~ oh ~\"\n")
+	sb.WriteString("let hh3 = \"hh ~ ~ ~ hh ~ ~ ~ oh ~ ~ ~ hh ~ ~ ~\"\n\n")
 
 	// ========== 808 BASS ==========
-	sb.WriteString("// ===== 808 BASS (follows kick, with slides) =====\n")
-	sb.WriteString(fmt.Sprintf("let bass1 = \"%s1 ~ ~ %s1 ~ ~ %s1 ~ ~ %s1 ~ ~ %s1 %s1 ~ %s1\"\n", r, r, r, r, r, fifth, r))
-	sb.WriteString(fmt.Sprintf("let bass2 = \"%s1 ~ ~ %s1 ~ %s1 ~ ~ %s1 ~ ~ %s1 ~ %s1 %s1 ~\"\n", r, r, fifth, r, r, r, r))
-	sb.WriteString(fmt.Sprintf("let bass3 = \"~ %s1 ~ ~ %s1 ~ %s1 ~ ~ %s1 ~ %s1 ~ ~ %s1 %s1\"\n\n", r, fifth, r, r, r, r, r))
+	// Sparse bass following the sparse kick
+	sb.WriteString("// ===== 808 BASS (sparse, follows kick) =====\n")
+	sb.WriteString(fmt.Sprintf("let bass1 = \"%s1 ~ ~ ~ ~ ~ %s1 ~ ~ ~ ~ ~ %s1 ~ ~ ~\"\n", r, r, fifth))
+	sb.WriteString(fmt.Sprintf("let bass2 = \"~ ~ %s1 ~ ~ ~ ~ ~ %s1 ~ ~ ~ ~ ~ %s1 ~\"\n", r, fifth, r))
+	sb.WriteString(fmt.Sprintf("let bass3 = \"%s1 ~ ~ ~ %s1 ~ ~ ~ ~ ~ %s1 ~ ~ ~ ~ ~\"\n\n", r, fifth, r))
 
 	// ========== VOCAL CHOPS ==========
-	sb.WriteString("// ===== VOCAL CHOPS (busy, rhythmic) =====\n")
-	// Use detected pattern: c#4 c#4 c#4 g#4 | c#4 d#4 d#4 g#4 | d#4 d#4 g#4 d#4 | d#4 d#4 d#4 d#4
-	sb.WriteString(fmt.Sprintf("let vox1 = \"%s4 %s4 %s4 %s4 %s4 %s4 %s4 %s4 %s4 %s4 %s4 %s4 %s4 %s4 %s4 %s4\"\n",
-		r, r, r, fifth, r, third, third, fifth, third, third, fifth, third, third, third, third, third))
-	sb.WriteString(fmt.Sprintf("let vox2 = \"%s4 ~ %s4 ~ %s4 ~ %s4 ~ %s4 ~ %s4 ~ %s4 ~ %s4 ~\"\n",
-		r, r, fifth, third, r, fifth, third, r))
-	sb.WriteString(fmt.Sprintf("let vox3 = \"~ %s4 ~ %s4 ~ %s4 ~ %s4 ~ %s4 ~ %s4 ~ %s4 ~ %s4\"\n",
-		r, fifth, r, third, fifth, r, third, fifth))
-	sb.WriteString(fmt.Sprintf("let vox4 = \"%s4 %s4 ~ ~ %s4 %s4 ~ ~ %s4 %s4 ~ ~ %s4 %s4 ~ ~\"\n\n",
-		r, fifth, third, r, fifth, third, r, fifth))
+	// Original analysis: sparse (2.1 notes/sec), irregular timing, high register (C5, G#4, D#5)
+	sb.WriteString("// ===== VOCAL CHOPS (sparse, high register like original) =====\n")
+	sb.WriteString(fmt.Sprintf("let vox1 = \"%s5 ~ ~ ~ %s4 ~ ~ ~ ~ ~ %s5 ~ ~ ~ ~ ~\"\n", r, fifth, third))
+	sb.WriteString(fmt.Sprintf("let vox2 = \"~ ~ %s5 ~ ~ ~ ~ ~ %s4 ~ ~ ~ %s5 ~ ~ ~\"\n", fifth, r, r))
+	sb.WriteString(fmt.Sprintf("let vox3 = \"~ %s5 ~ ~ ~ ~ %s4 ~ ~ ~ ~ ~ ~ %s5 ~ ~\"\n", r, fifth, third))
+	sb.WriteString(fmt.Sprintf("let vox4 = \"%s5 ~ ~ %s4 ~ ~ ~ ~ ~ ~ %s5 ~ ~ ~ %s4 ~\"\n\n", r, fifth, r, third))
 
 	// ========== STABS ==========
 	sb.WriteString("// ===== CHORD STABS =====\n")
@@ -124,11 +122,11 @@ func (g *BrazilianFunkGenerator) Generate(analysisResult *analysis.Result) strin
 	sb.WriteString("  .attack(0.001).decay(0.2).sustain(0.4).release(0.15)\n")
 	sb.WriteString("  .slide(0.1)\n\n")
 
-	// Vocal chop - increased for mid presence
-	sb.WriteString("let voxFx = p => p.sound(\"square\")\n")
-	sb.WriteString("  .lpf(3500).gain(0.75).room(0.12)\n")
-	sb.WriteString("  .attack(0.005).decay(0.06).sustain(0.5).release(0.04)\n")
-	sb.WriteString("  .phaser(0.3).phaserdepth(0.4).crush(14)\n\n")
+	// Vocal chop - high register, spacious
+	sb.WriteString("let voxFx = p => p.sound(\"gm_lead_2_sawtooth\")\n")
+	sb.WriteString("  .lpf(4000).gain(0.9).room(0.3)\n")
+	sb.WriteString("  .attack(0.01).decay(0.1).sustain(0.6).release(0.15)\n")
+	sb.WriteString("  .delay(0.2).delaytime(0.375).delayfeedback(0.3)\n\n")
 
 	// Stab - increased for mid presence
 	sb.WriteString("let stabFx = p => p.sound(\"sawtooth\")\n")
