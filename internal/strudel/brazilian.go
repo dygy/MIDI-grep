@@ -4,7 +4,7 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/arkadiishvartcman/midi-grep/internal/analysis"
+	"github.com/dygy/midi-grep/internal/analysis"
 )
 
 // BrazilianFunkGenerator creates Strudel code for Brazilian funk/phonk tracks

@@ -10,15 +10,15 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arkadiishvartcman/midi-grep/internal/analysis"
-	"github.com/arkadiishvartcman/midi-grep/internal/audio"
-	"github.com/arkadiishvartcman/midi-grep/internal/cache"
-	"github.com/arkadiishvartcman/midi-grep/internal/drums"
-	"github.com/arkadiishvartcman/midi-grep/internal/exec"
-	"github.com/arkadiishvartcman/midi-grep/internal/midi"
-	"github.com/arkadiishvartcman/midi-grep/internal/progress"
-	"github.com/arkadiishvartcman/midi-grep/internal/strudel"
-	"github.com/arkadiishvartcman/midi-grep/internal/workspace"
+	"github.com/dygy/midi-grep/internal/analysis"
+	"github.com/dygy/midi-grep/internal/audio"
+	"github.com/dygy/midi-grep/internal/cache"
+	"github.com/dygy/midi-grep/internal/drums"
+	"github.com/dygy/midi-grep/internal/exec"
+	"github.com/dygy/midi-grep/internal/midi"
+	"github.com/dygy/midi-grep/internal/progress"
+	"github.com/dygy/midi-grep/internal/strudel"
+	"github.com/dygy/midi-grep/internal/workspace"
 )
 
 // Config holds pipeline configuration

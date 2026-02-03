@@ -6,7 +6,7 @@ import (
 	"path/filepath"
 	"strings"
 
-	apperrors "github.com/arkadiishvartcman/midi-grep/internal/errors"
+	apperrors "github.com/dygy/midi-grep/internal/errors"
 )
 
 const (

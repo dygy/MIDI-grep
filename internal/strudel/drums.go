@@ -5,7 +5,7 @@ import (
 	"math"
 	"strings"
 
-	"github.com/arkadiishvartcman/midi-grep/internal/drums"
+	"github.com/dygy/midi-grep/internal/drums"
 )
 
 // DrumKit defines preset drum sound mappings

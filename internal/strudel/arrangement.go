@@ -4,9 +4,9 @@ import (
 	"fmt"
 	"strings"
 
-	"github.com/arkadiishvartcman/midi-grep/internal/analysis"
-	"github.com/arkadiishvartcman/midi-grep/internal/drums"
-	"github.com/arkadiishvartcman/midi-grep/internal/midi"
+	"github.com/dygy/midi-grep/internal/analysis"
+	"github.com/dygy/midi-grep/internal/drums"
+	"github.com/dygy/midi-grep/internal/midi"
 )
 
 // ArrangementGenerator creates musical Strudel code with chord progressions

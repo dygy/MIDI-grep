@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/arkadiishvartcman/midi-grep/internal/audio"
-	"github.com/arkadiishvartcman/midi-grep/internal/cache"
-	"github.com/arkadiishvartcman/midi-grep/internal/pipeline"
-	"github.com/arkadiishvartcman/midi-grep/internal/server"
+	"github.com/dygy/midi-grep/internal/audio"
+	"github.com/dygy/midi-grep/internal/cache"
+	"github.com/dygy/midi-grep/internal/pipeline"
+	"github.com/dygy/midi-grep/internal/server"
 	"github.com/spf13/cobra"
 )
 

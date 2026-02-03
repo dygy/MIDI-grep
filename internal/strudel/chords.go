@@ -6,7 +6,7 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/arkadiishvartcman/midi-grep/internal/midi"
+	"github.com/dygy/midi-grep/internal/midi"
 )
 
 // ChordType represents the quality of a chord

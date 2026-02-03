@@ -1,4 +1,4 @@
-module github.com/arkadiishvartcman/midi-grep
+module github.com/dygy/midi-grep
 
 go 1.25.5
 

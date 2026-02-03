@@ -7,7 +7,7 @@ import (
 	"os"
 	"strconv"
 
-	"github.com/arkadiishvartcman/midi-grep/internal/exec"
+	"github.com/dygy/midi-grep/internal/exec"
 )
 
 // Hit represents a single detected drum hit

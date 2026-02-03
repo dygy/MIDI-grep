@@ -8,8 +8,8 @@ import (
 	"sort"
 	"strings"
 
-	"github.com/arkadiishvartcman/midi-grep/internal/analysis"
-	"github.com/arkadiishvartcman/midi-grep/internal/midi"
+	"github.com/dygy/midi-grep/internal/analysis"
+	"github.com/dygy/midi-grep/internal/midi"
 )
 
 // SoundStyle defines preset sound combinations for different genres

@@ -6,7 +6,7 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/arkadiishvartcman/midi-grep/internal/exec"
+	"github.com/dygy/midi-grep/internal/exec"
 )
 
 // Note represents a single MIDI note

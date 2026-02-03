@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/arkadiishvartcman/midi-grep/internal/audio"
+	"github.com/dygy/midi-grep/internal/audio"
 	"github.com/go-chi/chi/v5"
 )
 

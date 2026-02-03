@@ -6,8 +6,8 @@ import (
 	"os"
 	"path/filepath"
 
-	apperrors "github.com/arkadiishvartcman/midi-grep/internal/errors"
-	"github.com/arkadiishvartcman/midi-grep/internal/exec"
+	apperrors "github.com/dygy/midi-grep/internal/errors"
+	"github.com/dygy/midi-grep/internal/exec"
 )
 
 // StemMode defines the stem separation mode

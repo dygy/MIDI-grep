@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/arkadiishvartcman/midi-grep/internal/exec"
+	"github.com/dygy/midi-grep/internal/exec"
 )
 
 // Transcriber converts audio to MIDI using Basic Pitch

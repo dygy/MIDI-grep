@@ -4,8 +4,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/arkadiishvartcman/midi-grep/internal/analysis"
-	"github.com/arkadiishvartcman/midi-grep/internal/midi"
+	"github.com/dygy/midi-grep/internal/analysis"
+	"github.com/dygy/midi-grep/internal/midi"
 )
 
 func TestAutoOutputMode(t *testing.T) {
