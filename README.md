@@ -188,7 +188,7 @@ midi-grep/
 
 ```bash
 # Clone the repository
-git clone https://github.com/arkadiishvartcman/midi-grep.git
+git clone https://github.com/dygy/midi-grep.git
 cd midi-grep
 
 # Install all dependencies (Go + Python)
@@ -232,12 +232,14 @@ This installs:
 | `--midi` | `-m` | Also save cleaned MIDI file |
 | `--copy` | `-c` | Copy result to clipboard |
 | `--verbose` | `-v` | Show verbose output |
+| `--render` | - | Render audio to WAV (`auto` saves to cache, or specify path) |
 | `--chords` | - | Use chord-based generation (better for electronic/funk) |
 | `--no-cache` | - | Skip stem cache, force fresh extraction |
 | `--drums` | - | Include drum patterns (default: on) |
 | `--drums-only` | - | Extract only drums (skip melodic processing) |
 | `--drum-kit` | - | Drum kit: tr808, tr909, linn, acoustic, lofi |
 | `--style` | - | Sound style (auto, piano, synth, electronic, house, etc.) |
+| `--brazilian-funk` | - | Force Brazilian funk mode (auto-detected normally) |
 
 ### Web Interface
 
@@ -581,11 +583,72 @@ Paste this into [Strudel](https://strudel.dygy.app/) and press Ctrl+Enter to pla
 2. **Cache Check**: Skip re-processing if stems already cached
 3. **Stem Separation**: Demucs AI model extracts melodic, bass, drums, vocals stems
 4. **Analysis**: librosa detects BPM and musical key
-5. **Transcription**: Basic Pitch converts melodic audio to MIDI
-6. **Drum Detection**: Onset detection extracts kick, snare, hi-hat patterns
-7. **Cleanup**: Quantization, velocity filtering, noise removal
-8. **Loop Detection**: Identifies repeating patterns with confidence scoring
-9. **Generation**: Notes + drums converted to Strudel bar arrays with effect functions
+5. **Genre Detection**: Auto-detect Brazilian funk/phonk based on audio characteristics
+6. **Transcription**: Basic Pitch converts melodic audio to MIDI
+7. **Drum Detection**: Onset detection extracts kick, snare, hi-hat patterns
+8. **Cleanup**: Quantization, velocity filtering, noise removal
+9. **Loop Detection**: Identifies repeating patterns with confidence scoring
+10. **Generation**: Notes + drums converted to Strudel bar arrays with effect functions
+11. **Caching**: Save versioned outputs for iteration
+12. **Audio Rendering**: Optionally synthesize WAV preview
+
+## Audio Rendering
+
+Generate a WAV preview of the Strudel patterns without opening a browser:
+
+```bash
+# Render to cache directory (recommended)
+./bin/midi-grep extract --url "..." --render auto
+
+# Render to specific file
+./bin/midi-grep extract --url "..." --render output.wav
+```
+
+The renderer synthesizes:
+- **Kick drums**: Pitch envelope with distortion (808 style)
+- **Snare**: Body tone + high-passed noise
+- **Hi-hats**: Filtered noise with decay envelope
+- **Bass**: Sawtooth + sub-octave, low-pass filtered
+- **Synth voices**: Square/saw waves with ADSR envelopes
+
+Output: Stereo 44.1kHz 16-bit WAV, 16 bars by default.
+
+## Output Caching
+
+All outputs are cached for iteration and comparison:
+
+```
+.cache/stems/yt_VIDEO_ID/
+├── piano.wav              # Separated piano/melodic stem
+├── drums.wav              # Separated drums stem
+├── output_v001.strudel    # Version 1 Strudel code
+├── output_v001.json       # Version 1 metadata (BPM, key, style)
+├── output_v002.strudel    # Version 2 (after re-running)
+├── output_v002.json
+├── output_latest.strudel  # Always points to latest
+├── render_v001.wav        # Rendered audio for v1
+└── render_v002.wav        # Rendered audio for v2
+```
+
+Each run creates a new version, allowing you to:
+- Compare different generations
+- Track improvements over time
+- Iterate on the output without losing previous work
+
+**Metadata stored** (`output_vXXX.json`):
+```json
+{
+  "code": "// MIDI-grep output...",
+  "bpm": 136,
+  "key": "C# minor",
+  "style": "brazilian_funk",
+  "genre": "brazilian_funk",
+  "notes": 497,
+  "drum_hits": 287,
+  "version": 1,
+  "created_at": "2025-02-03T01:24:00Z"
+}
+```
 
 ## Project Structure
 

@@ -49,9 +49,39 @@ Template Generation → Tamborzão drums + 808 bass + synth stabs
 
 ### Caching
 
-Stems are cached in `.cache/stems/` by URL or file hash. Subsequent runs skip download and separation.
+All outputs are cached in `.cache/stems/{key}/` by URL or file hash:
 
-Cache version is auto-computed from script hashes (`separate.py`). When scripts change, cache is automatically invalidated.
+```
+.cache/stems/yt_VIDEO_ID/
+├── piano.wav              # Separated melodic stem
+├── drums.wav              # Separated drums stem
+├── .version               # Cache version (script hash)
+├── output_v001.strudel    # Version 1 Strudel code
+├── output_v001.json       # Version 1 metadata
+├── output_v002.strudel    # Version 2...
+├── output_latest.strudel  # Symlink to latest
+└── render_v001.wav        # Rendered audio preview
+```
+
+- **Stem cache**: Auto-invalidates when `separate.py` changes
+- **Output versioning**: Each run creates new version (v001, v002, ...)
+- **Metadata stored**: BPM, key, style, genre, notes, drum hits, timestamp
+
+### Audio Rendering
+
+The `--render` flag synthesizes WAV audio from patterns:
+
+```bash
+./bin/midi-grep extract --url "..." --render auto  # Save to cache
+./bin/midi-grep extract --url "..." --render out.wav  # Custom path
+```
+
+Implemented in `scripts/python/render_audio.py`:
+- Kick: Pitch envelope + distortion (808 style)
+- Snare: Body tone + high-passed noise
+- Hi-hat: Filtered noise with decay
+- Bass: Sawtooth + sub-octave, LPF
+- Synth: Square/saw with ADSR
 
 ## Tech Stack
 
@@ -76,9 +106,13 @@ midi-grep/
 │   │   ├── transcribe.go       # Basic Pitch wrapper
 │   │   └── cleanup.go          # Quantization, velocity filtering
 │   ├── strudel/
-│   │   ├── generator.go        # MIDI → Strudel conversion
+│   │   ├── generator.go        # MIDI → Strudel conversion (bar arrays + effects)
+│   │   ├── drums.go            # Drum pattern generation (s() patterns)
 │   │   ├── effects.go          # Per-voice effect settings (filter, pan, reverb, delay)
-│   │   └── sections.go         # Section detection (intro, verse, chorus)
+│   │   ├── sections.go         # Section detection (intro, verse, chorus)
+│   │   ├── brazilian.go        # Brazilian funk/phonk template generation
+│   │   ├── chords.go           # Chord detection and voicings
+│   │   └── arrangement.go      # Arrangement-based output (chord variables)
 │   ├── pipeline/orchestrator.go # End-to-end CLI pipeline
 │   ├── server/
 │   │   ├── server.go           # HTTP server setup
@@ -89,12 +123,16 @@ midi-grep/
 │   ├── progress/progress.go    # CLI progress output
 │   ├── workspace/workspace.go  # Temp file management
 │   └── errors/errors.go        # Custom error types
+│   ├── cache/cache.go          # Stem + output caching with versioning
+│   ├── drums/detector.go       # Drum pattern detection
 ├── scripts/
 │   ├── midi-grep.sh            # Main CLI wrapper script
 │   ├── extract-youtube.sh      # Quick YouTube extraction
 │   └── python/
 │       ├── separate.py         # Demucs stem separation (melodic/bass/drums/vocals)
-│       ├── analyze.py          # BPM/key detection
+│       ├── analyze.py          # BPM/key detection with candidates
+│       ├── detect_drums.py     # Drum onset detection and classification
+│       ├── render_audio.py     # WAV audio synthesis from patterns
 │       ├── smart_analyze.py    # Advanced chord/section detection
 │       ├── chord_to_strudel.py # Chord-based Strudel generation
 │       ├── transcribe.py       # Basic Pitch transcription
@@ -199,6 +237,25 @@ The Strudel generator is split across three files:
 - `Section` struct - start/end beats, type, energy level
 - `GenerateSectionHeader()` - creates time-stamped section comments
 
+**`internal/strudel/brazilian.go`** - Brazilian funk/phonk generation:
+- `GenerateBrazilianFunk()` - template-based output for funk carioca
+- Tamborzão drum patterns (syncopated 808 kicks)
+- Multiple pattern variations with block comments (`/* */`) for easy live coding
+- 808 bass with slide and distortion
+- Synth stabs using detected key (C# minor chord tones, etc.)
+- Helper functions: `getThird()`, `getSeventh()`, `getMinorScale()`, `getMajorScale()`
+
+**`internal/strudel/chords.go`** - Chord detection:
+- `DetectChords()` - identifies chord types from MIDI notes
+- Chord types: major, minor, 7th, 9th, dim, aug, sus
+- `ChordProgression` struct for tracking changes over time
+
+**`internal/strudel/arrangement.go`** - Arrangement-based output:
+- `GenerateArrangement()` - creates chord-variable based output
+- Uses `arrange([bars, "<chord>"])` syntax
+- Chord voicings with `.dict('ireal-ext').voicing()`
+- Root note bass, arpeggiated parts, pad layers
+
 ### Detection Candidates
 
 All detection algorithms show top candidates in the output header for transparency:
@@ -301,6 +358,8 @@ go build -o bin/midi-grep ./cmd/midi-grep
 | `--quantize` | Quantization (4, 8, 16) |
 | `--simplify` | Simplify notes (default: on) |
 | `--drum-kit` | Drum kit (tr808, tr909, linn, acoustic, lofi) |
+| `--render` | Render audio to WAV (`auto` saves to cache, or specify path) |
+| `--brazilian-funk` | Force Brazilian funk mode (auto-detected normally) |
 
 ## Dependencies
 

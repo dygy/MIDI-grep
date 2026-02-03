@@ -62,6 +62,12 @@ _Moving from "dump all notes" to "find the actual riff."_
   - [x] **Loop Confidence Score:** Indicate how certain we are about detected loops (0.45 threshold)
   - [x] **Loop-Only Output:** Option to output just the core repeating pattern (`--loop-only` flag)
 
+- [x] **Genre Auto-Detection** ✅ NEW
+  - [x] **Brazilian Funk/Phonk Detection:** Scoring system analyzes BPM (125-155), vocal-range note clustering, short note durations, low bass content
+  - [x] **Template-Based Generation:** When funk detected, use authentic tamborzão drum patterns + 808 bass instead of transcription
+  - [x] **Style Auto-Detection:** Analyze BPM, key (minor/major), note density to auto-select jazz/soul/funk/electronic/house/trance
+  - [x] **`--brazilian-funk` Override:** Manual flag to force Brazilian funk mode when auto-detection misses
+
 - [ ] **Motif Extraction**
   - [ ] **Melody vs Accompaniment:** Separate lead melodic line from harmonic backing
   - [ ] **Theme Identification:** Find recurring melodic themes throughout the track
@@ -234,9 +240,22 @@ _Support for other live coding environments and formats._
 
 ---
 
-## Phase 7: User Experience
+## Phase 7: User Experience ✅ PARTIAL
 
 _Making the tool more interactive and user-friendly._
+
+- [x] **Output Caching & Versioning** ✅ NEW
+  - [x] **Versioned Outputs:** Each run creates v001, v002, etc. in `.cache/stems/{key}/`
+  - [x] **Metadata Storage:** BPM, key, style, genre, notes, drum hits, timestamp saved in JSON
+  - [x] **Latest Symlink:** `output_latest.strudel` always points to newest version
+  - [x] **Iteration Support:** Compare previous outputs to track improvements
+
+- [x] **Audio Rendering** ✅ NEW
+  - [x] **WAV Synthesis:** `--render` flag generates audio preview from patterns
+  - [x] **Drum Synthesis:** Kick (808 pitch envelope), snare, hi-hat with proper envelopes
+  - [x] **Bass Synthesis:** Sawtooth + sub-octave, low-pass filtered
+  - [x] **Synth Voices:** Square/saw with ADSR envelopes
+  - [x] **Cache Integration:** `--render auto` saves to cache directory with versioning
 
 - [ ] **Interactive Mode**
   - [ ] **Audio Preview:** Listen to extracted stem before generating code
@@ -360,3 +379,7 @@ _Ideas for future consideration, not yet prioritized._
 | 1.37 | 2026-02-03 | Bar array output: let bass/mid/high/drums = [...] with effect functions, cat(...map()) for playback |
 | 1.38 | 2026-02-03 | Drums in default output: drumsFx with bank(), s() patterns integrated in stack |
 | 1.39 | 2026-02-03 | Chord mode: --chords flag for electronic/funk music using chord detection instead of note transcription |
+| 1.40 | 2026-02-03 | Brazilian Funk auto-detection: scoring system for BPM 125-155, vocal-range notes, short durations, low bass → template generation |
+| 1.41 | 2026-02-03 | Output caching with versioning: save Strudel code + metadata (v001, v002, ...) to .cache/stems/{key}/ |
+| 1.42 | 2026-02-03 | Audio rendering: --render flag to synthesize WAV from patterns (kick, snare, hh, bass, synth voices) |
+| 1.43 | 2026-02-03 | Block comment variations (/* */) for easier live coding uncommenting |

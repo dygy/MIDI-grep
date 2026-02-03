@@ -79,6 +79,50 @@
       │ → effect funcs  │
       │ → drums + notes │
       └─────────────────┘
+               │
+               ▼ (optional)
+      ┌─────────────────┐
+      │ Audio Render    │ (Python)
+      │ → kick/snare/hh │
+      │ → bass synth    │
+      │ → pad synth     │
+      │ → stereo WAV    │
+      └─────────────────┘
+```
+
+### Audio Rendering (Optional)
+
+The `--render` flag synthesizes WAV audio preview from Strudel patterns:
+
+```
+Strudel Code
+     │
+     ▼
+┌─────────────────┐
+│ Parse Patterns  │ (extract mini-notation)
+│ - let name = `..`
+│ - BPM from setcps
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Synthesize      │
+│ - Kick: pitch env + distort
+│ - Snare: tone + noise
+│ - HH: filtered noise
+│ - Bass: saw + sub + LPF
+│ - Synth: square/saw + ADSR
+└────────┬────────┘
+         │
+         ▼
+┌─────────────────┐
+│ Mix to Stereo   │ (44.1kHz, 16-bit)
+│ - Pan per voice
+│ - Normalize
+└────────┬────────┘
+         │
+         ▼
+    render_vXXX.wav
 ```
 
 ---
@@ -87,10 +131,43 @@
 
 - **Stem Cache:** `.cache/stems/` in repository root, keyed by URL/file hash
 - **Cache Versioning:** Auto-computed from script hashes, invalidates on code changes
+- **Output Versioning:** Each generation creates v001, v002, etc. with metadata
 - **File Storage:** Local filesystem (OS temp directory for processing artifacts)
 - **Session State:** None — fully stateless request/response cycle
 - **Cleanup Strategy:** Delete temp files after response sent (or after timeout)
 - **No Database:** V1 requires no persistence (no users, no history)
+
+### Cache Directory Structure
+
+```
+.cache/stems/yt_VIDEO_ID/
+├── piano.wav              # Separated melodic stem
+├── drums.wav              # Separated drums stem
+├── bass.wav               # Separated bass stem (full mode)
+├── .version               # Cache version (script hash)
+├── output_v001.strudel    # Version 1 Strudel code
+├── output_v001.json       # Version 1 metadata
+├── output_v002.strudel    # Version 2...
+├── output_latest.strudel  # Symlink to latest
+├── render_v001.wav        # Rendered audio for v1
+└── render_v002.wav        # Rendered audio for v2
+```
+
+### Output Metadata (`output_vXXX.json`)
+
+```json
+{
+  "code": "// MIDI-grep output...",
+  "bpm": 136,
+  "key": "C# minor",
+  "style": "brazilian_funk",
+  "genre": "brazilian_funk",
+  "notes": 497,
+  "drum_hits": 287,
+  "version": 1,
+  "created_at": "2025-02-03T01:24:00Z"
+}
+```
 
 ---
 
@@ -150,7 +227,8 @@ midi-grep/
 │   │   ├── effects.go        # Per-voice effect settings
 │   │   ├── sections.go       # Section detection
 │   │   ├── chords.go         # Chord detection/voicings
-│   │   └── arrangement.go    # Arrangement-based output
+│   │   ├── arrangement.go    # Arrangement-based output
+│   │   └── brazilian.go      # Brazilian funk/phonk template generation
 │   │
 │   ├── pipeline/
 │   │   └── orchestrator.go   # End-to-end pipeline coordination
@@ -180,7 +258,8 @@ midi-grep/
 │       ├── cleanup.py        # MIDI quantization
 │       ├── detect_drums.py   # Drum hit detection
 │       ├── smart_analyze.py  # Chord/section detection
-│       └── chord_to_strudel.py # Chord-based generation
+│       ├── chord_to_strudel.py # Chord-based generation
+│       └── render_audio.py   # WAV audio synthesis from patterns
 │
 ├── Dockerfile
 ├── docker-compose.yml        # Local dev with volume mounts
