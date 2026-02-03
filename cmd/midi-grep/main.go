@@ -129,6 +129,7 @@ var (
 	noCache       bool
 	chordMode     bool
 	brazilianFunk bool
+	renderAudio   string // Output path for rendered WAV
 
 	// serve flags
 	port int
@@ -178,6 +179,7 @@ func init() {
 	extractCmd.Flags().BoolVar(&noCache, "no-cache", false, "Skip stem cache (force fresh extraction)")
 	extractCmd.Flags().BoolVar(&chordMode, "chords", false, "Use chord-based generation (better for electronic/non-piano music)")
 	extractCmd.Flags().BoolVar(&brazilianFunk, "brazilian-funk", false, "Use Brazilian funk/phonk mode (tamborzão drums, 808 bass)")
+	extractCmd.Flags().StringVar(&renderAudio, "render", "", "Render output to WAV file (e.g., --render output.wav)")
 
 	// Serve command flags
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to listen on")
@@ -343,9 +345,94 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		fmt.Println()
 	}
 
+	// Render audio if requested
+	if renderAudio != "" {
+		fmt.Printf("\nRendering audio to %s...\n", renderAudio)
+		// Use 16 bars by default, or calculate from original if available
+		duration := 0.0 // 0 means use default (16 bars)
+		if err := renderStrudelToWav(result.StrudelCode, renderAudio, duration); err != nil {
+			fmt.Printf("Warning: Audio render failed: %v\n", err)
+		} else {
+			fmt.Printf("Audio rendered: %s\n", renderAudio)
+		}
+	}
+
 	fmt.Println("\nDone! Strudel code generated successfully.")
 
 	return nil
+}
+
+// renderStrudelToWav calls the Python script to render Strudel code to WAV
+func renderStrudelToWav(code, outputPath string, duration float64) error {
+	// Find scripts directory
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("find executable: %w", err)
+	}
+	exeDir := filepath.Dir(exePath)
+
+	// Try different script locations
+	scriptPaths := []string{
+		filepath.Join(exeDir, "..", "scripts", "python", "render_audio.py"),
+		filepath.Join(exeDir, "scripts", "python", "render_audio.py"),
+		"scripts/python/render_audio.py",
+	}
+
+	var scriptPath string
+	for _, p := range scriptPaths {
+		if _, err := os.Stat(p); err == nil {
+			scriptPath = p
+			break
+		}
+	}
+
+	if scriptPath == "" {
+		return fmt.Errorf("render_audio.py not found")
+	}
+
+	// Write code to temp file
+	tmpFile, err := os.CreateTemp("", "strudel-*.txt")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(code); err != nil {
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	tmpFile.Close()
+
+	// Find Python
+	pythonPaths := []string{
+		filepath.Join(exeDir, "..", "scripts", "python", ".venv", "bin", "python3"),
+		filepath.Join(exeDir, "scripts", "python", ".venv", "bin", "python3"),
+		"scripts/python/.venv/bin/python3",
+		"python3",
+	}
+
+	var pythonPath string
+	for _, p := range pythonPaths {
+		if _, err := os.Stat(p); err == nil {
+			pythonPath = p
+			break
+		}
+	}
+
+	if pythonPath == "" {
+		pythonPath = "python3"
+	}
+
+	// Run render script
+	args := []string{scriptPath, tmpFile.Name(), "-o", outputPath}
+	if duration > 0 {
+		args = append(args, "-d", fmt.Sprintf("%.1f", duration))
+	}
+
+	cmd := exec.Command(pythonPath, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
 }
 
 func runServe(cmd *cobra.Command, args []string) error {
