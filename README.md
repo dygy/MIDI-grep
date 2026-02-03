@@ -18,8 +18,16 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
 - **Chord Mode**: Alternative chord-based generation for electronic/funk music (`--chords`)
 - **Loop Detection**: Automatically identifies repeating patterns (1, 2, 4, or 8 bar loops) with confidence scoring
 - **Genre Auto-Detection**: Automatically detects genre and uses specialized generators:
-  - **Brazilian Funk/Phonk**: Detected by BPM (125-155), vocal-range note clustering, short note durations, low bass content → uses tamborzão templates with 808 bass
-  - **Style Detection**: Detects style based on BPM, key (minor/major), and note density (jazz, soul, funk, electronic, etc.)
+  - **Brazilian Funk**: BPM 130-145 (136 typical), mid-heavy spectrum, vocal chops → uses tamborzão templates
+  - **Brazilian Phonk**: BPM 80-100 or 145-180, darker sound → phonk-style drums
+  - **Retro Wave/Synthwave**: BPM 130-170, longer synth notes → synthwave style
+  - **Style Detection**: Detects style based on BPM, key (minor/major), and note density
+- **Deep Learning Genre Detection**: CLAP (Contrastive Language-Audio Pretraining) model for zero-shot audio classification
+- **Manual Genre Override**: `--genre` flag to force specific genre when auto-detection fails
+- **AI-Driven Audio Rendering**: Synthesize WAV previews with AI-suggested mix parameters
+  - Spectral/dynamics/timbre analysis of original audio
+  - Automatic effect parameter optimization
+  - Rendered vs original comparison with similarity scoring
 - **Dynamic Strudel Output**: Rich patterns with per-voice effects
   - `.velocity()` patterns with dynamic range expansion for expressive dynamics
   - Style-specific accent patterns (downbeat, backbeat, offbeat)
@@ -64,45 +72,51 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
 ## Architecture
 
 ```
-┌─────────────────────────────────────────────────────────────────────────────┐
-│                              MIDI-grep                                      │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────┐    ┌─────────────┐    ┌─────────────┐    ┌─────────────┐  │
-│  │   INPUT     │    │  SEPARATE   │    │  TRANSCRIBE │    │   OUTPUT    │  │
-│  │             │    │             │    │             │    │             │  │
-│  │ • YouTube   │───▶│ • Demucs    │───▶│ • Basic     │───▶│ • Strudel   │  │
-│  │   (yt-dlp)  │    │   (PyTorch) │    │   Pitch     │    │   code      │  │
-│  │ • WAV/MP3   │    │ • Stems:    │    │   (TF)      │    │ • MIDI file │  │
-│  │             │    │   piano,    │    │ • librosa   │    │ • JSON      │  │
-│  │             │    │   bass,     │    │   (BPM/Key) │    │             │  │
-│  │             │    │   drums     │    │             │    │             │  │
-│  └─────────────┘    └─────────────┘    └─────────────┘    └─────────────┘  │
-│                                                                             │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                           TECHNOLOGY STACK                                  │
-├─────────────────────────────────────────────────────────────────────────────┤
-│                                                                             │
-│  ┌─────────────────────────────┐    ┌─────────────────────────────────────┐│
-│  │         GO (1.21+)          │    │           PYTHON (3.11+)            ││
-│  │                             │    │                                     ││
-│  │  • CLI (Cobra)              │    │  • demucs      - Stem separation    ││
-│  │  • HTTP Server (Chi)        │    │  • basic-pitch - Audio → MIDI       ││
-│  │  • Pipeline orchestration   │    │  • librosa     - Audio analysis     ││
-│  │  • Strudel code generation  │    │  • pretty_midi - MIDI processing    ││
-│  │                             │    │  • tensorflow  - ML inference       ││
-│  └─────────────────────────────┘    └─────────────────────────────────────┘│
-│                                                                             │
-│  ┌─────────────────────────────┐    ┌─────────────────────────────────────┐│
-│  │        WEB FRONTEND         │    │            EXTERNAL                 ││
-│  │                             │    │                                     ││
-│  │  • HTMX (no JS frameworks)  │    │  • yt-dlp     - YouTube download    ││
-│  │  • PicoCSS (styling)        │    │  • ffmpeg     - Audio conversion    ││
-│  │  • SSE (real-time updates)  │    │                                     ││
-│  │  • Go templates             │    │                                     ││
-│  └─────────────────────────────┘    └─────────────────────────────────────┘│
-│                                                                             │
-└─────────────────────────────────────────────────────────────────────────────┘
+┌───────────────────────────────────────────────────────────────────────────────────┐
+│                                   MIDI-grep                                       │
+├───────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                   │
+│  ┌───────────┐   ┌───────────┐   ┌───────────┐   ┌───────────┐   ┌───────────┐  │
+│  │  INPUT    │   │ SEPARATE  │   │  ANALYZE  │   │ TRANSCRIBE│   │  OUTPUT   │  │
+│  │           │   │           │   │           │   │           │   │           │  │
+│  │ • YouTube │──▶│ • Demucs  │──▶│ • BPM/Key │──▶│ • Basic   │──▶│ • Strudel │  │
+│  │   (yt-dlp)│   │ • Stems:  │   │ • Genre   │   │   Pitch   │   │   code    │  │
+│  │ • WAV/MP3 │   │   melodic,│   │   detect  │   │ • Drum    │   │ • MIDI    │  │
+│  │           │   │   bass,   │   │ • CLAP    │   │   onset   │   │ • WAV     │  │
+│  │           │   │   drums   │   │   (opt)   │   │           │   │   render  │  │
+│  └───────────┘   └───────────┘   └───────────┘   └───────────┘   └───────────┘  │
+│                                        │                                         │
+│                         ┌──────────────┴──────────────┐                         │
+│                         ▼                              ▼                         │
+│              ┌─────────────────────┐      ┌─────────────────────┐               │
+│              │  Standard Pipeline  │      │  Template Pipeline  │               │
+│              │  (note transcribe)  │      │  (Brazilian funk)   │               │
+│              └─────────────────────┘      └─────────────────────┘               │
+│                                                                                   │
+├───────────────────────────────────────────────────────────────────────────────────┤
+│                              TECHNOLOGY STACK                                     │
+├───────────────────────────────────────────────────────────────────────────────────┤
+│                                                                                   │
+│  ┌─────────────────────────────┐    ┌───────────────────────────────────────┐   │
+│  │         GO (1.21+)          │    │           PYTHON (3.11+)              │   │
+│  │                             │    │                                       │   │
+│  │  • CLI (Cobra)              │    │  • demucs      - Stem separation      │   │
+│  │  • HTTP Server (Chi)        │    │  • basic-pitch - Audio → MIDI         │   │
+│  │  • Pipeline orchestration   │    │  • librosa     - Audio analysis       │   │
+│  │  • Genre auto-detection     │    │  • CLAP        - DL genre detection   │   │
+│  │  • Strudel code generation  │    │  • pretty_midi - MIDI processing      │   │
+│  └─────────────────────────────┘    └───────────────────────────────────────┘   │
+│                                                                                   │
+│  ┌─────────────────────────────┐    ┌───────────────────────────────────────┐   │
+│  │        WEB FRONTEND         │    │            EXTERNAL                   │   │
+│  │                             │    │                                       │   │
+│  │  • HTMX (no JS frameworks)  │    │  • yt-dlp     - YouTube download      │   │
+│  │  • PicoCSS (styling)        │    │  • ffmpeg     - Audio conversion      │   │
+│  │  • SSE (real-time updates)  │    │                                       │   │
+│  │  • Go templates             │    │                                       │   │
+│  └─────────────────────────────┘    └───────────────────────────────────────┘   │
+│                                                                                   │
+└───────────────────────────────────────────────────────────────────────────────────┘
 ```
 
 ### Module Structure
@@ -128,6 +142,10 @@ midi-grep/
 │       ├── transcribe.py    # Basic Pitch audio → MIDI
 │       ├── analyze.py       # librosa BPM/key detection
 │       ├── cleanup.py       # MIDI quantization & filtering
+│       ├── detect_drums.py  # Drum onset detection & classification
+│       ├── detect_genre_dl.py    # CLAP deep learning genre detection
+│       ├── detect_genre_essentia.py  # Essentia-based genre detection
+│       ├── render_audio.py  # WAV synthesis from patterns
 │       └── training/        # Model fine-tuning (Phase 9)
 │
 └── context/                 # AWOS documentation
@@ -232,7 +250,8 @@ This installs:
 | `--midi` | `-m` | Also save cleaned MIDI file |
 | `--copy` | `-c` | Copy result to clipboard |
 | `--verbose` | `-v` | Show verbose output |
-| `--render` | - | Render audio to WAV (`auto` saves to cache, or specify path) |
+| `--render` | - | Render audio to WAV (default: `auto` saves to cache, `none` to disable) |
+| `--quality` | - | Stem separation quality: `fast`, `normal` (default), `high`, `best` |
 | `--chords` | - | Use chord-based generation (better for electronic/funk) |
 | `--no-cache` | - | Skip stem cache, force fresh extraction |
 | `--drums` | - | Include drum patterns (default: on) |
@@ -240,6 +259,8 @@ This installs:
 | `--drum-kit` | - | Drum kit: tr808, tr909, linn, acoustic, lofi |
 | `--style` | - | Sound style (auto, piano, synth, electronic, house, etc.) |
 | `--brazilian-funk` | - | Force Brazilian funk mode (auto-detected normally) |
+| `--genre` | - | Manual genre override: `brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz` |
+| `--deep-genre` | `true` | Use deep learning (CLAP) for genre detection (enabled by default) |
 
 ### Web Interface
 
@@ -592,7 +613,7 @@ Paste this into [Strudel](https://strudel.dygy.app/) and press Ctrl+Enter to pla
 11. **Caching**: Save versioned outputs for iteration
 12. **Audio Rendering**: Optionally synthesize WAV preview
 
-## Audio Rendering
+## Audio Rendering & AI Analysis
 
 Generate a WAV preview of the Strudel patterns without opening a browser:
 
@@ -604,14 +625,46 @@ Generate a WAV preview of the Strudel patterns without opening a browser:
 ./bin/midi-grep extract --url "..." --render output.wav
 ```
 
-The renderer synthesizes:
+### Synthesis Engine (`render_audio.py`)
+
+The renderer synthesizes each pattern type:
 - **Kick drums**: Pitch envelope with distortion (808 style)
 - **Snare**: Body tone + high-passed noise
 - **Hi-hats**: Filtered noise with decay envelope
 - **Bass**: Sawtooth + sub-octave, low-pass filtered
-- **Synth voices**: Square/saw waves with ADSR envelopes
+- **Vocal chops**: Square wave with fast attack
+- **Chord stabs**: Filtered sawtooth
+- **Lead**: Triangle wave with vibrato
 
 Output: Stereo 44.1kHz 16-bit WAV, 16 bars by default.
+
+### AI-Driven Mix Parameters (`audio_to_strudel_params.py`)
+
+Analyzes the original audio to suggest optimal Strudel effect parameters:
+
+- **Spectral analysis**: Determines filter cutoffs, brightness
+- **Dynamics analysis**: Suggests compression, gain staging
+- **Timbre matching**: Recommends distortion, FM synthesis amounts
+- **Spatial analysis**: Determines reverb size, delay times
+- **Envelope detection**: Suggests ADSR values
+
+The analysis feeds back into the renderer for better mix balance.
+
+### Audio Comparison (`compare_audio.py`)
+
+Compares rendered output against original stems:
+
+```
+[7/7] Comparing rendered audio with original...
+```
+
+Metrics computed:
+- **Spectral similarity**: Centroid, bandwidth, rolloff comparison
+- **Rhythmic similarity**: Onset alignment, tempo consistency
+- **Timbral similarity**: MFCC distance, spectral flatness
+- **Overall score**: Weighted combination (0-100%)
+
+This feedback loop helps improve the synthesis quality.
 
 ## Output Caching
 

@@ -184,7 +184,7 @@ func init() {
 	extractCmd.Flags().BoolVar(&chordMode, "chords", false, "Use chord-based generation (better for electronic/non-piano music)")
 	extractCmd.Flags().BoolVar(&brazilianFunk, "brazilian-funk", false, "Use Brazilian funk/phonk mode (tamborzão drums, 808 bass)")
 	extractCmd.Flags().StringVar(&genreOverride, "genre", "", "Override genre detection (brazilian_funk, brazilian_phonk, retro_wave, trance, house, lofi)")
-	extractCmd.Flags().BoolVar(&useDeepGenre, "deep-genre", false, "Use deep learning (CLAP) for genre detection")
+	extractCmd.Flags().BoolVar(&useDeepGenre, "deep-genre", true, "Use deep learning (CLAP) for genre detection")
 	extractCmd.Flags().StringVar(&renderAudio, "render", "auto", "Render output to WAV ('auto' saves in cache dir, 'none' to disable)")
 	extractCmd.Flags().BoolVar(&compareAudio, "compare", false, "Compare rendered audio with original stems (requires --render)")
 	extractCmd.Flags().StringVar(&stemQuality, "quality", "normal", "Stem separation quality: fast, normal, high (better, slower), best (highest, slowest)")
