@@ -147,7 +147,7 @@ func (p *Pipeline) SearchSimilar(ctx context.Context, audioPath string, threshol
 		args = append(args, "--github", p.config.GitHubRepo)
 	}
 
-	result, err := p.runner.RunModule(ctx, "rave.cli", args...)
+	_, err := p.runner.RunModule(ctx, "rave.cli", args...)
 	if err != nil {
 		return nil, fmt.Errorf("similarity search failed: %w", err)
 	}

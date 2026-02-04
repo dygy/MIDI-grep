@@ -80,21 +80,21 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
 ```
                               MIDI-grep Pipeline
 
-  INPUT           SEPARATE         ANALYZE         TRANSCRIBE       OUTPUT
-    │                │                │                │               │
-    ▼                ▼                ▼                ▼               ▼
+   INPUT            SEPARATE          ANALYZE           TRANSCRIBE        OUTPUT
+     │                 │                 │                  │                │
+     ▼                 ▼                 ▼                  ▼                ▼
 ┌─────────┐     ┌────────────┐     ┌───────────┐     ┌──────────────┐    ┌─────────┐
 │ YouTube │     │  Demucs    │     │  librosa  │     │ Basic Pitch  │    │ Strudel │
 │ yt-dlp  │────▶│   stem     │────▶│  BPM/Key  │────▶│ Audio → MIDI │───▶│  code   │
 │ WAV/MP3 │     │ separation │     │  + CLAP   │     │ Drum onset   │    │  + WAV  │
 └─────────┘     └────────────┘     └───────────┘     └──────────────┘    └─────────┘
-                    │                │
-                    ▼                ▼
-              ┌──────────┐    ┌───────────┐
-              │ melodic  │    │  Genre    │
-              │ bass     │    │ Detection │──┬── Standard: note transcription
-              │ drums    │    │           │  │
-              │ vocals   │    └───────────┘  └── Template: Brazilian funk/phonk
+                    │                  │
+                    ▼                  ▼
+              ┌──────────┐      ┌───────────┐
+              │ melodic  │      │  Genre    │
+              │ bass     │      │ Detection │──┬── Standard: note transcription
+              │ drums    │      │           │  │
+              │ vocals   │      └───────────┘  └── Template: Brazilian funk/phonk
               └──────────┘
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -106,9 +106,13 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   ├── Pipeline orchestration            ├── librosa     - audio analysis
   └── Strudel generation                └── pretty_midi - MIDI processing
 
-  Frontend                              External
-  ├── HTMX                              ├── yt-dlp  - YouTube download
-  ├── PicoCSS                           └── ffmpeg  - audio conversion
+  TypeScript/Node.js                    External
+  └── node-web-audio-api                ├── yt-dlp  - YouTube download
+      - offline audio rendering         └── ffmpeg  - audio conversion
+
+  Frontend
+  ├── HTMX
+  ├── PicoCSS
   └── SSE updates
 ```
 
@@ -126,10 +130,17 @@ midi-grep/
 │   ├── strudel/             # MIDI → Strudel code generation
 │   ├── pipeline/            # Orchestrates the full extraction flow
 │   ├── server/              # HTTP server, HTMX templates, SSE
-│   └── exec/                # Python subprocess runner
+│   ├── exec/                # Python subprocess runner
+│   └── report/              # Go HTML report generation
 │
 ├── scripts/
 │   ├── midi-grep.sh         # Main CLI wrapper (Bash)
+│   ├── node/                # TypeScript audio rendering
+│   │   ├── src/
+│   │   │   └── render-strudel-node.ts  # Offline Strudel renderer
+│   │   ├── dist/            # Compiled JavaScript output
+│   │   ├── package.json     # Node.js dependencies
+│   │   └── tsconfig.json    # TypeScript configuration
 │   └── python/              # Python ML scripts
 │       ├── separate.py      # Demucs stem separation
 │       ├── transcribe.py    # Basic Pitch audio → MIDI
@@ -139,6 +150,9 @@ midi-grep/
 │       ├── detect_genre_dl.py    # CLAP deep learning genre detection
 │       ├── detect_genre_essentia.py  # Essentia-based genre detection
 │       ├── render_audio.py  # WAV synthesis from patterns
+│       ├── ai_code_generator.py  # AI-driven Strudel code generation
+│       ├── thin_patterns.py # Pattern density control
+│       ├── render_with_models.py # Render with granular models
 │       └── training/        # Model fine-tuning (Phase 9)
 │
 └── context/                 # AWOS documentation

@@ -347,7 +347,7 @@ def generate_frequency_bands_chart(results, output_path):
     ax.bar(x + width/2, rend_vals, width, label='Rendered', color='#3fb950', alpha=0.8)
 
     ax.set_ylabel('Energy %', fontsize=11)
-    ax.set_title('Frequency Band Distribution', fontsize=13, color='#c9d1d9', pad=10)
+    # Title handled by HTML report
     ax.set_xticks(x)
     ax.set_xticklabels(band_labels, fontsize=10)
     ax.legend(loc='upper right', facecolor='#21262d', edgecolor='#30363d')
@@ -373,7 +373,7 @@ def generate_similarity_chart(results, output_path):
     bars = ax.barh(metric_labels, values, color=colors, alpha=0.8)
     ax.set_xlim(0, 100)
     ax.set_xlabel('Similarity %', fontsize=11)
-    ax.set_title('Similarity Scores', fontsize=13, color='#c9d1d9', pad=10)
+    # Title handled by HTML report
     ax.grid(True, alpha=0.2, axis='x')
 
     for bar, val in zip(bars, values):
@@ -398,7 +398,7 @@ def generate_spectrogram_chart(audio_path, output_path, title, duration=30):
     try:
         D = librosa.amplitude_to_db(np.abs(librosa.stft(y)), ref=np.max)
         librosa.display.specshow(D, sr=22050, x_axis='time', y_axis='hz', ax=ax, cmap='magma')
-        ax.set_title(title, fontsize=13, color='#c9d1d9', pad=10)
+        # Title handled by HTML report
         ax.set_ylim(0, 8000)
         plt.tight_layout()
         plt.savefig(output_path, dpi=120, facecolor='#0d1117', edgecolor='none', bbox_inches='tight')
@@ -422,7 +422,7 @@ def generate_chromagram_chart(audio_path, output_path, title, duration=30):
     try:
         chroma = librosa.feature.chroma_cqt(y=y, sr=22050)
         librosa.display.specshow(chroma, sr=22050, x_axis='time', y_axis='chroma', ax=ax, cmap='coolwarm')
-        ax.set_title(title, fontsize=13, color='#c9d1d9', pad=10)
+        # Title handled by HTML report
         plt.tight_layout()
         plt.savefig(output_path, dpi=120, facecolor='#0d1117', edgecolor='none', bbox_inches='tight')
         plt.close()
@@ -528,7 +528,6 @@ def generate_comparison_chart(results, original_path, rendered_path, output_path
     ax1.bar(x + width/2, rend_vals, width, label='Rendered', color='#3fb950', alpha=0.8)
 
     ax1.set_ylabel('Energy %', fontsize=10)
-    ax1.set_title('Frequency Band Distribution', fontsize=12, color='#c9d1d9', pad=10)
     ax1.set_xticks(x)
     ax1.set_xticklabels(band_labels, fontsize=9)
     ax1.legend(loc='upper right', facecolor='#21262d', edgecolor='#30363d')
@@ -546,7 +545,6 @@ def generate_comparison_chart(results, original_path, rendered_path, output_path
     bars = ax2.barh(metric_labels, values, color=colors, alpha=0.8)
     ax2.set_xlim(0, 100)
     ax2.set_xlabel('Similarity %', fontsize=10)
-    ax2.set_title('Similarity Scores', fontsize=12, color='#c9d1d9', pad=10)
     ax2.grid(True, alpha=0.2, axis='x')
 
     for bar, val in zip(bars, values):
@@ -560,7 +558,6 @@ def generate_comparison_chart(results, original_path, rendered_path, output_path
         if orig_y is not None:
             D_orig = librosa.amplitude_to_db(np.abs(librosa.stft(orig_y)), ref=np.max)
             img = librosa.display.specshow(D_orig, sr=22050, x_axis='time', y_axis='hz', ax=ax3, cmap='magma')
-            ax3.set_title('Original - Spectrogram', fontsize=12, color='#c9d1d9', pad=10)
             ax3.set_ylim(0, 8000)
     except Exception as e:
         ax3.text(0.5, 0.5, f'Spectrogram unavailable', ha='center', va='center',
@@ -573,7 +570,6 @@ def generate_comparison_chart(results, original_path, rendered_path, output_path
         if rend_y is not None:
             D_rend = librosa.amplitude_to_db(np.abs(librosa.stft(rend_y)), ref=np.max)
             librosa.display.specshow(D_rend, sr=22050, x_axis='time', y_axis='hz', ax=ax4, cmap='magma')
-            ax4.set_title('Rendered - Spectrogram', fontsize=12, color='#c9d1d9', pad=10)
             ax4.set_ylim(0, 8000)
     except Exception as e:
         ax4.text(0.5, 0.5, f'Spectrogram unavailable', ha='center', va='center',
@@ -586,7 +582,6 @@ def generate_comparison_chart(results, original_path, rendered_path, output_path
         if orig_y is not None:
             chroma_orig = librosa.feature.chroma_cqt(y=orig_y, sr=22050)
             librosa.display.specshow(chroma_orig, sr=22050, x_axis='time', y_axis='chroma', ax=ax5, cmap='coolwarm')
-            ax5.set_title('Original - Chromagram (Pitch)', fontsize=12, color='#c9d1d9', pad=10)
     except Exception as e:
         ax5.text(0.5, 0.5, f'Chromagram unavailable', ha='center', va='center',
                 transform=ax5.transAxes, color='#8b949e')
@@ -598,19 +593,15 @@ def generate_comparison_chart(results, original_path, rendered_path, output_path
         if rend_y is not None:
             chroma_rend = librosa.feature.chroma_cqt(y=rend_y, sr=22050)
             librosa.display.specshow(chroma_rend, sr=22050, x_axis='time', y_axis='chroma', ax=ax6, cmap='coolwarm')
-            ax6.set_title('Rendered - Chromagram (Pitch)', fontsize=12, color='#c9d1d9', pad=10)
     except Exception as e:
         ax6.text(0.5, 0.5, f'Chromagram unavailable', ha='center', va='center',
                 transform=ax6.transAxes, color='#8b949e')
 
-    # Overall title with score
+    # Overall score is shown in the report, not embedded in image
     overall = results['comparison'].get('overall_similarity', 0) * 100
-    color = '#3fb950' if overall >= 70 else '#d29922' if overall >= 50 else '#f85149'
-    fig.suptitle(f'Audio Comparison Report  —  Overall Match: {overall:.0f}%',
-                 fontsize=16, color=color, y=0.98, fontweight='bold')
 
     # Adjust layout
-    plt.tight_layout(rect=[0, 0, 1, 0.96])
+    plt.tight_layout()
 
     # Save
     plt.savefig(output_path, dpi=150, facecolor='#0d1117', edgecolor='none', bbox_inches='tight')

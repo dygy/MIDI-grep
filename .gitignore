@@ -56,3 +56,4 @@ pretrained_models/
 !examples/*.mp3
 .cache/
 scripts/python/models/
+/scripts/node/node_modules/

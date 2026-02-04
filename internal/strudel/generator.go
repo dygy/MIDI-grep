@@ -531,12 +531,71 @@ type StyleCandidate struct {
 	Score float64
 }
 
+// AIParams holds AI-derived parameters for code generation
+// These are extracted from original audio analysis to ensure
+// generated code naturally matches the target characteristics
+type AIParams struct {
+	// Filter parameters (per voice)
+	LPFBass int     `json:"lpf_bass"`
+	LPFMid  int     `json:"lpf_mid"`
+	LPFHigh int     `json:"lpf_high"`
+	HPFBass int     `json:"hpf_bass"`
+	HPFMid  int     `json:"hpf_mid"`
+	HPFHigh int     `json:"hpf_high"`
+
+	// Dynamics
+	GainBass float64 `json:"gain_bass"`
+	GainMid  float64 `json:"gain_mid"`
+	GainHigh float64 `json:"gain_high"`
+	ClipBass float64 `json:"clip_bass"`
+	ClipMid  float64 `json:"clip_mid"`
+	ClipHigh float64 `json:"clip_high"`
+
+	// Distortion/bitcrush
+	Distort float64 `json:"distort"`
+	Crush   int     `json:"crush"`
+	Coarse  int     `json:"coarse"`
+
+	// Spatial
+	Room          float64 `json:"room"`
+	Size          float64 `json:"size"`
+	Delay         float64 `json:"delay"`
+	DelayTime     float64 `json:"delaytime"`
+	DelayFeedback float64 `json:"delayfeedback"`
+	PanWidth      float64 `json:"pan_width"`
+
+	// Modulation
+	Vib    float64 `json:"vib"`
+	VibMod float64 `json:"vibmod"`
+	Phaser float64 `json:"phaser"`
+
+	// Envelope
+	Attack  float64 `json:"attack"`
+	Decay   float64 `json:"decay"`
+	Sustain float64 `json:"sustain"`
+	Release float64 `json:"release"`
+
+	// Rhythm
+	Swing     float64 `json:"swing"`
+	DegradeBy float64 `json:"degradeBy"`
+
+	// Sound selection (AI-derived)
+	SoundBass string `json:"sound_bass"`
+	SoundMid  string `json:"sound_mid"`
+	SoundHigh string `json:"sound_high"`
+	DrumBank  string `json:"drum_bank"`
+
+	// Source info
+	Enabled bool `json:"enabled"` // Whether AI params are active
+}
+
 // Generator converts MIDI notes to Strudel code
 type Generator struct {
 	quantize        int
 	style           SoundStyle
 	palette         SoundPalette
 	styleCandidates []StyleCandidate
+	aiParams        *AIParams // AI-derived parameters (nil = use defaults)
 }
 
 // VoiceNotes holds notes for a specific voice range
@@ -595,6 +654,40 @@ func NewGeneratorWithStyle(quantize int, style SoundStyle) *Generator {
 // SetStyleCandidates sets the alternative style candidates for the header
 func (g *Generator) SetStyleCandidates(candidates []StyleCandidate) {
 	g.styleCandidates = candidates
+}
+
+// SetAIParams sets AI-derived parameters for code generation
+// When set, these override the default style-based effects
+func (g *Generator) SetAIParams(params *AIParams) {
+	if params != nil {
+		params.Enabled = true
+	}
+	g.aiParams = params
+}
+
+// LoadAIParamsFromJSON loads AI parameters from a JSON file
+func (g *Generator) LoadAIParamsFromJSON(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("failed to read AI params: %w", err)
+	}
+
+	// The JSON has nested structure from ai_code_generator.py
+	var wrapper struct {
+		Params AIParams `json:"params"`
+	}
+	if err := json.Unmarshal(data, &wrapper); err != nil {
+		return fmt.Errorf("failed to parse AI params: %w", err)
+	}
+
+	wrapper.Params.Enabled = true
+	g.aiParams = &wrapper.Params
+	return nil
+}
+
+// HasAIParams returns true if AI parameters are set
+func (g *Generator) HasAIParams() bool {
+	return g.aiParams != nil && g.aiParams.Enabled
 }
 
 // SetStyle changes the sound style

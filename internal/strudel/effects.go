@@ -2110,6 +2110,150 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 	return strings.Join(parts, "\n    ")
 }
 
+// BuildEffectChainFromAIParams generates effect chain from AI-derived parameters
+// This produces effects that naturally match the original audio characteristics
+func BuildEffectChainFromAIParams(params *AIParams, voice string) string {
+	if params == nil || !params.Enabled {
+		return ""
+	}
+
+	var parts []string
+
+	// Gain with perlin modulation (organic feel)
+	var baseGain float64
+	switch voice {
+	case "bass":
+		baseGain = params.GainBass
+	case "mid":
+		baseGain = params.GainMid
+	case "high":
+		baseGain = params.GainHigh
+	default:
+		baseGain = 1.0
+	}
+	if baseGain > 0 {
+		parts = append(parts, fmt.Sprintf(".gain(perlin.range(%.2f, %.2f).slow(8))", baseGain*0.9, baseGain*1.1))
+	}
+
+	// Pan (bass centered, others with subtle movement)
+	if voice == "bass" {
+		parts = append(parts, ".pan(0.5)")
+	} else {
+		width := params.PanWidth
+		if width <= 0 {
+			width = 0.2
+		}
+		if voice == "high" {
+			width *= 1.5
+		}
+		slowVal := 4
+		if voice == "high" {
+			slowVal = 3
+		}
+		parts = append(parts, fmt.Sprintf(".pan(perlin.range(%.2f,%.2f).slow(%d))", 0.5-width, 0.5+width, slowVal))
+	}
+
+	// Filters (AI-derived)
+	var hpf, lpf int
+	switch voice {
+	case "bass":
+		hpf, lpf = params.HPFBass, params.LPFBass
+	case "mid":
+		hpf, lpf = params.HPFMid, params.LPFMid
+	case "high":
+		hpf, lpf = params.HPFHigh, params.LPFHigh
+	}
+	if hpf > 0 {
+		parts = append(parts, fmt.Sprintf(".hpf(%d)", hpf))
+	}
+	if lpf > 0 && lpf < 20000 {
+		parts = append(parts, fmt.Sprintf(".lpf(%d)", lpf))
+	}
+
+	// Distortion/bitcrush (from AI analysis)
+	if params.Crush > 0 && params.Crush < 16 {
+		parts = append(parts, fmt.Sprintf(".crush(%d)", params.Crush))
+	}
+	if params.Coarse > 1 {
+		parts = append(parts, fmt.Sprintf(".coarse(%d)", params.Coarse))
+	}
+
+	// Clip (dynamics)
+	var clip float64
+	switch voice {
+	case "bass":
+		clip = params.ClipBass
+	case "mid":
+		clip = params.ClipMid
+	case "high":
+		clip = params.ClipHigh
+	}
+	if clip > 0 && clip != 1.0 {
+		parts = append(parts, fmt.Sprintf(".clip(%.2f)", clip))
+	}
+
+	// Reverb (scaled by voice)
+	if params.Room > 0 {
+		roomMult := 1.0
+		if voice == "mid" {
+			roomMult = 1.5
+		} else if voice == "high" {
+			roomMult = 2.0
+		}
+		parts = append(parts, fmt.Sprintf(".room(%.2f)", params.Room*roomMult))
+		parts = append(parts, fmt.Sprintf(".size(%.2f)", params.Size*roomMult))
+	}
+
+	// Delay (high voice mainly)
+	if voice == "high" && params.Delay > 0 {
+		parts = append(parts, fmt.Sprintf(".delay(%.2f)", params.Delay))
+		parts = append(parts, fmt.Sprintf(".delaytime(%.3f)", params.DelayTime))
+		parts = append(parts, fmt.Sprintf(".delayfeedback(%.2f)", params.DelayFeedback))
+	}
+
+	// Echo (all voices if enabled)
+	if params.Delay > 0 && voice != "high" {
+		parts = append(parts, fmt.Sprintf(".echo(2, %.3f, %.2f)", params.DelayTime, params.DelayFeedback*0.8))
+	}
+
+	// Shape/saturation
+	if params.Distort > 0 {
+		parts = append(parts, fmt.Sprintf(".shape(%.2f)", params.Distort))
+	}
+
+	// Pattern transforms
+	if params.Swing > 0 {
+		parts = append(parts, fmt.Sprintf(".swing(%.2f)", params.Swing))
+	}
+	if params.DegradeBy > 0 {
+		parts = append(parts, fmt.Sprintf(".degradeBy(%.2f)", params.DegradeBy))
+	}
+
+	// Iter for bass (creates movement)
+	if voice == "bass" && params.Swing > 0 {
+		parts = append(parts, ".iter(4)")
+	}
+
+	return strings.Join(parts, "\n    ")
+}
+
+// GetAISoundForVoice returns the AI-recommended sound for a voice
+func GetAISoundForVoice(params *AIParams, voice string) string {
+	if params == nil || !params.Enabled {
+		return ""
+	}
+	switch voice {
+	case "bass":
+		return params.SoundBass
+	case "mid":
+		return params.SoundMid
+	case "high":
+		return params.SoundHigh
+	default:
+		return ""
+	}
+}
+
 // BuildPatternTransforms generates pattern-level transformation chain
 // Each transform is placed on its own line for readability
 func BuildPatternTransforms(effects VoiceEffects) string {

@@ -685,6 +685,15 @@ def generate_report(cache_dir, version_dir, output_path=None):
             display: block;
         }}
 
+        .chart-caption {{
+            padding: 0.5rem 1rem;
+            font-size: 0.85rem;
+            color: var(--text-secondary);
+            text-align: center;
+            background: var(--bg-secondary);
+            border-top: 1px solid var(--border);
+        }}
+
         .chart-item.full-width {{
             grid-column: span 2;
         }}
@@ -794,12 +803,12 @@ def generate_report(cache_dir, version_dir, output_path=None):
                 Visual Comparison Charts
             </div>
             <div class="charts-grid">
-                {f'<div class="chart-item"><img src="{chart_frequency_data}" alt="Frequency Bands"/></div>' if chart_frequency_data else ''}
-                {f'<div class="chart-item"><img src="{chart_similarity_data}" alt="Similarity Scores"/></div>' if chart_similarity_data else ''}
-                {f'<div class="chart-item"><img src="{chart_spec_orig_data}" alt="Original Spectrogram"/></div>' if chart_spec_orig_data else ''}
-                {f'<div class="chart-item"><img src="{chart_spec_rend_data}" alt="Rendered Spectrogram"/></div>' if chart_spec_rend_data else ''}
-                {f'<div class="chart-item"><img src="{chart_chroma_orig_data}" alt="Original Chromagram"/></div>' if chart_chroma_orig_data else ''}
-                {f'<div class="chart-item"><img src="{chart_chroma_rend_data}" alt="Rendered Chromagram"/></div>' if chart_chroma_rend_data else ''}
+                {f'<div class="chart-item"><img src="{chart_frequency_data}" alt="Frequency Bands"/><div class="chart-caption">Frequency Bands</div></div>' if chart_frequency_data else ''}
+                {f'<div class="chart-item"><img src="{chart_similarity_data}" alt="Similarity Scores"/><div class="chart-caption">Similarity Scores</div></div>' if chart_similarity_data else ''}
+                {f'<div class="chart-item"><img src="{chart_spec_orig_data}" alt="Original Spectrogram"/><div class="chart-caption">Original Spectrogram</div></div>' if chart_spec_orig_data else ''}
+                {f'<div class="chart-item"><img src="{chart_spec_rend_data}" alt="Rendered Spectrogram"/><div class="chart-caption">Rendered Spectrogram</div></div>' if chart_spec_rend_data else ''}
+                {f'<div class="chart-item"><img src="{chart_chroma_orig_data}" alt="Original Chromagram"/><div class="chart-caption">Original Chromagram</div></div>' if chart_chroma_orig_data else ''}
+                {f'<div class="chart-item"><img src="{chart_chroma_rend_data}" alt="Rendered Chromagram"/><div class="chart-caption">Rendered Chromagram</div></div>' if chart_chroma_rend_data else ''}
             </div>
         </div>""" if has_individual_charts else ''}
 

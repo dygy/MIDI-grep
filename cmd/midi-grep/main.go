@@ -13,6 +13,7 @@ import (
 	"github.com/dygy/midi-grep/internal/audio"
 	"github.com/dygy/midi-grep/internal/cache"
 	"github.com/dygy/midi-grep/internal/pipeline"
+	"github.com/dygy/midi-grep/internal/report"
 	"github.com/dygy/midi-grep/internal/server"
 	"github.com/spf13/cobra"
 )
@@ -192,6 +193,19 @@ Example:
 	RunE: runGenServe,
 }
 
+var reportCmd = &cobra.Command{
+	Use:   "report <cache-dir>",
+	Short: "Generate HTML report for extraction results",
+	Long: `Generate a self-contained HTML report with audio players,
+comparison charts, and Strudel code.
+
+Examples:
+  midi-grep report .cache/stems/my_track
+  midi-grep report .cache/stems/my_track --version 2 -o report.html`,
+	Args: cobra.ExactArgs(1),
+	RunE: runReport,
+}
+
 var (
 	// extract flags
 	inputPath   string
@@ -245,6 +259,10 @@ var (
 	genSync            bool
 	genPort            int
 	genOutputDir       string
+
+	// report flags
+	reportVersion int
+	reportOutput  string
 )
 
 func init() {
@@ -343,6 +361,11 @@ func init() {
 	// Generative serve flags
 	genServeCmd.Flags().StringVar(&genModelsPath, "models", "models", "Models repository directory")
 	genServeCmd.Flags().IntVar(&genPort, "port", 5555, "Server port")
+
+	// Report command
+	rootCmd.AddCommand(reportCmd)
+	reportCmd.Flags().IntVarP(&reportVersion, "version", "v", 0, "Version number (default: latest)")
+	reportCmd.Flags().StringVarP(&reportOutput, "output", "o", "", "Output HTML path (default: version_dir/report.html)")
 }
 
 func runExtract(cmd *cobra.Command, args []string) error {
@@ -618,31 +641,56 @@ func runExtract(cmd *cobra.Command, args []string) error {
 			strudelFile = filepath.Join(result.CacheDir, "output.strudel")
 		}
 
-		// Debug: print paths
-		fmt.Printf("       DEBUG: versionDir=%q, CacheDir=%q, strudelFile=%q\n", versionDir, result.CacheDir, strudelFile)
-
 		// Verify strudel file exists
 		if _, err := os.Stat(strudelFile); os.IsNotExist(err) {
-			fmt.Printf("       Warning: Strudel file not found at %s, writing it...\n", strudelFile)
-			// Write the strudel code to the expected location
+			fmt.Printf("       Strudel file not found, writing it...\n")
 			if err := os.WriteFile(strudelFile, []byte(result.StrudelCode), 0644); err != nil {
 				fmt.Printf("       Warning: Could not write strudel file: %v\n", err)
 			}
 		}
 
-		// Use iterative rendering for better quality (AI-driven parameter optimization)
-		if err := iterativeRender(melodicForDuration, strudelFile, audioPath, feedbackPath, duration, findScriptsDir()); err != nil {
-			// Fallback to single-pass rendering if iterative fails
-			fmt.Printf("       Iterative render failed, trying single-pass: %v\n", err)
-			if err := renderStrudelToWavWithFeedback(result.StrudelCode, audioPath, duration, feedbackPath); err != nil {
-				fmt.Printf("       Warning: Audio render failed: %v\n", err)
+		// GRANULAR MODEL RENDERING: Train models from stems and render with actual track sounds
+		modelsDir := filepath.Join(result.CacheDir, "models")
+		granularSuccess := false
+
+		fmt.Println("       Training granular models from stems...")
+		if err := trainGranularModels(result.CacheDir, modelsDir, findScriptsDir()); err != nil {
+			fmt.Printf("       Warning: Granular model training failed: %v\n", err)
+		} else {
+			// Check if any models were created
+			if entries, _ := os.ReadDir(modelsDir); len(entries) > 0 {
+				fmt.Println("       Rendering with granular models (AI-driven, actual track samples)...")
+				bpm := result.BPM
+				if bpm == 0 {
+					bpm = 120 // default
+				}
+				// Pass original audio for direct analysis (most accurate AI-driven matching)
+				if err := renderWithGranularModels(strudelFile, modelsDir, audioPath, feedbackPath, melodicForDuration, bpm, duration, findScriptsDir()); err != nil {
+					fmt.Printf("       Warning: Granular render failed: %v, falling back to iterative...\n", err)
+				} else {
+					fmt.Printf("       Render complete (granular models): %s\n", audioPath)
+					renderedPath = audioPath
+					granularSuccess = true
+				}
+			}
+		}
+
+		// Fallback: Use iterative rendering if granular models didn't work
+		if !granularSuccess {
+			fmt.Println("       Falling back to iterative rendering...")
+			if err := iterativeRender(melodicForDuration, strudelFile, audioPath, feedbackPath, duration, findScriptsDir()); err != nil {
+				// Fallback to single-pass rendering if iterative fails
+				fmt.Printf("       Iterative render failed, trying single-pass: %v\n", err)
+				if err := renderStrudelToWavWithFeedback(result.StrudelCode, audioPath, duration, feedbackPath); err != nil {
+					fmt.Printf("       Warning: Audio render failed: %v\n", err)
+				} else {
+					fmt.Printf("       Render complete (single-pass): %s\n", audioPath)
+					renderedPath = audioPath
+				}
 			} else {
-				fmt.Printf("       Render complete (single-pass): %s\n", audioPath)
+				fmt.Printf("       Render complete (iterative): %s\n", audioPath)
 				renderedPath = audioPath
 			}
-		} else {
-			fmt.Printf("       Render complete (iterative): %s\n", audioPath)
-			renderedPath = audioPath
 		}
 	}
 
@@ -897,6 +945,120 @@ func iterativeRender(originalPath, strudelPath, outputPath, aiParamsPath string,
 	return cmd.Run()
 }
 
+// trainGranularModels trains granular models from stems for high-fidelity rendering
+func trainGranularModels(cacheDir, modelsDir, scriptsDir string) error {
+	// Resolve all paths to absolute
+	scriptsDir, _ = filepath.Abs(scriptsDir)
+	cacheDir, _ = filepath.Abs(cacheDir)
+	modelsDir, _ = filepath.Abs(modelsDir)
+
+	// Create models directory
+	if err := os.MkdirAll(modelsDir, 0755); err != nil {
+		return fmt.Errorf("create models dir: %w", err)
+	}
+
+	python := findPython(scriptsDir)
+
+	// Train model for each stem type
+	stems := map[string]string{
+		"melodic": filepath.Join(cacheDir, "melodic.wav"),
+		"bass":    filepath.Join(cacheDir, "bass.wav"),
+		"drums":   filepath.Join(cacheDir, "drums.wav"),
+	}
+
+	// Check for legacy piano.wav
+	if _, err := os.Stat(stems["melodic"]); os.IsNotExist(err) {
+		stems["melodic"] = filepath.Join(cacheDir, "piano.wav")
+	}
+
+	for stemType, stemPath := range stems {
+		if _, err := os.Stat(stemPath); os.IsNotExist(err) {
+			fmt.Printf("       Skipping %s (not found)\n", stemType)
+			continue
+		}
+
+		modelDir := filepath.Join(modelsDir, stemType)
+		pitchedDir := filepath.Join(modelDir, "pitched")
+
+		// Check if model already trained
+		if entries, err := os.ReadDir(pitchedDir); err == nil && len(entries) > 0 {
+			fmt.Printf("       %s model already trained (%d samples)\n", stemType, len(entries))
+			continue
+		}
+
+		fmt.Printf("       Training %s model from %s...\n", stemType, filepath.Base(stemPath))
+
+		// Use the rave.cli train command
+		args := []string{
+			"-m", "rave.cli",
+			"train", stemPath,
+			"--name", stemType,
+			"--output", modelsDir,
+			"--mode", "granular",
+		}
+
+		cmd := exec.Command(python, args...)
+		cmd.Dir = scriptsDir
+		cmd.Env = append(os.Environ(), fmt.Sprintf("PYTHONPATH=%s", scriptsDir))
+		cmd.Stdout = os.Stdout
+		cmd.Stderr = os.Stderr
+
+		if err := cmd.Run(); err != nil {
+			fmt.Printf("       Warning: %s model training failed: %v\n", stemType, err)
+		} else {
+			fmt.Printf("       %s model trained\n", stemType)
+		}
+	}
+
+	return nil
+}
+
+// renderWithGranularModels renders Strudel code using trained granular models
+func renderWithGranularModels(strudelFile, modelsDir, outputPath, aiParamsPath, originalAudioPath string, bpm float64, duration float64, scriptsDir string) error {
+	// Resolve all paths to absolute
+	scriptsDir, _ = filepath.Abs(scriptsDir)
+	strudelFile, _ = filepath.Abs(strudelFile)
+	modelsDir, _ = filepath.Abs(modelsDir)
+	outputPath, _ = filepath.Abs(outputPath)
+
+	script := filepath.Join(scriptsDir, "render_with_models.py")
+	if _, err := os.Stat(script); os.IsNotExist(err) {
+		return fmt.Errorf("render_with_models.py not found")
+	}
+
+	python := findPython(scriptsDir)
+	args := []string{
+		script,
+		strudelFile,
+		"-m", modelsDir,
+		"-o", outputPath,
+		"-i", "10", // 10 iterations for AI-driven refinement
+	}
+	if bpm > 0 {
+		args = append(args, "--bpm", fmt.Sprintf("%.1f", bpm))
+	}
+	if duration > 0 {
+		args = append(args, "-d", fmt.Sprintf("%.1f", duration))
+	}
+	// Original audio is preferred for direct analysis (more accurate than pre-computed params)
+	if originalAudioPath != "" {
+		if absPath, err := filepath.Abs(originalAudioPath); err == nil && fileExists(absPath) {
+			args = append(args, "--original", absPath)
+		}
+	}
+	// Fallback to AI params if original not available
+	if aiParamsPath != "" {
+		if absPath, err := filepath.Abs(aiParamsPath); err == nil && fileExists(absPath) {
+			args = append(args, "-p", absPath)
+		}
+	}
+
+	cmd := exec.Command(python, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
 // generateComparisonChart generates a frequency comparison chart
 func generateComparisonChart(originalPath, renderedPath, outputPath, scriptsDir string) error {
 	script := filepath.Join(scriptsDir, "compare_audio.py")
@@ -983,6 +1145,11 @@ func findScriptsDir() string {
 func dirExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && info.IsDir()
+}
+
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }
 
 // getAudioDuration gets the duration of an audio file using ffprobe
@@ -1312,4 +1479,38 @@ func runGenServe(cmd *cobra.Command, args []string) error {
 	execCmd.Stderr = os.Stderr
 
 	return execCmd.Run()
+}
+
+func runReport(cmd *cobra.Command, args []string) error {
+	cacheDir := args[0]
+
+	// Find version directory
+	versionDir := ""
+	if reportVersion > 0 {
+		versionDir = filepath.Join(cacheDir, fmt.Sprintf("v%03d", reportVersion))
+	} else {
+		// Find latest version
+		for i := 999; i > 0; i-- {
+			vdir := filepath.Join(cacheDir, fmt.Sprintf("v%03d", i))
+			if info, err := os.Stat(vdir); err == nil && info.IsDir() {
+				versionDir = vdir
+				break
+			}
+		}
+	}
+
+	if versionDir == "" {
+		versionDir = cacheDir // Fallback to cache dir itself
+	}
+
+	fmt.Printf("Generating report from: %s\n", versionDir)
+
+	gen := report.NewGenerator(cacheDir, versionDir)
+	outputPath, err := gen.Generate(reportOutput)
+	if err != nil {
+		return fmt.Errorf("failed to generate report: %w", err)
+	}
+
+	fmt.Printf("Report generated: %s\n", outputPath)
+	return nil
 }

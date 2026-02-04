@@ -112,10 +112,39 @@ The `--render` flag synthesizes WAV audio from patterns:
 - Chord stabs: Filtered sawtooth
 - Lead: Triangle wave with vibrato
 
+**Node.js Strudel Renderer (`scripts/node/src/render-strudel-node.ts`):**
+- TypeScript-based offline audio rendering using node-web-audio-api
+- Parses Strudel mini-notation patterns directly
+- Synthesizes melodic notes with harmonics for frequency content
+- Drum synthesis: kick (808-style), snare (body + noise), hi-hats
+- Voice-specific filtering: bass (LPF 800Hz), mid (BPF 2500Hz), high (HPF 400Hz)
+- Outputs 16-bit 44.1kHz stereo WAV files
+- Build: `cd scripts/node && npm run build`
+- Usage: `node dist/render-strudel-node.js input.strudel output.wav --duration 30`
+
 **AI Parameter Suggestion (`scripts/python/audio_to_strudel_params.py`):**
 - Analyzes original audio spectral/dynamic characteristics
 - Suggests optimal Strudel effect parameters (filters, compression, reverb)
 - Feeds back into renderer for AI-driven mix balance
+
+**AI Code Generator (`scripts/python/ai_code_generator.py`):**
+- Analyzes original audio for ALL characteristics (spectrum, dynamics, timing, timbre)
+- Generates Strudel code with parameters inherently matched to target
+- No hardcoded values - everything derived from analysis
+- Works universally for any track/genre
+- Outputs AudioProfile with spectral bands, dynamics, and timing info
+
+**Pattern Thinner (`scripts/python/thin_patterns.py`):**
+- AI-driven pattern density control
+- Thins drum patterns to match original's onset density
+- Prevents tempo detection errors from too many drum hits
+- Parses and modifies Strudel bar arrays
+
+**Model-based Renderer (`scripts/python/render_with_models.py`):**
+- Audio rendering using trained granular models
+- Loads pitched samples from model directories
+- Adapts ALL parameters from original track analysis
+- No hardcoded values - works for any track/genre
 
 **Audio Comparison (`scripts/python/compare_audio.py`):**
 - Compares rendered output vs original stems
@@ -135,12 +164,19 @@ The `--render` flag synthesizes WAV audio from patterns:
 - Strudel code block with copy button
 - Dark theme styled like Playwright/Jupyter reports
 
+**Go Report Generator (`internal/report/generator.go`):**
+- Type-safe Go implementation that can replace Python report generator
+- Embeds audio files as base64 for self-contained HTML
+- Parses comparison.json and ai_params.json for data tables
+- Same feature set as Python version with better type safety
+
 ## Tech Stack
 
 - **Language**: Go 1.21+
 - **CLI Framework**: Cobra
 - **Web Framework**: Chi + HTMX + Go templates
 - **Audio Processing**: Python scripts (demucs, basic-pitch, librosa)
+- **Audio Rendering**: TypeScript/Node.js (node-web-audio-api for offline synthesis)
 - **YouTube Download**: yt-dlp
 
 ## Project Structure
@@ -174,12 +210,19 @@ midi-grep/
 │   ├── exec/runner.go          # Python subprocess execution
 │   ├── progress/progress.go    # CLI progress output
 │   ├── workspace/workspace.go  # Temp file management
-│   └── errors/errors.go        # Custom error types
+│   ├── errors/errors.go        # Custom error types
 │   ├── cache/cache.go          # Stem + output caching with versioning
 │   ├── drums/detector.go       # Drum pattern detection
+│   └── report/generator.go     # Go HTML report generation (replaces Python)
 ├── scripts/
 │   ├── midi-grep.sh            # Main CLI wrapper script
 │   ├── extract-youtube.sh      # Quick YouTube extraction
+│   ├── node/                   # TypeScript audio rendering
+│   │   ├── src/
+│   │   │   └── render-strudel-node.ts  # Offline Strudel renderer
+│   │   ├── dist/               # Compiled JavaScript output
+│   │   ├── package.json        # Node.js dependencies
+│   │   └── tsconfig.json       # TypeScript configuration
 │   └── python/
 │       ├── separate.py         # Demucs stem separation (melodic/bass/drums/vocals)
 │       ├── analyze.py          # BPM/key detection with candidates
@@ -189,13 +232,14 @@ midi-grep/
 │       ├── chord_to_strudel.py # Chord-based Strudel generation
 │       ├── transcribe.py       # Basic Pitch transcription
 │       ├── cleanup.py          # MIDI quantization
-│       ├── detect_drums.py     # Drum pattern detection
 │       ├── detect_genre_dl.py  # CLAP-based deep learning genre detection
 │       ├── detect_genre_essentia.py # Essentia-based genre detection
-│       ├── render_audio.py     # WAV synthesis from Strudel patterns
 │       ├── audio_to_strudel_params.py # AI-driven effect parameter suggestion
 │       ├── compare_audio.py    # Rendered vs original audio comparison
 │       ├── generate_report.py  # HTML report generation
+│       ├── ai_code_generator.py # AI-driven Strudel code generation
+│       ├── thin_patterns.py    # Pattern density control
+│       ├── render_with_models.py # Render using trained granular models
 │       ├── iterative_render.py # AI-driven iterative audio refinement
 │       ├── requirements.txt
 │       └── rave/               # RAVE generative model system
@@ -510,6 +554,11 @@ CLAP (Contrastive Language-Audio Pretraining) model for zero-shot classification
 - `openl3` - Timbre embeddings for RAVE pipeline
 - `laion-clap` - Deep learning genre detection + timbre embeddings
 - `acids-rave` - (Optional) Full RAVE neural network training
+
+### Node.js/TypeScript (in scripts/node)
+- `node-web-audio-api` - Web Audio API for Node.js (offline rendering)
+- `typescript` - TypeScript compiler
+- `@types/node` - Node.js type definitions
 
 ### System
 - `yt-dlp` - YouTube downloads
