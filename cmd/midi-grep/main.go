@@ -244,6 +244,7 @@ var (
 	genAddToRepo       bool
 	genSync            bool
 	genPort            int
+	genOutputDir       string
 )
 
 func init() {
@@ -312,7 +313,7 @@ func init() {
 
 	// Generative process flags
 	genProcessCmd.Flags().StringVar(&genTrackID, "track-id", "", "Unique track identifier (required)")
-	genProcessCmd.Flags().StringVarP(&outputPath, "output", "o", "output", "Output directory")
+	genProcessCmd.Flags().StringVar(&genOutputDir, "output", "output", "Output directory")
 	genProcessCmd.Flags().StringVar(&genModelsPath, "models", "models", "Models repository directory")
 	genProcessCmd.Flags().StringVar(&genGitHubRepo, "github", "", "GitHub repo for model sync (user/repo)")
 	genProcessCmd.Flags().StringVar(&genTrainingMode, "mode", "granular", "Training mode (granular or rave)")
@@ -321,7 +322,7 @@ func init() {
 
 	// Generative train flags
 	genTrainCmd.Flags().StringVar(&genModelName, "name", "", "Model name (required)")
-	genTrainCmd.Flags().StringVarP(&outputPath, "output", "o", "models", "Output directory")
+	genTrainCmd.Flags().StringVar(&genOutputDir, "output", "models", "Output directory")
 	genTrainCmd.Flags().StringVar(&genTrainingMode, "mode", "granular", "Training mode (granular or rave)")
 	genTrainCmd.Flags().IntVar(&epochs, "epochs", 500, "Training epochs (RAVE mode)")
 	genTrainCmd.Flags().IntVar(&genGrainMS, "grain-ms", 100, "Grain duration in ms (granular mode)")
@@ -530,8 +531,9 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	}
 
 	// Get version directory from orchestrator result (it already saved the output)
+	// Note: output is cached even with --no-cache (--no-cache only skips stem cache)
 	var versionDir string
-	if result.CacheKey != "" && result.OutputVersion > 0 && !noCache {
+	if result.CacheKey != "" && result.OutputVersion > 0 {
 		stemCache, err := cache.NewStemCache()
 		if err == nil {
 			versionDir = stemCache.GetVersionDir(result.CacheKey, result.OutputVersion)
@@ -614,6 +616,18 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		strudelFile := filepath.Join(versionDir, "output.strudel")
 		if versionDir == "" {
 			strudelFile = filepath.Join(result.CacheDir, "output.strudel")
+		}
+
+		// Debug: print paths
+		fmt.Printf("       DEBUG: versionDir=%q, CacheDir=%q, strudelFile=%q\n", versionDir, result.CacheDir, strudelFile)
+
+		// Verify strudel file exists
+		if _, err := os.Stat(strudelFile); os.IsNotExist(err) {
+			fmt.Printf("       Warning: Strudel file not found at %s, writing it...\n", strudelFile)
+			// Write the strudel code to the expected location
+			if err := os.WriteFile(strudelFile, []byte(result.StrudelCode), 0644); err != nil {
+				fmt.Printf("       Warning: Could not write strudel file: %v\n", err)
+			}
 		}
 
 		// Use iterative rendering for better quality (AI-driven parameter optimization)
@@ -1135,7 +1149,7 @@ func runGenProcess(cmd *cobra.Command, args []string) error {
 		"-m", "rave.cli",
 		"process", stemsDir,
 		"--track-id", genTrackID,
-		"--output", outputPath,
+		"--output", genOutputDir,
 		"--models", genModelsPath,
 		"--mode", genTrainingMode,
 		"--threshold", fmt.Sprintf("%.2f", genThreshold),
@@ -1179,7 +1193,7 @@ func runGenTrain(cmd *cobra.Command, args []string) error {
 		"-m", "rave.cli",
 		"train", audioPath,
 		"--name", genModelName,
-		"--output", outputPath,
+		"--output", genOutputDir,
 		"--mode", genTrainingMode,
 	}
 
