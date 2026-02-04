@@ -57,3 +57,6 @@ pretrained_models/
 .cache/
 scripts/python/models/
 /scripts/node/node_modules/
+
+# ClickHouse local data
+.clickhouse/

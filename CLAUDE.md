@@ -474,6 +474,69 @@ go build -o bin/midi-grep ./cmd/midi-grep
 | `--brazilian-funk` | Force Brazilian funk mode (auto-detected normally) |
 | `--genre` | Manual genre override (`brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz`) |
 | `--deep-genre` | Use deep learning (CLAP) for genre detection (default: enabled, skipped when `--genre` is specified) |
+| `--iterate N` | AI-driven improvement iterations (uses Claude to improve code) |
+| `--target-similarity` | Target similarity for --iterate (0.0-1.0, default: 0.70) |
+
+### AI-Driven Iterative Improvement
+
+The `--iterate` flag enables AI-driven code improvement using Claude:
+
+```bash
+# Run 5 iterations, target 70% similarity
+./bin/midi-grep extract --url "..." --iterate 5
+
+# Higher target similarity
+./bin/midi-grep extract --url "..." --iterate 10 --target-similarity 0.80
+```
+
+**How it works:**
+1. Extract and render initial Strudel code
+2. Compare rendered audio with original (frequency bands, MFCC, chroma)
+3. Send comparison results to LLM (Ollama local or Claude API)
+4. LLM analyzes gaps and generates improved code
+5. Repeat until target similarity or max iterations reached
+6. Store all runs in ClickHouse for incremental learning
+
+**LLM Options:**
+
+| Flag | Description |
+|------|-------------|
+| `--ollama` | Use Ollama (local, free) - **default: enabled** |
+| `--ollama-model` | Model to use (default: `deepseek-coder:6.7b`) |
+
+```bash
+# Default: uses Ollama (free, local)
+./bin/midi-grep extract --url "..." --iterate 5
+
+# Use Claude API instead (requires ANTHROPIC_API_KEY)
+./bin/midi-grep extract --url "..." --iterate 5 --ollama=false
+
+# Use different Ollama model
+./bin/midi-grep extract --url "..." --iterate 5 --ollama-model codellama:13b
+```
+
+**Ollama Setup (one-time):**
+```bash
+# Install
+brew install ollama
+
+# Start service
+brew services start ollama
+
+# Pull a model (choose one)
+ollama pull deepseek-coder:6.7b  # Default, good for code
+ollama pull codellama:13b        # Alternative
+ollama pull llama3:8b            # General purpose
+```
+
+**ClickHouse Setup:**
+```bash
+# Option 1: Local (development) - auto-used
+./bin/clickhouse local --path .clickhouse/db --query "SELECT 1"
+
+# Option 2: Docker (production)
+docker-compose -f docker-compose.clickhouse.yml up -d
+```
 
 ### Generative Mode Commands
 

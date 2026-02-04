@@ -229,6 +229,10 @@ var (
 	renderAudio   string // Output path for rendered WAV
 	compareAudio  bool   // Compare rendered with original
 	stemQuality   string // Stem separation quality (fast, normal, high, best)
+	iterateCount     int     // AI-driven improvement iterations
+	targetSimilarity float64 // Target similarity for iteration
+	useOllama        bool    // Use Ollama (local LLM) instead of Claude API
+	ollamaModel      string  // Ollama model to use
 
 	// serve flags
 	port int
@@ -308,6 +312,10 @@ func init() {
 	extractCmd.Flags().StringVar(&renderAudio, "render", "auto", "Render output to WAV ('auto' saves in cache dir, 'none' to disable)")
 	extractCmd.Flags().BoolVar(&compareAudio, "compare", false, "Compare rendered audio with original stems (requires --render)")
 	extractCmd.Flags().StringVar(&stemQuality, "quality", "normal", "Stem separation quality: fast, normal, high (better, slower), best (highest, slowest)")
+	extractCmd.Flags().IntVar(&iterateCount, "iterate", 0, "AI-driven improvement iterations (0=disabled)")
+	extractCmd.Flags().Float64Var(&targetSimilarity, "target-similarity", 0.70, "Target similarity for --iterate (0.0-1.0)")
+	extractCmd.Flags().BoolVar(&useOllama, "ollama", true, "Use Ollama (local LLM) - free, no API key needed")
+	extractCmd.Flags().StringVar(&ollamaModel, "ollama-model", "deepseek-coder:6.7b", "Ollama model to use")
 
 	// Serve command flags
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to listen on")
@@ -716,6 +724,48 @@ func runExtract(cmd *cobra.Command, args []string) error {
 			} else {
 				fmt.Printf("       Comparison chart: %s\n", chartPath)
 				comparisonChartPath = chartPath
+			}
+		}
+	}
+
+	// AI-driven improvement iterations
+	if iterateCount > 0 && renderedPath != "" && result.CacheDir != "" {
+		fmt.Printf("\n[AI] Starting AI-driven improvement (%d iterations, target: %.0f%%)...\n", iterateCount, targetSimilarity*100)
+
+		// Get paths
+		melodicPath := filepath.Join(result.CacheDir, "melodic.wav")
+		if _, err := os.Stat(melodicPath); os.IsNotExist(err) {
+			melodicPath = filepath.Join(result.CacheDir, "piano.wav")
+		}
+
+		strudelPath := filepath.Join(versionDir, "output.strudel")
+		if versionDir == "" {
+			strudelPath = filepath.Join(result.CacheDir, "output.strudel")
+		}
+
+		if _, err := os.Stat(melodicPath); err == nil {
+			if err := runAIImprover(
+				melodicPath,
+				strudelPath,
+				versionDir,
+				result.BPM,
+				result.Key,
+				soundStyle,
+				result.Genre,
+				iterateCount,
+				targetSimilarity,
+				useOllama,
+				ollamaModel,
+				findScriptsDir(),
+			); err != nil {
+				fmt.Printf("[AI] Warning: AI improvement failed: %v\n", err)
+			} else {
+				fmt.Println("[AI] Improvement complete")
+				// Re-generate comparison chart with new render
+				newRenderPath := filepath.Join(versionDir, fmt.Sprintf("render_v%03d.wav", result.OutputVersion+iterateCount))
+				if _, err := os.Stat(newRenderPath); err == nil {
+					renderedPath = newRenderPath
+				}
 			}
 		}
 	}
@@ -1513,4 +1563,51 @@ func runReport(cmd *cobra.Command, args []string) error {
 
 	fmt.Printf("Report generated: %s\n", outputPath)
 	return nil
+}
+
+// runAIImprover runs the AI-driven Strudel code improvement pipeline
+func runAIImprover(
+	originalAudio string,
+	strudelPath string,
+	outputDir string,
+	bpm float64,
+	key string,
+	style string,
+	genre string,
+	iterations int,
+	target float64,
+	useOllama bool,
+	ollamaModel string,
+	scriptsDir string,
+) error {
+	script := filepath.Join(scriptsDir, "ai_improver.py")
+	if _, err := os.Stat(script); os.IsNotExist(err) {
+		return fmt.Errorf("ai_improver.py not found")
+	}
+
+	python := findPython(scriptsDir)
+	args := []string{
+		script,
+		originalAudio,
+		strudelPath,
+		"-o", outputDir,
+		"-i", fmt.Sprintf("%d", iterations),
+		"-t", fmt.Sprintf("%.2f", target),
+		"--bpm", fmt.Sprintf("%.1f", bpm),
+		"--key", key,
+		"--style", style,
+		"--genre", genre,
+	}
+
+	if useOllama {
+		args = append(args, "--ollama")
+		if ollamaModel != "" {
+			args = append(args, "--ollama-model", ollamaModel)
+		}
+	}
+
+	cmd := exec.Command(python, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
 }
