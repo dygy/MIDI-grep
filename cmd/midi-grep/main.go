@@ -1114,7 +1114,7 @@ func runAudioComparison(originalPath, renderedPath, scriptsDir string) error {
 // Generative pipeline commands
 
 func runGenProcess(cmd *cobra.Command, args []string) error {
-	stemsDir := args[0]
+	stemsDir, _ := filepath.Abs(args[0])
 	scriptsDir, _ := filepath.Abs(findScriptsDir())
 
 	fmt.Println("========================================")
@@ -1155,7 +1155,7 @@ func runGenProcess(cmd *cobra.Command, args []string) error {
 }
 
 func runGenTrain(cmd *cobra.Command, args []string) error {
-	audioPath := args[0]
+	audioPath, _ := filepath.Abs(args[0])
 	scriptsDir, _ := filepath.Abs(findScriptsDir())
 
 	fmt.Println("========================================")
@@ -1210,7 +1210,7 @@ func runGenTrain(cmd *cobra.Command, args []string) error {
 }
 
 func runGenSearch(cmd *cobra.Command, args []string) error {
-	audioPath := args[0]
+	audioPath, _ := filepath.Abs(args[0])
 	scriptsDir, _ := filepath.Abs(findScriptsDir())
 
 	fmt.Printf("Searching for models similar to: %s\n", audioPath)
