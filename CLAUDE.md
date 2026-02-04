@@ -47,6 +47,27 @@ Auto-Detection → BPM 125-155 + vocal-range notes + short durations + low bass
 Template Generation → Tamborzão drums + 808 bass + synth stabs
 ```
 
+**Generative Mode** (RAVE neural synthesizers - for full creative control):
+```
+Input → Separated Stems
+    ↓
+Timbre Analysis (OpenL3/CLAP) → Embedding vector per stem
+    ↓
+Model Search → Find similar existing models (threshold: 88%)
+    ↓
+If no match: Train New Model
+  - Granular (fast, minutes): Onset-based grain extraction
+  - RAVE (quality, hours): Full neural network training
+    ↓
+GitHub Sync → Upload/download models for reuse
+    ↓
+Strudel Generation → note() control with trained models
+```
+
+This mode trains neural synthesizers that learn the "sound" of your track material,
+enabling full note() control - edit any pitch, create new melodies, all sounding
+like the original. Models are stored in a repository and reused across tracks.
+
 ### Caching
 
 All outputs are cached in `.cache/stems/{key}/` by URL or file hash:
@@ -175,8 +196,18 @@ midi-grep/
 │       ├── audio_to_strudel_params.py # AI-driven effect parameter suggestion
 │       ├── compare_audio.py    # Rendered vs original audio comparison
 │       ├── generate_report.py  # HTML report generation
-│       └── requirements.txt
-├── internal/cache/cache.go     # Stem caching (by URL/file hash)
+│       ├── iterative_render.py # AI-driven iterative audio refinement
+│       ├── requirements.txt
+│       └── rave/               # RAVE generative model system
+│           ├── __init__.py
+│           ├── cli.py          # CLI wrapper for pipeline
+│           ├── pipeline.py     # End-to-end generative pipeline
+│           ├── trainer.py      # RAVE + Granular model training
+│           ├── repository.py   # Model storage + GitHub sync
+│           └── timbre_embeddings.py # OpenL3/CLAP timbre analysis
+├── internal/
+│   ├── generative/pipeline.go  # Go wrapper for RAVE pipeline
+│   └── cache/cache.go          # Stem caching (by URL/file hash)
 ├── context/                    # AWOS product documentation
 │   ├── product/
 │   │   ├── product-definition.md
@@ -400,6 +431,43 @@ go build -o bin/midi-grep ./cmd/midi-grep
 | `--genre` | Manual genre override (`brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz`) |
 | `--deep-genre` | Use deep learning (CLAP) for genre detection (default: enabled, skipped when `--genre` is specified) |
 
+### Generative Mode Commands
+
+The `generative` command (aliases: `gen`, `rave`) provides neural synthesizer training:
+
+```bash
+# List available generative models
+./bin/midi-grep generative list
+
+# Train a new granular model (fast, uses onset detection)
+./bin/midi-grep generative train piano.wav --name my_piano --mode granular
+
+# Train a RAVE neural network (quality, takes hours)
+./bin/midi-grep generative train piano.wav --name my_synth --mode rave --epochs 500
+
+# Search for similar models before training
+./bin/midi-grep generative search piano.wav --threshold 0.85
+
+# Process stems through full pipeline (auto-trains or reuses models)
+./bin/midi-grep generative process ./stems --track-id mytrack
+
+# Start local HTTP server for Strudel samples
+./bin/midi-grep generative serve --port 5555
+
+# After starting server, use in Strudel:
+# await samples('http://localhost:5555/my_piano/')
+# $: note("c3 e3 g3").sound("my_piano")
+```
+
+| Flag | Description |
+|------|-------------|
+| `--mode` | Training mode: `granular` (fast) or `rave` (quality) |
+| `--models` | Models repository directory (default: `models`) |
+| `--github` | GitHub repo for sync (e.g., `user/midi-grep-sounds`) |
+| `--threshold` | Similarity threshold for reusing models (0.0-1.0, default: 0.88) |
+| `--epochs` | Training epochs for RAVE mode (default: 500) |
+| `--grain-ms` | Grain duration for granular mode (default: 100ms) |
+
 ## Genre Auto-Detection
 
 The pipeline includes intelligent genre detection in `internal/pipeline/orchestrator.go`:
@@ -439,6 +507,9 @@ CLAP (Contrastive Language-Audio Pretraining) model for zero-shot classification
 - `basic-pitch` - Audio-to-MIDI
 - `librosa` - Audio analysis
 - `pretty_midi` - MIDI manipulation
+- `openl3` - Timbre embeddings for RAVE pipeline
+- `laion-clap` - Deep learning genre detection + timbre embeddings
+- `acids-rave` - (Optional) Full RAVE neural network training
 
 ### System
 - `yt-dlp` - YouTube downloads

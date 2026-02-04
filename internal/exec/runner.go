@@ -48,6 +48,37 @@ func (r *Runner) RunScript(ctx context.Context, script string, args ...string) (
 	return r.execute(ctx, r.PythonPath, fullArgs...)
 }
 
+// RunModule executes a Python module with -m flag
+func (r *Runner) RunModule(ctx context.Context, module string, args ...string) (*Result, error) {
+	// Set PYTHONPATH to include scripts directory for local modules
+	cmd := exec.CommandContext(ctx, r.PythonPath, append([]string{"-m", module}, args...)...)
+
+	var stdout, stderr bytes.Buffer
+	cmd.Stdout = &stdout
+	cmd.Stderr = &stderr
+	cmd.Dir = r.ScriptsDir
+	cmd.Env = append(os.Environ(), fmt.Sprintf("PYTHONPATH=%s", r.ScriptsDir))
+
+	start := time.Now()
+	err := cmd.Run()
+
+	result := &Result{
+		Stdout:   stdout.String(),
+		Stderr:   stderr.String(),
+		Duration: time.Since(start),
+	}
+
+	if exitErr, ok := err.(*exec.ExitError); ok {
+		result.ExitCode = exitErr.ExitCode()
+	}
+
+	if err != nil {
+		return result, fmt.Errorf("module %s failed: %w\nstderr: %s", module, err, result.Stderr)
+	}
+
+	return result, nil
+}
+
 // execute runs a command and captures output
 func (r *Runner) execute(ctx context.Context, name string, args ...string) (*Result, error) {
 	start := time.Now()

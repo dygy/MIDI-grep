@@ -111,6 +111,87 @@ var modelsListCmd = &cobra.Command{
 	RunE:  runModelsList,
 }
 
+var generativeCmd = &cobra.Command{
+	Use:   "generative",
+	Short: "RAVE-based generative sound model pipeline",
+	Long: `Train neural synthesizers on track material for unlimited creative control.
+
+This pipeline creates generative models that learn the "sound" of each stem,
+enabling full note() control in Strudel - edit any pitch, create new melodies,
+all sounding like the original track.
+
+Subcommands:
+  process   Process stems through the full pipeline
+  train     Train a new model from audio
+  search    Search for similar models
+  list      List available models
+  serve     Start local model server for Strudel`,
+	Aliases: []string{"gen", "rave"},
+}
+
+var genProcessCmd = &cobra.Command{
+	Use:   "process <stems-dir>",
+	Short: "Process stems through generative pipeline",
+	Long: `Process separated stems into playable generative models.
+
+This will:
+1. Analyze timbre of each stem
+2. Search for similar models in repository
+3. Train new models if no match found
+4. Generate Strudel code with note() control
+
+Example:
+  midi-grep generative process ./stems --track-id mytrack`,
+	Args: cobra.ExactArgs(1),
+	RunE: runGenProcess,
+}
+
+var genTrainCmd = &cobra.Command{
+	Use:   "train <audio>",
+	Short: "Train a new generative model",
+	Long: `Train a neural synthesizer on audio material.
+
+Modes:
+  granular - Fast (minutes): Creates grain bank from onsets
+  rave     - Quality (hours): Trains full RAVE neural network
+
+Example:
+  midi-grep generative train piano.wav --name my_piano --mode granular`,
+	Args: cobra.ExactArgs(1),
+	RunE: runGenTrain,
+}
+
+var genSearchCmd = &cobra.Command{
+	Use:   "search <audio>",
+	Short: "Search for similar models",
+	Long: `Find models in the repository with similar timbre.
+
+Uses OpenL3 or CLAP embeddings to compare audio signatures.
+
+Example:
+  midi-grep generative search piano.wav --threshold 0.85`,
+	Args: cobra.ExactArgs(1),
+	RunE: runGenSearch,
+}
+
+var genListCmd = &cobra.Command{
+	Use:   "list",
+	Short: "List available generative models",
+	RunE:  runGenList,
+}
+
+var genServeCmd = &cobra.Command{
+	Use:   "serve",
+	Short: "Start local model server for Strudel",
+	Long: `Start HTTP server to serve models to Strudel.
+
+Use in Strudel: await samples('http://localhost:5555/model_id/')
+
+Example:
+  midi-grep generative serve --port 5555`,
+	RunE: runGenServe,
+}
+
 var (
 	// extract flags
 	inputPath   string
@@ -151,6 +232,18 @@ var (
 	batchSize    int
 	learningRate float64
 	baseModel    string
+
+	// generative flags
+	genTrackID         string
+	genModelsPath      string
+	genGitHubRepo      string
+	genTrainingMode    string
+	genThreshold       float64
+	genModelName       string
+	genGrainMS         int
+	genAddToRepo       bool
+	genSync            bool
+	genPort            int
 )
 
 func init() {
@@ -165,6 +258,14 @@ func init() {
 
 	// Models subcommands
 	modelsCmd.AddCommand(modelsListCmd)
+
+	// Generative subcommands
+	rootCmd.AddCommand(generativeCmd)
+	generativeCmd.AddCommand(genProcessCmd)
+	generativeCmd.AddCommand(genTrainCmd)
+	generativeCmd.AddCommand(genSearchCmd)
+	generativeCmd.AddCommand(genListCmd)
+	generativeCmd.AddCommand(genServeCmd)
 
 	// Extract command flags
 	extractCmd.Flags().StringVarP(&inputPath, "input", "i", "", "Input audio file (WAV or MP3)")
@@ -208,6 +309,39 @@ func init() {
 	trainRunCmd.Flags().StringVar(&baseModel, "base-model", "basic-pitch", "Base model to fine-tune from")
 	trainRunCmd.MarkFlagRequired("dataset")
 	trainRunCmd.MarkFlagRequired("output")
+
+	// Generative process flags
+	genProcessCmd.Flags().StringVar(&genTrackID, "track-id", "", "Unique track identifier (required)")
+	genProcessCmd.Flags().StringVarP(&outputPath, "output", "o", "output", "Output directory")
+	genProcessCmd.Flags().StringVar(&genModelsPath, "models", "models", "Models repository directory")
+	genProcessCmd.Flags().StringVar(&genGitHubRepo, "github", "", "GitHub repo for model sync (user/repo)")
+	genProcessCmd.Flags().StringVar(&genTrainingMode, "mode", "granular", "Training mode (granular or rave)")
+	genProcessCmd.Flags().Float64Var(&genThreshold, "threshold", 0.88, "Similarity threshold for reusing models")
+	genProcessCmd.MarkFlagRequired("track-id")
+
+	// Generative train flags
+	genTrainCmd.Flags().StringVar(&genModelName, "name", "", "Model name (required)")
+	genTrainCmd.Flags().StringVarP(&outputPath, "output", "o", "models", "Output directory")
+	genTrainCmd.Flags().StringVar(&genTrainingMode, "mode", "granular", "Training mode (granular or rave)")
+	genTrainCmd.Flags().IntVar(&epochs, "epochs", 500, "Training epochs (RAVE mode)")
+	genTrainCmd.Flags().IntVar(&genGrainMS, "grain-ms", 100, "Grain duration in ms (granular mode)")
+	genTrainCmd.Flags().BoolVar(&genAddToRepo, "add-to-repo", true, "Add to model repository")
+	genTrainCmd.Flags().StringVar(&genGitHubRepo, "github", "", "GitHub repo for sync")
+	genTrainCmd.Flags().BoolVar(&genSync, "sync", false, "Sync to GitHub after training")
+	genTrainCmd.MarkFlagRequired("name")
+
+	// Generative search flags
+	genSearchCmd.Flags().StringVar(&genModelsPath, "models", "models", "Models repository directory")
+	genSearchCmd.Flags().StringVar(&genGitHubRepo, "github", "", "GitHub repo")
+	genSearchCmd.Flags().Float64Var(&genThreshold, "threshold", 0.85, "Minimum similarity threshold")
+
+	// Generative list flags
+	genListCmd.Flags().StringVar(&genModelsPath, "models", "models", "Models repository directory")
+	genListCmd.Flags().StringVar(&genGitHubRepo, "github", "", "GitHub repo")
+
+	// Generative serve flags
+	genServeCmd.Flags().StringVar(&genModelsPath, "models", "models", "Models repository directory")
+	genServeCmd.Flags().IntVar(&genPort, "port", 5555, "Server port")
 }
 
 func runExtract(cmd *cobra.Command, args []string) error {
@@ -975,4 +1109,193 @@ func runAudioComparison(originalPath, renderedPath, scriptsDir string) error {
 	cmd.Stderr = os.Stderr
 
 	return cmd.Run()
+}
+
+// Generative pipeline commands
+
+func runGenProcess(cmd *cobra.Command, args []string) error {
+	stemsDir := args[0]
+	scriptsDir, _ := filepath.Abs(findScriptsDir())
+
+	fmt.Println("========================================")
+	fmt.Println("RAVE Generative Pipeline")
+	fmt.Println("========================================")
+	fmt.Printf("Stems: %s\n", stemsDir)
+	fmt.Printf("Track ID: %s\n", genTrackID)
+	fmt.Printf("Mode: %s\n", genTrainingMode)
+	fmt.Printf("Threshold: %.0f%%\n", genThreshold*100)
+	fmt.Println()
+
+	python := filepath.Join(scriptsDir, ".venv", "bin", "python")
+	if _, err := os.Stat(python); err != nil {
+		python = "python3"
+	}
+
+	pyArgs := []string{
+		"-m", "rave.cli",
+		"process", stemsDir,
+		"--track-id", genTrackID,
+		"--output", outputPath,
+		"--models", genModelsPath,
+		"--mode", genTrainingMode,
+		"--threshold", fmt.Sprintf("%.2f", genThreshold),
+	}
+
+	if genGitHubRepo != "" {
+		pyArgs = append(pyArgs, "--github", genGitHubRepo)
+	}
+
+	execCmd := exec.Command(python, pyArgs...)
+	execCmd.Dir = scriptsDir
+	execCmd.Env = append(os.Environ(), fmt.Sprintf("PYTHONPATH=%s", scriptsDir))
+	execCmd.Stdout = os.Stdout
+	execCmd.Stderr = os.Stderr
+
+	return execCmd.Run()
+}
+
+func runGenTrain(cmd *cobra.Command, args []string) error {
+	audioPath := args[0]
+	scriptsDir, _ := filepath.Abs(findScriptsDir())
+
+	fmt.Println("========================================")
+	fmt.Printf("Training %s model: %s\n", genTrainingMode, genModelName)
+	fmt.Println("========================================")
+	fmt.Printf("Source: %s\n", audioPath)
+	if genTrainingMode == "rave" {
+		fmt.Printf("Epochs: %d\n", epochs)
+		fmt.Println("Note: RAVE training can take hours for quality results")
+	} else {
+		fmt.Printf("Grain size: %dms\n", genGrainMS)
+	}
+	fmt.Println()
+
+	python := filepath.Join(scriptsDir, ".venv", "bin", "python")
+	if _, err := os.Stat(python); err != nil {
+		python = "python3"
+	}
+
+	pyArgs := []string{
+		"-m", "rave.cli",
+		"train", audioPath,
+		"--name", genModelName,
+		"--output", outputPath,
+		"--mode", genTrainingMode,
+	}
+
+	if genTrainingMode == "rave" {
+		pyArgs = append(pyArgs, "--epochs", fmt.Sprintf("%d", epochs))
+	} else {
+		pyArgs = append(pyArgs, "--grain-ms", fmt.Sprintf("%d", genGrainMS))
+	}
+
+	if genAddToRepo {
+		pyArgs = append(pyArgs, "--add-to-repo")
+	}
+
+	if genGitHubRepo != "" {
+		pyArgs = append(pyArgs, "--github", genGitHubRepo)
+		if genSync {
+			pyArgs = append(pyArgs, "--sync")
+		}
+	}
+
+	execCmd := exec.Command(python, pyArgs...)
+	execCmd.Dir = scriptsDir
+	execCmd.Env = append(os.Environ(), fmt.Sprintf("PYTHONPATH=%s", scriptsDir))
+	execCmd.Stdout = os.Stdout
+	execCmd.Stderr = os.Stderr
+
+	return execCmd.Run()
+}
+
+func runGenSearch(cmd *cobra.Command, args []string) error {
+	audioPath := args[0]
+	scriptsDir, _ := filepath.Abs(findScriptsDir())
+
+	fmt.Printf("Searching for models similar to: %s\n", audioPath)
+	fmt.Printf("Threshold: %.0f%%\n\n", genThreshold*100)
+
+	python := filepath.Join(scriptsDir, ".venv", "bin", "python")
+	if _, err := os.Stat(python); err != nil {
+		python = "python3"
+	}
+
+	pyArgs := []string{
+		"-m", "rave.cli",
+		"search", audioPath,
+		"--models", genModelsPath,
+		"--threshold", fmt.Sprintf("%.2f", genThreshold),
+	}
+
+	if genGitHubRepo != "" {
+		pyArgs = append(pyArgs, "--github", genGitHubRepo)
+	}
+
+	execCmd := exec.Command(python, pyArgs...)
+	execCmd.Dir = scriptsDir
+	execCmd.Env = append(os.Environ(), fmt.Sprintf("PYTHONPATH=%s", scriptsDir))
+	execCmd.Stdout = os.Stdout
+	execCmd.Stderr = os.Stderr
+
+	return execCmd.Run()
+}
+
+func runGenList(cmd *cobra.Command, args []string) error {
+	scriptsDir, _ := filepath.Abs(findScriptsDir())
+
+	python := filepath.Join(scriptsDir, ".venv", "bin", "python")
+	if _, err := os.Stat(python); err != nil {
+		python = "python3"
+	}
+
+	pyArgs := []string{
+		"-m", "rave.cli",
+		"list",
+		"--models", genModelsPath,
+	}
+
+	if genGitHubRepo != "" {
+		pyArgs = append(pyArgs, "--github", genGitHubRepo)
+	}
+
+	execCmd := exec.Command(python, pyArgs...)
+	execCmd.Dir = scriptsDir
+	execCmd.Env = append(os.Environ(), fmt.Sprintf("PYTHONPATH=%s", scriptsDir))
+	execCmd.Stdout = os.Stdout
+	execCmd.Stderr = os.Stderr
+
+	return execCmd.Run()
+}
+
+func runGenServe(cmd *cobra.Command, args []string) error {
+	scriptsDir, _ := filepath.Abs(findScriptsDir())
+
+	fmt.Println("========================================")
+	fmt.Println("Starting RAVE Model Server")
+	fmt.Println("========================================")
+	fmt.Printf("Models: %s\n", genModelsPath)
+	fmt.Printf("Port: %d\n", genPort)
+	fmt.Println()
+	fmt.Printf("Use in Strudel: await samples('http://localhost:%d/<model_id>/')\n\n", genPort)
+
+	python := filepath.Join(scriptsDir, ".venv", "bin", "python")
+	if _, err := os.Stat(python); err != nil {
+		python = "python3"
+	}
+
+	pyArgs := []string{
+		"-m", "rave.cli",
+		"serve",
+		"--models", genModelsPath,
+		"--port", fmt.Sprintf("%d", genPort),
+	}
+
+	execCmd := exec.Command(python, pyArgs...)
+	execCmd.Dir = scriptsDir
+	execCmd.Env = append(os.Environ(), fmt.Sprintf("PYTHONPATH=%s", scriptsDir))
+	execCmd.Stdout = os.Stdout
+	execCmd.Stderr = os.Stderr
+
+	return execCmd.Run()
 }

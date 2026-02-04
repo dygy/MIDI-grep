@@ -55,3 +55,4 @@ pretrained_models/
 !examples/*.wav
 !examples/*.mp3
 .cache/
+scripts/python/models/

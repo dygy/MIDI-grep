@@ -11,3 +11,10 @@ keras>=2.15.0,<3.0.0
 # Deep learning genre detection (CLAP)
 transformers>=4.30.0
 laion-clap>=1.1.4
+
+# RAVE generative pipeline
+openl3>=0.4.1
+
+# Optional: Full RAVE neural network training (for --mode rave)
+# Uncomment if you want to train full neural synthesizers (takes hours)
+# acids-rave>=2.3.0
