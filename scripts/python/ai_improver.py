@@ -555,6 +555,34 @@ def store_knowledge(
     return clickhouse_insert("midi_grep.knowledge", data)
 
 
+def analyze_original_audio(audio_path: str, output_dir: str) -> Optional[Dict]:
+    """Analyze original audio to extract synthesis parameters."""
+    config_path = Path(output_dir) / "synth_config.json"
+
+    analyze_script = Path(__file__).parent / "analyze_synth_params.py"
+    if not analyze_script.exists():
+        print(f"Warning: analyze_synth_params.py not found", file=sys.stderr)
+        return None
+
+    cmd = [
+        sys.executable,
+        str(analyze_script),
+        audio_path,
+        "-o", str(config_path),
+        "-d", "60"  # Analyze first 60 seconds
+    ]
+
+    result = subprocess.run(cmd, capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"Warning: Audio analysis failed: {result.stderr[:200]}", file=sys.stderr)
+        return None
+
+    if config_path.exists():
+        with open(config_path) as f:
+            return json.load(f)
+    return None
+
+
 def improve_strudel(
     original_audio: str,
     strudel_path: str,
@@ -565,7 +593,7 @@ def improve_strudel(
     use_ollama: bool = False
 ) -> Dict:
     """
-    Main improvement loop.
+    Main improvement loop with AI-driven synthesis parameter extraction.
 
     Args:
         original_audio: Path to original audio file
@@ -589,6 +617,28 @@ def improve_strudel(
     print(f"Hash: {track_hash}")
     print(f"Target: {target_similarity*100:.0f}% similarity")
     print(f"Max iterations: {max_iterations}")
+
+    # Ensure output directory exists
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
+    # PHASE 1: Analyze original audio to extract synthesis parameters
+    print(f"\n--- Phase 1: Analyzing original audio ---")
+    synth_config = analyze_original_audio(original_audio, output_dir)
+    synth_config_path = Path(output_dir) / "synth_config.json"
+
+    if synth_config:
+        synth_params = synth_config.get("synth_config", synth_config)
+        tempo_info = synth_params.get("tempo", {})
+        analyzed_bpm = tempo_info.get("bpm", metadata.get("bpm", 120))
+        print(f"  Extracted BPM: {analyzed_bpm:.1f} (confidence: {tempo_info.get('confidence', 0)*100:.0f}%)")
+        print(f"  Waveform suggestion: {synth_params.get('oscillator', {}).get('waveform', 'saw')}")
+        print(f"  Attack: {synth_params.get('envelope', {}).get('attack', 0.01)*1000:.1f}ms")
+        print(f"  Harmonics: {'tonal' if synth_params.get('harmonics', {}).get('harmonic_ratio', 0) > 0.5 else 'percussive'}")
+        # Update metadata with analyzed values
+        metadata["bpm"] = analyzed_bpm
+    else:
+        print("  Warning: Could not analyze original audio, using defaults")
+        synth_config = None
 
     # Read current code
     with open(strudel_path) as f:
@@ -620,9 +670,6 @@ def improve_strudel(
     exact_duration = get_audio_duration(original_audio)
     print(f"Original audio duration: {exact_duration:.6f}s")
 
-    # Ensure output directory exists
-    Path(output_dir).mkdir(parents=True, exist_ok=True)
-
     for iteration in range(max_iterations):
         print(f"\n--- Iteration {iteration + 1}/{max_iterations} (v{current_version}) ---")
 
@@ -631,13 +678,17 @@ def improve_strudel(
         node_renderer = Path(__file__).parent.parent / "node" / "dist" / "render-strudel-node.js"
 
         if node_renderer.exists():
-            # Prefer Node.js renderer for richer harmonic content
+            # Prefer Node.js renderer with dynamic synthesis config
             render_cmd = [
                 "node", str(node_renderer),
                 strudel_path,
                 str(render_path),
                 "--duration", f"{exact_duration:.2f}"
             ]
+            # Pass synth config if available (AI-analyzed parameters)
+            if synth_config_path.exists():
+                render_cmd.extend(["--config", str(synth_config_path)])
+                print(f"       Using AI-analyzed synthesis config")
         else:
             # Fallback to Python renderer
             render_cmd = [

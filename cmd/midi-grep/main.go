@@ -672,8 +672,9 @@ func runExtract(cmd *cobra.Command, args []string) error {
 				if bpm == 0 {
 					bpm = 120 // default
 				}
-				// Pass ORIGINAL audio for comparison (not stems) - zero hardcoding
-				if err := renderWithGranularModels(strudelFile, modelsDir, audioPath, feedbackPath, result.OriginalPath, bpm, duration, findScriptsDir()); err != nil {
+				// Pass MELODIC stem for AI synthesis analysis (better frequency matching)
+				melodicStemForAnalysis := filepath.Join(result.CacheDir, "melodic.wav")
+				if err := renderWithGranularModels(strudelFile, modelsDir, audioPath, feedbackPath, melodicStemForAnalysis, bpm, duration, findScriptsDir()); err != nil {
 					fmt.Printf("       Warning: Granular render failed: %v, falling back to iterative...\n", err)
 				} else {
 					fmt.Printf("       Render complete (granular models): %s\n", audioPath)
@@ -1093,15 +1094,32 @@ func trainGranularModels(cacheDir, modelsDir, scriptsDir string) error {
 	return nil
 }
 
-// renderWithGranularModels renders Strudel code using trained granular models via Node.js
+// renderWithGranularModels renders Strudel code using AI-analyzed synthesis parameters via Node.js
 func renderWithGranularModels(strudelFile, modelsDir, outputPath, aiParamsPath, originalAudioPath string, bpm float64, duration float64, scriptsDir string) error {
 	// Resolve all paths to absolute
 	scriptsDir, _ = filepath.Abs(scriptsDir)
 	strudelFile, _ = filepath.Abs(strudelFile)
 	modelsDir, _ = filepath.Abs(modelsDir)
 	outputPath, _ = filepath.Abs(outputPath)
+	outputDir := filepath.Dir(outputPath)
 
-	// Use Node.js renderer with proper Strudel parsing
+	// PHASE 1: AI-analyze original audio to extract synthesis parameters
+	synthConfigPath := filepath.Join(outputDir, "synth_config.json")
+	if originalAudioPath != "" {
+		analyzeScript := filepath.Join(scriptsDir, "analyze_synth_params.py")
+		if _, err := os.Stat(analyzeScript); err == nil {
+			fmt.Println("       Analyzing audio for AI-driven synthesis parameters...")
+			python := findPython(scriptsDir)
+			analyzeCmd := exec.Command(python, analyzeScript, originalAudioPath,
+				"-o", synthConfigPath, "-d", "60")
+			analyzeCmd.Stderr = os.Stderr
+			if err := analyzeCmd.Run(); err == nil {
+				fmt.Println("       AI synthesis config generated")
+			}
+		}
+	}
+
+	// PHASE 2: Use Node.js renderer with proper Strudel parsing
 	nodeScript := filepath.Join(scriptsDir, "..", "node", "dist", "render-strudel-node.js")
 	if _, err := os.Stat(nodeScript); os.IsNotExist(err) {
 		return fmt.Errorf("render-strudel-node.js not found (run 'npm run build' in scripts/node)")
@@ -1110,9 +1128,15 @@ func renderWithGranularModels(strudelFile, modelsDir, outputPath, aiParamsPath, 
 	args := []string{
 		nodeScript,
 		strudelFile,
-		"-m", modelsDir,
 		"-o", outputPath,
 	}
+
+	// Pass AI-analyzed synthesis config if available
+	if _, err := os.Stat(synthConfigPath); err == nil {
+		args = append(args, "--config", synthConfigPath)
+		fmt.Println("       Using AI-analyzed synthesis config")
+	}
+
 	if bpm > 0 {
 		args = append(args, "--bpm", fmt.Sprintf("%.0f", bpm))
 	}

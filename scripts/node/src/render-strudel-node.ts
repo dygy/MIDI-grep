@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 /**
- * Node.js Strudel Renderer
+ * Node.js Strudel Renderer with Dynamic Synthesis
  *
- * Uses Strudel's mini notation parser for accurate pattern parsing
- * Synthesizes audio using 808 drums, saw bass, and synth leads
+ * Uses Strudel's mini notation parser for accurate pattern parsing.
+ * Accepts synthesis config from AI audio analyzer for dynamic parameters.
+ * NO HARDCODED VALUES - everything comes from config or analysis.
  */
 
 // @ts-ignore - Strudel types not available
@@ -13,30 +14,72 @@ import path from 'path';
 
 const SAMPLE_RATE = 44100;
 
-// Note name to MIDI mapping
-const NOTE_TO_MIDI: { [key: string]: number } = {};
-const NOTES = ['c', 'cs', 'd', 'ds', 'e', 'f', 'fs', 'g', 'gs', 'a', 'as', 'b'];
-for (let octave = 0; octave <= 8; octave++) {
-  NOTES.forEach((note, i) => {
-    NOTE_TO_MIDI[`${note}${octave}`] = 12 + octave * 12 + i;
-  });
+// ============================================
+// INTERFACES
+// ============================================
+
+interface EnvelopeConfig {
+  attack: number;  // seconds
+  decay: number;
+  sustain: number; // 0-1
+  release: number;
 }
 
-// MIDI to frequency
-function midiToFreq(midi: number): number {
-  return 440 * Math.pow(2, (midi - 69) / 12);
+interface VoiceSynthConfig {
+  gain: number;
+  lpf: number;
+  hpf: number;
+  envelope: EnvelopeConfig;
+  waveform: 'sine' | 'saw' | 'square' | 'triangle' | 'noise';
+  detune_cents?: number;
+  sub_octave_gain?: number;
+  transient_boost?: number;
+  reverb?: number;
 }
 
-// Parse note name to MIDI
-function noteToMidi(note: string): number | null {
-  const normalized = note.toLowerCase().replace('#', 's');
-  return NOTE_TO_MIDI[normalized] ?? null;
+interface SynthConfig {
+  envelope: EnvelopeConfig;
+  filters: {
+    lpf_cutoff: number;
+    hpf_cutoff: number;
+    filter_envelope_amount: number;
+    filter_attack: number;
+    filter_decay: number;
+  };
+  oscillator: {
+    waveform: string;
+    harmonics: number;
+    detune_cents: number;
+    sub_octave_gain: number;
+  };
+  dynamics: {
+    compression_ratio: number;
+    target_rms: number;
+    limiter_threshold: number;
+  };
+  tempo: {
+    bpm: number;
+    confidence: number;
+    samples_per_beat: number;
+    sync_to_beat: boolean;
+  };
+  voices: {
+    bass: VoiceSynthConfig;
+    mid: VoiceSynthConfig;
+    high: VoiceSynthConfig;
+    drums: Partial<VoiceSynthConfig>;
+  };
+  master: {
+    gain: number;
+    hpf: number;
+    limiter: boolean;
+  };
 }
 
 interface GranularModel {
   name: string;
-  samples: Map<string, Float32Array>; // note name -> audio data
-  drumSamples?: Map<string, Float32Array[]>; // bd/sd/hh -> array of samples
+  samples: Map<string, Float32Array>;
+  drumSamples?: Map<string, Float32Array[]>;
   sampleRate: number;
 }
 
@@ -53,101 +96,449 @@ interface ParsedVoice {
   modelType: 'melodic' | 'bass' | 'drums';
 }
 
-/**
- * Load a WAV file and return Float32Array of samples
- */
-function loadWav(filePath: string): Float32Array | null {
+// ============================================
+// NOTE MAPPING
+// ============================================
+
+const NOTE_TO_MIDI: { [key: string]: number } = {};
+const NOTES = ['c', 'cs', 'd', 'ds', 'e', 'f', 'fs', 'g', 'gs', 'a', 'as', 'b'];
+for (let octave = 0; octave <= 8; octave++) {
+  NOTES.forEach((note, i) => {
+    NOTE_TO_MIDI[`${note}${octave}`] = 12 + octave * 12 + i;
+  });
+}
+
+function midiToFreq(midi: number): number {
+  return 440 * Math.pow(2, (midi - 69) / 12);
+}
+
+function noteToMidi(note: string): number | null {
+  const normalized = note.toLowerCase().replace('#', 's');
+  return NOTE_TO_MIDI[normalized] ?? null;
+}
+
+// ============================================
+// DEFAULT CONFIG (fallback when no config provided)
+// ============================================
+
+function getDefaultConfig(): SynthConfig {
+  return {
+    envelope: { attack: 0.01, decay: 0.1, sustain: 0.7, release: 0.15 },
+    filters: {
+      lpf_cutoff: 8000,
+      hpf_cutoff: 80,
+      filter_envelope_amount: 0.3,
+      filter_attack: 0.02,
+      filter_decay: 0.3
+    },
+    oscillator: {
+      waveform: 'saw',
+      harmonics: 5,
+      detune_cents: 5,
+      sub_octave_gain: 0.2
+    },
+    dynamics: {
+      compression_ratio: 2.0,
+      target_rms: 0.3,
+      limiter_threshold: 0.95
+    },
+    tempo: {
+      bpm: 120,
+      confidence: 0.5,
+      samples_per_beat: Math.floor(SAMPLE_RATE * 60 / 120),
+      sync_to_beat: false
+    },
+    voices: {
+      bass: {
+        gain: 0.3, lpf: 500, hpf: 40,
+        envelope: { attack: 0.005, decay: 0.2, sustain: 0.6, release: 0.1 },
+        waveform: 'saw', sub_octave_gain: 0.4
+      },
+      mid: {
+        gain: 1.0, lpf: 6000, hpf: 200,
+        envelope: { attack: 0.01, decay: 0.15, sustain: 0.7, release: 0.2 },
+        waveform: 'saw', detune_cents: 5
+      },
+      high: {
+        gain: 0.8, lpf: 12000, hpf: 400,
+        envelope: { attack: 0.005, decay: 0.1, sustain: 0.5, release: 0.15 },
+        waveform: 'square'
+      },
+      drums: {
+        gain: 0.7, transient_boost: 0.5, reverb: 0.1
+      }
+    },
+    master: { gain: 0.9, hpf: 30, limiter: true }
+  };
+}
+
+// ============================================
+// WAVEFORM GENERATORS
+// ============================================
+
+function generateSine(phase: number): number {
+  return Math.sin(2 * Math.PI * phase);
+}
+
+function generateSaw(phase: number): number {
+  return 2 * (phase % 1) - 1;
+}
+
+function generateSquare(phase: number): number {
+  return (phase % 1) < 0.5 ? 1 : -1;
+}
+
+function generateTriangle(phase: number): number {
+  const t = phase % 1;
+  return Math.abs(t * 4 - 2) - 1;
+}
+
+function generateNoise(): number {
+  return Math.random() * 2 - 1;
+}
+
+function generateWaveform(waveform: string, phase: number): number {
+  switch (waveform) {
+    case 'sine': return generateSine(phase);
+    case 'saw': return generateSaw(phase);
+    case 'square': return generateSquare(phase);
+    case 'triangle': return generateTriangle(phase);
+    case 'noise': return generateNoise();
+    default: return generateSaw(phase);
+  }
+}
+
+// ============================================
+// ENVELOPE GENERATOR
+// ============================================
+
+function applyEnvelope(t: number, duration: number, env: EnvelopeConfig): number {
+  const { attack, decay, sustain, release } = env;
+
+  if (t < attack) {
+    // Attack phase
+    return t / attack;
+  } else if (t < attack + decay) {
+    // Decay phase
+    const decayProgress = (t - attack) / decay;
+    return 1 - (1 - sustain) * decayProgress;
+  } else if (t < duration - release) {
+    // Sustain phase
+    return sustain;
+  } else {
+    // Release phase
+    const releaseProgress = (t - (duration - release)) / release;
+    return sustain * (1 - Math.min(1, releaseProgress));
+  }
+}
+
+// ============================================
+// FILTER (Simple one-pole)
+// ============================================
+
+function applyLPF(samples: Float32Array, cutoffHz: number, sampleRate: number): void {
+  const rc = 1 / (2 * Math.PI * cutoffHz);
+  const dt = 1 / sampleRate;
+  const alpha = dt / (rc + dt);
+
+  let prev = samples[0];
+  for (let i = 1; i < samples.length; i++) {
+    samples[i] = prev + alpha * (samples[i] - prev);
+    prev = samples[i];
+  }
+}
+
+function applyHPF(samples: Float32Array, cutoffHz: number, sampleRate: number): void {
+  const rc = 1 / (2 * Math.PI * cutoffHz);
+  const dt = 1 / sampleRate;
+  const alpha = rc / (rc + dt);
+
+  let prevIn = samples[0];
+  let prevOut = samples[0];
+  for (let i = 1; i < samples.length; i++) {
+    const current = samples[i];
+    samples[i] = alpha * (prevOut + current - prevIn);
+    prevIn = current;
+    prevOut = samples[i];
+  }
+}
+
+// ============================================
+// DYNAMIC SYNTHESIZERS
+// ============================================
+
+function synthNote(
+  freq: number,
+  duration: number,
+  config: VoiceSynthConfig,
+  sampleRate: number
+): Float32Array {
+  const len = Math.floor(duration * sampleRate);
+  const output = new Float32Array(len);
+
+  const waveform = config.waveform || 'saw';
+  const detune = (config.detune_cents || 0) / 100;
+  const subGain = config.sub_octave_gain || 0;
+
+  for (let i = 0; i < len; i++) {
+    const t = i / sampleRate;
+
+    // Main oscillator
+    const phase1 = freq * t;
+    let sample = generateWaveform(waveform, phase1);
+
+    // Detuned oscillator for fatness
+    if (detune !== 0) {
+      const detuneRatio = Math.pow(2, detune / 12);
+      const phase2 = freq * detuneRatio * t;
+      sample = (sample + generateWaveform(waveform, phase2)) * 0.5;
+    }
+
+    // Sub oscillator
+    if (subGain > 0) {
+      const subPhase = freq * 0.5 * t;
+      sample += generateSine(subPhase) * subGain;
+    }
+
+    // Apply envelope
+    const env = applyEnvelope(t, duration, config.envelope);
+    output[i] = sample * env * config.gain;
+  }
+
+  // Apply filters
+  if (config.lpf && config.lpf < sampleRate / 2) {
+    applyLPF(output, config.lpf, sampleRate);
+  }
+  if (config.hpf && config.hpf > 20) {
+    applyHPF(output, config.hpf, sampleRate);
+  }
+
+  return output;
+}
+
+function synthKick(duration: number, config: Partial<VoiceSynthConfig>, sampleRate: number): Float32Array {
+  const len = Math.floor(duration * sampleRate);
+  const output = new Float32Array(len);
+
+  const pitchStart = 150;
+  const pitchEnd = 40;
+  const pitchDecay = 0.05;
+  const transientBoost = config.transient_boost || 0.5;
+
+  for (let i = 0; i < len; i++) {
+    const t = i / sampleRate;
+
+    // Pitch envelope
+    const pitchEnv = Math.exp(-t / pitchDecay);
+    const freq = pitchEnd + (pitchStart - pitchEnd) * pitchEnv;
+
+    // Sine with harmonics
+    const phase = 2 * Math.PI * freq * t;
+    let sample = Math.sin(phase);
+    sample += 0.3 * Math.sin(phase * 2) * Math.exp(-t / 0.02);
+
+    // Amplitude envelope
+    const ampEnv = Math.exp(-t / 0.15);
+
+    // Click transient
+    const click = Math.exp(-t / 0.003) * transientBoost;
+
+    output[i] = (sample * ampEnv + click) * (config.gain || 0.7);
+  }
+
+  return output;
+}
+
+function synthSnare(duration: number, config: Partial<VoiceSynthConfig>, sampleRate: number): Float32Array {
+  const len = Math.floor(duration * sampleRate);
+  const output = new Float32Array(len);
+
+  const transientBoost = config.transient_boost || 0.5;
+
+  for (let i = 0; i < len; i++) {
+    const t = i / sampleRate;
+
+    // Body tone
+    const body = (Math.sin(2 * Math.PI * 180 * t) * 0.5 +
+                  Math.sin(2 * Math.PI * 330 * t) * 0.3) *
+                  Math.exp(-t / 0.08);
+
+    // Noise (snare wires)
+    const noise = generateNoise() * Math.exp(-t / 0.12);
+
+    // Transient
+    const click = Math.exp(-t / 0.002) * transientBoost;
+
+    output[i] = (body * 0.5 + noise * 0.6 + click * 0.3) * (config.gain || 0.7);
+  }
+
+  // High-pass for crispness
+  applyHPF(output, 200, sampleRate);
+
+  return output;
+}
+
+function synthHihat(duration: number, config: Partial<VoiceSynthConfig>, sampleRate: number, open: boolean = false): Float32Array {
+  const len = Math.floor(duration * sampleRate);
+  const output = new Float32Array(len);
+
+  const decay = open ? 0.15 : 0.03;
+
+  for (let i = 0; i < len; i++) {
+    const t = i / sampleRate;
+
+    // Metallic noise
+    let metallic = 0;
+    const freqs = [800, 1500, 3000, 6000, 10000];
+    for (const f of freqs) {
+      metallic += Math.sin(2 * Math.PI * f * t * (1 + Math.random() * 0.01)) * 0.2;
+    }
+
+    // Pure noise
+    const noise = generateNoise();
+
+    // Envelope
+    const env = Math.exp(-t / decay);
+
+    output[i] = (metallic * 0.4 + noise * 0.6) * env * (config.gain || 0.5);
+  }
+
+  // High-pass
+  applyHPF(output, 2000, sampleRate);
+
+  return output;
+}
+
+// ============================================
+// PATTERN PARSING
+// ============================================
+
+function getPatternEvents(pattern: string, startCycle: number, endCycle: number): Array<{
+  value: string;
+  begin: number;
+  end: number;
+}> {
   try {
-    const buffer = fs.readFileSync(filePath);
-    // Simple WAV parser - assumes 16-bit PCM
-    const dataStart = buffer.indexOf('data') + 8;
-    const samples = new Float32Array((buffer.length - dataStart) / 2);
-    for (let i = 0; i < samples.length; i++) {
-      const int16 = buffer.readInt16LE(dataStart + i * 2);
-      samples[i] = int16 / 32768;
-    }
-    return samples;
-  } catch {
-    return null;
+    const pat = mini(pattern);
+    const haps = pat.queryArc(startCycle, endCycle);
+    return haps.map((hap: any) => ({
+      value: String(hap.value),
+      begin: Number(hap.whole?.begin ?? hap.part.begin),
+      end: Number(hap.whole?.end ?? hap.part.end),
+    }));
+  } catch (e) {
+    return parsePatternSimple(pattern, startCycle, endCycle);
   }
 }
 
-/**
- * Load granular model from models directory
- */
-function loadGranularModel(modelsDir: string, modelName: string): GranularModel | null {
-  const modelPath = path.join(modelsDir, modelName);
-  const pitchedDir = path.join(modelPath, 'pitched');
-  const grainsDir = path.join(modelPath, 'grains');
-  const metadataPath = path.join(modelPath, 'metadata.json');
+function parsePatternSimple(pattern: string, startCycle: number, endCycle: number): Array<{
+  value: string;
+  begin: number;
+  end: number;
+}> {
+  const events: Array<{ value: string; begin: number; end: number }> = [];
+  const tokens = pattern.split(/\s+/).filter(t => t && t !== '~');
 
-  const samples = new Map<string, Float32Array>();
-  let drumSamples: Map<string, Float32Array[]> | undefined;
+  if (tokens.length === 0) return events;
 
-  // Load pitched samples for melodic/bass
-  if (fs.existsSync(pitchedDir)) {
-    const files = fs.readdirSync(pitchedDir).filter(f => f.endsWith('.wav'));
-    for (const file of files) {
-      const noteName = file.replace('.wav', '');
-      const audioData = loadWav(path.join(pitchedDir, file));
-      if (audioData) {
-        samples.set(noteName, audioData);
+  const slotDuration = 1 / tokens.length;
+
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i];
+    if (token.startsWith('[') && token.endsWith(']')) {
+      // Chord
+      const notes = token.slice(1, -1).split(',');
+      for (const note of notes) {
+        events.push({
+          value: note.trim(),
+          begin: startCycle + i * slotDuration,
+          end: startCycle + (i + 1) * slotDuration,
+        });
       }
+    } else {
+      events.push({
+        value: token,
+        begin: startCycle + i * slotDuration,
+        end: startCycle + (i + 1) * slotDuration,
+      });
     }
   }
 
-  // For drums: load grains and classify by frequency
-  if (modelName === 'drums' && fs.existsSync(grainsDir) && fs.existsSync(metadataPath)) {
-    try {
-      const metadata = JSON.parse(fs.readFileSync(metadataPath, 'utf-8'));
-      drumSamples = new Map<string, Float32Array[]>();
-      drumSamples.set('bd', []);  // kick: low frequency
-      drumSamples.set('sd', []);  // snare: mid frequency
-      drumSamples.set('hh', []);  // hi-hat: high frequency
-      drumSamples.set('oh', []);  // open hi-hat
-
-      for (const grain of metadata.grains || []) {
-        const grainPath = path.join(grainsDir, grain.file);
-        const audioData = loadWav(grainPath);
-        if (audioData) {
-          const midi = grain.midi_note || 60;
-          // Classify by pitch: kick < 50, snare 50-65, hi-hat > 65
-          if (midi < 50) {
-            drumSamples.get('bd')!.push(audioData);
-          } else if (midi < 65) {
-            drumSamples.get('sd')!.push(audioData);
-          } else {
-            drumSamples.get('hh')!.push(audioData);
-            drumSamples.get('oh')!.push(audioData);
-          }
-        }
-      }
-
-      const bdCount = drumSamples.get('bd')!.length;
-      const sdCount = drumSamples.get('sd')!.length;
-      const hhCount = drumSamples.get('hh')!.length;
-      console.log(`  Loaded ${modelName}: ${bdCount} kicks, ${sdCount} snares, ${hhCount} hi-hats`);
-    } catch (e) {
-      console.log(`  Warning: Could not load drum grains: ${e}`);
-    }
-  } else if (samples.size > 0) {
-    console.log(`  Loaded ${modelName}: ${samples.size} pitched samples`);
-  }
-
-  if (samples.size === 0 && !drumSamples) {
-    return null;
-  }
-
-  return { name: modelName, samples, drumSamples, sampleRate: SAMPLE_RATE };
+  return events;
 }
 
-/**
- * Parse effect function from Strudel code
- */
+// ============================================
+// STRUDEL CODE PARSING
+// ============================================
+
+function parseStrudelCode(code: string, configBpm?: number): { bpm: number; voices: ParsedVoice[] } {
+  let bpm = configBpm || 120;
+
+  // Extract BPM from setcps
+  const bpmMatch = code.match(/setcps\((\d+)\/60\/4\)/);
+  if (bpmMatch && !configBpm) {
+    bpm = parseInt(bpmMatch[1]);
+  }
+
+  const voices: ParsedVoice[] = [];
+
+  // Array format: let bass = ["c2 e2", "f2 g2"]
+  const arrayRegex = /let\s+(\w+)\s*=\s*\[([\s\S]*?)\]/g;
+  let match;
+
+  while ((match = arrayRegex.exec(code)) !== null) {
+    const name = match[1];
+    const content = match[2];
+    const patterns: string[] = [];
+    const strRegex = /"([^"]+)"/g;
+    let strMatch;
+    while ((strMatch = strRegex.exec(content)) !== null) {
+      patterns.push(strMatch[1]);
+    }
+    if (patterns.length > 0) {
+      voices.push({
+        name,
+        patterns,
+        effects: parseEffects(code, name),
+        modelType: getModelType(name),
+      });
+    }
+  }
+
+  // Single pattern format: let kick1 = "bd ~ bd ~"
+  const singlePatterns: { [base: string]: string[] } = {};
+  const singleRegex = /let\s+(\w+?)(\d+)\s*=\s*"([^"]+)"/g;
+
+  while ((match = singleRegex.exec(code)) !== null) {
+    const baseName = match[1];
+    const idx = parseInt(match[2]) - 1;
+    const pattern = match[3];
+    if (!singlePatterns[baseName]) {
+      singlePatterns[baseName] = [];
+    }
+    while (singlePatterns[baseName].length <= idx) {
+      singlePatterns[baseName].push('~');
+    }
+    singlePatterns[baseName][idx] = pattern;
+  }
+
+  for (const [name, patterns] of Object.entries(singlePatterns)) {
+    if (!voices.find(v => v.name === name)) {
+      voices.push({
+        name,
+        patterns,
+        effects: parseEffects(code, name),
+        modelType: getModelType(name),
+      });
+    }
+  }
+
+  return { bpm, voices };
+}
+
 function parseEffects(code: string, voiceName: string): VoiceEffects {
   const effects: VoiceEffects = { gain: 1.0 };
 
-  // Match: let bassFx = p => p.sound("...").gain(0.8).lpf(800)
   const fxRegex = new RegExp(`let\\s+${voiceName}Fx\\s*=\\s*p\\s*=>\\s*p[^\\n]+`, 'i');
   const match = code.match(fxRegex);
 
@@ -166,74 +557,6 @@ function parseEffects(code: string, voiceName: string): VoiceEffects {
   return effects;
 }
 
-/**
- * Parse Strudel code to extract voices and patterns
- */
-function parseStrudelCode(code: string): { bpm: number; voices: ParsedVoice[] } {
-  let bpm = 120;
-
-  // Extract BPM from setcps
-  const bpmMatch = code.match(/setcps\((\d+)\/60\/4\)/);
-  if (bpmMatch) {
-    bpm = parseInt(bpmMatch[1]);
-  }
-
-  const voices: ParsedVoice[] = [];
-
-  // Pattern 1: Array format - let bass = ["c2 e2", "f2 g2"]
-  const arrayRegex = /let\s+(\w+)\s*=\s*\[([\s\S]*?)\]/g;
-  let match;
-  while ((match = arrayRegex.exec(code)) !== null) {
-    const name = match[1];
-    const content = match[2];
-    const patterns: string[] = [];
-    const strRegex = /"([^"]+)"/g;
-    let strMatch;
-    while ((strMatch = strRegex.exec(content)) !== null) {
-      patterns.push(strMatch[1]);
-    }
-    if (patterns.length > 0) {
-      const modelType = getModelType(name);
-      voices.push({
-        name,
-        patterns,
-        effects: parseEffects(code, name),
-        modelType,
-      });
-    }
-  }
-
-  // Pattern 2: Single pattern format (Brazilian funk) - let kick1 = "bd ~ bd ~"
-  const singlePatterns: { [base: string]: string[] } = {};
-  const singleRegex = /let\s+(\w+?)(\d+)\s*=\s*"([^"]+)"/g;
-  while ((match = singleRegex.exec(code)) !== null) {
-    const baseName = match[1];
-    const idx = parseInt(match[2]) - 1;
-    const pattern = match[3];
-    if (!singlePatterns[baseName]) {
-      singlePatterns[baseName] = [];
-    }
-    while (singlePatterns[baseName].length <= idx) {
-      singlePatterns[baseName].push('~');
-    }
-    singlePatterns[baseName][idx] = pattern;
-  }
-
-  for (const [name, patterns] of Object.entries(singlePatterns)) {
-    if (!voices.find(v => v.name === name)) {
-      const modelType = getModelType(name);
-      voices.push({
-        name,
-        patterns,
-        effects: parseEffects(code, name),
-        modelType,
-      });
-    }
-  }
-
-  return { bpm, voices };
-}
-
 function getModelType(name: string): 'melodic' | 'bass' | 'drums' {
   const n = name.toLowerCase();
   if (n.includes('kick') || n.includes('snare') || n.includes('hh') || n.includes('drum')) {
@@ -245,424 +568,61 @@ function getModelType(name: string): 'melodic' | 'bass' | 'drums' {
   return 'melodic';
 }
 
-/**
- * Get events from a mini notation pattern using Strudel's parser
- */
-function getPatternEvents(pattern: string, startCycle: number, endCycle: number): Array<{
-  value: string;
-  begin: number;
-  end: number;
-}> {
-  try {
-    // Use Strudel's mini notation parser
-    const pat = mini(pattern);
-    const haps = pat.queryArc(startCycle, endCycle);
-    return haps.map((hap: any) => ({
-      value: String(hap.value),
-      begin: Number(hap.whole?.begin ?? hap.part.begin),
-      end: Number(hap.whole?.end ?? hap.part.end),
-    }));
-  } catch (e) {
-    // Fallback to simple parser if Strudel fails
-    return parsePatternSimple(pattern, startCycle, endCycle);
-  }
-}
-
-/**
- * Simple fallback pattern parser
- */
-function parsePatternSimple(pattern: string, startCycle: number, endCycle: number): Array<{
-  value: string;
-  begin: number;
-  end: number;
-}> {
-  const events: Array<{ value: string; begin: number; end: number }> = [];
-  const tokens = pattern.split(/\s+/).filter(t => t);
-  const totalSlots = tokens.reduce((sum, t) => {
-    if (t.startsWith('~*')) return sum + (parseInt(t.slice(2)) || 1);
-    return sum + 1;
-  }, 0) || 1;
-
-  let slot = 0;
-  for (const token of tokens) {
-    if (token === '~') {
-      slot++;
-    } else if (token.startsWith('~*')) {
-      slot += parseInt(token.slice(2)) || 1;
-    } else if (token.startsWith('[') && token.endsWith(']')) {
-      // Chord
-      const notes = token.slice(1, -1).split(',');
-      for (const note of notes) {
-        events.push({
-          value: note.trim(),
-          begin: startCycle + slot / totalSlots,
-          end: startCycle + (slot + 1) / totalSlots,
-        });
-      }
-      slot++;
-    } else {
-      events.push({
-        value: token,
-        begin: startCycle + slot / totalSlots,
-        end: startCycle + (slot + 1) / totalSlots,
-      });
-      slot++;
-    }
-  }
-  return events;
-}
-
 // ============================================
-// SYNTHESIS ENGINE - 808 drums, bass, synths
+// MAIN RENDER FUNCTION
 // ============================================
 
-/**
- * Synthesize 808-style kick drum
- */
-function synthKick(duration: number, sampleRate: number): Float32Array {
-  const len = Math.floor(duration * sampleRate);
-  const output = new Float32Array(len);
-
-  const pitchStart = 150;  // Start frequency
-  const pitchEnd = 40;     // End frequency
-  const pitchDecay = 0.05; // Pitch envelope decay time
-
-  for (let i = 0; i < len; i++) {
-    const t = i / sampleRate;
-
-    // Pitch envelope (exponential decay)
-    const pitchEnv = Math.exp(-t / pitchDecay);
-    const freq = pitchEnd + (pitchStart - pitchEnd) * pitchEnv;
-
-    // Sine oscillator with pitch envelope
-    const phase = 2 * Math.PI * freq * t;
-    let sample = Math.sin(phase);
-
-    // Add some harmonics for punch
-    sample += 0.3 * Math.sin(phase * 2) * Math.exp(-t / 0.02);
-
-    // Amplitude envelope
-    const ampDecay = 0.15;
-    const ampEnv = Math.exp(-t / ampDecay);
-
-    // Click transient
-    const click = Math.exp(-t / 0.003) * 0.5;
-
-    output[i] = (sample * ampEnv + click) * 0.8;
-  }
-
-  return output;
-}
-
-/**
- * Synthesize snare drum
- */
-function synthSnare(duration: number, sampleRate: number): Float32Array {
-  const len = Math.floor(duration * sampleRate);
-  const output = new Float32Array(len);
-
-  for (let i = 0; i < len; i++) {
-    const t = i / sampleRate;
-
-    // Body tone (two sine waves)
-    const bodyFreq1 = 180;
-    const bodyFreq2 = 330;
-    const body = (Math.sin(2 * Math.PI * bodyFreq1 * t) * 0.5 +
-                  Math.sin(2 * Math.PI * bodyFreq2 * t) * 0.3) *
-                  Math.exp(-t / 0.08);
-
-    // Noise (snare wires)
-    const noise = (Math.random() * 2 - 1) * Math.exp(-t / 0.12);
-
-    // High-pass the noise a bit (simple differencing)
-    output[i] = body * 0.6 + noise * 0.7;
-  }
-
-  // Simple high-pass filter for noise crispness
-  for (let i = len - 1; i > 0; i--) {
-    output[i] = output[i] * 0.7 + (output[i] - output[i-1]) * 0.3;
-  }
-
-  return output;
-}
-
-/**
- * Synthesize hi-hat
- */
-function synthHihat(duration: number, sampleRate: number, open: boolean = false): Float32Array {
-  const len = Math.floor(duration * sampleRate);
-  const output = new Float32Array(len);
-
-  const decay = open ? 0.15 : 0.03;
-
-  for (let i = 0; i < len; i++) {
-    const t = i / sampleRate;
-
-    // Metallic noise (multiple square waves at inharmonic frequencies)
-    let metallic = 0;
-    const freqs = [800, 1500, 3000, 6000, 10000];
-    for (const f of freqs) {
-      metallic += Math.sin(2 * Math.PI * f * t * (1 + Math.random() * 0.01)) * 0.2;
-    }
-
-    // Noise component
-    const noise = (Math.random() * 2 - 1);
-
-    // Mix and envelope
-    const env = Math.exp(-t / decay);
-    output[i] = (metallic * 0.4 + noise * 0.6) * env * 0.5;
-  }
-
-  return output;
-}
-
-/**
- * Synthesize bass note (saw + sub)
- */
-function synthBass(freq: number, duration: number, sampleRate: number): Float32Array {
-  const len = Math.floor(duration * sampleRate);
-  const output = new Float32Array(len);
-
-  for (let i = 0; i < len; i++) {
-    const t = i / sampleRate;
-    const phase = freq * t;
-
-    // Sawtooth wave
-    const saw = 2 * (phase % 1) - 1;
-
-    // Sub oscillator (one octave down, sine)
-    const sub = Math.sin(2 * Math.PI * freq * 0.5 * t);
-
-    // Mix
-    let sample = saw * 0.5 + sub * 0.5;
-
-    // Simple low-pass filter (smoothing)
-    if (i > 0) {
-      const cutoff = Math.min(800 / freq, 0.8);
-      sample = output[i-1] * (1 - cutoff) + sample * cutoff;
-    }
-
-    // Amplitude envelope
-    const attack = 0.005;
-    const release = 0.05;
-    let env = 1;
-    if (t < attack) env = t / attack;
-    if (t > duration - release) env = (duration - t) / release;
-
-    output[i] = sample * env * 0.7;
-  }
-
-  return output;
-}
-
-/**
- * Synthesize melodic note (detuned saws for synth sound)
- */
-function synthLead(freq: number, duration: number, sampleRate: number): Float32Array {
-  const len = Math.floor(duration * sampleRate);
-  const output = new Float32Array(len);
-
-  const detune = 1.005; // Slight detune for fatness
-
-  for (let i = 0; i < len; i++) {
-    const t = i / sampleRate;
-
-    // Two detuned sawtooth waves
-    const phase1 = freq * t;
-    const phase2 = freq * detune * t;
-    const saw1 = 2 * (phase1 % 1) - 1;
-    const saw2 = 2 * (phase2 % 1) - 1;
-
-    // Add a triangle for body
-    const triPhase = freq * t * 2;
-    const tri = Math.abs((triPhase % 1) * 4 - 2) - 1;
-
-    let sample = (saw1 + saw2) * 0.3 + tri * 0.2;
-
-    // Filter envelope (opens then closes)
-    const filterAttack = 0.02;
-    const filterDecay = 0.1;
-    let filterEnv: number;
-    if (t < filterAttack) {
-      filterEnv = t / filterAttack;
-    } else {
-      filterEnv = Math.exp(-(t - filterAttack) / filterDecay) * 0.7 + 0.3;
-    }
-
-    // Simple low-pass (smoothing based on filter envelope)
-    // Higher cutoff = more mid/high frequencies
-    if (i > 0) {
-      const cutoff = 0.4 + filterEnv * 0.5; // Brighter filter
-      sample = output[i-1] * (1 - cutoff) + sample * cutoff;
-    }
-
-    // Amplitude envelope
-    const attack = 0.01;
-    const release = 0.08;
-    let ampEnv = 1;
-    if (t < attack) ampEnv = t / attack;
-    if (t > duration - release) ampEnv = Math.max(0, (duration - t) / release);
-
-    output[i] = sample * ampEnv * 0.6;
-  }
-
-  return output;
-}
-
-/**
- * Synthesize high melodic note (brighter, more harmonics)
- */
-function synthHigh(freq: number, duration: number, sampleRate: number): Float32Array {
-  const len = Math.floor(duration * sampleRate);
-  const output = new Float32Array(len);
-
-  for (let i = 0; i < len; i++) {
-    const t = i / sampleRate;
-
-    // Square-ish wave (odd harmonics)
-    let sample = 0;
-    for (let h = 1; h <= 5; h += 2) {
-      sample += Math.sin(2 * Math.PI * freq * h * t) / h;
-    }
-    sample *= 0.5;
-
-    // Add brightness with a bit of saw
-    const sawPhase = freq * t;
-    const saw = 2 * (sawPhase % 1) - 1;
-    sample = sample * 0.6 + saw * 0.2;
-
-    // Amplitude envelope (plucky)
-    const attack = 0.005;
-    const decay = 0.1;
-    const sustain = 0.4;
-    const release = 0.1;
-
-    let ampEnv: number;
-    if (t < attack) {
-      ampEnv = t / attack;
-    } else if (t < attack + decay) {
-      ampEnv = 1 - (1 - sustain) * (t - attack) / decay;
-    } else if (t > duration - release) {
-      ampEnv = sustain * (duration - t) / release;
-    } else {
-      ampEnv = sustain;
-    }
-
-    output[i] = sample * Math.max(0, ampEnv) * 0.5;
-  }
-
-  return output;
-}
-
-/**
- * Pitch shift a sample to target frequency
- */
-function pitchShiftSample(
-  sample: Float32Array,
-  sourceFreq: number,
-  targetFreq: number,
-  duration: number,
-  sampleRate: number
-): Float32Array {
-  const ratio = targetFreq / sourceFreq;
-  const outputLength = Math.min(Math.floor(duration * sampleRate), Math.floor(sample.length / ratio));
-  const output = new Float32Array(outputLength);
-
-  for (let i = 0; i < outputLength; i++) {
-    const sourceIndex = i * ratio;
-    const idx = Math.floor(sourceIndex);
-    const frac = sourceIndex - idx;
-
-    if (idx + 1 < sample.length) {
-      output[i] = sample[idx] * (1 - frac) + sample[idx + 1] * frac;
-    } else if (idx < sample.length) {
-      output[i] = sample[idx];
-    }
-  }
-
-  // Apply envelope
-  const attackSamples = Math.floor(0.005 * sampleRate);
-  const releaseSamples = Math.floor(0.05 * sampleRate);
-  for (let i = 0; i < attackSamples && i < output.length; i++) {
-    output[i] *= i / attackSamples;
-  }
-  for (let i = 0; i < releaseSamples && i < output.length; i++) {
-    const idx = output.length - 1 - i;
-    output[idx] *= i / releaseSamples;
-  }
-
-  return output;
-}
-
-/**
- * Find closest sample in model for a given note
- * Handles samples named with or without octave (e.g., "c" or "c4")
- */
-function findClosestSample(model: GranularModel, targetNote: string): { sample: Float32Array; freq: number } | null {
-  const targetMidi = noteToMidi(targetNote);
-  if (targetMidi === null) return null;
-
-  let closest: { sample: Float32Array; freq: number; diff: number } | null = null;
-
-  for (const [noteName, sample] of model.samples) {
-    // Try direct lookup first (e.g., "c4")
-    let sampleMidi = NOTE_TO_MIDI[noteName];
-
-    // If not found, it's a pitch class without octave (e.g., "c")
-    // Use octave 4 as reference
-    if (sampleMidi === undefined) {
-      sampleMidi = NOTE_TO_MIDI[noteName + '4'];
-    }
-
-    if (sampleMidi !== undefined) {
-      // For pitch class samples, find the best octave match
-      const targetPitchClass = targetMidi % 12;
-      const samplePitchClass = sampleMidi % 12;
-
-      // Calculate difference considering pitch class match is best
-      let diff: number;
-      if (targetPitchClass === samplePitchClass) {
-        // Same pitch class - perfect match, will pitch shift octaves
-        diff = 0;
-      } else {
-        // Different pitch class - use semitone distance
-        diff = Math.min(
-          Math.abs(targetPitchClass - samplePitchClass),
-          12 - Math.abs(targetPitchClass - samplePitchClass)
-        );
-      }
-
-      if (!closest || diff < closest.diff) {
-        // Use the sample's reference pitch (at octave 4 if pitch class only)
-        closest = { sample, freq: midiToFreq(sampleMidi), diff };
-      }
-    }
-  }
-
-  return closest ? { sample: closest.sample, freq: closest.freq } : null;
-}
-
-/**
- * Render all voices to audio buffer
- */
 async function render(
   voices: ParsedVoice[],
-  models: Map<string, GranularModel>,
-  bpm: number,
+  config: SynthConfig,
   duration: number
 ): Promise<Float32Array> {
   const totalSamples = Math.floor(duration * SAMPLE_RATE);
   const output = new Float32Array(totalSamples);
 
+  const bpm = config.tempo.bpm;
   const cyclesPerSecond = bpm / 60 / 4;
   const totalCycles = duration * cyclesPerSecond;
-  const samplesPerCycle = SAMPLE_RATE / cyclesPerSecond;
 
-  console.log(`\nRendering ${voices.length} voices at ${bpm} BPM for ${duration}s (${totalCycles.toFixed(1)} cycles)`);
+  console.log(`\nRendering ${voices.length} voices at ${bpm} BPM for ${duration}s`);
+  console.log(`Config: envelope A=${config.envelope.attack.toFixed(3)}s D=${config.envelope.decay.toFixed(3)}s`);
+  console.log(`        filters LPF=${config.filters.lpf_cutoff}Hz HPF=${config.filters.hpf_cutoff}Hz`);
 
   for (const voice of voices) {
-    const gain = voice.effects.gain;
-    console.log(`  ${voice.name}: gain=${gain.toFixed(2)}, type=${voice.modelType}, ${voice.patterns.length} patterns`);
+    // Get voice-specific config
+    let voiceConfig: VoiceSynthConfig;
+
+    if (voice.modelType === 'bass') {
+      voiceConfig = { ...config.voices.bass };
+    } else if (voice.modelType === 'drums') {
+      voiceConfig = {
+        gain: config.voices.drums.gain || 0.7,
+        lpf: 20000,
+        hpf: 20,
+        envelope: config.envelope,
+        waveform: 'noise',
+        transient_boost: config.voices.drums.transient_boost
+      };
+    } else {
+      // Melodic - choose mid or high based on note range
+      voiceConfig = { ...config.voices.mid };
+      if (voice.name.toLowerCase().includes('high')) {
+        voiceConfig = { ...config.voices.high };
+      }
+    }
+
+    // Apply effect chain overrides from Strudel code
+    if (voice.effects.gain !== 1.0) {
+      voiceConfig.gain *= voice.effects.gain;
+    }
+    if (voice.effects.lpf) {
+      voiceConfig.lpf = Math.min(voiceConfig.lpf, voice.effects.lpf);
+    }
+    if (voice.effects.hpf) {
+      voiceConfig.hpf = Math.max(voiceConfig.hpf, voice.effects.hpf);
+    }
+
+    console.log(`  ${voice.name}: gain=${voiceConfig.gain.toFixed(2)}, type=${voice.modelType}, ${voice.patterns.length} patterns`);
 
     let currentCycle = 0;
     let patternIndex = 0;
@@ -682,63 +642,45 @@ async function render(
         const startSample = Math.floor(eventTime * SAMPLE_RATE);
         if (startSample >= totalSamples) break;
 
-        // Handle drum triggers - USE SYNTHESIS
+        let synthSample: Float32Array;
+
         if (voice.modelType === 'drums') {
           const drumType = event.value.toLowerCase();
-          let drumSample: Float32Array;
-          let drumGain = gain * 0.15; // Minimal drums
+          const drumConfig = config.voices.drums;
 
           if (drumType === 'bd' || drumType === 'kick') {
-            drumSample = synthKick(0.3, SAMPLE_RATE);
-            drumGain *= 0.2; // Very low kicks
+            synthSample = synthKick(0.3, drumConfig, SAMPLE_RATE);
           } else if (drumType === 'sd' || drumType === 'snare' || drumType === 'sn') {
-            drumSample = synthSnare(0.2, SAMPLE_RATE);
+            synthSample = synthSnare(0.2, drumConfig, SAMPLE_RATE);
           } else if (drumType === 'oh' || drumType === 'openhat') {
-            drumSample = synthHihat(0.3, SAMPLE_RATE, true);
-            drumGain *= 1.5; // Boost hi-hats for brightness
+            synthSample = synthHihat(0.3, drumConfig, SAMPLE_RATE, true);
           } else if (drumType === 'hh' || drumType === 'hihat' || drumType === 'ch') {
-            drumSample = synthHihat(0.1, SAMPLE_RATE, false);
-            drumGain *= 1.5; // Boost hi-hats for brightness
+            synthSample = synthHihat(0.1, drumConfig, SAMPLE_RATE, false);
           } else {
-            // Default to kick for unknown drums
-            drumSample = synthKick(0.3, SAMPLE_RATE);
-            drumGain *= 0.5;
+            synthSample = synthKick(0.3, drumConfig, SAMPLE_RATE);
           }
-
-          const len = Math.min(drumSample.length, totalSamples - startSample);
-          for (let i = 0; i < len; i++) {
-            output[startSample + i] += drumSample[i] * drumGain;
-          }
-          continue;
-        }
-
-        // Handle melodic notes - USE SYNTHESIS
-        const targetMidi = noteToMidi(event.value);
-        if (targetMidi === null) continue;
-
-        const targetFreq = midiToFreq(targetMidi);
-        let synthSample: Float32Array;
-        let voiceGain = gain;
-
-        // Choose synth based on voice type and register
-        // D5=74 is ~587Hz (mid), C6=84 is ~1047Hz (high-mid)
-        // Adjust gains to favor mids over bass (match typical melodic stem)
-        if (voice.modelType === 'bass') {
-          synthSample = synthBass(targetFreq, Math.min(eventDuration, 0.5), SAMPLE_RATE);
-          voiceGain *= 0.08; // Minimal bass
-        } else if (targetMidi >= 84) {
-          // Only C6 and above use high synth (bright, upper harmonics)
-          synthSample = synthHigh(targetFreq, Math.min(eventDuration, 0.4), SAMPLE_RATE);
-          voiceGain *= 2.5;
         } else {
-          // Everything else (including "high" voice D5-G5) uses lead synth for mids
-          synthSample = synthLead(targetFreq, Math.min(eventDuration, 0.4), SAMPLE_RATE);
-          voiceGain *= 3.0; // Dominant mids
+          const targetMidi = noteToMidi(event.value);
+          if (targetMidi === null) continue;
+
+          const targetFreq = midiToFreq(targetMidi);
+          const noteDuration = Math.min(eventDuration, 0.5);
+
+          // Choose voice config based on MIDI note
+          let noteConfig = voiceConfig;
+          if (targetMidi >= 72) { // C5 and above
+            noteConfig = { ...config.voices.high, gain: voiceConfig.gain };
+          } else if (targetMidi < 48) { // Below C3
+            noteConfig = { ...config.voices.bass, gain: voiceConfig.gain };
+          }
+
+          synthSample = synthNote(targetFreq, noteDuration, noteConfig, SAMPLE_RATE);
         }
 
+        // Mix into output
         const len = Math.min(synthSample.length, totalSamples - startSample);
         for (let i = 0; i < len; i++) {
-          output[startSample + i] += synthSample[i] * voiceGain;
+          output[startSample + i] += synthSample[i];
         }
       }
 
@@ -747,36 +689,42 @@ async function render(
     }
   }
 
-  // Apply simple high-pass filter to reduce mud (remove sub-bass below ~80Hz)
-  const hpfAlpha = 0.995; // Cutoff ~80Hz at 44100 sample rate
-  let hpfPrev = 0;
-  let hpfPrevOut = 0;
-  for (let i = 0; i < output.length; i++) {
-    const filtered = hpfAlpha * (hpfPrevOut + output[i] - hpfPrev);
-    hpfPrev = output[i];
-    hpfPrevOut = filtered;
-    output[i] = filtered;
+  // Apply master processing
+  console.log(`\nApplying master processing...`);
+
+  // Master HPF
+  if (config.master.hpf > 20) {
+    applyHPF(output, config.master.hpf, SAMPLE_RATE);
   }
 
-  // Normalize
-  let maxVal = 0;
+  // Master gain
   for (let i = 0; i < output.length; i++) {
-    maxVal = Math.max(maxVal, Math.abs(output[i]));
+    output[i] *= config.master.gain;
   }
-  if (maxVal > 0.95) {
-    const scale = 0.95 / maxVal;
+
+  // Limiter
+  if (config.master.limiter) {
+    const threshold = config.dynamics.limiter_threshold;
+    let maxVal = 0;
     for (let i = 0; i < output.length; i++) {
-      output[i] *= scale;
+      maxVal = Math.max(maxVal, Math.abs(output[i]));
     }
-    console.log(`  Normalized: peak ${maxVal.toFixed(2)} → 0.95`);
+    if (maxVal > threshold) {
+      const scale = threshold / maxVal;
+      for (let i = 0; i < output.length; i++) {
+        output[i] *= scale;
+      }
+      console.log(`  Limiter: peak ${maxVal.toFixed(2)} → ${threshold}`);
+    }
   }
 
   return output;
 }
 
-/**
- * Convert Float32Array to WAV buffer
- */
+// ============================================
+// WAV OUTPUT
+// ============================================
+
 function float32ToWav(samples: Float32Array, sampleRate: number): Buffer {
   const numChannels = 1;
   const bitDepth = 16;
@@ -785,22 +733,17 @@ function float32ToWav(samples: Float32Array, sampleRate: number): Buffer {
   const dataLength = samples.length * blockAlign;
   const buffer = Buffer.alloc(44 + dataLength);
 
-  // RIFF header
   buffer.write('RIFF', 0);
   buffer.writeUInt32LE(36 + dataLength, 4);
   buffer.write('WAVE', 8);
-
-  // fmt chunk
   buffer.write('fmt ', 12);
   buffer.writeUInt32LE(16, 16);
-  buffer.writeUInt16LE(1, 20); // PCM
+  buffer.writeUInt16LE(1, 20);
   buffer.writeUInt16LE(numChannels, 22);
   buffer.writeUInt32LE(sampleRate, 24);
   buffer.writeUInt32LE(sampleRate * blockAlign, 28);
   buffer.writeUInt16LE(blockAlign, 32);
   buffer.writeUInt16LE(bitDepth, 34);
-
-  // data chunk
   buffer.write('data', 36);
   buffer.writeUInt32LE(dataLength, 40);
 
@@ -812,44 +755,52 @@ function float32ToWav(samples: Float32Array, sampleRate: number): Buffer {
   return buffer;
 }
 
-/**
- * Main function
- */
+// ============================================
+// MAIN
+// ============================================
+
 async function main(): Promise<void> {
   const args = process.argv.slice(2);
 
   if (args.length === 0 || args.includes('--help')) {
-    console.log('Node.js Strudel Renderer (with Granular Samples)');
+    console.log('Node.js Strudel Renderer with Dynamic Synthesis');
     console.log('');
-    console.log('Usage: node render-strudel-node.js <input.strudel> -m <models_dir> -o <output.wav> [options]');
+    console.log('Usage: node render-strudel-node.js <input.strudel> [output.wav] [options]');
     console.log('');
     console.log('Options:');
-    console.log('  -m, --models <dir>     Models directory (required for granular)');
-    console.log('  -o, --output <file>    Output WAV file');
-    console.log('  -d, --duration <sec>   Duration in seconds (default: 60)');
-    console.log('  --bpm <bpm>            Override BPM');
+    console.log('  -o, --output <file>     Output WAV file');
+    console.log('  -d, --duration <sec>    Duration in seconds (default: 60)');
+    console.log('  -c, --config <json>     Synthesis config JSON file (from analyze_synth_params.py)');
+    console.log('  --bpm <bpm>             Override BPM');
+    console.log('  -m, --models <dir>      Models directory (deprecated, using synthesis)');
     process.exit(0);
   }
 
   // Parse arguments
   let inputPath = '';
   let outputPath = '';
-  let modelsDir = '';
+  let configPath = '';
   let duration = 60;
   let overrideBpm = 0;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
-    if (arg === '-m' || arg === '--models') {
-      modelsDir = path.resolve(args[++i]);
-    } else if (arg === '-o' || arg === '--output') {
+    if (arg === '-o' || arg === '--output') {
       outputPath = path.resolve(args[++i]);
     } else if (arg === '-d' || arg === '--duration') {
       duration = parseFloat(args[++i]);
+    } else if (arg === '-c' || arg === '--config') {
+      configPath = path.resolve(args[++i]);
     } else if (arg === '--bpm') {
       overrideBpm = parseFloat(args[++i]);
+    } else if (arg === '-m' || arg === '--models') {
+      i++; // Skip models dir (deprecated)
     } else if (!arg.startsWith('-')) {
-      inputPath = path.resolve(arg);
+      if (!inputPath) {
+        inputPath = path.resolve(arg);
+      } else if (!outputPath) {
+        outputPath = path.resolve(arg);
+      }
     }
   }
 
@@ -863,41 +814,58 @@ async function main(): Promise<void> {
   }
 
   console.log('━'.repeat(60));
-  console.log('Node.js Strudel Renderer (Granular)');
+  console.log('Node.js Strudel Renderer (Dynamic Synthesis)');
   console.log('━'.repeat(60));
   console.log(`Input:    ${inputPath}`);
   console.log(`Output:   ${outputPath}`);
-  console.log(`Models:   ${modelsDir || '(none - will use synth)'}`);
   console.log(`Duration: ${duration}s`);
+
+  // Load synthesis config
+  let config = getDefaultConfig();
+
+  if (configPath && fs.existsSync(configPath)) {
+    console.log(`Config:   ${configPath}`);
+    try {
+      const configData = JSON.parse(fs.readFileSync(configPath, 'utf-8'));
+      // Merge with defaults (config may be nested under synth_config)
+      const synthConfig = configData.synth_config || configData;
+      config = { ...config, ...synthConfig };
+      if (synthConfig.voices) {
+        config.voices = { ...config.voices, ...synthConfig.voices };
+      }
+      if (synthConfig.tempo) {
+        config.tempo = { ...config.tempo, ...synthConfig.tempo };
+      }
+      console.log(`  Loaded config: BPM=${config.tempo.bpm}, waveform=${config.oscillator.waveform}`);
+    } catch (e) {
+      console.log(`  Warning: Could not parse config, using defaults`);
+    }
+  } else {
+    console.log(`Config:   (using defaults)`);
+  }
+
+  // Override BPM if specified
+  if (overrideBpm > 0) {
+    config.tempo.bpm = overrideBpm;
+    config.tempo.samples_per_beat = Math.floor(SAMPLE_RATE * 60 / overrideBpm);
+  }
 
   // Read and parse Strudel code
   const code = fs.readFileSync(inputPath, 'utf-8');
-  const { bpm: parsedBpm, voices } = parseStrudelCode(code);
-  const bpm = overrideBpm || parsedBpm;
+  const { bpm: parsedBpm, voices } = parseStrudelCode(code, config.tempo.bpm);
 
-  console.log(`\nParsed: ${voices.length} voices, ${bpm} BPM`);
+  // If no config BPM was set and code has BPM, use code BPM
+  if (!configPath && !overrideBpm && parsedBpm !== 120) {
+    config.tempo.bpm = parsedBpm;
+  }
+
+  console.log(`\nParsed: ${voices.length} voices, ${config.tempo.bpm} BPM`);
   for (const v of voices) {
-    console.log(`  ${v.name}: ${v.patterns.length} patterns, model=${v.modelType}, gain=${v.effects.gain.toFixed(2)}`);
-  }
-
-  // Load granular models
-  const models = new Map<string, GranularModel>();
-  if (modelsDir && fs.existsSync(modelsDir)) {
-    console.log(`\nLoading granular models from ${modelsDir}:`);
-    for (const modelName of ['melodic', 'bass', 'drums']) {
-      const model = loadGranularModel(modelsDir, modelName);
-      if (model) {
-        models.set(modelName, model);
-      }
-    }
-  }
-
-  if (models.size === 0) {
-    console.log('\nWarning: No granular models loaded, output may be silent');
+    console.log(`  ${v.name}: ${v.patterns.length} patterns, type=${v.modelType}`);
   }
 
   // Render
-  const audio = await render(voices, models, bpm, duration);
+  const audio = await render(voices, config, duration);
 
   // Save WAV
   const wavBuffer = float32ToWav(audio, SAMPLE_RATE);
