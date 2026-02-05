@@ -335,6 +335,9 @@ def generate_report(cache_dir, version_dir, output_path=None):
     chart_spec_rend = version_path / "chart_spectrogram_rendered.png"
     chart_chroma_orig = version_path / "chart_chromagram_original.png"
     chart_chroma_rend = version_path / "chart_chromagram_rendered.png"
+    chart_waveform = version_path / "chart_waveform.png"
+    chart_onset = version_path / "chart_onset.png"
+    chart_mfcc = version_path / "chart_mfcc.png"
 
     # Comparison results JSON (for HTML charts)
     comparison_json_path = version_path / "comparison.json"
@@ -393,6 +396,9 @@ def generate_report(cache_dir, version_dir, output_path=None):
     chart_spec_rend_data = encode_image_base64(str(chart_spec_rend)) if chart_spec_rend.exists() else None
     chart_chroma_orig_data = encode_image_base64(str(chart_chroma_orig)) if chart_chroma_orig.exists() else None
     chart_chroma_rend_data = encode_image_base64(str(chart_chroma_rend)) if chart_chroma_rend.exists() else None
+    chart_waveform_data = encode_image_base64(str(chart_waveform)) if chart_waveform.exists() else None
+    chart_onset_data = encode_image_base64(str(chart_onset)) if chart_onset.exists() else None
+    chart_mfcc_data = encode_image_base64(str(chart_mfcc)) if chart_mfcc.exists() else None
     has_individual_charts = any([chart_frequency_data, chart_similarity_data])
 
     # Load comparison results JSON for HTML charts
@@ -803,12 +809,15 @@ def generate_report(cache_dir, version_dir, output_path=None):
                 Visual Comparison Charts
             </div>
             <div class="charts-grid">
-                {f'<div class="chart-item"><img src="{chart_frequency_data}" alt="Frequency Bands"/><div class="chart-caption">Frequency Bands</div></div>' if chart_frequency_data else ''}
-                {f'<div class="chart-item"><img src="{chart_similarity_data}" alt="Similarity Scores"/><div class="chart-caption">Similarity Scores</div></div>' if chart_similarity_data else ''}
-                {f'<div class="chart-item"><img src="{chart_spec_orig_data}" alt="Original Spectrogram"/><div class="chart-caption">Original Spectrogram</div></div>' if chart_spec_orig_data else ''}
-                {f'<div class="chart-item"><img src="{chart_spec_rend_data}" alt="Rendered Spectrogram"/><div class="chart-caption">Rendered Spectrogram</div></div>' if chart_spec_rend_data else ''}
-                {f'<div class="chart-item"><img src="{chart_chroma_orig_data}" alt="Original Chromagram"/><div class="chart-caption">Original Chromagram</div></div>' if chart_chroma_orig_data else ''}
-                {f'<div class="chart-item"><img src="{chart_chroma_rend_data}" alt="Rendered Chromagram"/><div class="chart-caption">Rendered Chromagram</div></div>' if chart_chroma_rend_data else ''}
+                {f'<div class="chart-item"><img src="{chart_similarity_data}" alt="Similarity Scores"/><div class="chart-caption">Similarity Scores (with Overall Gauge)</div></div>' if chart_similarity_data else ''}
+                {f'<div class="chart-item"><img src="{chart_frequency_data}" alt="Frequency Bands"/><div class="chart-caption">Frequency Bands Distribution</div></div>' if chart_frequency_data else ''}
+                {f'<div class="chart-item"><img src="{chart_spec_orig_data}" alt="Original Spectrogram"/><div class="chart-caption">Original - Mel Spectrogram</div></div>' if chart_spec_orig_data else ''}
+                {f'<div class="chart-item"><img src="{chart_spec_rend_data}" alt="Rendered Spectrogram"/><div class="chart-caption">Rendered - Mel Spectrogram</div></div>' if chart_spec_rend_data else ''}
+                {f'<div class="chart-item"><img src="{chart_chroma_orig_data}" alt="Original Chromagram"/><div class="chart-caption">Original - Chromagram (Pitch Classes)</div></div>' if chart_chroma_orig_data else ''}
+                {f'<div class="chart-item"><img src="{chart_chroma_rend_data}" alt="Rendered Chromagram"/><div class="chart-caption">Rendered - Chromagram (Pitch Classes)</div></div>' if chart_chroma_rend_data else ''}
+                {f'<div class="chart-item full-width"><img src="{chart_waveform_data}" alt="Waveform Comparison"/><div class="chart-caption">Waveform Comparison (Original vs Rendered)</div></div>' if chart_waveform_data else ''}
+                {f'<div class="chart-item full-width"><img src="{chart_onset_data}" alt="Onset Strength"/><div class="chart-caption">Onset Strength (Rhythm/Attack Transients)</div></div>' if chart_onset_data else ''}
+                {f'<div class="chart-item full-width"><img src="{chart_mfcc_data}" alt="MFCC Comparison"/><div class="chart-caption">MFCC Comparison (Timbre Fingerprint)</div></div>' if chart_mfcc_data else ''}
             </div>
         </div>""" if has_individual_charts else ''}
 

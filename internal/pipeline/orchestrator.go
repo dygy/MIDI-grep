@@ -82,6 +82,7 @@ type Result struct {
 	DrumTypes       map[string]int // Hits by drum type
 	CacheKey        string         // Cache key for this extraction
 	CacheDir        string         // Cache directory path
+	OriginalPath    string         // Path to original input audio (for comparison)
 	OutputVersion   int            // Version number of this output
 	PreviousOutputs int            // Number of previous outputs in cache
 	Style           string         // Detected or specified style
@@ -133,6 +134,12 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 		cacheKey = filepath.Base(cfg.CachedStemsDir)
 		// Initialize stem cache for output saving
 		stemCache, _ = cache.NewStemCache()
+
+		// Restore original audio path from cache (for AI comparison)
+		originalPath := filepath.Join(cfg.CachedStemsDir, "original.wav")
+		if fileExists(originalPath) {
+			cfg.InputPath = originalPath
+		}
 
 		// Try melodic.wav first, fall back to piano.wav
 		melodicPath := filepath.Join(cfg.CachedStemsDir, "melodic.wav")
@@ -196,6 +203,10 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 							PianoPath: cached.MelodicPath,
 							DrumsPath: cached.DrumsPath,
 						}
+						// Restore original audio path from cache (for AI comparison)
+						if cached.OriginalPath != "" {
+							cfg.InputPath = cached.OriginalPath
+						}
 						usedCache = true
 						o.progress.StageComplete("Using cached stems (key: %s)", cacheKey[:8])
 					}
@@ -230,13 +241,14 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 				o.progress.StageComplete("Drums stem extracted")
 			}
 
-			// Save to cache with track metadata (all 4 stems)
+			// Save to cache with track metadata (all 4 stems + original)
 			if stemCache != nil && cacheKey != "" {
 				stems := &cache.StemPaths{
-					MelodicPath: stemResult.PianoPath,
-					DrumsPath:   stemResult.DrumsPath,
-					VocalsPath:  stemResult.VocalsPath,
-					BassPath:    stemResult.BassPath,
+					OriginalPath: cfg.InputPath, // Store original for proper comparison
+					MelodicPath:  stemResult.PianoPath,
+					DrumsPath:    stemResult.DrumsPath,
+					VocalsPath:   stemResult.VocalsPath,
+					BassPath:     stemResult.BassPath,
 				}
 				cached, err := stemCache.PutWithMetadata(cacheKey, stems, cfg.TrackTitle, cfg.InputURL)
 				if err != nil {
@@ -258,7 +270,8 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 
 	// Initialize result
 	result := &Result{
-		DrumTypes: make(map[string]int),
+		DrumTypes:    make(map[string]int),
+		OriginalPath: cfg.InputPath, // Original audio for comparison
 	}
 
 	var analysisResult *analysis.Result

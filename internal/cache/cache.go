@@ -29,13 +29,14 @@ type StemCache struct {
 
 // CachedStems represents cached stem file paths
 type CachedStems struct {
-	MelodicPath string // Renamed from PianoPath
-	DrumsPath   string
-	VocalsPath  string // Vocals stem
-	BassPath    string // Bass stem
-	CacheKey    string
-	TrackName   string // Human-readable track name
-	CachedAt    time.Time
+	OriginalPath string // Original audio BEFORE separation (for comparison)
+	MelodicPath  string // Renamed from PianoPath
+	DrumsPath    string
+	VocalsPath   string // Vocals stem
+	BassPath     string // Bass stem
+	CacheKey     string
+	TrackName    string // Human-readable track name
+	CachedAt     time.Time
 }
 
 // CachedOutput represents a cached generation result
@@ -213,6 +214,10 @@ func (c *StemCache) Get(key string) (*CachedStems, bool) {
 		return nil, false
 	}
 
+	// Check for original audio (required for proper comparison)
+	originalPath := filepath.Join(cacheSubdir, "original.wav")
+	originalExists := fileExists(originalPath)
+
 	// Try new naming first (melodic.wav), fall back to old (piano.wav)
 	melodicPath := filepath.Join(cacheSubdir, "melodic.wav")
 	if !fileExists(melodicPath) {
@@ -248,6 +253,9 @@ func (c *StemCache) Get(key string) (*CachedStems, bool) {
 		CachedAt:  info.ModTime(),
 	}
 
+	if originalExists {
+		result.OriginalPath = originalPath
+	}
 	if melodicExists {
 		result.MelodicPath = melodicPath
 	}
@@ -334,10 +342,11 @@ func (c *StemCache) GetByTrackName(trackName string) (*CachedStems, bool) {
 
 // StemPaths contains all stem file paths for caching
 type StemPaths struct {
-	MelodicPath string
-	DrumsPath   string
-	VocalsPath  string
-	BassPath    string
+	OriginalPath string // Original audio BEFORE separation
+	MelodicPath  string
+	DrumsPath    string
+	VocalsPath   string
+	BassPath     string
 }
 
 // Put stores stems in the cache with track name
@@ -370,6 +379,15 @@ func (c *StemCache) PutWithMetadata(key string, stems *StemPaths, trackTitle, ur
 		CacheKey:  folderName,
 		TrackName: trackTitle,
 		CachedAt:  time.Now(),
+	}
+
+	// Copy original audio if exists (REQUIRED for proper comparison)
+	if stems.OriginalPath != "" && fileExists(stems.OriginalPath) {
+		dst := filepath.Join(cacheSubdir, "original.wav")
+		if err := copyFile(stems.OriginalPath, dst); err != nil {
+			return nil, fmt.Errorf("cache original audio: %w", err)
+		}
+		result.OriginalPath = dst
 	}
 
 	// Copy melodic stem if exists

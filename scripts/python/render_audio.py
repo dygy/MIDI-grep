@@ -65,12 +65,44 @@ def parse_strudel_code(code):
                 result['duration_bars'] = len(patterns)
 
     # Try to extract gain values from effect chains
-    for pattern_type in ['kick', 'snare', 'hh', 'bass', 'vox', 'stab', 'lead']:
+    # Map effect names to mix keys (midFx -> vox_gain, highFx -> lead_gain)
+    fx_to_mix = {
+        'kick': 'kick_gain',
+        'snare': 'snare_gain',
+        'hh': 'hh_gain',
+        'bass': 'bass_gain',
+        'vox': 'vox_gain',
+        'stab': 'stab_gain',
+        'lead': 'lead_gain',
+        'mid': 'vox_gain',      # midFx controls vox/mid sounds
+        'high': 'lead_gain',    # highFx controls lead/high sounds
+        'drums': 'kick_gain',   # drumsFx affects drums overall
+    }
+
+    for pattern_type, mix_key in fx_to_mix.items():
+        # First try simple .gain(number)
         gain_match = re.search(rf'{pattern_type}Fx.*?\.gain\(([0-9.]+)\)', code)
         if gain_match:
-            # Scale the gain - Strudel uses 0-2+, we use 0-1
             strudel_gain = float(gain_match.group(1))
-            result['mix'][f'{pattern_type}_gain'] = min(strudel_gain / 2.0, 1.0)
+            result['mix'][mix_key] = min(strudel_gain / 2.0, 1.0)
+        else:
+            # Try complex patterns like .gain(perlin.range(0.88, 1.10).slow(8))
+            # Extract first two numbers and use their average
+            range_match = re.search(rf'{pattern_type}Fx.*?\.gain\(.*?range\(([0-9.]+),\s*([0-9.]+)\)', code)
+            if range_match:
+                low = float(range_match.group(1))
+                high = float(range_match.group(2))
+                strudel_gain = (low + high) / 2
+                result['mix'][mix_key] = min(strudel_gain / 2.0, 1.0)
+
+    # Also extract HPF/LPF values for brightness control
+    for pattern_type in ['bass', 'mid', 'high']:
+        lpf_match = re.search(rf'{pattern_type}Fx.*?\.lpf\(([0-9.]+)\)', code)
+        if lpf_match:
+            result[f'{pattern_type}_lpf'] = float(lpf_match.group(1))
+        hpf_match = re.search(rf'{pattern_type}Fx.*?\.hpf\(([0-9.]+)\)', code)
+        if hpf_match:
+            result[f'{pattern_type}_hpf'] = float(hpf_match.group(1))
 
     return result
 
@@ -614,6 +646,16 @@ def render_strudel_to_wav(code, output_path, duration_seconds=None, mix_override
 
     # Mix to stereo
     stereo = np.column_stack([left, right])
+
+    # Truncate to exact duration if specified (for millisecond-precise matching)
+    if duration_seconds:
+        exact_samples = int(SAMPLE_RATE * duration_seconds)
+        if len(stereo) > exact_samples:
+            stereo = stereo[:exact_samples]
+        elif len(stereo) < exact_samples:
+            # Pad with zeros if too short (shouldn't happen with ceil)
+            stereo = np.pad(stereo, ((0, exact_samples - len(stereo)), (0, 0)))
+        print(f"Truncated to exact duration: {duration_seconds:.6f}s ({exact_samples} samples)")
 
     # Simple normalization - no aggressive filtering or compression
     max_val = np.max(np.abs(stereo))

@@ -107,8 +107,8 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   └── Strudel generation                └── pretty_midi - MIDI processing
 
   TypeScript/Node.js                    External
-  └── node-web-audio-api                ├── yt-dlp  - YouTube download
-      - offline audio rendering         └── ffmpeg  - audio conversion
+  └── @strudel/mini - pattern parsing   ├── yt-dlp  - YouTube download
+                                        └── ffmpeg  - audio conversion
 
   Frontend
   ├── HTMX
@@ -135,11 +135,11 @@ midi-grep/
 │
 ├── scripts/
 │   ├── midi-grep.sh         # Main CLI wrapper (Bash)
-│   ├── node/                # TypeScript audio rendering
+│   ├── node/                # TypeScript audio rendering (primary)
 │   │   ├── src/
-│   │   │   └── render-strudel-node.ts  # Offline Strudel renderer
+│   │   │   └── render-strudel-node.ts  # Strudel renderer with synthesis
 │   │   ├── dist/            # Compiled JavaScript output
-│   │   ├── package.json     # Node.js dependencies
+│   │   ├── package.json     # @strudel/mini, node-web-audio-api
 │   │   └── tsconfig.json    # TypeScript configuration
 │   └── python/              # Python ML scripts
 │       ├── separate.py      # Demucs stem separation
@@ -149,11 +149,12 @@ midi-grep/
 │       ├── detect_drums.py  # Drum onset detection & classification
 │       ├── detect_genre_dl.py    # CLAP deep learning genre detection
 │       ├── detect_genre_essentia.py  # Essentia-based genre detection
-│       ├── render_audio.py  # WAV synthesis from patterns
+│       ├── render_audio.py  # WAV synthesis (fallback renderer)
 │       ├── ai_code_generator.py  # AI-driven Strudel code generation
+│       ├── ai_improver.py   # AI-driven iterative code improvement (Ollama/Claude)
 │       ├── thin_patterns.py # Pattern density control
-│       ├── render_with_models.py # Render with granular models
-│       └── training/        # Model fine-tuning (Phase 9)
+│       ├── render_with_models.py # Render with granular models (deprecated)
+│       └── training/        # Model fine-tuning
 │
 └── context/                 # AWOS documentation
     ├── product/             # Product definition, roadmap
@@ -268,6 +269,54 @@ This installs:
 | `--brazilian-funk` | - | Force Brazilian funk mode (auto-detected normally) |
 | `--genre` | - | Manual genre override: `brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz` |
 | `--deep-genre` | `true` | Use deep learning (CLAP) for genre detection (skipped when `--genre` is specified) |
+| `--iterate` | - | AI-driven improvement iterations (default: 0 = disabled) |
+| `--target-similarity` | - | Target similarity score to stop iteration (default: 0.70) |
+| `--ollama` | `true` | Use Ollama (free local LLM) for AI improvement |
+| `--ollama-model` | - | Ollama model to use (default: `codellama:7b`) |
+
+### AI-Driven Code Improvement
+
+MIDI-grep can iteratively improve Strudel code using AI analysis:
+
+```bash
+# Run 5 iterations of AI improvement (uses Ollama by default - free & local)
+./bin/midi-grep extract --url "..." --iterate 5
+
+# Target 75% similarity, max 10 iterations
+./bin/midi-grep extract --url "..." --iterate 10 --target-similarity 0.75
+
+# Use a different Ollama model
+./bin/midi-grep extract --url "..." --iterate 5 --ollama-model codellama:7b
+```
+
+**How it works:**
+1. Render initial Strudel code to WAV
+2. Compare against original audio (MFCC, chroma, frequency bands)
+3. Send comparison to LLM to analyze gaps
+4. LLM suggests effect parameter changes
+5. Apply changes and repeat until target reached
+6. Store all runs in ClickHouse for learning
+
+**Ollama Setup (one-time, free):**
+```bash
+brew install ollama
+ollama serve
+ollama pull codellama:7b  # 3.8GB download
+```
+
+**ClickHouse Learning Storage:**
+
+All improvement runs are stored in ClickHouse for incremental learning:
+- `midi_grep.runs` - Every render attempt with similarity scores
+- `midi_grep.knowledge` - Learned parameter improvements that transfer to future tracks
+
+ClickHouse Local is auto-downloaded and requires no setup. Data stored in `.clickhouse/db/`.
+
+```bash
+# Query your improvement history
+./bin/clickhouse local --path .clickhouse/db \
+  --query "SELECT track_hash, version, similarity_overall FROM midi_grep.runs ORDER BY created_at DESC LIMIT 5"
+```
 
 ### Web Interface
 
@@ -632,9 +681,32 @@ Generate a WAV preview of the Strudel patterns without opening a browser:
 ./bin/midi-grep extract --url "..." --render output.wav
 ```
 
-### Synthesis Engine (`render_audio.py`)
+### Node.js Synthesis Engine (`render-strudel-node.ts`)
 
-The renderer synthesizes each pattern type:
+The primary renderer uses TypeScript with proper Strudel pattern parsing:
+
+**Pattern Parsing:**
+- Uses `@strudel/mini` v1.1.0 for accurate mini-notation parsing
+- Handles rests (`~*N`), chords (`[a,b,c]`), and sequences
+
+**Synthesis:**
+- **Kick drums**: 808-style with pitch envelope (150→40Hz), amp decay, click transient
+- **Snare**: Dual-sine body (180Hz + 330Hz) + high-passed noise
+- **Hi-hats**: Metallic multi-frequency noise (open/closed variants)
+- **Bass**: Sawtooth + sub-octave sine, low-pass filtered
+- **Lead (mids)**: Detuned saws + triangle with filter envelope
+- **High**: Odd-harmonic square wave + saw for brightness
+
+**Mix Balance:**
+- Tuned for melodic content (mids 3x, highs 2.5x, bass 0.08x, drums 0.15x)
+- 80Hz high-pass filter on master to reduce mud
+- Achieves ~79% similarity against melodic stems
+
+Output: Mono 44.1kHz 16-bit WAV.
+
+### Python Synthesis Engine (`render_audio.py`)
+
+Fallback renderer for AI-driven iterative improvement:
 - **Kick drums**: Pitch envelope with distortion (808 style)
 - **Snare**: Body tone + high-passed noise
 - **Hi-hats**: Filtered noise with decay envelope
@@ -643,7 +715,7 @@ The renderer synthesizes each pattern type:
 - **Chord stabs**: Filtered sawtooth
 - **Lead**: Triangle wave with vibrato
 
-Output: Stereo 44.1kHz 16-bit WAV, 16 bars by default.
+Output: Stereo 44.1kHz 16-bit WAV.
 
 ### AI-Driven Mix Parameters (`audio_to_strudel_params.py`)
 

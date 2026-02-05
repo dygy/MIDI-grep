@@ -38,6 +38,28 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 DEFAULT_OLLAMA_MODEL = "tinyllama:latest"
 
 
+def get_audio_duration(audio_path: str) -> float:
+    """Get exact audio duration in seconds using ffprobe."""
+    try:
+        result = subprocess.run(
+            ['ffprobe', '-v', 'error', '-show_entries', 'format=duration',
+             '-of', 'default=noprint_wrappers=1:nokey=1', audio_path],
+            capture_output=True, text=True
+        )
+        if result.returncode == 0 and result.stdout.strip():
+            return float(result.stdout.strip())
+    except Exception:
+        pass
+    # Fallback: use librosa
+    try:
+        import librosa
+        y, sr = librosa.load(audio_path, sr=22050, mono=True)
+        return len(y) / sr
+    except Exception:
+        pass
+    return 60.0  # Default fallback
+
+
 def get_track_hash(audio_path: str) -> str:
     """Generate a hash for the audio file."""
     with open(audio_path, 'rb') as f:
@@ -162,61 +184,108 @@ def get_learned_knowledge(genre: str, bpm: float, key_type: str) -> List[Dict]:
     return clickhouse_query(query)
 
 
+def extract_effect_functions(code: str) -> str:
+    """Extract just the effect functions from Strudel code for concise prompts."""
+    import re
+    # Find all let *Fx = ... patterns (multiline)
+    fx_pattern = r'let\s+(\w+Fx)\s*=\s*p\s*=>\s*p[^\n]*(?:\n\s+\.[^\n]*)*'
+    matches = re.findall(fx_pattern, code, re.MULTILINE)
+    if matches:
+        # Return the full function definitions
+        full_matches = re.findall(r'let\s+\w+Fx\s*=\s*p\s*=>\s*p[^\n]*(?:\n\s+\.[^\n]*)*', code, re.MULTILINE)
+        return '\n'.join(full_matches)
+    # Fallback: return first 2000 chars if no pattern matches
+    return code[:2000] + ('...' if len(code) > 2000 else '')
+
+
+def merge_effect_functions(original_code: str, improved_effects: str) -> str:
+    """Merge improved effect functions back into the original code."""
+    import re
+
+    # Parse improved effects into a dict
+    improved_dict = {}
+    fx_pattern = r'let\s+(\w+Fx)\s*=\s*(p\s*=>\s*p[^\n]*(?:\n\s+\.[^\n]*)*)'
+    for match in re.finditer(fx_pattern, improved_effects, re.MULTILINE):
+        name, body = match.groups()
+        improved_dict[name] = f'let {name} = {body}'
+
+    if not improved_dict:
+        return original_code
+
+    # Replace each effect function in the original
+    result = original_code
+    for name, new_def in improved_dict.items():
+        # Pattern to match the full function definition
+        old_pattern = rf'let\s+{name}\s*=\s*p\s*=>\s*p[^\n]*(?:\n\s+\.[^\n]*)*'
+        # Escape backslashes in the replacement to avoid regex errors
+        safe_new_def = new_def.replace('\\', '\\\\')
+        try:
+            result = re.sub(old_pattern, safe_new_def, result, flags=re.MULTILINE)
+        except re.error as e:
+            print(f"Warning: regex error merging {name}: {e}")
+            continue
+
+    return result
+
+
 def build_improvement_prompt(
     previous_run: Dict,
     learned_knowledge: List[Dict],
     original_code: str
 ) -> str:
-    """Build the prompt for LLM analysis."""
-    return f"""You are an expert in Strudel live coding and audio production. Analyze the following comparison results and improve the Strudel code.
+    """Build the prompt for LLM analysis - let LLM decide everything."""
 
-## Previous Run Results
-- Overall Similarity: {previous_run.get('similarity_overall', 0)*100:.1f}%
-- MFCC (Timbre): {previous_run.get('similarity_mfcc', 0)*100:.1f}%
-- Chroma (Pitch): {previous_run.get('similarity_chroma', 0)*100:.1f}%
-- Frequency Balance: {previous_run.get('similarity_frequency', 0)*100:.1f}%
+    # Extract full effect functions (the LLM needs to see all effects)
+    effects_code = extract_effect_functions(original_code)
 
-## Frequency Band Differences (positive = rendered has MORE than original)
-- Sub-bass (20-60Hz): {previous_run.get('band_sub_bass', 0)*100:+.1f}%
-- Bass (60-250Hz): {previous_run.get('band_bass', 0)*100:+.1f}%
-- Low-mid (250-500Hz): {previous_run.get('band_low_mid', 0)*100:+.1f}%
-- Mid (500-2kHz): {previous_run.get('band_mid', 0)*100:+.1f}%
-- High-mid (2-4kHz): {previous_run.get('band_high_mid', 0)*100:+.1f}%
-- High (4-20kHz): {previous_run.get('band_high', 0)*100:+.1f}%
+    # Get frequency band differences
+    band_bass = previous_run.get('band_bass', 0)
+    band_mid = previous_run.get('band_mid', 0)
+    band_high = previous_run.get('band_high', 0)
 
-## Track Context
-- BPM: {previous_run.get('bpm', 120)}
-- Key: {previous_run.get('key', 'unknown')}
-- Style: {previous_run.get('style', 'auto')}
-- Genre: {previous_run.get('genre', 'unknown')}
+    # Get spectral metrics
+    brightness_ratio = previous_run.get('brightness_ratio', 1.0)
+    energy_ratio = previous_run.get('energy_ratio', 1.0)
 
-## Learned Knowledge (what has worked before for similar tracks)
-{json.dumps(learned_knowledge, indent=2) if learned_knowledge else "No prior knowledge available"}
+    # Include learned knowledge if available
+    knowledge_str = ""
+    if learned_knowledge:
+        knowledge_str = "\n\nPREVIOUS LEARNINGS:\n"
+        for k in learned_knowledge[:5]:
+            knowledge_str += f"- {k.get('parameter_name')}: {k.get('parameter_old_value')} -> {k.get('parameter_new_value')} (improved {k.get('similarity_improvement', 0)*100:.0f}%)\n"
 
-## Current Strudel Code
-```javascript
-{original_code}
-```
+    # Build the research-oriented prompt - give LLM full control
+    return f'''You are an audio mixing AI. Your goal: make the rendered audio match the original.
 
-## Your Task
-1. Analyze what's causing the similarity gaps
-2. Suggest specific changes to the Strudel code to improve similarity
-3. Generate improved Strudel code
+COMPARISON DATA (rendered minus original):
+- Bass: {band_bass*100:+.0f}% (positive=too loud, negative=too quiet)
+- Mid: {band_mid*100:+.0f}%
+- High: {band_high*100:+.0f}%
+- Brightness: {brightness_ratio:.0%} of original
+- Energy: {energy_ratio:.0%} of original
 
-Focus on:
-- If bass is too loud (+), reduce bass voice gain or add HPF
-- If highs are missing (-), reduce LPF cutoff or add high frequencies
-- If rhythm similarity is low, adjust note timing or swing
-- If timbre doesn't match, adjust effects (reverb, filter, distortion)
+CURRENT EFFECT FUNCTIONS:
+{effects_code}
+{knowledge_str}
+AVAILABLE EFFECTS:
+- .gain(0.01-2.0) - volume
+- .hpf(20-2000) - high pass filter (removes bass)
+- .lpf(200-20000) - low pass filter (removes treble)
+- .crush(1-16) - bit depth (lower=more distortion)
+- .coarse(1-16) - sample rate reduction
+- .room(0-1) - reverb amount
+- .delay(0-1) - delay wet mix
 
-Respond in JSON format:
-{{
-    "analysis": "Brief analysis of what's wrong",
-    "suggestions": ["Specific change 1", "Specific change 2", ...],
-    "improved_code": "The full improved Strudel code",
-    "expected_improvement": "What metrics should improve"
-}}
-"""
+EXAMPLE OUTPUT (what I expect):
+let bassFx = p => p.sound("gm_electric_bass_finger").gain(0.15).hpf(60).lpf(500)
+let midFx = p => p.sound("gm_epiano2").gain(1.2).lpf(5000)
+let highFx = p => p.sound("gm_music_box").gain(0.8).lpf(12000)
+let drumsFx = p => p.bank("RolandTR808").gain(0.9)
+
+TASK: Output your improved effect functions with SPECIFIC NUMERIC VALUES.
+Think about the frequency band data and adjust accordingly.
+
+Output ONLY the 4 lines (no comments, no explanation):'''
 
 
 def analyze_with_ollama(
@@ -252,20 +321,83 @@ def analyze_with_ollama(
 
         result_text = response.json().get("response", "")
 
-        # Extract JSON from response
-        if "```json" in result_text:
-            result_text = result_text.split("```json")[1].split("```")[0]
-        elif "```" in result_text:
-            result_text = result_text.split("```")[1].split("```")[0]
-
-        # Try to find JSON object in text
+        # Try to parse as JSON first
         import re
-        json_match = re.search(r'\{[\s\S]*\}', result_text)
-        if json_match:
-            result_text = json_match.group()
 
-        result = json.loads(result_text)
-        return result
+        # Method 1: Look for ```json block
+        if "```json" in result_text:
+            json_text = result_text.split("```json")[1].split("```")[0]
+            try:
+                return json.loads(json_text)
+            except:
+                pass
+
+        # Method 2: Look for JSON object pattern
+        json_match = re.search(r'\{[\s\S]*?"improved_code"[\s\S]*?\}', result_text)
+        if json_match:
+            try:
+                return json.loads(json_match.group())
+            except:
+                pass
+
+        # Method 3: Extract code from markdown code blocks
+        code_match = re.search(r'```(?:scss|javascript|js)?\n?([\s\S]*?)```', result_text)
+        if code_match:
+            extracted_code = code_match.group(1).strip()
+            # Check if it looks like effect functions
+            if 'Fx' in extracted_code or 'sound(' in extracted_code:
+                return {
+                    "analysis": "Extracted from response",
+                    "suggestions": ["Code extracted from markdown"],
+                    "improved_code": extracted_code
+                }
+
+        # Method 4: Look for let *Fx patterns directly in text
+        fx_matches = re.findall(r'let\s+\w+Fx\s*=\s*p\s*=>\s*p[^\n]*(?:\n\s+\.[^\n]*)*', result_text)
+        if fx_matches:
+            return {
+                "analysis": "Extracted effect functions",
+                "suggestions": ["Effect functions extracted from response"],
+                "improved_code": '\n'.join(fx_matches)
+            }
+
+        # Method 5: Parse natural language reasoning and extract values
+        # Look for mentions of gain values, reduce/increase, etc.
+        analysis = result_text[:500] if len(result_text) > 500 else result_text
+        suggestions = []
+
+        # Extract any numeric gain suggestions from text
+        gain_mentions = re.findall(r'(bass|mid|high|drums?)\s*(?:gain|Fx)?\s*(?:to|=|:)?\s*(0?\.[0-9]+|[0-2]\.[0-9]+)', result_text.lower())
+        if gain_mentions:
+            suggestions = [f"{m[0]} gain -> {m[1]}" for m in gain_mentions]
+
+        # Look for reduce/increase keywords
+        reduce_matches = re.findall(r'reduce\s+(bass|mid|high|drums?)', result_text.lower())
+        increase_matches = re.findall(r'increase\s+(bass|mid|high|drums?)', result_text.lower())
+
+        if reduce_matches:
+            suggestions.extend([f"reduce {m}" for m in reduce_matches])
+        if increase_matches:
+            suggestions.extend([f"increase {m}" for m in increase_matches])
+
+        # Look for "too loud" / "too quiet" mentions
+        if re.search(r'bass.*too\s*(loud|much|high)', result_text.lower()):
+            suggestions.append("reduce bass")
+        if re.search(r'bass.*too\s*(quiet|low|soft)', result_text.lower()):
+            suggestions.append("increase bass")
+        if re.search(r'mid.*too\s*(loud|much|high)', result_text.lower()):
+            suggestions.append("reduce mid")
+        if re.search(r'mid.*too\s*(quiet|low|soft|missing)', result_text.lower()):
+            suggestions.append("increase mid")
+
+        # Return whatever we found - the caller will generate code from band data
+        return {
+            "analysis": analysis,
+            "suggestions": suggestions if suggestions else ["LLM reasoning parsed"],
+            "improved_code": "",
+            "text_response": result_text,
+            "parsed_from_text": True
+        }
 
     except requests.exceptions.ConnectionError:
         print(f"Warning: Ollama not running at {OLLAMA_URL}", file=sys.stderr)
@@ -360,6 +492,16 @@ def store_run(
     ai_suggestions: Optional[List[str]] = None
 ):
     """Store a run in ClickHouse."""
+    # Extract data from comparison structure
+    comp_scores = comparison.get("comparison", {})
+    orig_bands = comparison.get("original", {}).get("bands", {})
+    rend_bands = comparison.get("rendered", {}).get("bands", {})
+
+    # Compute band differences (rendered - original)
+    band_diffs = {}
+    for band in ["sub_bass", "bass", "low_mid", "mid", "high_mid", "high"]:
+        band_diffs[band] = rend_bands.get(band, 0) - orig_bands.get(band, 0)
+
     data = {
         "track_hash": track_hash,
         "track_name": track_name,
@@ -369,17 +511,17 @@ def store_run(
         "style": style,
         "genre": genre,
         "strudel_code": strudel_code,
-        "similarity_overall": comparison.get("overall", 0),
-        "similarity_mfcc": comparison.get("mfcc", 0),
-        "similarity_chroma": comparison.get("chroma", 0),
-        "similarity_frequency": comparison.get("frequency", 0),
-        "similarity_rhythm": comparison.get("rhythm", 0),
-        "band_sub_bass": comparison.get("band_diffs", {}).get("sub_bass", 0),
-        "band_bass": comparison.get("band_diffs", {}).get("bass", 0),
-        "band_low_mid": comparison.get("band_diffs", {}).get("low_mid", 0),
-        "band_mid": comparison.get("band_diffs", {}).get("mid", 0),
-        "band_high_mid": comparison.get("band_diffs", {}).get("high_mid", 0),
-        "band_high": comparison.get("band_diffs", {}).get("high", 0),
+        "similarity_overall": comp_scores.get("overall_similarity", 0),
+        "similarity_mfcc": comp_scores.get("mfcc_similarity", 0),
+        "similarity_chroma": comp_scores.get("chroma_similarity", 0),
+        "similarity_frequency": comp_scores.get("frequency_balance_similarity", 0),
+        "similarity_rhythm": comp_scores.get("tempo_similarity", 0),
+        "band_sub_bass": band_diffs.get("sub_bass", 0),
+        "band_bass": band_diffs.get("bass", 0),
+        "band_low_mid": band_diffs.get("low_mid", 0),
+        "band_mid": band_diffs.get("mid", 0),
+        "band_high_mid": band_diffs.get("high_mid", 0),
+        "band_high": band_diffs.get("high", 0),
         "mix_params": json.dumps(mix_params),
         "improved_from_version": improved_from,
         "ai_suggestions": json.dumps(ai_suggestions) if ai_suggestions else ""
@@ -474,18 +616,37 @@ def improve_strudel(
     best_similarity = 0
     best_code = current_code
 
+    # Get exact duration from original audio (millisecond precision)
+    exact_duration = get_audio_duration(original_audio)
+    print(f"Original audio duration: {exact_duration:.6f}s")
+
+    # Ensure output directory exists
+    Path(output_dir).mkdir(parents=True, exist_ok=True)
+
     for iteration in range(max_iterations):
         print(f"\n--- Iteration {iteration + 1}/{max_iterations} (v{current_version}) ---")
 
-        # 1. Render current code
+        # 1. Render current code using Node.js renderer (better harmonics)
         render_path = Path(output_dir) / f"render_v{current_version:03d}.wav"
-        render_cmd = [
-            sys.executable,
-            str(Path(__file__).parent / "render_audio.py"),
-            strudel_path,
-            "-o", str(render_path),
-            "-d", "60"
-        ]
+        node_renderer = Path(__file__).parent.parent / "node" / "dist" / "render-strudel-node.js"
+
+        if node_renderer.exists():
+            # Prefer Node.js renderer for richer harmonic content
+            render_cmd = [
+                "node", str(node_renderer),
+                strudel_path,
+                str(render_path),
+                "--duration", f"{exact_duration:.2f}"
+            ]
+        else:
+            # Fallback to Python renderer
+            render_cmd = [
+                sys.executable,
+                str(Path(__file__).parent / "render_audio.py"),
+                strudel_path,
+                "-o", str(render_path),
+                "-d", f"{exact_duration:.6f}"
+            ]
         subprocess.run(render_cmd, capture_output=True)
 
         if not render_path.exists():
@@ -498,19 +659,23 @@ def improve_strudel(
             str(Path(__file__).parent / "compare_audio.py"),
             original_audio,
             str(render_path),
-            "--output-json", str(Path(output_dir) / f"comparison_v{current_version:03d}.json")
+            "-j"  # Output JSON to stdout
         ]
-        subprocess.run(compare_cmd, capture_output=True)
+        compare_result = subprocess.run(compare_cmd, capture_output=True, text=True)
 
         comparison_path = Path(output_dir) / f"comparison_v{current_version:03d}.json"
-        if comparison_path.exists():
-            with open(comparison_path) as f:
-                comparison = json.load(f)
+        if compare_result.returncode == 0 and compare_result.stdout.strip():
+            comparison = json.loads(compare_result.stdout)
+            # Save for reference
+            with open(comparison_path, 'w') as f:
+                json.dump(comparison, f, indent=2)
         else:
             print("Comparison failed, using defaults")
             comparison = {"overall": 0, "mfcc": 0, "chroma": 0, "frequency": 0}
 
-        current_similarity = comparison.get("overall", 0)
+        # Extract similarity from nested comparison structure
+        comp_scores = comparison.get("comparison", {})
+        current_similarity = comp_scores.get("overall_similarity", 0)
         print(f"Similarity: {current_similarity*100:.1f}%")
 
         # 3. Store this run
@@ -543,22 +708,50 @@ def improve_strudel(
 
         # 5. Get AI suggestions for improvement
         print("Analyzing with LLM...")
+
+        # Extract data from comparison structure
+        comp_scores = comparison.get("comparison", {})
+        orig_bands = comparison.get("original", {}).get("bands", {})
+        rend_bands = comparison.get("rendered", {}).get("bands", {})
+
+        # Compute band differences (rendered - original)
+        band_diffs = {}
+        for band in ["sub_bass", "bass", "low_mid", "mid", "high_mid", "high"]:
+            band_diffs[band] = rend_bands.get(band, 0) - orig_bands.get(band, 0)
+
+        # Compute brightness and energy ratios
+        orig_spectral = comparison.get("original", {}).get("spectral", {})
+        rend_spectral = comparison.get("rendered", {}).get("spectral", {})
+
+        orig_centroid = orig_spectral.get("centroid_mean", 1)
+        rend_centroid = rend_spectral.get("centroid_mean", 1)
+        brightness_ratio = rend_centroid / max(orig_centroid, 1) if orig_centroid else 1.0
+
+        orig_rms = orig_spectral.get("rms_mean", 0.1)
+        rend_rms = rend_spectral.get("rms_mean", 0.1)
+        energy_ratio = rend_rms / max(orig_rms, 0.001) if orig_rms else 1.0
+
         run_data = {
             "similarity_overall": current_similarity,
-            "similarity_mfcc": comparison.get("mfcc", 0),
-            "similarity_chroma": comparison.get("chroma", 0),
-            "similarity_frequency": comparison.get("frequency", 0),
-            "band_sub_bass": comparison.get("band_diffs", {}).get("sub_bass", 0),
-            "band_bass": comparison.get("band_diffs", {}).get("bass", 0),
-            "band_low_mid": comparison.get("band_diffs", {}).get("low_mid", 0),
-            "band_mid": comparison.get("band_diffs", {}).get("mid", 0),
-            "band_high_mid": comparison.get("band_diffs", {}).get("high_mid", 0),
-            "band_high": comparison.get("band_diffs", {}).get("high", 0),
+            "similarity_mfcc": comp_scores.get("mfcc_similarity", 0),
+            "similarity_chroma": comp_scores.get("chroma_similarity", 0),
+            "similarity_frequency": comp_scores.get("frequency_balance_similarity", 0),
+            "band_sub_bass": band_diffs.get("sub_bass", 0),
+            "band_bass": band_diffs.get("bass", 0),
+            "band_low_mid": band_diffs.get("low_mid", 0),
+            "band_mid": band_diffs.get("mid", 0),
+            "band_high_mid": band_diffs.get("high_mid", 0),
+            "band_high": band_diffs.get("high", 0),
+            "brightness_ratio": brightness_ratio,
+            "energy_ratio": energy_ratio,
             "bpm": metadata.get("bpm", 120),
             "key": metadata.get("key", ""),
             "style": metadata.get("style", ""),
             "genre": metadata.get("genre", "")
         }
+
+        print(f"       Bands: bass={band_diffs.get('bass',0)*100:+.0f}% mid={band_diffs.get('mid',0)*100:+.0f}% high={band_diffs.get('high',0)*100:+.0f}%")
+        print(f"       Brightness: {brightness_ratio:.0%}  Energy: {energy_ratio:.0%}")
 
         ai_result = analyze_with_llm(run_data, comparison, knowledge, current_code, use_ollama=use_ollama)
 
@@ -566,8 +759,86 @@ def improve_strudel(
         print(f"Suggestions: {ai_result.get('suggestions', [])[:3]}")
 
         # 6. Update code for next iteration
-        improved_code = ai_result.get("improved_code", current_code)
-        if improved_code and improved_code != current_code:
+        improved_effects = ai_result.get("improved_code", "")
+
+        # If LLM gave suggestions but no code, generate code from frequency band data
+        if not improved_effects or not improved_effects.strip():
+            import re as regex
+
+            # Extract current gains from code (try multiple patterns)
+            bass_gain_m = regex.search(r'bassFx.*?\.gain\(([0-9.]+)\)', current_code)
+            mid_gain_m = regex.search(r'midFx.*?\.gain\(([0-9.]+)\)', current_code)
+            high_gain_m = regex.search(r'highFx.*?\.gain\(([0-9.]+)\)', current_code)
+            drums_gain_m = regex.search(r'drumsFx.*?\.gain\(([0-9.]+)\)', current_code)
+
+            bass_g = float(bass_gain_m.group(1)) if bass_gain_m else 0.15
+            mid_g = float(mid_gain_m.group(1)) if mid_gain_m else 1.2
+            high_g = float(high_gain_m.group(1)) if high_gain_m else 0.8
+            drums_g = float(drums_gain_m.group(1)) if drums_gain_m else 0.9
+
+            # Aggressive adjustments based on band differences
+            # Positive band_diff = too loud, reduce gain
+            # Negative band_diff = too quiet, increase gain
+            # For large deficits (like -76%), we need aggressive changes
+            bass_diff = band_diffs.get('bass', 0) + band_diffs.get('sub_bass', 0) * 0.5
+            mid_diff = band_diffs.get('mid', 0) + band_diffs.get('low_mid', 0) * 0.5
+            high_diff = band_diffs.get('high', 0) + band_diffs.get('high_mid', 0) * 0.5
+
+            # Scale adjustment by deficit magnitude (more aggressive for large deficits)
+            bass_adj = max(0.5, min(2.0, 1.0 - bass_diff * 1.5))
+            mid_adj = max(0.5, min(2.5, 1.0 - mid_diff * 1.2))  # More aggressive for mid
+            high_adj = max(0.5, min(2.0, 1.0 - high_diff * 1.0))
+            energy_adj = max(0.7, min(1.5, 1.0 / max(energy_ratio, 0.3))) if energy_ratio < 0.7 else 1.0
+
+            new_bass = max(0.05, min(0.5, bass_g * bass_adj))
+            new_mid = max(0.5, min(3.0, mid_g * mid_adj * energy_adj))  # Allow higher mid gain
+            new_high = max(0.3, min(1.5, high_g * high_adj))
+            new_drums = max(0.5, min(1.2, drums_g * energy_adj))
+
+            print(f"       Computing from bands: bass={new_bass:.2f} mid={new_mid:.2f} high={new_high:.2f} drums={new_drums:.2f}")
+
+            # Extract current sounds
+            bass_sound_m = regex.search(r'bassFx.*?\.sound\("([^"]+)"\)', current_code)
+            mid_sound_m = regex.search(r'midFx.*?\.sound\("([^"]+)"\)', current_code)
+            high_sound_m = regex.search(r'highFx.*?\.sound\("([^"]+)"\)', current_code)
+            drums_bank_m = regex.search(r'drumsFx.*?\.bank\("([^"]+)"\)', current_code)
+
+            bass_sound = bass_sound_m.group(1) if bass_sound_m else "gm_electric_bass_finger"
+            mid_sound = mid_sound_m.group(1) if mid_sound_m else "gm_epiano2"
+            high_sound = high_sound_m.group(1) if high_sound_m else "gm_music_box"
+            drums_bank = drums_bank_m.group(1) if drums_bank_m else "RolandTR808"
+
+            # Extract current filter values
+            bass_hpf_m = regex.search(r'bassFx.*?\.hpf\(([0-9]+)\)', current_code)
+            bass_lpf_m = regex.search(r'bassFx.*?\.lpf\(([0-9]+)\)', current_code)
+            mid_lpf_m = regex.search(r'midFx.*?\.lpf\(([0-9]+)\)', current_code)
+            high_lpf_m = regex.search(r'highFx.*?\.lpf\(([0-9]+)\)', current_code)
+
+            bass_hpf = int(bass_hpf_m.group(1)) if bass_hpf_m else 60
+            bass_lpf = int(bass_lpf_m.group(1)) if bass_lpf_m else 500
+            mid_lpf = int(mid_lpf_m.group(1)) if mid_lpf_m else 5000
+            high_lpf = int(high_lpf_m.group(1)) if high_lpf_m else 12000
+
+            # Adjust filters based on brightness
+            if brightness_ratio < 0.8:  # Too dark, open up filters
+                mid_lpf = min(8000, mid_lpf + 1000)
+                high_lpf = min(16000, high_lpf + 2000)
+            elif brightness_ratio > 1.3:  # Too bright, close filters
+                mid_lpf = max(3000, mid_lpf - 1000)
+                high_lpf = max(8000, high_lpf - 2000)
+
+            # Generate improved effects
+            improved_effects = f'''let bassFx = p => p.sound("{bass_sound}").gain({new_bass:.2f}).hpf({bass_hpf}).lpf({bass_lpf})
+let midFx = p => p.sound("{mid_sound}").gain({new_mid:.2f}).lpf({mid_lpf})
+let highFx = p => p.sound("{high_sound}").gain({new_high:.2f}).lpf({high_lpf})
+let drumsFx = p => p.bank("{drums_bank}").gain({new_drums:.2f})'''
+
+        if improved_effects and improved_effects.strip():
+            # Merge improved effects back into full code
+            improved_code = merge_effect_functions(current_code, improved_effects)
+            if improved_code == current_code:
+                print("No effective changes made, stopping")
+                break
             current_code = improved_code
             # Save improved code
             improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
@@ -582,6 +853,74 @@ def improve_strudel(
             break
 
         current_version += 1
+
+    # Generate final comparison charts and report
+    print("\nGenerating comparison charts and report...")
+
+    # Find the latest render file in output directory
+    render_files = sorted(Path(output_dir).glob("render_v*.wav"))
+    if render_files:
+        best_render = render_files[-1]  # Latest version
+    else:
+        best_render = Path(output_dir) / "render.wav"
+
+    if best_render.exists():
+        print(f"Using render: {best_render.name}")
+
+        # Generate charts
+        chart_cmd = [
+            sys.executable,
+            str(Path(__file__).parent / "compare_audio.py"),
+            original_audio,
+            str(best_render),
+            "-c", str(Path(output_dir) / "comparison.png")
+        ]
+        chart_result = subprocess.run(chart_cmd, capture_output=True, text=True)
+        if chart_result.returncode != 0:
+            print(f"Chart generation warning: {chart_result.stderr[:200]}")
+
+        # Find and copy best strudel file
+        strudel_files = sorted(Path(output_dir).glob("output_v*.strudel"))
+        if strudel_files:
+            best_strudel = strudel_files[-1]
+            with open(best_strudel) as f:
+                code = f.read()
+            with open(Path(output_dir) / "output.strudel", 'w') as f:
+                f.write(code)
+
+        # Copy render
+        import shutil
+        if best_render.name != "render.wav":
+            shutil.copy(best_render, Path(output_dir) / "render.wav")
+
+        # Create metadata
+        meta = {
+            "bpm": metadata.get("bpm", 120),
+            "key": metadata.get("key", ""),
+            "style": metadata.get("style", ""),
+            "genre": metadata.get("genre", ""),
+            "ai_improved": True,
+            "iterations": current_version,
+            "similarity": best_similarity
+        }
+        with open(Path(output_dir) / "metadata.json", 'w') as f:
+            json.dump(meta, f, indent=2)
+
+        # Generate HTML report
+        cache_dir = Path(output_dir).parent
+        version_num = Path(output_dir).name.replace("v", "")
+        report_cmd = [
+            sys.executable,
+            str(Path(__file__).parent / "generate_report.py"),
+            str(cache_dir),
+            "-v", version_num,
+            "-o", str(Path(output_dir) / "report.html")
+        ]
+        result = subprocess.run(report_cmd, capture_output=True, text=True)
+        if result.returncode == 0:
+            print(f"Report generated: {Path(output_dir) / 'report.html'}")
+        else:
+            print(f"Report generation failed: {result.stderr}")
 
     print(f"\n{'='*60}")
     print("IMPROVEMENT COMPLETE")

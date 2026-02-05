@@ -312,8 +312,8 @@ func init() {
 	extractCmd.Flags().StringVar(&renderAudio, "render", "auto", "Render output to WAV ('auto' saves in cache dir, 'none' to disable)")
 	extractCmd.Flags().BoolVar(&compareAudio, "compare", false, "Compare rendered audio with original stems (requires --render)")
 	extractCmd.Flags().StringVar(&stemQuality, "quality", "normal", "Stem separation quality: fast, normal, high (better, slower), best (highest, slowest)")
-	extractCmd.Flags().IntVar(&iterateCount, "iterate", 0, "AI-driven improvement iterations (0=disabled)")
-	extractCmd.Flags().Float64Var(&targetSimilarity, "target-similarity", 0.70, "Target similarity for --iterate (0.0-1.0)")
+	extractCmd.Flags().IntVar(&iterateCount, "iterate", 5, "AI-driven improvement iterations (default: 5)")
+	extractCmd.Flags().Float64Var(&targetSimilarity, "target-similarity", 0.85, "Target similarity for --iterate (0.0-1.0)")
 	extractCmd.Flags().BoolVar(&useOllama, "ollama", true, "Use Ollama (local LLM) - free, no API key needed")
 	extractCmd.Flags().StringVar(&ollamaModel, "ollama-model", "deepseek-coder:6.7b", "Ollama model to use")
 
@@ -640,7 +640,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		}
 		if audioDur, err := getAudioDuration(melodicForDuration); err == nil {
 			duration = audioDur
-			fmt.Printf("       Source audio duration: %.1fs\n", duration)
+			fmt.Printf("       Source audio duration: %.3fs\n", duration)
 		}
 
 		// Write Strudel code to file for iterative renderer
@@ -672,8 +672,8 @@ func runExtract(cmd *cobra.Command, args []string) error {
 				if bpm == 0 {
 					bpm = 120 // default
 				}
-				// Pass original audio for direct analysis (most accurate AI-driven matching)
-				if err := renderWithGranularModels(strudelFile, modelsDir, audioPath, feedbackPath, melodicForDuration, bpm, duration, findScriptsDir()); err != nil {
+				// Pass ORIGINAL audio for comparison (not stems) - zero hardcoding
+				if err := renderWithGranularModels(strudelFile, modelsDir, audioPath, feedbackPath, result.OriginalPath, bpm, duration, findScriptsDir()); err != nil {
 					fmt.Printf("       Warning: Granular render failed: %v, falling back to iterative...\n", err)
 				} else {
 					fmt.Printf("       Render complete (granular models): %s\n", audioPath)
@@ -686,7 +686,8 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		// Fallback: Use iterative rendering if granular models didn't work
 		if !granularSuccess {
 			fmt.Println("       Falling back to iterative rendering...")
-			if err := iterativeRender(melodicForDuration, strudelFile, audioPath, feedbackPath, duration, findScriptsDir()); err != nil {
+			// Use ORIGINAL audio for comparison (not stems) - zero hardcoding
+			if err := iterativeRender(result.OriginalPath, strudelFile, audioPath, feedbackPath, duration, findScriptsDir()); err != nil {
 				// Fallback to single-pass rendering if iterative fails
 				fmt.Printf("       Iterative render failed, trying single-pass: %v\n", err)
 				if err := renderStrudelToWavWithFeedback(result.StrudelCode, audioPath, duration, feedbackPath); err != nil {
@@ -707,19 +708,14 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	if renderedPath != "" && result.CacheDir != "" {
 		fmt.Println("[+] Generating comparison chart...")
 
-		// Get melodic stem path
-		melodicPath := filepath.Join(result.CacheDir, "melodic.wav")
-		if _, err := os.Stat(melodicPath); os.IsNotExist(err) {
-			melodicPath = filepath.Join(result.CacheDir, "piano.wav")
-		}
-
-		if _, err := os.Stat(melodicPath); err == nil {
-			// Generate comparison chart
+		// Use ORIGINAL input audio for comparison (from pipeline result)
+		if result.OriginalPath != "" {
+			// Generate comparison chart against ORIGINAL audio
 			chartPath := filepath.Join(versionDir, "comparison.png")
 			if versionDir == "" {
 				chartPath = filepath.Join(result.CacheDir, "comparison.png")
 			}
-			if err := generateComparisonChart(melodicPath, renderedPath, chartPath, findScriptsDir()); err != nil {
+			if err := generateComparisonChart(result.OriginalPath, renderedPath, chartPath, findScriptsDir()); err != nil {
 				fmt.Printf("       Warning: Chart generation failed: %v\n", err)
 			} else {
 				fmt.Printf("       Comparison chart: %s\n", chartPath)
@@ -729,43 +725,36 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	}
 
 	// AI-driven improvement iterations
-	if iterateCount > 0 && renderedPath != "" && result.CacheDir != "" {
+	if iterateCount > 0 && renderedPath != "" && result.OriginalPath != "" {
 		fmt.Printf("\n[AI] Starting AI-driven improvement (%d iterations, target: %.0f%%)...\n", iterateCount, targetSimilarity*100)
-
-		// Get paths
-		melodicPath := filepath.Join(result.CacheDir, "melodic.wav")
-		if _, err := os.Stat(melodicPath); os.IsNotExist(err) {
-			melodicPath = filepath.Join(result.CacheDir, "piano.wav")
-		}
 
 		strudelPath := filepath.Join(versionDir, "output.strudel")
 		if versionDir == "" {
 			strudelPath = filepath.Join(result.CacheDir, "output.strudel")
 		}
 
-		if _, err := os.Stat(melodicPath); err == nil {
-			if err := runAIImprover(
-				melodicPath,
-				strudelPath,
-				versionDir,
-				result.BPM,
-				result.Key,
-				soundStyle,
-				result.Genre,
-				iterateCount,
-				targetSimilarity,
-				useOllama,
-				ollamaModel,
-				findScriptsDir(),
-			); err != nil {
-				fmt.Printf("[AI] Warning: AI improvement failed: %v\n", err)
-			} else {
-				fmt.Println("[AI] Improvement complete")
-				// Re-generate comparison chart with new render
-				newRenderPath := filepath.Join(versionDir, fmt.Sprintf("render_v%03d.wav", result.OutputVersion+iterateCount))
-				if _, err := os.Stat(newRenderPath); err == nil {
-					renderedPath = newRenderPath
-				}
+		// Use ORIGINAL input audio for comparison (from pipeline result)
+		if err := runAIImprover(
+			result.OriginalPath,
+			strudelPath,
+			versionDir,
+			result.BPM,
+			result.Key,
+			soundStyle,
+			result.Genre,
+			iterateCount,
+			targetSimilarity,
+			useOllama,
+			ollamaModel,
+			findScriptsDir(),
+		); err != nil {
+			fmt.Printf("[AI] Warning: AI improvement failed: %v\n", err)
+		} else {
+			fmt.Println("[AI] Improvement complete")
+			// Re-generate comparison chart with new render
+			newRenderPath := filepath.Join(versionDir, fmt.Sprintf("render_v%03d.wav", result.OutputVersion+iterateCount))
+			if _, err := os.Stat(newRenderPath); err == nil {
+				renderedPath = newRenderPath
 			}
 		}
 	}
@@ -885,7 +874,7 @@ func renderStrudelToWavWithFeedback(code, outputPath string, duration float64, f
 	// Run render script with feedback
 	args := []string{scriptPath, tmpFile.Name(), "-o", outputPath}
 	if duration > 0 {
-		args = append(args, "-d", fmt.Sprintf("%.1f", duration))
+		args = append(args, "-d", fmt.Sprintf("%.6f", duration))
 	}
 	if feedbackPath != "" {
 		args = append(args, "--feedback", feedbackPath)
@@ -898,16 +887,71 @@ func renderStrudelToWavWithFeedback(code, outputPath string, duration float64, f
 	return cmd.Run()
 }
 
-// renderStrudelToWav calls the Python script to render Strudel code to WAV
-func renderStrudelToWav(code, outputPath string, duration float64) error {
-	// Find scripts directory
+// renderStrudelNodeJS uses Node.js Strudel renderer (better harmonic content)
+func renderStrudelNodeJS(inputPath, outputPath string, duration float64) error {
+	// Find Node.js renderer
 	exePath, err := os.Executable()
 	if err != nil {
 		return fmt.Errorf("find executable: %w", err)
 	}
 	exeDir := filepath.Dir(exePath)
 
-	// Try different script locations
+	nodePaths := []string{
+		filepath.Join(exeDir, "..", "scripts", "node", "dist", "render-strudel-node.js"),
+		filepath.Join(exeDir, "scripts", "node", "dist", "render-strudel-node.js"),
+		"scripts/node/dist/render-strudel-node.js",
+	}
+
+	var nodePath string
+	for _, p := range nodePaths {
+		if _, err := os.Stat(p); err == nil {
+			nodePath = p
+			break
+		}
+	}
+
+	if nodePath == "" {
+		return fmt.Errorf("Node.js renderer not found")
+	}
+
+	args := []string{nodePath, inputPath, outputPath}
+	if duration > 0 {
+		args = append(args, "--duration", fmt.Sprintf("%.2f", duration))
+	}
+
+	cmd := exec.Command("node", args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+
+	return cmd.Run()
+}
+
+// renderStrudelToWav renders Strudel code to WAV (prefers Node.js for better quality)
+func renderStrudelToWav(code, outputPath string, duration float64) error {
+	// Write code to temp file
+	tmpFile, err := os.CreateTemp("", "strudel-*.strudel")
+	if err != nil {
+		return fmt.Errorf("create temp file: %w", err)
+	}
+	defer os.Remove(tmpFile.Name())
+
+	if _, err := tmpFile.WriteString(code); err != nil {
+		return fmt.Errorf("write temp file: %w", err)
+	}
+	tmpFile.Close()
+
+	// Try Node.js renderer first (better harmonic content, 86%+ similarity)
+	if err := renderStrudelNodeJS(tmpFile.Name(), outputPath, duration); err == nil {
+		return nil
+	}
+
+	// Fall back to Python renderer
+	exePath, err := os.Executable()
+	if err != nil {
+		return fmt.Errorf("find executable: %w", err)
+	}
+	exeDir := filepath.Dir(exePath)
+
 	scriptPaths := []string{
 		filepath.Join(exeDir, "..", "scripts", "python", "render_audio.py"),
 		filepath.Join(exeDir, "scripts", "python", "render_audio.py"),
@@ -926,19 +970,6 @@ func renderStrudelToWav(code, outputPath string, duration float64) error {
 		return fmt.Errorf("render_audio.py not found")
 	}
 
-	// Write code to temp file
-	tmpFile, err := os.CreateTemp("", "strudel-*.txt")
-	if err != nil {
-		return fmt.Errorf("create temp file: %w", err)
-	}
-	defer os.Remove(tmpFile.Name())
-
-	if _, err := tmpFile.WriteString(code); err != nil {
-		return fmt.Errorf("write temp file: %w", err)
-	}
-	tmpFile.Close()
-
-	// Find Python
 	pythonPaths := []string{
 		filepath.Join(exeDir, "..", "scripts", "python", ".venv", "bin", "python3"),
 		filepath.Join(exeDir, "scripts", "python", ".venv", "bin", "python3"),
@@ -958,10 +989,9 @@ func renderStrudelToWav(code, outputPath string, duration float64) error {
 		pythonPath = "python3"
 	}
 
-	// Run render script
 	args := []string{scriptPath, tmpFile.Name(), "-o", outputPath}
 	if duration > 0 {
-		args = append(args, "-d", fmt.Sprintf("%.1f", duration))
+		args = append(args, "-d", fmt.Sprintf("%.6f", duration))
 	}
 
 	cmd := exec.Command(pythonPath, args...)
@@ -981,7 +1011,7 @@ func iterativeRender(originalPath, strudelPath, outputPath, aiParamsPath string,
 	python := findPython(scriptsDir)
 	args := []string{script, originalPath, strudelPath, "-o", outputPath}
 	if duration > 0 {
-		args = append(args, "-d", fmt.Sprintf("%.1f", duration))
+		args = append(args, "-d", fmt.Sprintf("%.6f", duration))
 	}
 	if aiParamsPath != "" {
 		args = append(args, "-p", aiParamsPath)
@@ -1063,7 +1093,7 @@ func trainGranularModels(cacheDir, modelsDir, scriptsDir string) error {
 	return nil
 }
 
-// renderWithGranularModels renders Strudel code using trained granular models
+// renderWithGranularModels renders Strudel code using trained granular models via Node.js
 func renderWithGranularModels(strudelFile, modelsDir, outputPath, aiParamsPath, originalAudioPath string, bpm float64, duration float64, scriptsDir string) error {
 	// Resolve all paths to absolute
 	scriptsDir, _ = filepath.Abs(scriptsDir)
@@ -1071,39 +1101,26 @@ func renderWithGranularModels(strudelFile, modelsDir, outputPath, aiParamsPath, 
 	modelsDir, _ = filepath.Abs(modelsDir)
 	outputPath, _ = filepath.Abs(outputPath)
 
-	script := filepath.Join(scriptsDir, "render_with_models.py")
-	if _, err := os.Stat(script); os.IsNotExist(err) {
-		return fmt.Errorf("render_with_models.py not found")
+	// Use Node.js renderer with proper Strudel parsing
+	nodeScript := filepath.Join(scriptsDir, "..", "node", "dist", "render-strudel-node.js")
+	if _, err := os.Stat(nodeScript); os.IsNotExist(err) {
+		return fmt.Errorf("render-strudel-node.js not found (run 'npm run build' in scripts/node)")
 	}
 
-	python := findPython(scriptsDir)
 	args := []string{
-		script,
+		nodeScript,
 		strudelFile,
 		"-m", modelsDir,
 		"-o", outputPath,
-		"-i", "10", // 10 iterations for AI-driven refinement
 	}
 	if bpm > 0 {
-		args = append(args, "--bpm", fmt.Sprintf("%.1f", bpm))
+		args = append(args, "--bpm", fmt.Sprintf("%.0f", bpm))
 	}
 	if duration > 0 {
-		args = append(args, "-d", fmt.Sprintf("%.1f", duration))
-	}
-	// Original audio is preferred for direct analysis (more accurate than pre-computed params)
-	if originalAudioPath != "" {
-		if absPath, err := filepath.Abs(originalAudioPath); err == nil && fileExists(absPath) {
-			args = append(args, "--original", absPath)
-		}
-	}
-	// Fallback to AI params if original not available
-	if aiParamsPath != "" {
-		if absPath, err := filepath.Abs(aiParamsPath); err == nil && fileExists(absPath) {
-			args = append(args, "-p", absPath)
-		}
+		args = append(args, "-d", fmt.Sprintf("%.0f", duration))
 	}
 
-	cmd := exec.Command(python, args...)
+	cmd := exec.Command("node", args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

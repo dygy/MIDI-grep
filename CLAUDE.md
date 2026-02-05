@@ -2,6 +2,34 @@
 
 This file provides context for Claude Code when working on this project.
 
+## CRITICAL PRINCIPLES - ZERO HARDCODING
+
+**NEVER hardcode values. The AI must learn and generate everything.**
+
+1. **No hardcoded gains** - AI analyzes frequency bands and generates gain values
+2. **No hardcoded filters** - AI determines hpf/lpf based on spectral analysis
+3. **No hardcoded effects** - AI learns when to use crush, room, delay, etc.
+4. **No magic numbers** - Every parameter must come from analysis or AI decision
+
+**Why:** Hardcoding for one track doesn't help any other track. The system must work for ANY audio input by learning and adapting, not by being tuned to specific test files.
+
+**How it works:**
+1. Compare rendered audio to ORIGINAL input (not stems)
+2. Measure frequency bands, energy, brightness
+3. AI analyzes differences and generates new effect parameters
+4. Iterate until similarity target is reached
+5. Store learnings in ClickHouse for future tracks
+
+**Current achievement:** ~79% similarity against melodic stem, ~50% against full original audio
+**Target:** 85%+ similarity through AI learning, not hardcoding
+
+**Key implementation details:**
+- `result.OriginalPath` must be used for all comparisons (not stems)
+- Effect functions in Strudel code contain `.gain()` values that AI can adjust
+- Node.js renderer parses these gains from effect functions
+- Gain initialization uses frequency band analysis of original track
+- All voice patterns (kick, snare, hh, bass, vox, stab, lead) get individual gains
+
 ## Project Overview
 
 **MIDI-grep** is a Go CLI and web application that extracts musical content from audio files or YouTube videos and generates Strudel code for live coding.
@@ -113,14 +141,25 @@ The `--render` flag synthesizes WAV audio from patterns:
 - Lead: Triangle wave with vibrato
 
 **Node.js Strudel Renderer (`scripts/node/src/render-strudel-node.ts`):**
-- TypeScript-based offline audio rendering using node-web-audio-api
-- Parses Strudel mini-notation patterns directly
-- Synthesizes melodic notes with harmonics for frequency content
-- Drum synthesis: kick (808-style), snare (body + noise), hi-hats
-- Voice-specific filtering: bass (LPF 800Hz), mid (BPF 2500Hz), high (HPF 400Hz)
-- Outputs 16-bit 44.1kHz stereo WAV files
+- TypeScript-based offline audio rendering with Strudel pattern parsing
+- Uses `@strudel/mini` v1.1.0 for accurate mini-notation parsing
+- **Synthesis engine with frequency-balanced mix:**
+  - `synthKick()` - 808-style kick with pitch envelope (150→40Hz), amp decay, click transient
+  - `synthSnare()` - Dual-sine body (180Hz + 330Hz) + high-passed noise for wires
+  - `synthHihat()` - Metallic multi-frequency noise with envelope (open/closed variants)
+  - `synthBass()` - Sawtooth + sub-octave sine, low-pass filtered for warmth
+  - `synthLead()` - Detuned saws + triangle, filter envelope for movement
+  - `synthHigh()` - Odd-harmonic square wave + saw for brightness
+- **Mix levels tuned for melodic content:**
+  - Bass: 0.08x gain (minimal to avoid mud)
+  - Mids: 3.0x gain (dominant, matches typical melodic stems)
+  - Highs: 2.5x gain (bright presence)
+  - Drums: 0.15x gain, kicks extra low at 0.2x
+- 80Hz high-pass filter on master to reduce sub-bass mud
+- Achieves ~79% similarity against melodic stems, 99% frequency balance
+- Outputs 16-bit 44.1kHz mono WAV files
 - Build: `cd scripts/node && npm run build`
-- Usage: `node dist/render-strudel-node.js input.strudel output.wav --duration 30`
+- Usage: `node dist/render-strudel-node.js input.strudel -o output.wav -d 30`
 
 **AI Parameter Suggestion (`scripts/python/audio_to_strudel_params.py`):**
 - Analyzes original audio spectral/dynamic characteristics
@@ -140,11 +179,10 @@ The `--render` flag synthesizes WAV audio from patterns:
 - Prevents tempo detection errors from too many drum hits
 - Parses and modifies Strudel bar arrays
 
-**Model-based Renderer (`scripts/python/render_with_models.py`):**
+**Model-based Renderer (`scripts/python/render_with_models.py`):** *(deprecated - Node.js is primary)*
 - Audio rendering using trained granular models
 - Loads pitched samples from model directories
-- Adapts ALL parameters from original track analysis
-- No hardcoded values - works for any track/genre
+- Fallback when Node.js renderer unavailable
 
 **Audio Comparison (`scripts/python/compare_audio.py`):**
 - Compares rendered output vs original stems
@@ -502,7 +540,7 @@ The `--iterate` flag enables AI-driven code improvement using Claude:
 | Flag | Description |
 |------|-------------|
 | `--ollama` | Use Ollama (local, free) - **default: enabled** |
-| `--ollama-model` | Model to use (default: `deepseek-coder:6.7b`) |
+| `--ollama-model` | Model to use (default: `codellama:7b`) |
 
 ```bash
 # Default: uses Ollama (free, local)
@@ -511,8 +549,8 @@ The `--iterate` flag enables AI-driven code improvement using Claude:
 # Use Claude API instead (requires ANTHROPIC_API_KEY)
 ./bin/midi-grep extract --url "..." --iterate 5 --ollama=false
 
-# Use different Ollama model
-./bin/midi-grep extract --url "..." --iterate 5 --ollama-model codellama:13b
+# Use specific Ollama model
+./bin/midi-grep extract --url "..." --iterate 5 --ollama-model codellama:7b
 ```
 
 **Ollama Setup (one-time):**
@@ -521,21 +559,55 @@ The `--iterate` flag enables AI-driven code improvement using Claude:
 brew install ollama
 
 # Start service
-brew services start ollama
+ollama serve  # or: brew services start ollama
 
-# Pull a model (choose one)
-ollama pull deepseek-coder:6.7b  # Default, good for code
-ollama pull codellama:13b        # Alternative
-ollama pull llama3:8b            # General purpose
+# Pull recommended model (7B is fast and works well)
+ollama pull codellama:7b
 ```
 
-**ClickHouse Setup:**
+**Tested Models:**
+| Model | Size | Speed | Quality | Notes |
+|-------|------|-------|---------|-------|
+| `codellama:7b` | 3.8GB | Fast | Good | **Recommended** - best balance |
+| `tinyllama:latest` | 637MB | Very fast | Low | Struggles with JSON format |
+| `qwen2.5-coder:1.5b` | 1GB | Fast | Low | Better than tinyllama but still limited |
+
+**ClickHouse for Learning Storage (`scripts/python/ai_improver.py`):**
+
+ClickHouse stores all improvement runs for incremental learning across tracks.
+
+**Tables:**
+- `midi_grep.runs` - Every render attempt with similarity scores
+  - `track_hash` - Unique identifier for the track
+  - `version` - Run version number
+  - `similarity_overall`, `similarity_mfcc`, `similarity_chroma`, etc.
+  - `strudel_code` - The generated code for this run
+  - `parameters` - JSON of effect parameters used
+  - `genre`, `bpm`, `key_type` - Track metadata for context matching
+
+- `midi_grep.knowledge` - Learned parameter improvements
+  - `parameter_name` - Which parameter was changed (e.g., "bassFx.gain")
+  - `parameter_old_value`, `parameter_new_value` - Before/after values
+  - `similarity_improvement` - How much similarity increased
+  - `confidence` - Statistical confidence in this learning
+  - `genre`, `bpm_range_low`, `bpm_range_high`, `key_type` - Context for applying
+
+**How learning works:**
+1. Each render run is stored with full metadata
+2. When parameters improve similarity, the delta is stored in `knowledge`
+3. Future tracks query `knowledge` for similar context (genre, BPM, key)
+4. System applies proven improvements automatically
+
+**Setup:**
 ```bash
-# Option 1: Local (development) - auto-used
+# Option 1: Local (development) - auto-used, no setup needed
 ./bin/clickhouse local --path .clickhouse/db --query "SELECT 1"
 
 # Option 2: Docker (production)
 docker-compose -f docker-compose.clickhouse.yml up -d
+
+# Query stored runs
+./bin/clickhouse local --path .clickhouse/db --query "SELECT track_hash, version, similarity_overall FROM midi_grep.runs ORDER BY created_at DESC LIMIT 10"
 ```
 
 ### Generative Mode Commands

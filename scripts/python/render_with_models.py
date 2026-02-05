@@ -297,12 +297,32 @@ def render_note(samples, midi_note, duration, velocity=1.0):
 
 
 def parse_bar_arrays(code):
-    """Parse bar array patterns from Strudel code."""
+    """Parse bar array patterns from Strudel code.
+
+    Handles two formats:
+    1. Array format: let bass = ["...", "..."]
+    2. Single pattern format: let kick1 = "..." (Brazilian funk mode)
+    """
     patterns = {}
+
+    # Format 1: Array patterns like let bass = ["...", "..."]
     matches = re.findall(r'let\s+(\w+)\s*=\s*\[([\s\S]*?)\]', code)
     for name, content in matches:
         bars = re.findall(r'"([^"]*)"', content)
         patterns[name] = bars
+
+    # Format 2: Single patterns like let kick1 = "..." (Brazilian funk)
+    # Group by base name (kick, bass, vox, etc.)
+    single_matches = re.findall(r'let\s+(\w+?)(\d+)\s*=\s*"([^"]*)"', code)
+    for base_name, num, pattern in single_matches:
+        if base_name not in patterns:
+            patterns[base_name] = []
+        # Ensure we have enough slots
+        idx = int(num) - 1
+        while len(patterns[base_name]) <= idx:
+            patterns[base_name].append("~")
+        patterns[base_name][idx] = pattern
+
     return patterns
 
 
@@ -451,16 +471,37 @@ def render_with_models(strudel_code, models_dir, output_path, bpm=120, duration=
     high_e = target_bands.get('high', 0) + target_bands.get('high_mid', 0)
     total_e = bass_e + mid_e + high_e
 
+    # Map patterns to frequency bands for gain initialization
+    bass_patterns = ['bass', 'kick']
+    mid_patterns = ['mid', 'melodic', 'vox', 'stab']
+    high_patterns = ['high', 'lead', 'hh']
+    drums_patterns = ['drums', 'snare']
+
+    # Initialize base gains from target analysis
+    base_gains = {}
     if total_e > 0:
-        gains = {
-            'bass': max(0.1, bass_e / total_e * 3),
-            'mid': max(0.5, mid_e / total_e * 4),
-            'high': max(0.3, high_e / total_e * 4),
-            'drums': 0.5,
-            'melodic': max(0.5, mid_e / total_e * 3)
+        base_gains = {
+            'bass_band': max(0.1, bass_e / total_e * 3),
+            'mid_band': max(0.5, mid_e / total_e * 4),
+            'high_band': max(0.3, high_e / total_e * 4),
+            'drums_band': 0.5
         }
     else:
-        gains = {'bass': 0.5, 'mid': 1.5, 'high': 1.0, 'drums': 0.5, 'melodic': 1.0}
+        base_gains = {'bass_band': 0.5, 'mid_band': 1.5, 'high_band': 1.0, 'drums_band': 0.5}
+
+    # Create gains for all patterns found in the code
+    gains = {}
+    for pattern_name in patterns.keys():
+        if pattern_name in bass_patterns:
+            gains[pattern_name] = base_gains['bass_band']
+        elif pattern_name in mid_patterns:
+            gains[pattern_name] = base_gains['mid_band']
+        elif pattern_name in high_patterns:
+            gains[pattern_name] = base_gains['high_band']
+        elif pattern_name in drums_patterns:
+            gains[pattern_name] = base_gains['drums_band']
+        else:
+            gains[pattern_name] = 1.0  # Default for unknown patterns
 
     print(f"Initial gains: {', '.join(f'{k}={v:.2f}' for k,v in gains.items())}")
 
@@ -470,9 +511,13 @@ def render_with_models(strudel_code, models_dir, output_path, bpm=120, duration=
     total_samples = int(duration * SAMPLE_RATE)
     total_bars = int(duration / bar_duration) + 1
 
+    # Map pattern names to model names
     pattern_model_map = {
         'bass': 'bass', 'mid': 'melodic', 'high': 'melodic',
-        'drums': 'drums', 'melodic': 'melodic'
+        'drums': 'drums', 'melodic': 'melodic',
+        # Brazilian funk patterns
+        'kick': 'drums', 'snare': 'drums', 'hh': 'drums',
+        'vox': 'melodic', 'stab': 'melodic', 'lead': 'melodic'
     }
 
     voices = {}
@@ -528,25 +573,33 @@ def render_with_models(strudel_code, models_dir, output_path, bpm=120, duration=
             break
 
         # Adjust gains based on band differences
+        # Map each voice to a frequency band for adjustment
         for voice_name in voices:
-            if voice_name == 'bass':
-                target_bass = target_bands.get('bass', 0) + target_bands.get('sub_bass', 0)
-                current_bass = current['band_energy'].get('bass', 0) + current['band_energy'].get('sub_bass', 0)
-                if current_bass > 0.001:
-                    ratio = target_bass / current_bass
-                    current_gains['bass'] *= np.clip(ratio, 0.8, 1.2)
-            elif voice_name in ['mid', 'melodic']:
-                target_mid = target_bands.get('mid', 0) + target_bands.get('low_mid', 0)
-                current_mid = current['band_energy'].get('mid', 0) + current['band_energy'].get('low_mid', 0)
-                if current_mid > 0.001:
-                    ratio = target_mid / current_mid
-                    current_gains[voice_name] *= np.clip(ratio, 0.9, 1.1)
-            elif voice_name == 'high':
-                target_high = target_bands.get('high', 0) + target_bands.get('high_mid', 0)
-                current_high = current['band_energy'].get('high', 0) + current['band_energy'].get('high_mid', 0)
-                if current_high > 0.001:
-                    ratio = target_high / current_high
-                    current_gains['high'] *= np.clip(ratio, 0.8, 1.2)
+            if voice_name in current_gains:
+                if voice_name in ['bass', 'kick']:
+                    # Bass + sub-bass range
+                    target_val = target_bands.get('bass', 0) + target_bands.get('sub_bass', 0)
+                    current_val = current['band_energy'].get('bass', 0) + current['band_energy'].get('sub_bass', 0)
+                elif voice_name in ['mid', 'melodic', 'vox', 'stab']:
+                    # Mid range
+                    target_val = target_bands.get('mid', 0) + target_bands.get('low_mid', 0)
+                    current_val = current['band_energy'].get('mid', 0) + current['band_energy'].get('low_mid', 0)
+                elif voice_name in ['high', 'lead', 'hh']:
+                    # High range
+                    target_val = target_bands.get('high', 0) + target_bands.get('high_mid', 0)
+                    current_val = current['band_energy'].get('high', 0) + current['band_energy'].get('high_mid', 0)
+                elif voice_name in ['snare', 'drums']:
+                    # Snare covers mid + high_mid
+                    target_val = target_bands.get('high_mid', 0) + target_bands.get('mid', 0) * 0.5
+                    current_val = current['band_energy'].get('high_mid', 0) + current['band_energy'].get('mid', 0) * 0.5
+                else:
+                    continue
+
+                if current_val > 0.001:
+                    ratio = target_val / current_val
+                    # More conservative adjustment - smaller steps for stability
+                    adjustment = np.clip(ratio, 0.9, 1.1)
+                    current_gains[voice_name] *= adjustment
 
         # Apply spectral matching
         audio = apply_spectral_matching(audio, current, target, SAMPLE_RATE)
