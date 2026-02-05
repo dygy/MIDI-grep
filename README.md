@@ -149,6 +149,7 @@ midi-grep/
 │       ├── detect_drums.py  # Drum onset detection & classification
 │       ├── detect_genre_dl.py    # CLAP deep learning genre detection
 │       ├── detect_genre_essentia.py  # Essentia-based genre detection
+│       ├── analyze_synth_params.py  # AI audio analysis for synthesis parameters
 │       ├── render_audio.py  # WAV synthesis (fallback renderer)
 │       ├── ai_code_generator.py  # AI-driven Strudel code generation
 │       ├── ai_improver.py   # AI-driven iterative code improvement (Ollama/Claude)

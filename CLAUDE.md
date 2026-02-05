@@ -14,21 +14,29 @@ This file provides context for Claude Code when working on this project.
 **Why:** Hardcoding for one track doesn't help any other track. The system must work for ANY audio input by learning and adapting, not by being tuned to specific test files.
 
 **How it works:**
-1. Compare rendered audio to ORIGINAL input (not stems)
-2. Measure frequency bands, energy, brightness
-3. AI analyzes differences and generates new effect parameters
-4. Iterate until similarity target is reached
-5. Store learnings in ClickHouse for future tracks
+1. **AI Audio Analysis** (`analyze_synth_params.py`):
+   - Analyzes original melodic stem for transients, spectral envelope, harmonics
+   - Extracts BPM, waveform suggestions, filter cutoffs, gain ratios
+   - Generates JSON synthesis config with per-voice parameters
+2. **Dynamic Synthesis** (Node.js renderer):
+   - Reads AI-generated config for envelope, filters, waveform per voice
+   - Uses saw waveform for mid-heavy content (harmonics fill spectrum)
+   - Adjusts master HPF based on original's bass content
+3. **Comparison & Iteration**:
+   - Compare rendered audio to melodic stem
+   - Measure frequency bands, energy, brightness
+   - AI analyzes differences and generates new parameters
+   - Store learnings in ClickHouse for future tracks
 
-**Current achievement:** ~79% similarity against melodic stem, ~50% against full original audio
-**Target:** 85%+ similarity through AI learning, not hardcoding
+**Current achievement:** 86.5% similarity against melodic stem
+**Target:** 90%+ similarity through AI learning, not hardcoding
 
 **Key implementation details:**
-- `result.OriginalPath` must be used for all comparisons (not stems)
-- Effect functions in Strudel code contain `.gain()` values that AI can adjust
-- Node.js renderer parses these gains from effect functions
-- Gain initialization uses frequency band analysis of original track
-- All voice patterns (kick, snare, hh, bass, vox, stab, lead) get individual gains
+- `melodic.wav` is used for AI synthesis analysis (matches what we're synthesizing)
+- `analyze_synth_params.py` extracts transients, spectrum, harmonics, tempo
+- Node.js renderer accepts `--config` flag for dynamic synthesis parameters
+- Saw waveforms essential for mid-band content (sine only produces fundamental)
+- Per-voice gain scaling from original frequency band analysis
 
 ## Project Overview
 
