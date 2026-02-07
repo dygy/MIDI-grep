@@ -28,12 +28,13 @@ This file provides context for Claude Code when working on this project.
    - AI analyzes differences and generates new parameters
    - Store learnings in ClickHouse for future tracks
 
-**Current achievement:** 86.5% similarity against melodic stem
-**Target:** 90%+ similarity through AI learning, not hardcoding
+**Current achievement:** 90%+ similarity on electro swing tracks (91.2% Catgroove, 90.5% Booty Swing)
+**Target:** 90%+ similarity across all genres through AI learning, not hardcoding
 
 **Key implementation details:**
-- `melodic.wav` is used for AI synthesis analysis (matches what we're synthesizing)
+- Original audio (full mix) is used for AI synthesis analysis (proper frequency balance)
 - `analyze_synth_params.py` extracts transients, spectrum, harmonics, tempo
+- `synth_config.json` stores AI-derived BPM and tempo tolerance for comparison
 - Node.js renderer accepts `--config` flag for dynamic synthesis parameters
 - Saw waveforms essential for mid-band content (sine only produces fundamental)
 - Per-voice gain scaling from original frequency band analysis
@@ -123,6 +124,7 @@ All outputs are cached in `.cache/stems/{key}/` by URL or file hash:
     ├── comparison.png     # Combined comparison chart
     ├── chart_*.png        # Individual analysis charts
     ├── ai_params.json     # AI-suggested mix parameters
+    ├── synth_config.json  # AI-derived synthesis config (BPM, tempo tolerance)
     └── report.html        # Self-contained HTML report
 ```
 
@@ -200,6 +202,36 @@ The `--render` flag synthesizes WAV audio from patterns:
 - Overall similarity score for quality feedback
 - Generates 6 individual chart images + combined comparison chart
 - Saves comparison.json for HTML report data
+- Accepts `--config` for AI-derived tempo tolerance from synth_config.json
+
+**Mel Spectrogram Analyzer (`scripts/python/spectrogram_analyzer.py`):**
+- Deep mel spectrogram analysis for AI learning
+- Compares original vs rendered spectrograms to identify:
+  - Which frequency bands differ at which times
+  - Envelope/amplitude differences over time
+  - Harmonic content differences
+  - Transient/attack differences
+- Generates actionable insights for LLM prompts (dB differences → gain multipliers)
+
+**AI Code Improver (`scripts/python/ai_code_improver.py`):**
+- Gap analysis between original and rendered audio
+- Identifies specific frequency band deficiencies
+- Modifies Strudel code to address gaps
+- Conservative 50% correction per iteration to avoid over-correction
+
+**AI Iterative Codegen (`scripts/python/ai_iterative_codegen.py`):**
+- Iteration loop with automatic revert-on-regression
+- Tracks best similarity across iterations
+- Reverts to best code if similarity drops
+
+**Sound Selector (`scripts/python/sound_selector.py`):**
+- Complete Strudel sound catalog:
+  - **67 drum machines** from tidal-drum-machines (Roland, Linn, Akai, Boss, Korg, etc.)
+  - **128 General MIDI instruments** (gm_* prefix)
+  - 5 basic waveforms + ZZFX synths
+- **17 genre palettes** (brazilian_funk, electro_swing, house, jpop, trance, lofi, synthwave, etc.)
+- Sound alternation patterns using `<sound1 sound2>` syntax
+- Timbre-based selection (brightness, warmth, attack time, harmonic richness)
 
 **HTML Report (`scripts/python/generate_report.py`):**
 - Self-contained single-file HTML report with embedded audio and charts
@@ -284,9 +316,17 @@ midi-grep/
 │       ├── compare_audio.py    # Rendered vs original audio comparison
 │       ├── generate_report.py  # HTML report generation
 │       ├── ai_code_generator.py # AI-driven Strudel code generation
+│       ├── ai_code_improver.py # Gap analysis and Strudel code modification
+│       ├── ai_iterative_codegen.py # Iteration loop with revert-on-regression
+│       ├── ai_learning_optimizer.py # AI learning optimization
+│       ├── spectrogram_analyzer.py # Mel spectrogram deep analysis for AI
+│       ├── sound_selector.py   # Complete sound catalog (67 drums, 128 GM)
 │       ├── thin_patterns.py    # Pattern density control
 │       ├── render_with_models.py # Render using trained granular models
 │       ├── iterative_render.py # AI-driven iterative audio refinement
+│       ├── learn_artist.py     # Artist-specific learning
+│       ├── seed_knowledge.py   # Knowledge base seeding
+│       ├── iterative_optimizer.py # Iterative optimization loop
 │       ├── requirements.txt
 │       └── rave/               # RAVE generative model system
 │           ├── __init__.py

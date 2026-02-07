@@ -33,6 +33,13 @@ try:
 except ImportError:
     HAS_REQUESTS = False
 
+# Import our smarter gap analysis
+try:
+    from ai_code_improver import analyze_comparison_gaps, improve_strudel_code
+    HAS_CODE_IMPROVER = True
+except ImportError:
+    HAS_CODE_IMPROVER = False
+
 # Ollama configuration
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 DEFAULT_OLLAMA_MODEL = "tinyllama:latest"
@@ -184,6 +191,290 @@ def get_learned_knowledge(genre: str, bpm: float, key_type: str) -> List[Dict]:
     return clickhouse_query(query)
 
 
+def extract_parameters_from_code(code: str) -> Dict[str, Dict[str, Any]]:
+    """Extract effect parameters from Strudel code for learning."""
+    import re
+    params = {}
+
+    # Pattern to match effect functions and their parameters
+    fx_pattern = r'let\s+(\w+Fx)\s*=\s*p\s*=>\s*p([^\n]*(?:\n\s+\.[^\n]*)*)'
+
+    for match in re.finditer(fx_pattern, code, re.MULTILINE):
+        fx_name = match.group(1)  # e.g., "bassFx"
+        fx_body = match.group(2)  # e.g., ".sound("supersaw").gain(0.15)..."
+
+        fx_params = {}
+
+        # Extract .gain(value)
+        gain_m = re.search(r'\.gain\(([0-9.]+)\)', fx_body)
+        if gain_m:
+            fx_params['gain'] = float(gain_m.group(1))
+
+        # Extract .hpf(value)
+        hpf_m = re.search(r'\.hpf\(([0-9.]+)\)', fx_body)
+        if hpf_m:
+            fx_params['hpf'] = float(hpf_m.group(1))
+
+        # Extract .lpf(value)
+        lpf_m = re.search(r'\.lpf\(([0-9.]+)\)', fx_body)
+        if lpf_m:
+            fx_params['lpf'] = float(lpf_m.group(1))
+
+        # Extract .attack(value)
+        attack_m = re.search(r'\.attack\(([0-9.]+)\)', fx_body)
+        if attack_m:
+            fx_params['attack'] = float(attack_m.group(1))
+
+        # Extract .decay(value)
+        decay_m = re.search(r'\.decay\(([0-9.]+)\)', fx_body)
+        if decay_m:
+            fx_params['decay'] = float(decay_m.group(1))
+
+        # Extract .sustain(value)
+        sustain_m = re.search(r'\.sustain\(([0-9.]+)\)', fx_body)
+        if sustain_m:
+            fx_params['sustain'] = float(sustain_m.group(1))
+
+        # Extract .release(value)
+        release_m = re.search(r'\.release\(([0-9.]+)\)', fx_body)
+        if release_m:
+            fx_params['release'] = float(release_m.group(1))
+
+        # Extract .room(value)
+        room_m = re.search(r'\.room\(([0-9.]+)\)', fx_body)
+        if room_m:
+            fx_params['room'] = float(room_m.group(1))
+
+        # Extract .sound("value")
+        sound_m = re.search(r'\.sound\("([^"]+)"\)', fx_body)
+        if sound_m:
+            fx_params['sound'] = sound_m.group(1)
+
+        if fx_params:
+            params[fx_name] = fx_params
+
+    return params
+
+
+def learn_from_improvement(
+    genre: str,
+    bpm: float,
+    key_type: str,
+    old_code: str,
+    new_code: str,
+    old_similarity: float,
+    new_similarity: float
+) -> int:
+    """
+    Compare before/after code and store successful parameter changes as knowledge.
+    Returns number of knowledge entries stored.
+    """
+    if new_similarity <= old_similarity:
+        return 0  # No improvement, nothing to learn
+
+    improvement = new_similarity - old_similarity
+    if improvement < 0.01:  # Less than 1% improvement, skip
+        return 0
+
+    old_params = extract_parameters_from_code(old_code)
+    new_params = extract_parameters_from_code(new_code)
+
+    entries_stored = 0
+
+    for fx_name in new_params:
+        if fx_name not in old_params:
+            continue
+
+        for param_name in new_params[fx_name]:
+            if param_name not in old_params[fx_name]:
+                continue
+
+            old_val = old_params[fx_name][param_name]
+            new_val = new_params[fx_name][param_name]
+
+            # Skip if values are the same
+            if old_val == new_val:
+                continue
+
+            # Store the learned improvement
+            full_param_name = f"{fx_name}.{param_name}"
+            success = store_knowledge(
+                genre=genre,
+                bpm=bpm,
+                key_type=key_type,
+                parameter_name=full_param_name,
+                old_value=str(old_val),
+                new_value=str(new_val),
+                improvement=improvement
+            )
+            if success:
+                entries_stored += 1
+                print(f"       📚 Learned: {full_param_name}: {old_val} → {new_val} (+{improvement*100:.1f}%)")
+
+    return entries_stored
+
+
+def normalize_artist(name: str) -> str:
+    """Normalize artist name for consistent matching."""
+    import re
+    normalized = name.lower()
+    normalized = re.sub(r'[^\w\s]', '', normalized)
+    normalized = re.sub(r'\s+', '_', normalized.strip())
+    return normalized
+
+
+def get_artist_presets(artist: str) -> Dict[str, Dict]:
+    """
+    Get artist-specific parameter presets from learned knowledge.
+    Uses the artist_knowledge table populated by learn_artist.py.
+    """
+    if not artist:
+        return {}
+
+    artist_normalized = normalize_artist(artist)
+
+    query = f"""
+        SELECT parameter_name, parameter_value, avg_similarity, track_count
+        FROM midi_grep.artist_knowledge
+        WHERE artist_normalized = '{artist_normalized}'
+          AND confidence > 0.3
+        ORDER BY avg_similarity DESC
+    """
+
+    try:
+        rows = clickhouse_query(query)
+    except:
+        return {}  # Table might not exist yet
+
+    presets = {}
+    for row in rows:
+        param_name = row.get('parameter_name', '')
+        value = row.get('parameter_value', '')
+
+        if '.' in param_name:
+            fx_name, param = param_name.split('.', 1)
+            if fx_name not in presets:
+                presets[fx_name] = {}
+            try:
+                presets[fx_name][param] = float(value)
+            except ValueError:
+                presets[fx_name][param] = value
+
+    return presets
+
+
+def detect_artist_from_path(path: str) -> Optional[str]:
+    """Try to detect artist name from file path or cache directory."""
+    import re
+
+    # Common patterns in YouTube titles: "Artist - Song Title"
+    # or "Song Title - Artist"
+    path_str = str(path)
+
+    # Look for patterns like "Artist Name - "
+    match = re.search(r'/([^/]+)\s*-\s*[^/]+/(?:melodic|v\d+)', path_str)
+    if match:
+        potential_artist = match.group(1).strip()
+        # Filter out common non-artist words
+        skip_words = ['official', 'video', 'audio', 'lyric', 'hd', '4k', 'remix']
+        if not any(w in potential_artist.lower() for w in skip_words):
+            return potential_artist
+
+    return None
+
+
+def get_genre_presets(genre: str) -> Dict[str, Any]:
+    """
+    Get genre-specific parameter presets from successful runs.
+    Analyzes high-performing runs and extracts average parameters.
+    """
+    # Query successful runs for this genre (>80% similarity)
+    query = f"""
+        SELECT
+            strudel_code,
+            similarity_overall,
+            bpm
+        FROM midi_grep.runs
+        WHERE genre = '{genre}'
+          AND similarity_overall > 0.80
+        ORDER BY similarity_overall DESC
+        LIMIT 10
+    """
+    rows = clickhouse_query(query)
+
+    if not rows:
+        # Fall back to all high-performing runs
+        query = """
+            SELECT
+                strudel_code,
+                similarity_overall,
+                bpm
+            FROM midi_grep.runs
+            WHERE similarity_overall > 0.85
+            ORDER BY similarity_overall DESC
+            LIMIT 10
+        """
+        rows = clickhouse_query(query)
+
+    if not rows:
+        return {}
+
+    # Aggregate parameters from successful runs
+    param_sums = {}
+    param_counts = {}
+
+    for row in rows:
+        code = row.get('strudel_code', '')
+        params = extract_parameters_from_code(code)
+
+        for fx_name, fx_params in params.items():
+            if fx_name not in param_sums:
+                param_sums[fx_name] = {}
+                param_counts[fx_name] = {}
+
+            for param, value in fx_params.items():
+                if isinstance(value, (int, float)):
+                    if param not in param_sums[fx_name]:
+                        param_sums[fx_name][param] = 0
+                        param_counts[fx_name][param] = 0
+                    param_sums[fx_name][param] += value
+                    param_counts[fx_name][param] += 1
+
+    # Calculate averages
+    presets = {}
+    for fx_name in param_sums:
+        presets[fx_name] = {}
+        for param in param_sums[fx_name]:
+            if param_counts[fx_name][param] > 0:
+                avg = param_sums[fx_name][param] / param_counts[fx_name][param]
+                presets[fx_name][param] = round(avg, 3)
+
+    return presets
+
+
+def apply_genre_presets(code: str, presets: Dict[str, Dict]) -> str:
+    """Apply genre presets to Strudel code as starting point."""
+    import re
+
+    if not presets:
+        return code
+
+    result = code
+
+    for fx_name, params in presets.items():
+        for param, value in params.items():
+            # Find and replace parameter in the effect function
+            # Pattern: .param(old_value) -> .param(new_value)
+            pattern = rf'(let\s+{fx_name}\s*=.*?\.{param}\()([0-9.]+)(\))'
+
+            def replacer(m):
+                return f"{m.group(1)}{value}{m.group(3)}"
+
+            result = re.sub(pattern, replacer, result, flags=re.DOTALL)
+
+    return result
+
+
 def extract_effect_functions(code: str) -> str:
     """Extract just the effect functions from Strudel code for concise prompts."""
     import re
@@ -231,7 +522,10 @@ def merge_effect_functions(original_code: str, improved_effects: str) -> str:
 def build_improvement_prompt(
     previous_run: Dict,
     learned_knowledge: List[Dict],
-    original_code: str
+    original_code: str,
+    spectrogram_insights: str = None,
+    genre: str = "",
+    artist: str = ""
 ) -> str:
     """Build the prompt for LLM analysis - let LLM decide everything."""
 
@@ -254,8 +548,23 @@ def build_improvement_prompt(
         for k in learned_knowledge[:5]:
             knowledge_str += f"- {k.get('parameter_name')}: {k.get('parameter_old_value')} -> {k.get('parameter_new_value')} (improved {k.get('similarity_improvement', 0)*100:.0f}%)\n"
 
+    # Include spectrogram insights if available (deep analysis)
+    spectrogram_str = ""
+    if spectrogram_insights:
+        spectrogram_str = f"\n\nDEEP SPECTROGRAM ANALYSIS:\n{spectrogram_insights}\n"
+
+    # Include genre/artist context
+    context_str = ""
+    if genre:
+        context_str += f"\nGENRE: {genre}"
+    if artist:
+        context_str += f"\nARTIST: {artist}"
+    if context_str:
+        context_str = f"\nCONTEXT:{context_str}\n"
+
     # Build the research-oriented prompt - give LLM full control
     return f'''You are an audio mixing AI. Your goal: make the rendered audio match the original.
+{context_str}
 
 COMPARISON DATA (rendered minus original):
 - Bass: {band_bass*100:+.0f}% (positive=too loud, negative=too quiet)
@@ -263,7 +572,7 @@ COMPARISON DATA (rendered minus original):
 - High: {band_high*100:+.0f}%
 - Brightness: {brightness_ratio:.0%} of original
 - Energy: {energy_ratio:.0%} of original
-
+{spectrogram_str}
 CURRENT EFFECT FUNCTIONS:
 {effects_code}
 {knowledge_str}
@@ -271,19 +580,46 @@ AVAILABLE EFFECTS:
 - .gain(0.01-2.0) - volume
 - .hpf(20-2000) - high pass filter (removes bass)
 - .lpf(200-20000) - low pass filter (removes treble)
+- .attack(0.001-0.5) - envelope attack time
+- .decay(0.01-1.0) - envelope decay time
+- .sustain(0-1) - envelope sustain level
+- .release(0.01-2.0) - envelope release time
 - .crush(1-16) - bit depth (lower=more distortion)
 - .coarse(1-16) - sample rate reduction
 - .room(0-1) - reverb amount
 - .delay(0-1) - delay wet mix
+- .distort(0-1) - distortion amount
+- .phaser(0-1) - phaser effect
+
+SOUND PALETTE (choose sounds that match the genre/timbre):
+WAVEFORMS: sine, sawtooth, square, triangle, supersaw
+BASS: gm_acoustic_bass, gm_electric_bass_finger, gm_electric_bass_pick, gm_fretless_bass, gm_slap_bass_1, gm_synth_bass_1, gm_synth_bass_2
+LEAD/MID: gm_lead_1_square, gm_lead_2_sawtooth, gm_lead_3_calliope, gm_lead_5_charang, gm_lead_6_voice, gm_lead_7_fifths
+PADS: gm_pad_1_new_age, gm_pad_2_warm, gm_pad_3_polysynth, gm_pad_4_choir, gm_string_ensemble_1, gm_synth_strings_1
+KEYS: gm_acoustic_grand_piano, gm_bright_acoustic_piano, gm_electric_piano_1, gm_electric_piano_2, gm_harpsichord, gm_clavinet
+BRASS: gm_trumpet, gm_trombone, gm_alto_sax, gm_tenor_sax, gm_brass_section, gm_synth_brass_1
+PERCUSSION: gm_glockenspiel, gm_music_box, gm_vibraphone, gm_marimba, gm_xylophone, gm_celesta
+FX: gm_fx_1_rain, gm_fx_3_crystal, gm_fx_4_atmosphere, gm_fx_7_echoes
+DRUM BANKS: RolandTR808, RolandTR909, RolandTR707, LinnDrum, OberheimDMX, AlesisHR16, BossDR110
+
+SOUND ALTERNATION - Use "<sound1 sound2>" for variety:
+Example: .sound("<supersaw gm_synth_bass_1>") alternates between sounds
+Example: .bank("<RolandTR808 RolandTR909>") alternates drum kits
+
+IMPORTANT: Don't use the same sounds for every track! Choose sounds that match the genre:
+- Brazilian Funk: RolandTR808, gm_synth_bass_1, gm_lead_2_sawtooth
+- Electro Swing: LinnDrum, gm_acoustic_bass, gm_trumpet, gm_clarinet
+- Trance: RolandTR909, supersaw, gm_pad_7_halo, gm_lead_7_fifths
+- LoFi: BossDR110, triangle, gm_electric_piano_1, gm_vibraphone
 
 EXAMPLE OUTPUT (what I expect):
-let bassFx = p => p.sound("gm_electric_bass_finger").gain(0.15).hpf(60).lpf(500)
-let midFx = p => p.sound("gm_epiano2").gain(1.2).lpf(5000)
-let highFx = p => p.sound("gm_music_box").gain(0.8).lpf(12000)
-let drumsFx = p => p.bank("RolandTR808").gain(0.9)
+let bassFx = p => p.sound("<gm_electric_bass_finger gm_synth_bass_1>").gain(0.15).hpf(60).lpf(500).attack(0.01)
+let midFx = p => p.sound("<gm_electric_piano_2 gm_lead_3_calliope>").gain(1.2).lpf(5000).attack(0.05).release(0.3)
+let highFx = p => p.sound("<gm_music_box gm_vibraphone>").gain(0.8).lpf(12000)
+let drumsFx = p => p.bank("<RolandTR909 LinnDrum>").gain(0.9)
 
 TASK: Output your improved effect functions with SPECIFIC NUMERIC VALUES.
-Think about the frequency band data and adjust accordingly.
+Use the spectrogram analysis insights to determine precise gain multipliers and envelope settings.
 
 Output ONLY the 4 lines (no comments, no explanation):'''
 
@@ -292,7 +628,10 @@ def analyze_with_ollama(
     previous_run: Dict,
     learned_knowledge: List[Dict],
     original_code: str,
-    model: str = None
+    model: str = None,
+    spectrogram_insights: str = None,
+    genre: str = "",
+    artist: str = ""
 ) -> Dict[str, Any]:
     """Use Ollama (local LLM) to analyze results and suggest improvements."""
 
@@ -301,7 +640,10 @@ def analyze_with_ollama(
         return {"suggestions": [], "improved_code": original_code, "reasoning": "No requests"}
 
     ollama_model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
-    prompt = build_improvement_prompt(previous_run, learned_knowledge, original_code)
+    prompt = build_improvement_prompt(
+        previous_run, learned_knowledge, original_code,
+        spectrogram_insights, genre=genre, artist=artist
+    )
 
     try:
         response = requests.post(
@@ -411,7 +753,10 @@ def analyze_with_ollama(
 def analyze_with_claude(
     previous_run: Dict,
     learned_knowledge: List[Dict],
-    original_code: str
+    original_code: str,
+    spectrogram_insights: str = None,
+    genre: str = "",
+    artist: str = ""
 ) -> Dict[str, Any]:
     """Use Claude API to analyze results and suggest improvements."""
 
@@ -422,7 +767,10 @@ def analyze_with_claude(
     if not api_key:
         return None  # Signal to try Ollama
 
-    prompt = build_improvement_prompt(previous_run, learned_knowledge, original_code)
+    prompt = build_improvement_prompt(
+        previous_run, learned_knowledge, original_code,
+        spectrogram_insights, genre=genre, artist=artist
+    )
     client = Anthropic(api_key=api_key)
 
     try:
@@ -451,7 +799,10 @@ def analyze_with_llm(
     comparison_data: Dict,
     learned_knowledge: List[Dict],
     original_code: str,
-    use_ollama: bool = False
+    use_ollama: bool = False,
+    spectrogram_insights: str = None,
+    genre: str = "",
+    artist: str = ""
 ) -> Dict[str, Any]:
     """
     Analyze and improve code using available LLM.
@@ -461,20 +812,32 @@ def analyze_with_llm(
     2. Try Claude API if ANTHROPIC_API_KEY is set
     3. Fall back to Ollama (local)
     4. Return unchanged code if nothing works
+
+    Now enhanced with spectrogram_insights for deeper analysis.
+    Genre and artist context helps with sound selection.
     """
 
     if use_ollama:
         print("       Using Ollama (local LLM)...")
-        return analyze_with_ollama(previous_run, learned_knowledge, original_code)
+        return analyze_with_ollama(
+            previous_run, learned_knowledge, original_code,
+            spectrogram_insights=spectrogram_insights, genre=genre, artist=artist
+        )
 
     # Try Claude first
-    result = analyze_with_claude(previous_run, learned_knowledge, original_code)
+    result = analyze_with_claude(
+        previous_run, learned_knowledge, original_code,
+        spectrogram_insights=spectrogram_insights, genre=genre, artist=artist
+    )
     if result is not None:
         return result
 
     # Fall back to Ollama
     print("       Claude unavailable, using Ollama (local LLM)...")
-    return analyze_with_ollama(previous_run, learned_knowledge, original_code)
+    return analyze_with_ollama(
+        previous_run, learned_knowledge, original_code,
+        spectrogram_insights=spectrogram_insights, genre=genre, artist=artist
+    )
 
 
 def store_run(
@@ -644,6 +1007,39 @@ def improve_strudel(
     with open(strudel_path) as f:
         current_code = f.read()
 
+    # Apply genre-specific presets as starting point
+    genre = metadata.get("genre", "")
+    if genre:
+        presets = get_genre_presets(genre)
+        if presets:
+            print(f"\n--- Applying {genre} genre presets ---")
+            for fx_name, params in presets.items():
+                param_str = ", ".join(f"{k}={v}" for k, v in params.items())
+                print(f"  {fx_name}: {param_str}")
+            current_code = apply_genre_presets(current_code, presets)
+            # Save preset-applied code
+            with open(strudel_path, 'w') as f:
+                f.write(current_code)
+
+    # Try to detect and apply artist-specific presets
+    artist = metadata.get("artist", "")
+    if not artist:
+        artist = detect_artist_from_path(original_audio)
+    if artist:
+        artist_presets = get_artist_presets(artist)
+        if artist_presets:
+            print(f"\n--- Applying {artist} artist presets ---")
+            for fx_name, params in artist_presets.items():
+                param_str = ", ".join(f"{k}={v}" for k, v in params.items())
+                print(f"  {fx_name}: {param_str}")
+            current_code = apply_genre_presets(current_code, artist_presets)
+            with open(strudel_path, 'w') as f:
+                f.write(current_code)
+
+    # Track previous code for learning
+    previous_code = current_code
+    previous_similarity = 0.0
+
     # Check for previous runs
     previous_run = get_previous_run(track_hash)
     if previous_run:
@@ -729,6 +1125,25 @@ def improve_strudel(
         current_similarity = comp_scores.get("overall_similarity", 0)
         print(f"Similarity: {current_similarity*100:.1f}%")
 
+        # Learn from improvement (if this iteration improved over previous)
+        if iteration > 0 and current_similarity > previous_similarity:
+            key_type = "minor" if "minor" in metadata.get("key", "").lower() else "major"
+            learned = learn_from_improvement(
+                genre=metadata.get("genre", ""),
+                bpm=metadata.get("bpm", 120),
+                key_type=key_type,
+                old_code=previous_code,
+                new_code=current_code,
+                old_similarity=previous_similarity,
+                new_similarity=current_similarity
+            )
+            if learned > 0:
+                print(f"       Stored {learned} knowledge entries")
+
+        # Update tracking for next iteration
+        previous_code = current_code
+        previous_similarity = current_similarity
+
         # 3. Store this run
         store_run(
             track_hash=track_hash,
@@ -804,7 +1219,37 @@ def improve_strudel(
         print(f"       Bands: bass={band_diffs.get('bass',0)*100:+.0f}% mid={band_diffs.get('mid',0)*100:+.0f}% high={band_diffs.get('high',0)*100:+.0f}%")
         print(f"       Brightness: {brightness_ratio:.0%}  Energy: {energy_ratio:.0%}")
 
-        ai_result = analyze_with_llm(run_data, comparison, knowledge, current_code, use_ollama=use_ollama)
+        # Deep spectrogram analysis for AI learning
+        spectrogram_insights = None
+        try:
+            from spectrogram_analyzer import analyze_spectrograms, format_for_llm
+            print(f"       Running deep spectrogram analysis...")
+            spec_analysis = analyze_spectrograms(original_audio, str(render_path), duration=min(30, exact_duration))
+            spectrogram_insights = format_for_llm(spec_analysis)
+            spec_sim = spec_analysis.get('spectrogram_similarity', 0)
+            print(f"       Spectrogram similarity: {spec_sim*100:.1f}%")
+
+            # Save spectrogram analysis for learning
+            spec_path = Path(output_dir) / f"spectrogram_v{current_version:03d}.json"
+            with open(spec_path, 'w') as f:
+                json.dump(spec_analysis, f, indent=2)
+
+            # Add spectrogram insights to run_data for LLM
+            run_data['spectrogram_insights'] = spectrogram_insights
+            run_data['spectrogram_similarity'] = spec_sim
+        except ImportError:
+            pass
+        except Exception as e:
+            print(f"       Spectrogram analysis failed: {e}")
+
+        # Extract genre and artist from metadata for sound selection
+        genre = metadata.get("genre", "")
+        artist_context = artist if artist else metadata.get("artist", "")
+        ai_result = analyze_with_llm(
+            run_data, comparison, knowledge, current_code,
+            use_ollama=use_ollama, spectrogram_insights=spectrogram_insights,
+            genre=genre, artist=artist_context
+        )
 
         print(f"Analysis: {ai_result.get('analysis', 'N/A')[:100]}...")
         print(f"Suggestions: {ai_result.get('suggestions', [])[:3]}")
@@ -812,8 +1257,51 @@ def improve_strudel(
         # 6. Update code for next iteration
         improved_effects = ai_result.get("improved_code", "")
 
-        # If LLM gave suggestions but no code, generate code from frequency band data
+        # If LLM gave suggestions but no code, use AI gap analysis for smarter improvement
         if not improved_effects or not improved_effects.strip():
+            if HAS_CODE_IMPROVER:
+                # Use the smarter AI code improver based on gap analysis
+                print(f"       Using AI gap analysis for code improvement...")
+
+                # Analyze comparison gaps
+                gaps = analyze_comparison_gaps(comparison)
+
+                if gaps['issues']:
+                    print(f"       Issues: {', '.join(gaps['issues'])}")
+                    print(f"       Suggestions: {'; '.join(gaps['suggestions'][:2])}")
+
+                # Load synth config if available
+                synth_cfg = {}
+                if synth_config_path.exists():
+                    with open(synth_config_path) as f:
+                        synth_cfg = json.load(f)
+
+                # Improve code based on gaps
+                improved_code_from_gaps, improved_synth_cfg = improve_strudel_code(
+                    current_code, gaps, synth_cfg
+                )
+
+                # Save updated synth config
+                if improved_synth_cfg and synth_config_path.exists():
+                    with open(synth_config_path, 'w') as f:
+                        json.dump(improved_synth_cfg, f, indent=2)
+
+                # Check if code actually changed
+                if improved_code_from_gaps != current_code:
+                    current_code = improved_code_from_gaps
+                    # Save and continue
+                    improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
+                    with open(improved_path, 'w') as f:
+                        f.write(current_code)
+                    with open(strudel_path, 'w') as f:
+                        f.write(current_code)
+                    print(f"       Saved improved code to {improved_path}")
+                    current_version += 1
+                    continue
+                else:
+                    print("       No changes from gap analysis")
+
+            # Fallback: compute from frequency bands if gap analysis didn't help
             import re as regex
 
             # Extract current gains from code (try multiple patterns)
@@ -828,21 +1316,17 @@ def improve_strudel(
             drums_g = float(drums_gain_m.group(1)) if drums_gain_m else 0.9
 
             # Aggressive adjustments based on band differences
-            # Positive band_diff = too loud, reduce gain
-            # Negative band_diff = too quiet, increase gain
-            # For large deficits (like -76%), we need aggressive changes
             bass_diff = band_diffs.get('bass', 0) + band_diffs.get('sub_bass', 0) * 0.5
             mid_diff = band_diffs.get('mid', 0) + band_diffs.get('low_mid', 0) * 0.5
             high_diff = band_diffs.get('high', 0) + band_diffs.get('high_mid', 0) * 0.5
 
-            # Scale adjustment by deficit magnitude (more aggressive for large deficits)
             bass_adj = max(0.5, min(2.0, 1.0 - bass_diff * 1.5))
-            mid_adj = max(0.5, min(2.5, 1.0 - mid_diff * 1.2))  # More aggressive for mid
+            mid_adj = max(0.5, min(2.5, 1.0 - mid_diff * 1.2))
             high_adj = max(0.5, min(2.0, 1.0 - high_diff * 1.0))
             energy_adj = max(0.7, min(1.5, 1.0 / max(energy_ratio, 0.3))) if energy_ratio < 0.7 else 1.0
 
             new_bass = max(0.05, min(0.5, bass_g * bass_adj))
-            new_mid = max(0.5, min(3.0, mid_g * mid_adj * energy_adj))  # Allow higher mid gain
+            new_mid = max(0.5, min(3.0, mid_g * mid_adj * energy_adj))
             new_high = max(0.3, min(1.5, high_g * high_adj))
             new_drums = max(0.5, min(1.2, drums_g * energy_adj))
 
@@ -871,10 +1355,10 @@ def improve_strudel(
             high_lpf = int(high_lpf_m.group(1)) if high_lpf_m else 12000
 
             # Adjust filters based on brightness
-            if brightness_ratio < 0.8:  # Too dark, open up filters
+            if brightness_ratio < 0.8:
                 mid_lpf = min(8000, mid_lpf + 1000)
                 high_lpf = min(16000, high_lpf + 2000)
-            elif brightness_ratio > 1.3:  # Too bright, close filters
+            elif brightness_ratio > 1.3:
                 mid_lpf = max(3000, mid_lpf - 1000)
                 high_lpf = max(8000, high_lpf - 2000)
 
@@ -998,6 +1482,7 @@ def main():
     parser.add_argument('--key', default='', help='Track key')
     parser.add_argument('--style', default='auto', help='Sound style')
     parser.add_argument('--genre', default='', help='Genre')
+    parser.add_argument('--artist', default='', help='Artist name (for artist-specific presets)')
     parser.add_argument('--ollama', action='store_true', help='Use Ollama (local LLM) instead of Claude API')
     parser.add_argument('--ollama-model', default=DEFAULT_OLLAMA_MODEL, help=f'Ollama model to use (default: {DEFAULT_OLLAMA_MODEL})')
 
@@ -1011,7 +1496,8 @@ def main():
         "bpm": args.bpm,
         "key": args.key,
         "style": args.style,
-        "genre": args.genre
+        "genre": args.genre,
+        "artist": args.artist
     }
 
     result = improve_strudel(

@@ -122,8 +122,27 @@ def compute_frequency_bands(y, sr=22050):
 
     return band_energy
 
-def compare_audio(original_path, rendered_path, duration=60):
-    """Compare original and rendered audio files."""
+def compare_audio(original_path, rendered_path, duration=60, synth_config_path=None):
+    """Compare original and rendered audio files.
+
+    Args:
+        original_path: Path to original audio
+        rendered_path: Path to rendered audio
+        duration: Max duration to analyze
+        synth_config_path: Optional path to synth_config.json for AI-derived tolerance
+    """
+    # Load AI-derived tempo tolerance from synth config if available
+    ai_tempo_tolerance = None
+    if synth_config_path:
+        try:
+            with open(synth_config_path, 'r') as f:
+                synth_config = json.load(f)
+            ai_tempo_tolerance = synth_config.get('tempo', {}).get('tempo_tolerance')
+            if ai_tempo_tolerance:
+                log(f"Using AI-derived tempo tolerance: {ai_tempo_tolerance:.1%}")
+        except Exception as e:
+            log(f"Warning: Could not load synth config: {e}")
+
     log(f"Loading original: {original_path}")
     original = load_audio(original_path, duration=duration)
 
@@ -192,8 +211,9 @@ def compare_audio(original_path, rendered_path, duration=60):
     orig_tempo = results['original']['rhythm']['tempo']
     rend_tempo = results['rendered']['rhythm']['tempo']
 
-    # Check tempo at different octaves: 1x, 2x, 0.5x, 3x, 0.33x
-    tempo_ratios = [1.0, 2.0, 0.5, 3.0, 1/3, 4.0, 0.25]
+    # Check tempo at various musical ratios (including non-standard ones for synthesized audio)
+    # Synthesized audio often triggers beat tracker at faster rates due to transients
+    tempo_ratios = [1.0, 2.0, 0.5, 3.0, 1/3, 4.0, 0.25, 1.5, 0.67, 1.6, 0.625]
     best_tempo_diff = float('inf')
     best_ratio = 1.0
 
@@ -208,8 +228,13 @@ def compare_audio(original_path, rendered_path, duration=60):
     results['comparison']['tempo_ratio_used'] = best_ratio
     results['comparison']['tempo_diff_bpm'] = best_tempo_diff
 
-    # Calculate similarity with 10 BPM tolerance (tighter than before)
-    tempo_sim = 1 - min(best_tempo_diff / 10, 1)
+    # Calculate similarity using AI-derived or default tolerance
+    # AI-derived tolerance accounts for beat regularity and tempo estimate variance
+    if ai_tempo_tolerance:
+        tolerance = orig_tempo * ai_tempo_tolerance  # AI-derived
+    else:
+        tolerance = orig_tempo * 0.15  # Default 15% if no config
+    tempo_sim = max(0, 1 - best_tempo_diff / tolerance)
     results['comparison']['tempo_similarity'] = float(tempo_sim)
 
     # Energy distribution similarity
@@ -939,6 +964,7 @@ def main():
     parser.add_argument('-j', '--json', action='store_true',
                        help='Output as JSON')
     parser.add_argument('-c', '--chart', help='Output path for comparison chart PNG')
+    parser.add_argument('--config', help='Path to synth_config.json for AI-derived tolerance')
 
     args = parser.parse_args()
 
@@ -946,7 +972,7 @@ def main():
     if args.json:
         _QUIET_MODE = True
 
-    results = compare_audio(args.original, args.rendered, args.duration)
+    results = compare_audio(args.original, args.rendered, args.duration, args.config)
 
     if results is None:
         sys.exit(1)

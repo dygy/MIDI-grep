@@ -26,6 +26,18 @@ import os
 from dataclasses import dataclass, asdict
 from typing import List, Dict, Optional, Tuple
 
+# Import sound selector for varied sound palette
+try:
+    from sound_selector import (
+        analyze_and_suggest, get_genre_sounds, create_sound_alternation,
+        GENRE_PALETTES, DRUM_BANKS, BASS_SOUNDS, LEAD_SOUNDS, PAD_SOUNDS,
+        PERCUSSIVE_SOUNDS
+    )
+    SOUND_SELECTOR_AVAILABLE = True
+except ImportError:
+    SOUND_SELECTOR_AVAILABLE = False
+    print("Warning: sound_selector not available, using default sounds", file=sys.stderr)
+
 
 @dataclass
 class AudioProfile:
@@ -258,14 +270,19 @@ def analyze_audio_complete(audio_path: str, duration: float = 60) -> AudioProfil
     )
 
 
-def profile_to_strudel_params(profile: AudioProfile) -> Dict:
+def profile_to_strudel_params(profile: AudioProfile, genre: str = "") -> Dict:
     """
     Convert audio profile to optimal Strudel parameters.
 
     This is where the AI magic happens - we derive ALL effect parameters
     from the audio analysis, with NO hardcoded values.
+
+    Args:
+        profile: Complete audio analysis profile
+        genre: Optional genre hint (e.g., 'brazilian_funk', 'electro_swing')
     """
     params = {}
+    params['genre'] = genre  # Store for later use
 
     # === FILTER PARAMETERS (from spectral analysis) ===
 
@@ -416,37 +433,68 @@ def profile_to_strudel_params(profile: AudioProfile) -> Dict:
         params['kick_beat_pattern'] = [1.0, 0.0, 0.5, 0.0]  # Lighter kick
         params['snare_beat_pattern'] = [0.0, 1.0, 0.0, 1.0]  # Snare on 2 and 4
 
-    # === SOUND SELECTION ===
+    # === SOUND SELECTION (using sound_selector for variety) ===
 
-    # Bass sound based on sub-bass and bass energy
-    if profile.sub_bass_energy > 0.15:
-        params['sound_bass'] = 'supersaw'  # Fat electronic bass
-    elif profile.bass_energy > 0.25:
-        params['sound_bass'] = 'sawtooth'  # Defined bass
-    else:
-        params['sound_bass'] = 'gm_acoustic_bass'  # Soft bass
+    if SOUND_SELECTOR_AVAILABLE:
+        # Use sound selector for intelligent sound selection with variety
+        # Calculate harmonic ratio from spectral flatness (higher flatness = more noise = less harmonic)
+        harmonic_ratio = 1.0 - profile.spectral_flatness_mean
 
-    # Mid sound based on timbre
-    if profile.timbre_profile == 'harsh':
-        params['sound_mid'] = 'square'
-    elif profile.timbre_profile == 'warm':
-        params['sound_mid'] = 'gm_epiano1'
-    elif profile.timbre_profile == 'gritty':
-        params['sound_mid'] = 'gm_lead_2_sawtooth'
-    else:
-        params['sound_mid'] = 'gm_pad_poly'
+        # Analyze and get sound suggestions (use genre if provided)
+        sound_suggestions = analyze_and_suggest(
+            spectral_centroid=profile.spectral_centroid_mean,
+            spectral_rolloff=profile.spectral_rolloff_mean,
+            rms_mean=profile.rms_mean,
+            attack_time=0.01 if profile.is_punchy else 0.05,  # Derived from punchiness
+            harmonic_ratio=harmonic_ratio,
+            genre=genre  # Pass genre for genre-specific sounds
+        )
 
-    # High sound based on brightness
-    if profile.brightness in ['very_bright', 'bright']:
-        params['sound_high'] = 'triangle'
-    else:
-        params['sound_high'] = 'gm_vibraphone'
+        # Use alternating sounds for variety (e.g., "<supersaw gm_synth_bass_1>")
+        params['sound_bass'] = sound_suggestions['bass_sound']
+        params['sound_mid'] = sound_suggestions['lead_sound']  # Lead for mid register
+        params['sound_pad'] = sound_suggestions['pad_sound']  # Pad for sustained parts
+        params['sound_high'] = sound_suggestions['high_sound']
+        params['drum_bank'] = sound_suggestions['drum_bank']
+        params['alt_drum_banks'] = sound_suggestions.get('alt_drum_banks', [])
 
-    # Drums based on punchiness
-    if profile.is_punchy:
-        params['drum_bank'] = 'RolandTR808'
+        # Store timbre profile for debugging
+        params['timbre_info'] = sound_suggestions.get('timbre_profile', {})
     else:
-        params['drum_bank'] = 'RolandTR909'
+        # Fallback to original logic if sound_selector not available
+        # Bass sound based on sub-bass and bass energy
+        if profile.sub_bass_energy > 0.15:
+            params['sound_bass'] = 'supersaw'
+        elif profile.bass_energy > 0.25:
+            params['sound_bass'] = 'sawtooth'
+        else:
+            params['sound_bass'] = 'gm_acoustic_bass'
+
+        # Mid sound based on timbre
+        if profile.timbre_profile == 'harsh':
+            params['sound_mid'] = 'square'
+        elif profile.timbre_profile == 'warm':
+            params['sound_mid'] = 'gm_epiano1'
+        elif profile.timbre_profile == 'gritty':
+            params['sound_mid'] = 'gm_lead_2_sawtooth'
+        else:
+            params['sound_mid'] = 'gm_pad_poly'
+
+        params['sound_pad'] = 'gm_pad_2_warm'
+
+        # High sound based on brightness
+        if profile.brightness in ['very_bright', 'bright']:
+            params['sound_high'] = 'triangle'
+        else:
+            params['sound_high'] = 'gm_vibraphone'
+
+        # Drums based on punchiness
+        if profile.is_punchy:
+            params['drum_bank'] = 'RolandTR808'
+        else:
+            params['drum_bank'] = 'RolandTR909'
+
+        params['alt_drum_banks'] = []
 
     return params
 
@@ -455,13 +503,20 @@ def generate_effect_chain(params: Dict, voice: str) -> str:
     """
     Generate Strudel effect chain for a voice.
     Voice: 'bass', 'mid', 'high'
+
+    Supports alternating sounds like "<supersaw gm_synth_bass_1>"
     """
     chain = []
 
-    # Sound source
+    # Sound source - handle alternating sounds
     sound_key = f'sound_{voice}'
     if sound_key in params:
-        chain.append(f'.sound("{params[sound_key]}")')
+        sound_val = params[sound_key]
+        # Alternating sounds already have < > syntax
+        if sound_val.startswith('<'):
+            chain.append(f'.sound("{sound_val}")')
+        else:
+            chain.append(f'.sound("{sound_val}")')
 
     # Gain with perlin modulation for organic feel
     gain_key = f'gain_{voice}'
@@ -523,14 +578,15 @@ def main():
     parser.add_argument('audio_path', help='Path to audio file')
     parser.add_argument('--output', '-o', help='Output JSON path')
     parser.add_argument('--duration', '-d', type=float, default=60, help='Analysis duration in seconds')
+    parser.add_argument('--genre', '-g', default='', help='Genre hint for sound selection')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     args = parser.parse_args()
 
     # Analyze audio
     profile = analyze_audio_complete(args.audio_path, duration=args.duration)
 
-    # Convert to Strudel parameters
-    params = profile_to_strudel_params(profile)
+    # Convert to Strudel parameters (with genre if provided)
+    params = profile_to_strudel_params(profile, genre=args.genre)
 
     # Generate effect chains
     effect_chains = {

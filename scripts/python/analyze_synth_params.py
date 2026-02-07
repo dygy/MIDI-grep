@@ -152,6 +152,87 @@ def analyze_harmonics(y, sr=22050):
     }
 
 
+def analyze_formants(y, sr=22050):
+    """Extract formant frequencies and harmonic profile for better timbre matching."""
+    from scipy.signal import find_peaks
+
+    # Compute average spectrum
+    S = np.abs(librosa.stft(y))
+    avg_spectrum = np.mean(S, axis=1)
+    freqs = librosa.fft_frequencies(sr=sr)
+
+    # Find spectral peaks (formants)
+    # Use prominence to find significant peaks, not just any local maximum
+    peaks, properties = find_peaks(
+        avg_spectrum,
+        prominence=np.max(avg_spectrum) * 0.05,  # 5% of max as minimum prominence
+        distance=5  # Minimum distance between peaks (in frequency bins)
+    )
+
+    # Get top 8 formants by prominence
+    if len(peaks) > 0:
+        prominences = properties['prominences']
+        sorted_indices = np.argsort(prominences)[::-1][:8]
+        top_peaks = peaks[sorted_indices]
+
+        formant_freqs = freqs[top_peaks].tolist()
+        formant_amps = (avg_spectrum[top_peaks] / np.max(avg_spectrum)).tolist()
+
+        # Sort by frequency
+        sorted_pairs = sorted(zip(formant_freqs, formant_amps))
+        formant_freqs = [f for f, a in sorted_pairs]
+        formant_amps = [a for f, a in sorted_pairs]
+    else:
+        formant_freqs = [100, 300, 600, 1000]  # Default formants
+        formant_amps = [1.0, 0.5, 0.3, 0.2]
+
+    # Compute harmonic profile (amplitudes of first 16 harmonics relative to fundamental)
+    # This helps recreate the timbre with additive synthesis
+    harmonics_profile = []
+    fundamental_bin = 5  # ~100 Hz bin as approximate fundamental
+
+    for h in range(1, 17):
+        harmonic_bin = fundamental_bin * h
+        if harmonic_bin < len(avg_spectrum):
+            # Average around the harmonic bin (±2 bins)
+            start = max(0, harmonic_bin - 2)
+            end = min(len(avg_spectrum), harmonic_bin + 3)
+            amp = np.mean(avg_spectrum[start:end])
+            harmonics_profile.append(float(amp))
+        else:
+            harmonics_profile.append(0.0)
+
+    # Normalize harmonic profile
+    max_harm = max(harmonics_profile) if harmonics_profile else 1.0
+    harmonics_profile = [h / max_harm for h in harmonics_profile]
+
+    # Estimate FM parameters from harmonic structure
+    # If odd harmonics dominate: square-like (FM ratio ~1, low index)
+    # If all harmonics present: saw-like (FM ratio ~1, high index)
+    odd_harmonics = sum(harmonics_profile[0::2])  # 1st, 3rd, 5th...
+    even_harmonics = sum(harmonics_profile[1::2])  # 2nd, 4th, 6th...
+    odd_ratio = odd_harmonics / (odd_harmonics + even_harmonics + 1e-10)
+
+    if odd_ratio > 0.7:
+        # Square-like: odd harmonics dominate
+        fm_ratio = 1.0
+        fm_index = 2.0
+    else:
+        # Saw-like: all harmonics present
+        fm_ratio = 1.0
+        fm_index = np.pi  # ~3.14 gives saw-like spectrum
+
+    return {
+        "formant_frequencies": formant_freqs,
+        "formant_amplitudes": formant_amps,
+        "formant_Q": 5.0,  # Default Q for moderate resonance
+        "harmonics_profile": harmonics_profile,
+        "fm_ratio": float(fm_ratio),
+        "fm_index": float(fm_index),
+        "odd_harmonic_ratio": float(odd_ratio)
+    }
+
+
 def analyze_dynamics(y, sr=22050):
     """Analyze amplitude dynamics for envelope shaping."""
     # Compute RMS envelope
@@ -189,12 +270,63 @@ def analyze_dynamics(y, sr=22050):
     }
 
 
+def correct_octave_error(tempo, prior_center=120, prior_range=40):
+    """
+    Correct octave errors by checking if half/double time is more likely.
+
+    Most music falls in 90-150 BPM range. If detected tempo is outside this,
+    check if an octave multiple is within range.
+
+    Args:
+        tempo: Detected tempo
+        prior_center: Expected tempo center (default 120 BPM)
+        prior_range: Expected tempo range from center (default ±40 BPM = 80-160)
+
+    Returns:
+        Corrected tempo
+    """
+    low = prior_center - prior_range  # 80 BPM
+    high = prior_center + prior_range  # 160 BPM
+
+    # Generate all octave candidates
+    candidates = [
+        tempo,
+        tempo / 2,
+        tempo * 2,
+        tempo * 2 / 3,  # triplet relationship
+        tempo * 3 / 2,  # triplet relationship
+    ]
+
+    # Score each candidate by distance from prior center
+    best_score = float('inf')
+    best_tempo = tempo
+
+    for cand in candidates:
+        if low <= cand <= high:
+            # Distance from prior center (prefer tempos near 120)
+            score = abs(cand - prior_center)
+            if score < best_score:
+                best_score = score
+                best_tempo = cand
+
+    # If no candidate in range, fall back to closest octave
+    if best_score == float('inf'):
+        for cand in candidates:
+            score = abs(cand - prior_center)
+            if score < best_score:
+                best_score = score
+                best_tempo = cand
+
+    return best_tempo
+
+
 def analyze_tempo_precise(y, sr=22050):
     """Extract precise tempo with sub-BPM accuracy."""
     # Use multiple methods and combine
 
-    # Method 1: librosa beat tracking
-    tempo1, beats = librosa.beat.beat_track(y=y, sr=sr)
+    # Method 1: librosa beat tracking with start_bpm hint
+    # Using start_bpm helps reduce octave errors by biasing towards typical range
+    tempo1, beats = librosa.beat.beat_track(y=y, sr=sr, start_bpm=120.0)
     if hasattr(tempo1, '__len__'):
         tempo1 = float(tempo1[0]) if len(tempo1) > 0 else 120.0
     else:
@@ -202,7 +334,7 @@ def analyze_tempo_precise(y, sr=22050):
 
     # Method 2: Onset-based tempo
     onset_env = librosa.onset.onset_strength(y=y, sr=sr)
-    tempo2 = librosa.feature.tempo(onset_envelope=onset_env, sr=sr)
+    tempo2 = librosa.feature.tempo(onset_envelope=onset_env, sr=sr, start_bpm=120.0)
     if hasattr(tempo2, '__len__'):
         tempo2 = float(tempo2[0]) if len(tempo2) > 0 else 120.0
     else:
@@ -212,10 +344,15 @@ def analyze_tempo_precise(y, sr=22050):
     tempogram = librosa.feature.tempogram(y=y, sr=sr)
     tempo_freqs = librosa.tempo_frequencies(tempogram.shape[0], sr=sr)
 
-    # Find peak in tempogram
+    # Find peak in tempogram (with prior correction)
     avg_tempogram = np.mean(tempogram, axis=1)
     peak_idx = np.argmax(avg_tempogram[1:]) + 1  # Skip DC
     tempo3 = tempo_freqs[peak_idx] if peak_idx < len(tempo_freqs) else 120.0
+
+    # Apply octave correction to each estimate
+    tempo1 = correct_octave_error(tempo1)
+    tempo2 = correct_octave_error(tempo2)
+    tempo3 = correct_octave_error(tempo3)
 
     # Combine estimates (weighted average, prefer tempogram)
     tempos = [tempo1, tempo2, tempo3]
@@ -237,14 +374,38 @@ def analyze_tempo_precise(y, sr=22050):
     else:
         final_tempo = median_tempo
 
+    # Final octave correction on combined result
+    final_tempo = correct_octave_error(final_tempo)
+
     # Calculate beat times for sync
     beat_times = librosa.frames_to_time(beats, sr=sr)
     beat_intervals = np.diff(beat_times) if len(beat_times) > 1 else [0.5]
     beat_regularity = 1 - np.std(beat_intervals) / (np.mean(beat_intervals) + 1e-10)
 
+    # AI-driven tempo tolerance: based on beat regularity and tempo estimate variance
+    # High regularity = tight tolerance, low regularity = looser tolerance
+    # Also, variance in tempo estimates indicates uncertainty
+    tempo_variance = np.std([t for t in tempos if 60 < t < 200]) if len(tempos) > 1 else 10
+
+    # Tolerance formula: base 10% + uncertainty factor
+    # - High regularity (>0.9): 10% base
+    # - Medium regularity (0.7-0.9): 15% base
+    # - Low regularity (<0.7): 20% base
+    # - Add variance factor: +1% per 5 BPM variance
+    if beat_regularity > 0.9:
+        base_tolerance = 0.10
+    elif beat_regularity > 0.7:
+        base_tolerance = 0.15
+    else:
+        base_tolerance = 0.20
+
+    variance_factor = min(0.10, tempo_variance / 50)  # Cap at 10% extra
+    tempo_tolerance = base_tolerance + variance_factor
+
     return {
         "tempo_bpm": float(np.clip(final_tempo, 60, 200)),
         "tempo_confidence": float(np.clip(beat_regularity, 0, 1)),
+        "tempo_tolerance": float(tempo_tolerance),  # AI-derived tolerance for comparison
         "beat_count": len(beats),
         "seconds_per_beat": 60.0 / final_tempo,
         "samples_per_beat": int(sr * 60.0 / final_tempo),
@@ -303,6 +464,7 @@ def generate_synth_config(analysis_results):
     dyn = analysis_results["dynamics"]
     tempo = analysis_results["tempo"]
     bands = analysis_results["frequency_bands"]
+    formants = analysis_results.get("formants", {})
 
     # Build envelope config
     envelope = {
@@ -349,21 +511,18 @@ def generate_synth_config(analysis_results):
     # Even if original sounds "tonal", we need harmonics to match spectral distribution.
     # A note at C4 (262Hz) only fills low_mid, but with harmonics can fill mid band too.
 
-    # Determine if we need more harmonic content to fill mid/high bands
-    # KEY INSIGHT: If original has 50%+ mid content, we ALWAYS need saw wave
-    # because low-octave notes have fundamentals in low_mid, not mid
-    # Only harmonics can fill the mid band (500-2000 Hz)
-    needs_harmonics = bands["mid_ratio"] > 0.3 or bands["high_ratio"] > 0.1
+    # KEY INSIGHT: Melodic patterns ALWAYS need harmonics for proper spectrum
+    # Even if the original mix is bass-heavy (low mid_ratio), the melodic notes
+    # still need saw waveform to produce harmonics that fill the mid band.
+    # Sine waves only produce fundamental frequency, not harmonics.
+    # So we ALWAYS use saw for mid voice, regardless of mix frequency balance.
+    mid_waveform = "saw"  # Always use saw - melodic patterns need harmonics
 
-    # Mid waveform: ALWAYS use saw when mid content is significant
-    # Sine waves cannot produce mid-band content from low-octave notes
-    mid_waveform = "saw" if needs_harmonics else oscillator["waveform"]
+    # LPF for mid: must allow harmonics through (always high cutoff for saw wave)
+    mid_lpf = max(4000, spec["centroid_hz"] * 2)
 
-    # LPF for mid: must allow harmonics through (higher cutoff if high mid content)
-    mid_lpf = max(4000, spec["centroid_hz"] * 2) if needs_harmonics else spec["lpf_cutoff"]
-
-    # Detune for richer spectral content
-    mid_detune = 10 if needs_harmonics else 5
+    # Detune for richer spectral content (always use 10 for saw wave)
+    mid_detune = 10
 
     # Calculate gain scaling based on original frequency distribution
     # If original has low bass, we should have very low bass
@@ -372,29 +531,32 @@ def generate_synth_config(analysis_results):
 
     voice_configs = {
         "bass": {
-            # Bass gain is proportional to original's bass content
-            # If original has <5% bass, use very minimal gain
-            "gain": min(0.2, bass_scale * 1.0) if bands["bass_ratio"] > 0.05 else 0.01,
-            "lpf": min(400, spec["lpf_cutoff"] * 0.2),
-            "hpf": 80,  # Higher HPF to reduce sub-bass
+            # Bass gain proportional to original's bass content
+            # Bass-heavy tracks (>30% bass) need strong bass gain
+            "gain": min(0.8, bass_scale * 1.2) if bands["bass_ratio"] > 0.05 else 0.02,
+            "lpf": min(600, spec["lpf_cutoff"] * 0.3),  # Higher LPF for more bass harmonics
+            "hpf": 30,  # Lower HPF to keep sub-bass
             "envelope": {**envelope, "attack": 0.005, "decay": 0.15},
             "waveform": "saw" if bands["bass_ratio"] > 0.1 else "sine",
-            "sub_octave_gain": 0.1 if bands["bass_ratio"] > 0.2 else 0
+            "sub_octave_gain": 0.4 if bands["bass_ratio"] > 0.2 else 0.1  # Strong sub for bass-heavy
         },
         "mid": {
-            "gain": min(1.5, mid_scale * 1.5 + 0.5),  # Best balance from v2
-            "lpf": mid_lpf,  # Use analyzed LPF
+            # Reduce mid gain for bass-heavy tracks to maintain balance
+            "gain": min(1.2, mid_scale * 1.2 + 0.3) if bands["bass_ratio"] < 0.3 else min(0.8, mid_scale * 1.0 + 0.2),
+            # LPF based on original's brightness - if centroid > 2000Hz, use high LPF
+            "lpf": max(6000, spec["centroid_hz"] * 2.5) if spec["centroid_hz"] > 1500 else mid_lpf,
             "hpf": 200,  # Keep HPF moderate
             "envelope": envelope,
             "waveform": mid_waveform,
             "detune_cents": mid_detune  # 10 cents for richer spectral content
         },
         "high": {
-            "gain": min(1.0, bands["high_ratio"] * 2.5 + 0.3),  # v2 balance
-            "lpf": max(8000, spec["lpf_cutoff"]),  # High LPF for brightness
-            "hpf": 400,
-            "envelope": {**envelope, "attack": 0.001, "sustain": 0.4},
-            "waveform": "square"  # Square for odd harmonics (brighter)
+            # Boost high voice gain based on brightness needs
+            "gain": min(1.2, bands["high_ratio"] * 3.0 + 0.4),
+            "lpf": max(12000, spec["lpf_cutoff"] * 2),  # Very high LPF for brightness
+            "hpf": 500,
+            "envelope": {**envelope, "attack": 0.001, "sustain": 0.5},
+            "waveform": "square"  # Square for bright odd harmonics
         },
         "drums": {
             "gain": 0.6 if harm["is_percussive"] else 0.4,  # v2 balance
@@ -407,18 +569,45 @@ def generate_synth_config(analysis_results):
     oscillator["waveform"] = mid_waveform
     oscillator["detune_cents"] = mid_detune
 
+    # Build FM synthesis config (AI-derived from harmonic analysis)
+    # FM synthesis produces richer harmonics that can better match real audio MFCC
+    # Enable for any track with significant harmonic content
+    fm_config = {
+        "enabled": True,  # Always enable FM for richer timbre
+        "modulator_ratio": formants.get("fm_ratio", 1.0),
+        # Modulation index determines harmonic richness: higher = more harmonics
+        "modulation_index": formants.get("fm_index", 2.0)
+    }
+
+    # Build formants config (resonant peaks from original audio)
+    formants_config = {
+        "frequencies": formants.get("formant_frequencies", [200, 500, 1000, 2000])[:6],  # Top 6 formants
+        "amplitudes": formants.get("formant_amplitudes", [1.0, 0.5, 0.3, 0.2])[:6],
+        "Q": formants.get("formant_Q", 5.0)
+    }
+
     return {
         "envelope": envelope,
         "filters": filters,
         "oscillator": oscillator,
         "dynamics": dynamics,
         "tempo": tempo_config,
+        "fm": fm_config,
+        "formants": formants_config,
+        "harmonics_profile": formants.get("harmonics_profile", [1.0, 0.5, 0.33, 0.25]),
         "voices": voice_configs,
         "master": {
-            "gain": 0.9,
-            # If original has very little bass (<5%), use aggressive HPF to match
-            "hpf": 120 if bands["bass_ratio"] < 0.05 else (80 if bands["bass_ratio"] < 0.15 else 40),
-            "limiter": True
+            # Higher master gain for louder output (limiter will prevent clipping)
+            "gain": 1.5,
+            # HPF based on bass content: bass-heavy tracks need low HPF
+            # >30% bass: HPF=20 (preserve sub), 15-30%: HPF=40, 5-15%: HPF=80, <5%: HPF=120
+            "hpf": 120 if bands["bass_ratio"] < 0.05 else (80 if bands["bass_ratio"] < 0.15 else (40 if bands["bass_ratio"] < 0.3 else 20)),
+            "limiter": True,
+            # AI-derived brightness target: boost high frequencies if original is bright
+            "target_centroid": spec["centroid_hz"],
+            # High shelf boost: scale based on how bright the original is
+            # Centroid 2400Hz needs ~3dB boost to match after saturation darkens things
+            "high_shelf_boost": min(4.0, max(0, (spec["centroid_hz"] - 1500) / 300))
         }
     }
 
@@ -468,6 +657,9 @@ def analyze_audio(audio_path, duration=60):
 
     print("Analyzing frequency bands...", file=sys.stderr)
     results["frequency_bands"] = analyze_frequency_bands(y, sr)
+
+    print("Analyzing formants and harmonic profile...", file=sys.stderr)
+    results["formants"] = analyze_formants(y, sr)
 
     # Generate synthesis config
     print("Generating synthesis config...", file=sys.stderr)

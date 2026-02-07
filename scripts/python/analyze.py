@@ -26,14 +26,23 @@ def main():
         # Load audio
         y, sr = librosa.load(input_path, sr=22050)
 
-        # BPM Detection
-        tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr)
+        # BPM Detection with start_bpm hint to reduce octave errors
+        tempo, beat_frames = librosa.beat.beat_track(y=y, sr=sr, start_bpm=120.0)
 
         # Handle tempo array (librosa may return array)
         if hasattr(tempo, '__len__'):
             bpm = float(tempo[0]) if len(tempo) > 0 else 120.0
         else:
             bpm = float(tempo)
+
+        # Correct octave errors - most music is in 80-160 BPM range
+        def correct_octave(t, center=120, range_=40):
+            low, high = center - range_, center + range_
+            candidates = [t, t/2, t*2, t*2/3, t*3/2]
+            best = min(candidates, key=lambda c: abs(c - center) if low <= c <= high else float('inf'))
+            return best if low <= best <= high else min(candidates, key=lambda c: abs(c - center))
+
+        bpm = correct_octave(bpm)
 
         # Estimate BPM confidence based on beat strength
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)

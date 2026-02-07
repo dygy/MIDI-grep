@@ -35,6 +35,7 @@ interface VoiceSynthConfig {
   sub_octave_gain?: number;
   transient_boost?: number;
   reverb?: number;
+  noise_mix?: number;  // 0-1 amount of noise to mix for more realistic timbre
 }
 
 interface SynthConfig {
@@ -63,6 +64,20 @@ interface SynthConfig {
     samples_per_beat: number;
     sync_to_beat: boolean;
   };
+  // FM synthesis settings (AI-derived from original audio)
+  fm?: {
+    enabled: boolean;
+    modulator_ratio: number;  // Ratio of modulator to carrier frequency
+    modulation_index: number; // Depth of modulation (0-10 typical)
+  };
+  // Formant settings (resonant peaks from original audio)
+  formants?: {
+    frequencies: number[];  // Peak frequencies in Hz
+    amplitudes: number[];   // Relative amplitudes (0-1)
+    Q: number;              // Resonance quality factor
+  };
+  // Harmonic amplitudes for additive synthesis
+  harmonics_profile?: number[];  // Amplitude of each harmonic (1st, 2nd, 3rd...)
   voices: {
     bass: VoiceSynthConfig;
     mid: VoiceSynthConfig;
@@ -73,6 +88,8 @@ interface SynthConfig {
     gain: number;
     hpf: number;
     limiter: boolean;
+    target_centroid?: number;
+    high_shelf_boost?: number;  // dB boost above 2kHz
   };
 }
 
@@ -94,6 +111,204 @@ interface ParsedVoice {
   patterns: string[];
   effects: VoiceEffects;
   modelType: 'melodic' | 'bass' | 'drums';
+  soundName?: string;  // The sound from .sound() in the code
+}
+
+// ============================================
+// SOUND-TO-SYNTHESIS MAPPING
+// Maps Strudel sound names to synthesis parameters for variety
+// ============================================
+
+interface SoundMapping {
+  waveform: 'sine' | 'saw' | 'square' | 'triangle' | 'noise';
+  lpf: number;
+  attack: number;
+  decay: number;
+  sustain: number;
+  release: number;
+  detune?: number;
+  subOctave?: number;
+  noiseMix?: number;
+}
+
+const SOUND_MAPPINGS: { [key: string]: SoundMapping } = {
+  // Basic waveforms
+  'sine': { waveform: 'sine', lpf: 20000, attack: 0.01, decay: 0.1, sustain: 0.8, release: 0.2 },
+  'sawtooth': { waveform: 'saw', lpf: 8000, attack: 0.005, decay: 0.15, sustain: 0.7, release: 0.2 },
+  'square': { waveform: 'square', lpf: 6000, attack: 0.005, decay: 0.1, sustain: 0.6, release: 0.15 },
+  'triangle': { waveform: 'triangle', lpf: 10000, attack: 0.02, decay: 0.2, sustain: 0.8, release: 0.25 },
+  'supersaw': { waveform: 'saw', lpf: 10000, attack: 0.01, decay: 0.15, sustain: 0.8, release: 0.25, detune: 15 },
+
+  // ========== BASS (33-40) ==========
+  'gm_acoustic_bass': { waveform: 'sine', lpf: 800, attack: 0.02, decay: 0.3, sustain: 0.4, release: 0.2, subOctave: 0.3 },
+  'gm_electric_bass_finger': { waveform: 'saw', lpf: 1200, attack: 0.01, decay: 0.2, sustain: 0.5, release: 0.15 },
+  'gm_electric_bass_pick': { waveform: 'saw', lpf: 2000, attack: 0.002, decay: 0.15, sustain: 0.4, release: 0.1 },
+  'gm_fretless_bass': { waveform: 'sine', lpf: 1000, attack: 0.03, decay: 0.3, sustain: 0.6, release: 0.3 },
+  'gm_slap_bass_1': { waveform: 'saw', lpf: 3000, attack: 0.001, decay: 0.1, sustain: 0.3, release: 0.1 },
+  'gm_slap_bass_2': { waveform: 'saw', lpf: 3500, attack: 0.001, decay: 0.12, sustain: 0.35, release: 0.1 },
+  'gm_synth_bass_1': { waveform: 'saw', lpf: 1500, attack: 0.005, decay: 0.2, sustain: 0.6, release: 0.15, subOctave: 0.2 },
+  'gm_synth_bass_2': { waveform: 'square', lpf: 1200, attack: 0.003, decay: 0.15, sustain: 0.5, release: 0.12 },
+  'gm_tuba': { waveform: 'saw', lpf: 600, attack: 0.05, decay: 0.3, sustain: 0.6, release: 0.25, subOctave: 0.2 },
+  'gm_contrabass': { waveform: 'saw', lpf: 700, attack: 0.04, decay: 0.35, sustain: 0.5, release: 0.3, subOctave: 0.25 },
+
+  // ========== SYNTH LEAD (81-88) ==========
+  'gm_lead_1_square': { waveform: 'square', lpf: 6000, attack: 0.01, decay: 0.15, sustain: 0.7, release: 0.2 },
+  'gm_lead_2_sawtooth': { waveform: 'saw', lpf: 8000, attack: 0.01, decay: 0.2, sustain: 0.75, release: 0.25 },
+  'gm_lead_3_calliope': { waveform: 'sine', lpf: 4000, attack: 0.05, decay: 0.3, sustain: 0.6, release: 0.3 },
+  'gm_lead_4_chiff': { waveform: 'square', lpf: 3000, attack: 0.001, decay: 0.1, sustain: 0.4, release: 0.1 },
+  'gm_lead_5_charang': { waveform: 'saw', lpf: 5000, attack: 0.005, decay: 0.1, sustain: 0.5, release: 0.15, detune: 8 },
+  'gm_lead_6_voice': { waveform: 'sine', lpf: 3000, attack: 0.08, decay: 0.4, sustain: 0.7, release: 0.4 },
+  'gm_lead_7_fifths': { waveform: 'saw', lpf: 7000, attack: 0.02, decay: 0.2, sustain: 0.7, release: 0.25, detune: 10 },
+  'gm_lead_8_bass_lead': { waveform: 'saw', lpf: 2000, attack: 0.01, decay: 0.2, sustain: 0.65, release: 0.2, subOctave: 0.3 },
+
+  // ========== SYNTH PAD (89-96) ==========
+  'gm_pad_1_new_age': { waveform: 'sine', lpf: 4000, attack: 0.3, decay: 0.5, sustain: 0.8, release: 0.8 },
+  'gm_pad_2_warm': { waveform: 'saw', lpf: 2000, attack: 0.2, decay: 0.4, sustain: 0.7, release: 0.6, detune: 5 },
+  'gm_pad_3_polysynth': { waveform: 'saw', lpf: 4000, attack: 0.15, decay: 0.3, sustain: 0.75, release: 0.5, detune: 12 },
+  'gm_pad_4_choir': { waveform: 'sine', lpf: 3000, attack: 0.25, decay: 0.4, sustain: 0.8, release: 0.7, noiseMix: 0.05 },
+  'gm_pad_5_bowed': { waveform: 'saw', lpf: 3500, attack: 0.35, decay: 0.4, sustain: 0.75, release: 0.6 },
+  'gm_pad_6_metallic': { waveform: 'square', lpf: 5000, attack: 0.2, decay: 0.35, sustain: 0.7, release: 0.5, detune: 8 },
+  'gm_pad_7_halo': { waveform: 'sine', lpf: 5000, attack: 0.4, decay: 0.5, sustain: 0.85, release: 1.0 },
+  'gm_pad_8_sweep': { waveform: 'saw', lpf: 6000, attack: 0.5, decay: 0.6, sustain: 0.7, release: 1.2, detune: 10 },
+
+  // ========== PIANO (1-8) ==========
+  'gm_acoustic_grand_piano': { waveform: 'triangle', lpf: 6000, attack: 0.005, decay: 0.5, sustain: 0.3, release: 0.4 },
+  'gm_bright_acoustic_piano': { waveform: 'triangle', lpf: 8000, attack: 0.003, decay: 0.4, sustain: 0.35, release: 0.35 },
+  'gm_electric_grand_piano': { waveform: 'sine', lpf: 5000, attack: 0.005, decay: 0.4, sustain: 0.4, release: 0.35 },
+  'gm_honkytonk_piano': { waveform: 'triangle', lpf: 5000, attack: 0.003, decay: 0.35, sustain: 0.25, release: 0.3, detune: 12 },
+  'gm_electric_piano_1': { waveform: 'sine', lpf: 4000, attack: 0.01, decay: 0.3, sustain: 0.4, release: 0.3 },
+  'gm_electric_piano_2': { waveform: 'sine', lpf: 5000, attack: 0.008, decay: 0.35, sustain: 0.45, release: 0.35 },
+  'gm_harpsichord': { waveform: 'saw', lpf: 7000, attack: 0.001, decay: 0.2, sustain: 0.1, release: 0.15 },
+  'gm_clavinet': { waveform: 'square', lpf: 5000, attack: 0.001, decay: 0.15, sustain: 0.2, release: 0.1 },
+
+  // ========== CHROMATIC PERCUSSION (9-16) ==========
+  'gm_celesta': { waveform: 'sine', lpf: 10000, attack: 0.001, decay: 0.5, sustain: 0.1, release: 0.4 },
+  'gm_glockenspiel': { waveform: 'sine', lpf: 12000, attack: 0.001, decay: 0.8, sustain: 0.1, release: 0.5 },
+  'gm_music_box': { waveform: 'sine', lpf: 8000, attack: 0.001, decay: 0.6, sustain: 0.15, release: 0.4 },
+  'gm_vibraphone': { waveform: 'sine', lpf: 6000, attack: 0.01, decay: 0.5, sustain: 0.3, release: 0.5 },
+  'gm_marimba': { waveform: 'sine', lpf: 4000, attack: 0.005, decay: 0.4, sustain: 0.1, release: 0.3 },
+  'gm_xylophone': { waveform: 'triangle', lpf: 8000, attack: 0.001, decay: 0.3, sustain: 0.05, release: 0.2 },
+  'gm_tubular_bells': { waveform: 'sine', lpf: 6000, attack: 0.01, decay: 1.0, sustain: 0.2, release: 0.8 },
+  'gm_dulcimer': { waveform: 'triangle', lpf: 5000, attack: 0.002, decay: 0.4, sustain: 0.2, release: 0.3 },
+
+  // ========== ORGAN (17-24) ==========
+  'gm_drawbar_organ': { waveform: 'sine', lpf: 6000, attack: 0.01, decay: 0.1, sustain: 0.9, release: 0.1 },
+  'gm_percussive_organ': { waveform: 'sine', lpf: 5000, attack: 0.005, decay: 0.2, sustain: 0.7, release: 0.15 },
+  'gm_rock_organ': { waveform: 'square', lpf: 4000, attack: 0.01, decay: 0.15, sustain: 0.85, release: 0.1, detune: 5 },
+  'gm_church_organ': { waveform: 'sine', lpf: 3000, attack: 0.15, decay: 0.3, sustain: 0.9, release: 0.4 },
+  'gm_reed_organ': { waveform: 'saw', lpf: 2500, attack: 0.08, decay: 0.2, sustain: 0.8, release: 0.2 },
+  'gm_accordion': { waveform: 'saw', lpf: 3500, attack: 0.05, decay: 0.15, sustain: 0.75, release: 0.15, detune: 8 },
+  'gm_harmonica': { waveform: 'saw', lpf: 3000, attack: 0.03, decay: 0.1, sustain: 0.7, release: 0.1, noiseMix: 0.03 },
+  'gm_tango_accordion': { waveform: 'saw', lpf: 4000, attack: 0.04, decay: 0.15, sustain: 0.8, release: 0.15, detune: 10 },
+
+  // ========== GUITAR (25-32) ==========
+  'gm_acoustic_guitar_nylon': { waveform: 'triangle', lpf: 4000, attack: 0.005, decay: 0.4, sustain: 0.3, release: 0.3 },
+  'gm_acoustic_guitar_steel': { waveform: 'triangle', lpf: 5000, attack: 0.003, decay: 0.35, sustain: 0.25, release: 0.25 },
+  'gm_electric_guitar_jazz': { waveform: 'sine', lpf: 3000, attack: 0.01, decay: 0.3, sustain: 0.5, release: 0.25 },
+  'gm_electric_guitar_clean': { waveform: 'triangle', lpf: 4500, attack: 0.005, decay: 0.25, sustain: 0.4, release: 0.2 },
+  'gm_electric_guitar_muted': { waveform: 'triangle', lpf: 2000, attack: 0.002, decay: 0.1, sustain: 0.2, release: 0.08 },
+  'gm_overdriven_guitar': { waveform: 'saw', lpf: 4000, attack: 0.005, decay: 0.2, sustain: 0.6, release: 0.2 },
+  'gm_distortion_guitar': { waveform: 'square', lpf: 5000, attack: 0.003, decay: 0.15, sustain: 0.7, release: 0.2 },
+  'gm_guitar_harmonics': { waveform: 'sine', lpf: 8000, attack: 0.01, decay: 0.6, sustain: 0.2, release: 0.4 },
+
+  // ========== STRINGS (41-48) ==========
+  'gm_violin': { waveform: 'saw', lpf: 5000, attack: 0.08, decay: 0.2, sustain: 0.75, release: 0.2 },
+  'gm_viola': { waveform: 'saw', lpf: 4000, attack: 0.1, decay: 0.25, sustain: 0.7, release: 0.25 },
+  'gm_cello': { waveform: 'saw', lpf: 3000, attack: 0.12, decay: 0.3, sustain: 0.7, release: 0.3 },
+  'gm_tremolo_strings': { waveform: 'saw', lpf: 4000, attack: 0.05, decay: 0.2, sustain: 0.7, release: 0.3, detune: 6 },
+  'gm_pizzicato_strings': { waveform: 'triangle', lpf: 3500, attack: 0.002, decay: 0.2, sustain: 0.1, release: 0.15 },
+  'gm_orchestral_harp': { waveform: 'triangle', lpf: 5000, attack: 0.005, decay: 0.5, sustain: 0.2, release: 0.4 },
+  'gm_timpani': { waveform: 'sine', lpf: 400, attack: 0.01, decay: 0.6, sustain: 0.2, release: 0.4, subOctave: 0.3 },
+
+  // ========== ENSEMBLE (49-56) ==========
+  'gm_string_ensemble_1': { waveform: 'saw', lpf: 4000, attack: 0.15, decay: 0.3, sustain: 0.7, release: 0.4, detune: 8 },
+  'gm_string_ensemble_2': { waveform: 'saw', lpf: 3500, attack: 0.2, decay: 0.35, sustain: 0.65, release: 0.45, detune: 10 },
+  'gm_synth_strings_1': { waveform: 'saw', lpf: 5000, attack: 0.1, decay: 0.25, sustain: 0.75, release: 0.35, detune: 12 },
+  'gm_synth_strings_2': { waveform: 'saw', lpf: 4500, attack: 0.15, decay: 0.3, sustain: 0.7, release: 0.4, detune: 15 },
+  'gm_choir_aahs': { waveform: 'sine', lpf: 3000, attack: 0.2, decay: 0.4, sustain: 0.8, release: 0.5, noiseMix: 0.03 },
+  'gm_voice_oohs': { waveform: 'sine', lpf: 2500, attack: 0.25, decay: 0.45, sustain: 0.75, release: 0.55, noiseMix: 0.02 },
+  'gm_synth_voice': { waveform: 'sine', lpf: 3500, attack: 0.15, decay: 0.35, sustain: 0.7, release: 0.4 },
+  'gm_orchestra_hit': { waveform: 'saw', lpf: 6000, attack: 0.001, decay: 0.3, sustain: 0.2, release: 0.25, detune: 15 },
+
+  // ========== BRASS (57-64) ==========
+  'gm_trumpet': { waveform: 'saw', lpf: 5000, attack: 0.03, decay: 0.2, sustain: 0.7, release: 0.15 },
+  'gm_trombone': { waveform: 'saw', lpf: 3000, attack: 0.05, decay: 0.25, sustain: 0.65, release: 0.2 },
+  'gm_muted_trumpet': { waveform: 'saw', lpf: 2000, attack: 0.03, decay: 0.2, sustain: 0.6, release: 0.15 },
+  'gm_french_horn': { waveform: 'saw', lpf: 2500, attack: 0.08, decay: 0.3, sustain: 0.65, release: 0.25 },
+  'gm_brass_section': { waveform: 'saw', lpf: 4000, attack: 0.02, decay: 0.2, sustain: 0.7, release: 0.2, detune: 10 },
+  'gm_synth_brass_1': { waveform: 'saw', lpf: 6000, attack: 0.01, decay: 0.15, sustain: 0.75, release: 0.15, detune: 8 },
+  'gm_synth_brass_2': { waveform: 'square', lpf: 5000, attack: 0.015, decay: 0.18, sustain: 0.7, release: 0.18, detune: 10 },
+
+  // ========== REED (65-72) ==========
+  'gm_soprano_sax': { waveform: 'saw', lpf: 5000, attack: 0.035, decay: 0.18, sustain: 0.72, release: 0.18, noiseMix: 0.02 },
+  'gm_alto_sax': { waveform: 'saw', lpf: 4000, attack: 0.04, decay: 0.2, sustain: 0.7, release: 0.2, noiseMix: 0.02 },
+  'gm_tenor_sax': { waveform: 'saw', lpf: 3500, attack: 0.04, decay: 0.25, sustain: 0.65, release: 0.25, noiseMix: 0.02 },
+  'gm_baritone_sax': { waveform: 'saw', lpf: 2500, attack: 0.045, decay: 0.28, sustain: 0.6, release: 0.28, noiseMix: 0.02 },
+  'gm_oboe': { waveform: 'saw', lpf: 4500, attack: 0.06, decay: 0.2, sustain: 0.7, release: 0.18, noiseMix: 0.01 },
+  'gm_english_horn': { waveform: 'saw', lpf: 3500, attack: 0.07, decay: 0.22, sustain: 0.68, release: 0.2, noiseMix: 0.01 },
+  'gm_bassoon': { waveform: 'saw', lpf: 2000, attack: 0.08, decay: 0.25, sustain: 0.65, release: 0.25, noiseMix: 0.015 },
+  'gm_clarinet': { waveform: 'square', lpf: 3500, attack: 0.05, decay: 0.2, sustain: 0.7, release: 0.18 },
+
+  // ========== PIPE (73-80) ==========
+  'gm_piccolo': { waveform: 'sine', lpf: 10000, attack: 0.04, decay: 0.15, sustain: 0.75, release: 0.15, noiseMix: 0.02 },
+  'gm_flute': { waveform: 'sine', lpf: 6000, attack: 0.05, decay: 0.18, sustain: 0.7, release: 0.18, noiseMix: 0.03 },
+  'gm_recorder': { waveform: 'sine', lpf: 5000, attack: 0.04, decay: 0.15, sustain: 0.72, release: 0.15, noiseMix: 0.02 },
+  'gm_pan_flute': { waveform: 'sine', lpf: 4000, attack: 0.06, decay: 0.2, sustain: 0.65, release: 0.2, noiseMix: 0.05 },
+  'gm_blown_bottle': { waveform: 'sine', lpf: 2000, attack: 0.1, decay: 0.3, sustain: 0.5, release: 0.3, noiseMix: 0.1 },
+  'gm_shakuhachi': { waveform: 'sine', lpf: 4000, attack: 0.08, decay: 0.25, sustain: 0.6, release: 0.25, noiseMix: 0.08 },
+  'gm_whistle': { waveform: 'sine', lpf: 8000, attack: 0.03, decay: 0.1, sustain: 0.8, release: 0.1, noiseMix: 0.02 },
+  'gm_ocarina': { waveform: 'sine', lpf: 3500, attack: 0.05, decay: 0.18, sustain: 0.7, release: 0.18, noiseMix: 0.02 },
+
+  // ========== SYNTH FX (97-104) ==========
+  'gm_fx_1_rain': { waveform: 'noise', lpf: 4000, attack: 0.5, decay: 0.8, sustain: 0.4, release: 1.5 },
+  'gm_fx_2_soundtrack': { waveform: 'saw', lpf: 3000, attack: 0.4, decay: 0.6, sustain: 0.7, release: 1.0, detune: 12 },
+  'gm_fx_3_crystal': { waveform: 'sine', lpf: 12000, attack: 0.1, decay: 0.4, sustain: 0.5, release: 0.8 },
+  'gm_fx_4_atmosphere': { waveform: 'sine', lpf: 3000, attack: 0.3, decay: 0.5, sustain: 0.7, release: 1.0, noiseMix: 0.1 },
+  'gm_fx_5_brightness': { waveform: 'saw', lpf: 10000, attack: 0.2, decay: 0.4, sustain: 0.6, release: 0.8, detune: 8 },
+  'gm_fx_6_goblins': { waveform: 'square', lpf: 2500, attack: 0.25, decay: 0.5, sustain: 0.5, release: 0.7, detune: 15 },
+  'gm_fx_7_echoes': { waveform: 'sine', lpf: 4000, attack: 0.2, decay: 0.6, sustain: 0.6, release: 1.2 },
+  'gm_fx_8_sci_fi': { waveform: 'saw', lpf: 6000, attack: 0.15, decay: 0.4, sustain: 0.55, release: 0.9, detune: 20 },
+
+  // ========== ETHNIC (105-112) ==========
+  'gm_sitar': { waveform: 'saw', lpf: 5000, attack: 0.01, decay: 0.5, sustain: 0.3, release: 0.4, detune: 5 },
+  'gm_banjo': { waveform: 'triangle', lpf: 6000, attack: 0.002, decay: 0.25, sustain: 0.15, release: 0.2 },
+  'gm_shamisen': { waveform: 'triangle', lpf: 4500, attack: 0.003, decay: 0.3, sustain: 0.2, release: 0.25 },
+  'gm_koto': { waveform: 'triangle', lpf: 5000, attack: 0.005, decay: 0.4, sustain: 0.2, release: 0.35 },
+  'gm_kalimba': { waveform: 'sine', lpf: 6000, attack: 0.002, decay: 0.5, sustain: 0.1, release: 0.4 },
+  'gm_bag_pipe': { waveform: 'saw', lpf: 3000, attack: 0.1, decay: 0.2, sustain: 0.85, release: 0.15, detune: 5, noiseMix: 0.03 },
+  'gm_fiddle': { waveform: 'saw', lpf: 5000, attack: 0.06, decay: 0.2, sustain: 0.75, release: 0.2 },
+  'gm_shanai': { waveform: 'saw', lpf: 4000, attack: 0.08, decay: 0.25, sustain: 0.7, release: 0.2, noiseMix: 0.04 },
+
+  // ========== PERCUSSIVE (113-119) ==========
+  'gm_tinkle_bell': { waveform: 'sine', lpf: 10000, attack: 0.001, decay: 0.4, sustain: 0.1, release: 0.3 },
+  'gm_agogo': { waveform: 'sine', lpf: 6000, attack: 0.001, decay: 0.3, sustain: 0.15, release: 0.25 },
+  'gm_steel_drums': { waveform: 'sine', lpf: 5000, attack: 0.005, decay: 0.4, sustain: 0.25, release: 0.35 },
+  'gm_woodblock': { waveform: 'triangle', lpf: 4000, attack: 0.001, decay: 0.15, sustain: 0.05, release: 0.1 },
+  'gm_taiko_drum': { waveform: 'sine', lpf: 500, attack: 0.005, decay: 0.4, sustain: 0.2, release: 0.3, subOctave: 0.4 },
+  'gm_melodic_tom': { waveform: 'sine', lpf: 800, attack: 0.005, decay: 0.3, sustain: 0.15, release: 0.25 },
+  'gm_synth_drum': { waveform: 'sine', lpf: 600, attack: 0.002, decay: 0.25, sustain: 0.1, release: 0.2, subOctave: 0.3 },
+
+  // ========== SOUND EFFECTS (120-128) ==========
+  'gm_reverse_cymbal': { waveform: 'noise', lpf: 8000, attack: 1.0, decay: 0.3, sustain: 0.8, release: 0.2 },
+  'gm_guitar_fret_noise': { waveform: 'noise', lpf: 6000, attack: 0.001, decay: 0.15, sustain: 0.1, release: 0.1 },
+  'gm_breath_noise': { waveform: 'noise', lpf: 3000, attack: 0.1, decay: 0.3, sustain: 0.5, release: 0.3 },
+  'gm_seashore': { waveform: 'noise', lpf: 2000, attack: 1.5, decay: 1.0, sustain: 0.6, release: 1.5 },
+  'gm_bird_tweet': { waveform: 'sine', lpf: 10000, attack: 0.01, decay: 0.1, sustain: 0.3, release: 0.1 },
+  'gm_telephone_ring': { waveform: 'square', lpf: 4000, attack: 0.001, decay: 0.05, sustain: 0.8, release: 0.05 },
+  'gm_helicopter': { waveform: 'noise', lpf: 500, attack: 0.5, decay: 0.5, sustain: 0.7, release: 0.5 },
+  'gm_applause': { waveform: 'noise', lpf: 6000, attack: 0.3, decay: 0.5, sustain: 0.6, release: 0.8 },
+  'gm_gunshot': { waveform: 'noise', lpf: 8000, attack: 0.001, decay: 0.1, sustain: 0.05, release: 0.15 },
+};
+
+function getSoundMapping(soundName: string): SoundMapping {
+  // Handle alternating sounds - just use the first one for offline rendering
+  let name = soundName;
+  if (soundName.startsWith('<') && soundName.endsWith('>')) {
+    const sounds = soundName.slice(1, -1).trim().split(/\s+/);
+    name = sounds[0];
+  }
+
+  return SOUND_MAPPINGS[name] || SOUND_MAPPINGS['sawtooth'];
 }
 
 // ============================================
@@ -264,6 +479,172 @@ function applyHPF(samples: Float32Array, cutoffHz: number, sampleRate: number): 
 }
 
 // ============================================
+// RESONANT BANDPASS FILTER (for formants)
+// ============================================
+
+interface BiquadState {
+  x1: number; x2: number;
+  y1: number; y2: number;
+}
+
+function createBiquadBandpass(centerFreq: number, Q: number, sampleRate: number): {
+  b0: number; b1: number; b2: number;
+  a1: number; a2: number;
+} {
+  const w0 = 2 * Math.PI * centerFreq / sampleRate;
+  const alpha = Math.sin(w0) / (2 * Q);
+
+  const b0 = alpha;
+  const b1 = 0;
+  const b2 = -alpha;
+  const a0 = 1 + alpha;
+  const a1 = -2 * Math.cos(w0);
+  const a2 = 1 - alpha;
+
+  return {
+    b0: b0 / a0,
+    b1: b1 / a0,
+    b2: b2 / a0,
+    a1: a1 / a0,
+    a2: a2 / a0
+  };
+}
+
+function applyBiquad(
+  samples: Float32Array,
+  coeffs: { b0: number; b1: number; b2: number; a1: number; a2: number },
+  state: BiquadState
+): void {
+  for (let i = 0; i < samples.length; i++) {
+    const x = samples[i];
+    const y = coeffs.b0 * x + coeffs.b1 * state.x1 + coeffs.b2 * state.x2
+            - coeffs.a1 * state.y1 - coeffs.a2 * state.y2;
+
+    state.x2 = state.x1;
+    state.x1 = x;
+    state.y2 = state.y1;
+    state.y1 = y;
+
+    samples[i] = y;
+  }
+}
+
+// ============================================
+// FORMANT FILTER BANK (parallel bandpass filters)
+// ============================================
+
+interface FormantConfig {
+  frequencies: number[];  // Center frequencies
+  amplitudes: number[];   // Relative amplitudes
+  Q: number;              // Quality factor (resonance)
+}
+
+function applyFormants(
+  samples: Float32Array,
+  formants: FormantConfig,
+  sampleRate: number
+): Float32Array {
+  if (!formants.frequencies || formants.frequencies.length === 0) {
+    return samples;
+  }
+
+  const output = new Float32Array(samples.length);
+
+  for (let f = 0; f < formants.frequencies.length; f++) {
+    const freq = formants.frequencies[f];
+    const amp = formants.amplitudes[f] || 1.0;
+
+    // Skip invalid frequencies
+    if (freq < 20 || freq > sampleRate / 2) continue;
+
+    const coeffs = createBiquadBandpass(freq, formants.Q, sampleRate);
+    const state: BiquadState = { x1: 0, x2: 0, y1: 0, y2: 0 };
+
+    // Copy input and filter
+    const filtered = new Float32Array(samples);
+    applyBiquad(filtered, coeffs, state);
+
+    // Add to output with amplitude
+    for (let i = 0; i < output.length; i++) {
+      output[i] += filtered[i] * amp;
+    }
+  }
+
+  return output;
+}
+
+// ============================================
+// HIGH-SHELF FILTER (for brightness boost)
+// ============================================
+
+function createHighShelf(freq: number, gainDb: number, sampleRate: number): {
+  b0: number; b1: number; b2: number;
+  a1: number; a2: number;
+} {
+  const A = Math.pow(10, gainDb / 40);
+  const w0 = 2 * Math.PI * freq / sampleRate;
+  const alpha = Math.sin(w0) / 2 * Math.sqrt(2);
+
+  const b0 = A * ((A + 1) + (A - 1) * Math.cos(w0) + 2 * Math.sqrt(A) * alpha);
+  const b1 = -2 * A * ((A - 1) + (A + 1) * Math.cos(w0));
+  const b2 = A * ((A + 1) + (A - 1) * Math.cos(w0) - 2 * Math.sqrt(A) * alpha);
+  const a0 = (A + 1) - (A - 1) * Math.cos(w0) + 2 * Math.sqrt(A) * alpha;
+  const a1 = 2 * ((A - 1) - (A + 1) * Math.cos(w0));
+  const a2 = (A + 1) - (A - 1) * Math.cos(w0) - 2 * Math.sqrt(A) * alpha;
+
+  return {
+    b0: b0 / a0,
+    b1: b1 / a0,
+    b2: b2 / a0,
+    a1: a1 / a0,
+    a2: a2 / a0
+  };
+}
+
+function applyHighShelf(samples: Float32Array, freq: number, gainDb: number, sampleRate: number): void {
+  if (Math.abs(gainDb) < 0.1) return; // Skip if gain is negligible
+
+  const coeffs = createHighShelf(freq, gainDb, sampleRate);
+  const state: BiquadState = { x1: 0, x2: 0, y1: 0, y2: 0 };
+  applyBiquad(samples, coeffs, state);
+}
+
+// ============================================
+// FM SYNTHESIS
+// ============================================
+
+function generateFM(
+  carrierFreq: number,
+  modulatorRatio: number,
+  modulationIndex: number,
+  phase: number
+): number {
+  // Carrier frequency modulated by modulator
+  const modFreq = carrierFreq * modulatorRatio;
+  const modPhase = phase * modulatorRatio;
+  const modulator = Math.sin(2 * Math.PI * modPhase) * modulationIndex;
+
+  return Math.sin(2 * Math.PI * phase + modulator);
+}
+
+// ============================================
+// HARMONIC ADDITIVE SYNTHESIS
+// ============================================
+
+function generateAdditive(
+  fundamentalPhase: number,
+  harmonicAmplitudes: number[]
+): number {
+  let output = 0;
+  for (let h = 0; h < harmonicAmplitudes.length; h++) {
+    const harmonic = h + 1;
+    const amp = harmonicAmplitudes[h];
+    output += Math.sin(2 * Math.PI * fundamentalPhase * harmonic) * amp;
+  }
+  return output;
+}
+
+// ============================================
 // DYNAMIC SYNTHESIZERS
 // ============================================
 
@@ -271,7 +652,8 @@ function synthNote(
   freq: number,
   duration: number,
   config: VoiceSynthConfig,
-  sampleRate: number
+  sampleRate: number,
+  globalConfig?: SynthConfig
 ): Float32Array {
   const len = Math.floor(duration * sampleRate);
   const output = new Float32Array(len);
@@ -280,24 +662,56 @@ function synthNote(
   const detune = (config.detune_cents || 0) / 100;
   const subGain = config.sub_octave_gain || 0;
 
+  // FM synthesis parameters from AI analysis
+  const useFM = globalConfig?.fm?.enabled ?? false;
+  const fmRatio = globalConfig?.fm?.modulator_ratio ?? 1.0;
+  const fmIndex = globalConfig?.fm?.modulation_index ?? 2.0;
+
+  // Harmonic profile from AI analysis (for additive synthesis component)
+  const harmonicsProfile = globalConfig?.harmonics_profile ?? [];
+  const useAdditive = harmonicsProfile.length > 4;
+
   for (let i = 0; i < len; i++) {
     const t = i / sampleRate;
+    const phase = freq * t;
 
-    // Main oscillator
-    const phase1 = freq * t;
-    let sample = generateWaveform(waveform, phase1);
+    let sample = 0;
+
+    if (useFM && waveform === 'saw') {
+      // FM synthesis for richer harmonics (AI-derived)
+      sample = generateFM(freq, fmRatio, fmIndex, phase);
+    } else if (useAdditive && waveform === 'saw') {
+      // Additive synthesis using AI-analyzed harmonic profile
+      sample = generateAdditive(phase, harmonicsProfile.slice(0, 8));
+    } else {
+      // Standard waveform generation
+      sample = generateWaveform(waveform, phase);
+    }
 
     // Detuned oscillator for fatness
     if (detune !== 0) {
       const detuneRatio = Math.pow(2, detune / 12);
       const phase2 = freq * detuneRatio * t;
-      sample = (sample + generateWaveform(waveform, phase2)) * 0.5;
+      if (useFM && waveform === 'saw') {
+        sample = (sample + generateFM(freq * detuneRatio, fmRatio, fmIndex, phase2)) * 0.5;
+      } else if (useAdditive && waveform === 'saw') {
+        sample = (sample + generateAdditive(phase2, harmonicsProfile.slice(0, 8))) * 0.5;
+      } else {
+        sample = (sample + generateWaveform(waveform, phase2)) * 0.5;
+      }
     }
 
     // Sub oscillator
     if (subGain > 0) {
       const subPhase = freq * 0.5 * t;
       sample += generateSine(subPhase) * subGain;
+    }
+
+    // Noise mixing for more realistic timbre (AI-learned parameter)
+    const noiseMix = config.noise_mix || 0;
+    if (noiseMix > 0) {
+      const noise = generateNoise() * noiseMix;
+      sample = sample * (1 - noiseMix) + noise;
     }
 
     // Apply envelope
@@ -312,6 +726,22 @@ function synthNote(
   if (config.hpf && config.hpf > 20) {
     applyHPF(output, config.hpf, sampleRate);
   }
+
+  // Apply formant filters if available (for vocal-like timbre)
+  // Note: Formants can hurt frequency balance if not tuned carefully
+  // Disable for now - needs more AI tuning to determine when to apply
+  // const formants = globalConfig?.formants;
+  // if (formants && formants.frequencies && formants.frequencies.length > 0) {
+  //   const formantOutput = applyFormants(output, {
+  //     frequencies: formants.frequencies,
+  //     amplitudes: formants.amplitudes || [],
+  //     Q: formants.Q || 5.0
+  //   }, sampleRate);
+  //   // Mix original with formant-filtered (20% for subtle effect)
+  //   for (let i = 0; i < output.length; i++) {
+  //     output[i] = (output[i] * 0.8 + formantOutput[i] * 0.2);
+  //   }
+  // }
 
   return output;
 }
@@ -496,11 +926,13 @@ function parseStrudelCode(code: string, configBpm?: number): { bpm: number; voic
       patterns.push(strMatch[1]);
     }
     if (patterns.length > 0) {
+      const parsed = parseEffects(code, name);
       voices.push({
         name,
         patterns,
-        effects: parseEffects(code, name),
+        effects: parsed.effects,
         modelType: getModelType(name),
+        soundName: parsed.soundName,
       });
     }
   }
@@ -524,11 +956,13 @@ function parseStrudelCode(code: string, configBpm?: number): { bpm: number; voic
 
   for (const [name, patterns] of Object.entries(singlePatterns)) {
     if (!voices.find(v => v.name === name)) {
+      const parsed = parseEffects(code, name);
       voices.push({
         name,
         patterns,
-        effects: parseEffects(code, name),
+        effects: parsed.effects,
         modelType: getModelType(name),
+        soundName: parsed.soundName,
       });
     }
   }
@@ -536,10 +970,16 @@ function parseStrudelCode(code: string, configBpm?: number): { bpm: number; voic
   return { bpm, voices };
 }
 
-function parseEffects(code: string, voiceName: string): VoiceEffects {
-  const effects: VoiceEffects = { gain: 1.0 };
+interface ParsedEffects {
+  effects: VoiceEffects;
+  soundName?: string;
+}
 
-  const fxRegex = new RegExp(`let\\s+${voiceName}Fx\\s*=\\s*p\\s*=>\\s*p[^\\n]+`, 'i');
+function parseEffects(code: string, voiceName: string): ParsedEffects {
+  const effects: VoiceEffects = { gain: 1.0 };
+  let soundName: string | undefined;
+
+  const fxRegex = new RegExp(`let\\s+${voiceName}Fx\\s*=\\s*p\\s*=>\\s*p[^\\n]+(?:\\n\\s+\\.[^\\n]+)*`, 'i');
   const match = code.match(fxRegex);
 
   if (match) {
@@ -552,9 +992,15 @@ function parseEffects(code: string, voiceName: string): VoiceEffects {
 
     const hpfMatch = chain.match(/\.hpf\(([0-9.]+)\)/);
     if (hpfMatch) effects.hpf = parseFloat(hpfMatch[1]);
+
+    // Extract sound name (supports alternating sounds like "<sound1 sound2>")
+    const soundMatch = chain.match(/\.sound\("([^"]+)"\)/);
+    if (soundMatch) {
+      soundName = soundMatch[1];
+    }
   }
 
-  return effects;
+  return { effects, soundName };
 }
 
 function getModelType(name: string): 'melodic' | 'bass' | 'drums' {
@@ -611,6 +1057,25 @@ async function render(
       }
     }
 
+    // Apply sound mapping if a specific sound is requested
+    if (voice.soundName && voice.modelType !== 'drums') {
+      const soundMapping = getSoundMapping(voice.soundName);
+      voiceConfig = {
+        ...voiceConfig,
+        waveform: soundMapping.waveform,
+        lpf: soundMapping.lpf,
+        envelope: {
+          attack: soundMapping.attack,
+          decay: soundMapping.decay,
+          sustain: soundMapping.sustain,
+          release: soundMapping.release,
+        },
+        detune_cents: soundMapping.detune || 0,
+        sub_octave_gain: soundMapping.subOctave || 0,
+        noise_mix: soundMapping.noiseMix || 0,
+      };
+    }
+
     // Apply effect chain overrides from Strudel code
     if (voice.effects.gain !== 1.0) {
       voiceConfig.gain *= voice.effects.gain;
@@ -622,7 +1087,8 @@ async function render(
       voiceConfig.hpf = Math.max(voiceConfig.hpf, voice.effects.hpf);
     }
 
-    console.log(`  ${voice.name}: gain=${voiceConfig.gain.toFixed(2)}, type=${voice.modelType}, ${voice.patterns.length} patterns`);
+    const soundInfo = voice.soundName ? `, sound=${voice.soundName}` : '';
+    console.log(`  ${voice.name}: gain=${voiceConfig.gain.toFixed(2)}, type=${voice.modelType}${soundInfo}, ${voice.patterns.length} patterns`);
 
     let currentCycle = 0;
     let patternIndex = 0;
@@ -674,7 +1140,7 @@ async function render(
             noteConfig = { ...config.voices.bass, gain: voiceConfig.gain };
           }
 
-          synthSample = synthNote(targetFreq, noteDuration, noteConfig, SAMPLE_RATE);
+          synthSample = synthNote(targetFreq, noteDuration, noteConfig, SAMPLE_RATE, config);
         }
 
         // Mix into output
@@ -697,12 +1163,48 @@ async function render(
     applyHPF(output, config.master.hpf, SAMPLE_RATE);
   }
 
+  // AI-derived brightness boost (high-shelf filter at 2kHz)
+  const highShelfBoost = config.master.high_shelf_boost || 0;
+  if (highShelfBoost > 0.1) {
+    applyHighShelf(output, 2000, highShelfBoost, SAMPLE_RATE);
+    console.log(`  High-shelf boost: +${highShelfBoost.toFixed(1)} dB above 2kHz`);
+  }
+
   // Master gain
   for (let i = 0; i < output.length; i++) {
     output[i] *= config.master.gain;
   }
 
-  // Limiter
+  // Soft saturation: limits peaks while adding harmonics
+  // Uses tanh which naturally compresses high values
+  // This mimics analog saturation/tape compression
+
+  // First, apply gain to bring up levels
+  const saturationDrive = 3.0;  // How hard we drive into saturation
+  for (let i = 0; i < output.length; i++) {
+    output[i] *= saturationDrive;
+  }
+
+  // Apply tanh saturation (soft clipping)
+  for (let i = 0; i < output.length; i++) {
+    output[i] = Math.tanh(output[i]);
+  }
+
+  // Tanh outputs -1 to 1, scale to desired peak
+  const targetPeak = 0.85;  // Leave some headroom
+  for (let i = 0; i < output.length; i++) {
+    output[i] *= targetPeak;
+  }
+
+  // Calculate RMS after saturation
+  let sumSq = 0;
+  for (let i = 0; i < output.length; i++) {
+    sumSq += output[i] * output[i];
+  }
+  const postSatRms = Math.sqrt(sumSq / output.length);
+  console.log(`  Saturation: drive ${saturationDrive}×, post-sat RMS ${postSatRms.toFixed(4)}`)
+
+  // Limiter AFTER compression (to control peaks)
   if (config.master.limiter) {
     const threshold = config.dynamics.limiter_threshold;
     let maxVal = 0;
@@ -715,6 +1217,42 @@ async function render(
         output[i] *= scale;
       }
       console.log(`  Limiter: peak ${maxVal.toFixed(2)} → ${threshold}`);
+    }
+  }
+
+  // RMS normalization AFTER limiter (to match target loudness)
+  if (config.dynamics.target_rms > 0) {
+    // Calculate current RMS after limiting
+    let sumSquares = 0;
+    for (let i = 0; i < output.length; i++) {
+      sumSquares += output[i] * output[i];
+    }
+    const currentRms = Math.sqrt(sumSquares / output.length);
+
+    // Normalize to target RMS
+    if (currentRms > 0.001) {
+      const rmsScale = config.dynamics.target_rms / currentRms;
+      // Allow up to 3x amplification (target / current), but cap at 0.95 peak
+      const safeScale = Math.min(3.0, Math.max(0.1, rmsScale));
+      for (let i = 0; i < output.length; i++) {
+        output[i] *= safeScale;
+      }
+
+      // Final peak check after RMS normalization
+      let finalMax = 0;
+      for (let i = 0; i < output.length; i++) {
+        finalMax = Math.max(finalMax, Math.abs(output[i]));
+      }
+      if (finalMax > 0.98) {
+        // Soft clip if we exceeded
+        const clipScale = 0.98 / finalMax;
+        for (let i = 0; i < output.length; i++) {
+          output[i] *= clipScale;
+        }
+      }
+
+      const finalRms = currentRms * safeScale * (finalMax > 0.98 ? 0.98/finalMax : 1);
+      console.log(`  RMS norm: ${currentRms.toFixed(4)} → ${finalRms.toFixed(4)} (target: ${config.dynamics.target_rms.toFixed(4)}, scale: ${safeScale.toFixed(2)}×)`);
     }
   }
 

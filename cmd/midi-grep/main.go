@@ -672,9 +672,10 @@ func runExtract(cmd *cobra.Command, args []string) error {
 				if bpm == 0 {
 					bpm = 120 // default
 				}
-				// Pass MELODIC stem for AI synthesis analysis (better frequency matching)
-				melodicStemForAnalysis := filepath.Join(result.CacheDir, "melodic.wav")
-				if err := renderWithGranularModels(strudelFile, modelsDir, audioPath, feedbackPath, melodicStemForAnalysis, bpm, duration, findScriptsDir()); err != nil {
+				// Pass ORIGINAL audio for AI synthesis analysis (proper frequency balance)
+				// Using melodic stem misses bass content - we need full mix for proper gains
+				originalForAnalysis := result.OriginalPath
+				if err := renderWithGranularModels(strudelFile, modelsDir, audioPath, feedbackPath, originalForAnalysis, bpm, duration, findScriptsDir()); err != nil {
 					fmt.Printf("       Warning: Granular render failed: %v, falling back to iterative...\n", err)
 				} else {
 					fmt.Printf("       Render complete (granular models): %s\n", audioPath)
@@ -716,7 +717,9 @@ func runExtract(cmd *cobra.Command, args []string) error {
 			if versionDir == "" {
 				chartPath = filepath.Join(result.CacheDir, "comparison.png")
 			}
-			if err := generateComparisonChart(result.OriginalPath, renderedPath, chartPath, findScriptsDir()); err != nil {
+			// Pass synth config for AI-derived tempo tolerance
+			synthConfigPath := filepath.Join(versionDir, "synth_config.json")
+			if err := generateComparisonChart(result.OriginalPath, renderedPath, chartPath, synthConfigPath, findScriptsDir()); err != nil {
 				fmt.Printf("       Warning: Chart generation failed: %v\n", err)
 			} else {
 				fmt.Printf("       Comparison chart: %s\n", chartPath)
@@ -1131,13 +1134,16 @@ func renderWithGranularModels(strudelFile, modelsDir, outputPath, aiParamsPath, 
 		"-o", outputPath,
 	}
 
-	// Pass AI-analyzed synthesis config if available
+	// Pass AI-analyzed synthesis config if available (includes correct BPM)
+	hasConfig := false
 	if _, err := os.Stat(synthConfigPath); err == nil {
 		args = append(args, "--config", synthConfigPath)
 		fmt.Println("       Using AI-analyzed synthesis config")
+		hasConfig = true
 	}
 
-	if bpm > 0 {
+	// Only pass --bpm if we don't have a config (config has more accurate BPM from original audio)
+	if bpm > 0 && !hasConfig {
 		args = append(args, "--bpm", fmt.Sprintf("%.0f", bpm))
 	}
 	if duration > 0 {
@@ -1151,14 +1157,23 @@ func renderWithGranularModels(strudelFile, modelsDir, outputPath, aiParamsPath, 
 }
 
 // generateComparisonChart generates a frequency comparison chart
-func generateComparisonChart(originalPath, renderedPath, outputPath, scriptsDir string) error {
+func generateComparisonChart(originalPath, renderedPath, outputPath, synthConfigPath, scriptsDir string) error {
 	script := filepath.Join(scriptsDir, "compare_audio.py")
 	if _, err := os.Stat(script); os.IsNotExist(err) {
 		return fmt.Errorf("compare_audio.py not found")
 	}
 
 	python := findPython(scriptsDir)
-	cmd := exec.Command(python, script, originalPath, renderedPath, "--chart", outputPath)
+	args := []string{script, originalPath, renderedPath, "--chart", outputPath}
+
+	// Pass synth config for AI-derived tolerance if available
+	if synthConfigPath != "" {
+		if _, err := os.Stat(synthConfigPath); err == nil {
+			args = append(args, "--config", synthConfigPath)
+		}
+	}
+
+	cmd := exec.Command(python, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 	return cmd.Run()

@@ -6,6 +6,7 @@ import (
 	"math"
 	"os"
 	"sort"
+	"strconv"
 	"strings"
 
 	"github.com/dygy/midi-grep/internal/analysis"
@@ -1551,14 +1552,21 @@ func (g *Generator) voiceToPattern(notes []midi.Note, gridSize float64, numBars 
 
 		// Simplify consecutive rests within bar
 		simplified := simplifyPattern(barParts)
-		if simplified != "" && !isAllRests(simplified) {
-			bars = append(bars, simplified)
+		if simplified != "" && !isAllRests(simplified) && !isTooSparse(simplified) {
+			// Only include bars with meaningful density (at least 2 notes per bar)
+			noteCount := countNotesInPattern(simplified)
+			if noteCount >= 2 || (noteCount >= 1 && len(bars) < 4) {
+				bars = append(bars, simplified)
+			}
 		}
 	}
 
 	if len(bars) == 0 {
 		return "~"
 	}
+
+	// Deduplicate similar consecutive bars for cleaner output
+	bars = deduplicateBars(bars)
 
 	// Join bars with | for visual separation (Strudel treats space and | same)
 	return strings.Join(bars, " | ")
@@ -1616,6 +1624,77 @@ func isAllRests(pattern string) bool {
 		}
 	}
 	return true
+}
+
+// countNotesInPattern counts actual notes (not rests) in a pattern
+func countNotesInPattern(pattern string) int {
+	parts := strings.Fields(pattern)
+	count := 0
+	for _, p := range parts {
+		if p != "~" && !strings.HasPrefix(p, "~*") {
+			// Count chord notes individually
+			if strings.HasPrefix(p, "[") && strings.HasSuffix(p, "]") {
+				inner := strings.Trim(p, "[]")
+				count += len(strings.Split(inner, ","))
+			} else {
+				count++
+			}
+		}
+	}
+	return count
+}
+
+// isToSparse returns true if pattern has too many leading rests (e.g., "~*13 g4")
+// These patterns are likely transcription noise and not musically useful
+func isTooSparse(pattern string) bool {
+	parts := strings.Fields(pattern)
+	if len(parts) == 0 {
+		return true
+	}
+
+	// Check for patterns like "~*N note" where N > 6 (more than half the bar is rest)
+	if len(parts) <= 2 {
+		first := parts[0]
+		if strings.HasPrefix(first, "~*") {
+			numStr := strings.TrimPrefix(first, "~*")
+			if num, err := strconv.Atoi(numStr); err == nil && num > 6 {
+				return true
+			}
+		}
+	}
+
+	return false
+}
+
+// deduplicateBars removes consecutive duplicate bars, keeping unique ones
+func deduplicateBars(bars []string) []string {
+	if len(bars) <= 1 {
+		return bars
+	}
+
+	// Normalize patterns for comparison (remove extra spaces)
+	normalize := func(s string) string {
+		parts := strings.Fields(s)
+		return strings.Join(parts, " ")
+	}
+
+	var result []string
+	seen := make(map[string]bool)
+
+	for _, bar := range bars {
+		normalized := normalize(bar)
+		if !seen[normalized] {
+			seen[normalized] = true
+			result = append(result, bar)
+		}
+	}
+
+	// Keep at least some variety - if we reduced too much, keep original
+	if len(result) < 3 && len(bars) > 3 {
+		return bars[:min(8, len(bars))] // Keep first 8 unique-ish bars
+	}
+
+	return result
 }
 
 // AvailableStyles returns list of available sound styles
