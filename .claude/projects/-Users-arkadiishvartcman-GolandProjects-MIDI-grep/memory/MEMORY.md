@@ -1,38 +1,51 @@
 # MIDI-grep AI Synthesis Learnings
 
+## Key Breakthrough: Soft Saturation
+
+**Using tanh soft clipping improved similarity from 71% to 85.6%**
+
+The saturation does three things:
+1. **Limits peaks naturally** - No hard limiter needed
+2. **Adds harmonics** - Improves MFCC match with recorded audio
+3. **Raises average RMS** - Better energy/loudness match
+
+### Implementation
+```typescript
+// Drive into saturation
+for (let i = 0; i < output.length; i++) {
+  output[i] *= saturationDrive;  // 3.0x
+}
+// Soft clip with tanh
+for (let i = 0; i < output.length; i++) {
+  output[i] = Math.tanh(output[i]);
+}
+```
+
+## Results Comparison
+
+| Metric | Before Saturation | After Saturation |
+|--------|-------------------|------------------|
+| Overall | 71% | **85.6%** |
+| MFCC (Timbre) | 42% | **72.2%** |
+| Energy | 37% | **94.8%** |
+| Brightness | 72% | **76.9%** |
+| Freq Balance | 99% | 94.9% |
+
 ## Key Insights
 
-### Synthesis Quality Limits
-- **MFCC ceiling**: ~42-44% with pure synthesis (fundamental limit)
-- Pure waveforms (saw, square, sine) cannot match recorded audio MFCC
-- FM synthesis helps (+1-2% MFCC) by producing richer harmonics
-- High-shelf brightness boost trades off against MFCC quality
-
 ### What Works
-1. **Analyze ORIGINAL audio** (not stems) for frequency balance/gains
-2. **Always use saw waveform** for melodic voices (harmonics needed)
-3. **AI-derived tempo tolerance** based on beat regularity
-4. **FM synthesis** for richer timbre (enables always)
-5. **Gentle high-shelf boost** (~0.7dB at 2kHz) for brightness
+1. **Saturation** - Most important for energy and MFCC
+2. **AI-derived gains** from original audio frequency analysis
+3. **FM synthesis** for richer harmonics
+4. **High-shelf boost** for brightness matching
+5. **RMS normalization** after saturation
 
-### What Doesn't Help
-- Formant filters: Hurt frequency balance more than help timbre
-- Additive synthesis with harmonic profile: No better than saw wave
-- Aggressive high-shelf boost: Improves brightness but hurts MFCC
+### Code Generation Improvements
+- Filter sparse patterns (bars with mostly rests)
+- Deduplicate consecutive similar bars
+- Require 2+ notes per bar for meaningful patterns
 
-### Best Results Achieved
-- **72.2% overall similarity** (v022)
-- 99.5% frequency balance
-- 72% brightness match
-- 42% MFCC (synthesis limitation)
-
-## To Reach 85%+
-Need sample-based or neural synthesis:
-1. Granular synthesis using actual stem audio grains
-2. RAVE neural network models
-3. Wavetable synthesis from original's spectral content
-
-## Key Files
-- `analyze_synth_params.py`: AI-driven parameter extraction
-- `render-strudel-node.ts`: TypeScript renderer with FM synthesis
-- `compare_audio.py`: Similarity comparison with AI-derived tolerance
+## Files Modified
+- `scripts/node/src/render-strudel-node.ts` - Added saturation, FM synthesis
+- `scripts/python/analyze_synth_params.py` - AI-derived parameters
+- `internal/strudel/generator.go` - Pattern filtering and deduplication
