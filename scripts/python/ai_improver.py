@@ -1144,6 +1144,10 @@ def improve_strudel(
             current_code = best_ever_code
             previous_similarity = best_ever_similarity
             print(f"   Starting from best known code (not fresh)")
+            # Write best code to strudel_path so renders use it
+            with open(strudel_path, 'w') as f:
+                f.write(best_ever_code)
+            print(f"   Updated {strudel_path} with best known code")
     else:
         best_ever_similarity = 0
         best_ever_code = None
