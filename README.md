@@ -275,7 +275,7 @@ This installs:
 | `--iterate` | `5` | AI-driven improvement iterations (default: 5, always enabled) |
 | `--target-similarity` | `0.85` | Target similarity score to stop iteration (default: 0.85) |
 | `--ollama` | `true` | Use Ollama (free local LLM) for AI improvement |
-| `--ollama-model` | - | Ollama model to use (default: `deepseek-coder:6.7b`) |
+| `--ollama-model` | - | Ollama model to use (default: `llama3:8b`) |
 
 ### Default Analysis Features
 
@@ -299,7 +299,7 @@ MIDI-grep can iteratively improve Strudel code using AI analysis:
 ./bin/midi-grep extract --url "..." --iterate 10 --target-similarity 0.75
 
 # Use a different Ollama model
-./bin/midi-grep extract --url "..." --iterate 5 --ollama-model codellama:7b
+./bin/midi-grep extract --url "..." --iterate 5 --ollama-model llama3:8b
 ```
 
 **How it works:**
@@ -314,7 +314,7 @@ MIDI-grep can iteratively improve Strudel code using AI analysis:
 ```bash
 brew install ollama
 ollama serve
-ollama pull codellama:7b  # 3.8GB download
+ollama pull llama3:8b  # 3.8GB download
 ```
 
 **ClickHouse Learning Storage:**

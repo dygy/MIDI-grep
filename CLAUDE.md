@@ -604,17 +604,17 @@ The `--iterate` flag enables AI-driven code improvement using Claude:
 | Flag | Description |
 |------|-------------|
 | `--ollama` | Use Ollama (local, free) - **default: enabled** |
-| `--ollama-model` | Model to use (default: `codellama:7b`) |
+| `--ollama-model` | Model to use (default: `llama3:8b`) |
 
 ```bash
-# Default: uses Ollama (free, local)
+# Default: uses Ollama (free, local) with llama3:8b
 ./bin/midi-grep extract --url "..." --iterate 5
 
 # Use Claude API instead (requires ANTHROPIC_API_KEY)
 ./bin/midi-grep extract --url "..." --iterate 5 --ollama=false
 
 # Use specific Ollama model
-./bin/midi-grep extract --url "..." --iterate 5 --ollama-model codellama:7b
+./bin/midi-grep extract --url "..." --iterate 5 --ollama-model llama3:8b
 ```
 
 **Ollama Setup (one-time):**
@@ -625,16 +625,19 @@ brew install ollama
 # Start service
 ollama serve  # or: brew services start ollama
 
-# Pull recommended model (7B is fast and works well)
-ollama pull codellama:7b
+# Pull recommended model (understands music concepts)
+ollama pull llama3:8b
 ```
 
 **Tested Models:**
-| Model | Size | Speed | Quality | Notes |
-|-------|------|-------|---------|-------|
-| `codellama:7b` | 3.8GB | Fast | Good | **Recommended** - best balance |
-| `tinyllama:latest` | 637MB | Very fast | Low | Struggles with JSON format |
-| `qwen2.5-coder:1.5b` | 1GB | Fast | Low | Better than tinyllama but still limited |
+| Model | Size | Speed | Music Understanding | Notes |
+|-------|------|-------|---------------------|-------|
+| `llama3:8b` | 4.7GB | Medium | ⭐⭐⭐⭐⭐ | **Recommended** - best for music + audio concepts |
+| `deepseek-coder:6.7b` | 3.8GB | Fast | ⭐⭐ | Good at JSON but code-focused |
+| `codellama:7b` | 3.8GB | Fast | ⭐⭐ | Code-focused, less musical knowledge |
+| `mistral:7b` | 4.1GB | Fast | ⭐⭐⭐⭐ | Good general model |
+
+**Why `llama3:8b`?** The LLM needs to understand audio/music concepts ("bass sounds muddy", "mids are harsh", "drums lack punch") not just generate code. General-purpose models with broad knowledge outperform code-only models for this task.
 
 **ClickHouse for Learning Storage (`scripts/python/ai_improver.py`):**
 

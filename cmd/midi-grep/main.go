@@ -318,7 +318,7 @@ func init() {
 	extractCmd.Flags().IntVar(&iterateCount, "iterate", 5, "AI-driven improvement iterations (default: 5)")
 	extractCmd.Flags().Float64Var(&targetSimilarity, "target-similarity", 0.85, "Target similarity for --iterate (0.0-1.0)")
 	extractCmd.Flags().BoolVar(&useOllama, "ollama", true, "Use Ollama (local LLM) - free, no API key needed")
-	extractCmd.Flags().StringVar(&ollamaModel, "ollama-model", "deepseek-coder:6.7b", "Ollama model to use")
+	extractCmd.Flags().StringVar(&ollamaModel, "ollama-model", "llama3:8b", "Ollama model to use")
 
 	// Serve command flags
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to listen on")
