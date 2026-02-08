@@ -811,6 +811,33 @@ func runExtract(cmd *cobra.Command, args []string) error {
 			if _, err := os.Stat(newRenderPath); err == nil {
 				renderedPath = newRenderPath
 			}
+
+			// Re-render stems with improved code and re-run comparison
+			improvedStrudelPath := filepath.Join(versionDir, "output.strudel")
+			if _, err := os.Stat(improvedStrudelPath); err == nil {
+				fmt.Println("[AI] Re-rendering stems with improved code...")
+				baseName := strings.TrimSuffix(filepath.Base(renderedPath), ".wav")
+				stemOutputPath := filepath.Join(versionDir, baseName+"_final.wav")
+				if err := renderStrudelNodeJS(improvedStrudelPath, stemOutputPath, audioDuration, true); err != nil {
+					fmt.Printf("       Warning: Could not re-render stems: %v\n", err)
+				} else {
+					// Update stem paths to use final render
+					finalStems := StemPaths{
+						OriginalBass:    filepath.Join(result.CacheDir, "bass.wav"),
+						RenderedBass:    filepath.Join(versionDir, baseName+"_final_bass.wav"),
+						OriginalDrums:   filepath.Join(result.CacheDir, "drums.wav"),
+						RenderedDrums:   filepath.Join(versionDir, baseName+"_final_drums.wav"),
+						OriginalMelodic: filepath.Join(result.CacheDir, "melodic.wav"),
+						RenderedMelodic: filepath.Join(versionDir, baseName+"_final_melodic.wav"),
+					}
+					fmt.Println("[AI] Running per-stem comparison on improved render...")
+					if err := generateStemComparison(finalStems, versionDir, findScriptsDir(), audioDuration); err != nil {
+						fmt.Printf("       Warning: Per-stem comparison failed: %v\n", err)
+					} else {
+						fmt.Printf("       Per-stem comparison charts: %s/chart_stem_*.png\n", versionDir)
+					}
+				}
+			}
 		}
 	}
 

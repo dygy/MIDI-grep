@@ -1413,7 +1413,8 @@ def improve_strudel(
                             sys.executable,
                             str(Path(__file__).parent / "compare_audio.py"),
                             original_audio, str(test_path),
-                            "-d", f"{min(30, exact_duration):.2f}"
+                            "-d", f"{min(30, exact_duration):.2f}",
+                            "--json", "--quiet"  # Output JSON, suppress logs
                         ]
                         test_result = subprocess.run(test_compare_cmd, capture_output=True, text=True)
                         try:
