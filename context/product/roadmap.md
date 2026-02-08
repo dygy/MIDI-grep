@@ -377,15 +377,23 @@ _Fixing the core audio quality issues blocking high similarity scores._
   - [ ] **Sub-Octave Mix:** sub_bass band chronically 15-17% under target
   - [ ] **808 Sub Mode:** Add dedicated sub-bass oscillator for bass voice
 
-- [ ] **ClickHouse Learning Application**
-  - [ ] **Apply Stored Knowledge:** 83 knowledge items not being used
-  - [ ] **Genre Context Matching:** Use genre/BPM/key to find relevant learnings
-  - [ ] **Auto-Apply Best Configs:** Start from proven parameters, not defaults
+- [x] **ClickHouse Learning Application** ✅ (Feb 2026)
+  - [x] **Apply Stored Knowledge:** Best code from ClickHouse now written to strudel_path
+  - [x] **Genre Context Matching:** Query fetches across genres for universal learnings
+  - [x] **Auto-Apply Best Configs:** Start from best known code, not defaults
 
 - [ ] **LLM Improvement Effectiveness**
   - [ ] **29 iterations, still 64.6%:** LLM not understanding frequency fixes
   - [ ] **Concrete Parameter Changes:** Give LLM exact gain multipliers to apply
-  - [ ] **Regression Prevention:** Don't accept changes that reduce similarity
+  - [x] **Regression Prevention:** Fixed --json --quiet flags for comparison parsing
+
+- [x] **Per-Stem Comparison After AI** ✅ (Feb 2026)
+  - [x] **Re-render stems:** Now re-renders with improved code after AI iterations
+  - [x] **Bass was empty:** Fixed - Brazilian Funk template bass now renders
+
+- [x] **Cache Key Identity** ✅ (Feb 2026)
+  - [x] **Filename-based keys:** Changed from hash (file_785c...) to filename
+  - [x] **Learning preservation:** Track identity preserved for ClickHouse learning
 
 - [ ] **Sidechain/Ducking for Bass**
   - [ ] **Kick Ducks Bass:** Essential for Brazilian funk/house punch
