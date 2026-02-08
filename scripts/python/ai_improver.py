@@ -176,19 +176,36 @@ def get_best_run(track_hash: str) -> Optional[Dict]:
 
 
 def get_learned_knowledge(genre: str, bpm: float, key_type: str) -> List[Dict]:
-    """Get relevant learned knowledge for this track context."""
-    query = f"""
-        SELECT parameter_name, parameter_new_value, similarity_improvement, confidence
-        FROM midi_grep.knowledge
-        WHERE (genre = '{genre}' OR genre = '')
-          AND bpm_range_low <= {bpm}
-          AND bpm_range_high >= {bpm}
-          AND (key_type = '{key_type}' OR key_type = '')
-          AND confidence > 0.5
-        ORDER BY similarity_improvement DESC
-        LIMIT 10
+    """Get relevant learned knowledge for this track context.
+
+    Priority:
+    1. Exact genre match with BPM in range
+    2. Any genre with standard Fx patterns (bassFx, midFx, etc.)
+    3. Universal learnings (empty genre)
     """
-    return clickhouse_query(query)
+    # First try exact genre match
+    query = f"""
+        SELECT parameter_name, parameter_new_value, similarity_improvement, confidence, genre
+        FROM midi_grep.knowledge
+        WHERE (
+            (genre = '{genre}' AND bpm_range_low <= {bpm} AND bpm_range_high >= {bpm})
+            OR (parameter_name LIKE 'bassFx%' OR parameter_name LIKE 'midFx%'
+                OR parameter_name LIKE 'highFx%' OR parameter_name LIKE 'drumsFx%')
+            OR genre = ''
+        )
+          AND confidence > 0.5
+          AND similarity_improvement > 0.1
+        ORDER BY similarity_improvement DESC
+        LIMIT 20
+    """
+    results = clickhouse_query(query)
+
+    # Log what we found
+    if results:
+        genres_found = set(r.get('genre', '') for r in results)
+        print(f"       Found {len(results)} knowledge items from genres: {genres_found}")
+
+    return results
 
 
 def extract_parameters_from_code(code: str) -> Dict[str, Dict[str, Any]]:
@@ -541,12 +558,21 @@ def build_improvement_prompt(
     brightness_ratio = previous_run.get('brightness_ratio', 1.0)
     energy_ratio = previous_run.get('energy_ratio', 1.0)
 
-    # Include learned knowledge if available
+    # Include learned knowledge if available - MAKE IT MANDATORY
     knowledge_str = ""
     if learned_knowledge:
-        knowledge_str = "\n\nPREVIOUS LEARNINGS:\n"
-        for k in learned_knowledge[:5]:
-            knowledge_str += f"- {k.get('parameter_name')}: {k.get('parameter_old_value')} -> {k.get('parameter_new_value')} (improved {k.get('similarity_improvement', 0)*100:.0f}%)\n"
+        knowledge_str = """
+
+⚠️ MANDATORY KNOWLEDGE FROM DATABASE - YOU MUST USE THESE VALUES ⚠️
+These are PROVEN improvements from previous tracks. DO NOT IGNORE.
+If the current code doesn't have these values, ADD THEM.
+"""
+        for k in learned_knowledge[:10]:  # Show more items
+            param = k.get('parameter_name', '')
+            new_val = k.get('parameter_new_value', '')
+            improvement = k.get('similarity_improvement', 0) * 100
+            knowledge_str += f"  ✓ SET {param} = {new_val} (proven +{improvement:.0f}% improvement)\n"
+        knowledge_str += "\nFAILURE TO APPLY THESE WILL RESULT IN LOWER SIMILARITY SCORES.\n"
 
     # Include spectrogram insights if available (deep analysis)
     spectrogram_str = ""
@@ -665,11 +691,12 @@ TASK: Fix the frequency balance issues shown in COMPARISON DATA.
 - Use the spectrogram insights for precise dB-to-gain conversions
 - Choose sounds that match the genre (not the same sounds every time!)
 
-CRITICAL RULES:
-1. Bass MUST have .lpf(500) or lower to stay out of mid range
-2. Each voice needs .hpf() and .lpf() to prevent frequency overlap
-3. Use perlin.range() for natural gain variation: perlin.range(0.3, 0.5).slow(8)
-4. Conservative changes - adjust by 20-30% per iteration, not 200%
+CRITICAL RULES (MUST FOLLOW):
+1. **APPLY ALL MANDATORY KNOWLEDGE ABOVE** - These are proven improvements from the database. If it says "SET bassFx.gain = 0.6", then bassFx MUST have .gain(0.6). No exceptions.
+2. Bass MUST have .lpf(500) or lower to stay out of mid range
+3. Each voice needs .hpf() and .lpf() to prevent frequency overlap
+4. Use perlin.range() for natural gain variation: perlin.range(0.3, 0.5).slow(8)
+5. Conservative changes - adjust by 20-30% per iteration, not 200%
 
 Output ONLY these 4 lines (no explanation, no comments):
 let bassFx = p => p.sound("...").gain(...).hpf(...).lpf(...)...
@@ -1349,116 +1376,14 @@ def improve_strudel(
         # 6. Update code for next iteration
         improved_effects = ai_result.get("improved_code", "")
 
-        # If LLM gave suggestions but no code, use AI gap analysis for smarter improvement
+        # NO FALLBACKS - LLM MUST return code or we fail
         if not improved_effects or not improved_effects.strip():
-            if HAS_CODE_IMPROVER:
-                # Use the smarter AI code improver based on gap analysis
-                print(f"       Using AI gap analysis for code improvement...")
-
-                # Analyze comparison gaps
-                gaps = analyze_comparison_gaps(comparison)
-
-                if gaps['issues']:
-                    print(f"       Issues: {', '.join(gaps['issues'])}")
-                    print(f"       Suggestions: {'; '.join(gaps['suggestions'][:2])}")
-
-                # Load synth config if available
-                synth_cfg = {}
-                if synth_config_path.exists():
-                    with open(synth_config_path) as f:
-                        synth_cfg = json.load(f)
-
-                # Improve code based on gaps
-                improved_code_from_gaps, improved_synth_cfg = improve_strudel_code(
-                    current_code, gaps, synth_cfg
-                )
-
-                # Save updated synth config
-                if improved_synth_cfg and synth_config_path.exists():
-                    with open(synth_config_path, 'w') as f:
-                        json.dump(improved_synth_cfg, f, indent=2)
-
-                # Check if code actually changed
-                if improved_code_from_gaps != current_code:
-                    current_code = improved_code_from_gaps
-                    # Save and continue
-                    improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
-                    with open(improved_path, 'w') as f:
-                        f.write(current_code)
-                    with open(strudel_path, 'w') as f:
-                        f.write(current_code)
-                    print(f"       Saved improved code to {improved_path}")
-                    current_version += 1
-                    continue
-                else:
-                    print("       No changes from gap analysis")
-
-            # Fallback: compute from frequency bands if gap analysis didn't help
-            import re as regex
-
-            # Extract current gains from code (try multiple patterns)
-            bass_gain_m = regex.search(r'bassFx.*?\.gain\(([0-9.]+)\)', current_code)
-            mid_gain_m = regex.search(r'midFx.*?\.gain\(([0-9.]+)\)', current_code)
-            high_gain_m = regex.search(r'highFx.*?\.gain\(([0-9.]+)\)', current_code)
-            drums_gain_m = regex.search(r'drumsFx.*?\.gain\(([0-9.]+)\)', current_code)
-
-            bass_g = float(bass_gain_m.group(1)) if bass_gain_m else 0.15
-            mid_g = float(mid_gain_m.group(1)) if mid_gain_m else 1.2
-            high_g = float(high_gain_m.group(1)) if high_gain_m else 0.8
-            drums_g = float(drums_gain_m.group(1)) if drums_gain_m else 0.9
-
-            # Aggressive adjustments based on band differences
-            bass_diff = band_diffs.get('bass', 0) + band_diffs.get('sub_bass', 0) * 0.5
-            mid_diff = band_diffs.get('mid', 0) + band_diffs.get('low_mid', 0) * 0.5
-            high_diff = band_diffs.get('high', 0) + band_diffs.get('high_mid', 0) * 0.5
-
-            bass_adj = max(0.5, min(2.0, 1.0 - bass_diff * 1.5))
-            mid_adj = max(0.5, min(2.5, 1.0 - mid_diff * 1.2))
-            high_adj = max(0.5, min(2.0, 1.0 - high_diff * 1.0))
-            energy_adj = max(0.7, min(1.5, 1.0 / max(energy_ratio, 0.3))) if energy_ratio < 0.7 else 1.0
-
-            new_bass = max(0.05, min(0.5, bass_g * bass_adj))
-            new_mid = max(0.5, min(3.0, mid_g * mid_adj * energy_adj))
-            new_high = max(0.3, min(1.5, high_g * high_adj))
-            new_drums = max(0.5, min(1.2, drums_g * energy_adj))
-
-            print(f"       Computing from bands: bass={new_bass:.2f} mid={new_mid:.2f} high={new_high:.2f} drums={new_drums:.2f}")
-
-            # Extract current sounds
-            bass_sound_m = regex.search(r'bassFx.*?\.sound\("([^"]+)"\)', current_code)
-            mid_sound_m = regex.search(r'midFx.*?\.sound\("([^"]+)"\)', current_code)
-            high_sound_m = regex.search(r'highFx.*?\.sound\("([^"]+)"\)', current_code)
-            drums_bank_m = regex.search(r'drumsFx.*?\.bank\("([^"]+)"\)', current_code)
-
-            bass_sound = bass_sound_m.group(1) if bass_sound_m else "gm_electric_bass_finger"
-            mid_sound = mid_sound_m.group(1) if mid_sound_m else "gm_epiano2"
-            high_sound = high_sound_m.group(1) if high_sound_m else "gm_music_box"
-            drums_bank = drums_bank_m.group(1) if drums_bank_m else "RolandTR808"
-
-            # Extract current filter values
-            bass_hpf_m = regex.search(r'bassFx.*?\.hpf\(([0-9]+)\)', current_code)
-            bass_lpf_m = regex.search(r'bassFx.*?\.lpf\(([0-9]+)\)', current_code)
-            mid_lpf_m = regex.search(r'midFx.*?\.lpf\(([0-9]+)\)', current_code)
-            high_lpf_m = regex.search(r'highFx.*?\.lpf\(([0-9]+)\)', current_code)
-
-            bass_hpf = int(bass_hpf_m.group(1)) if bass_hpf_m else 60
-            bass_lpf = int(bass_lpf_m.group(1)) if bass_lpf_m else 500
-            mid_lpf = int(mid_lpf_m.group(1)) if mid_lpf_m else 5000
-            high_lpf = int(high_lpf_m.group(1)) if high_lpf_m else 12000
-
-            # Adjust filters based on brightness
-            if brightness_ratio < 0.8:
-                mid_lpf = min(8000, mid_lpf + 1000)
-                high_lpf = min(16000, high_lpf + 2000)
-            elif brightness_ratio > 1.3:
-                mid_lpf = max(3000, mid_lpf - 1000)
-                high_lpf = max(8000, high_lpf - 2000)
-
-            # Generate improved effects
-            improved_effects = f'''let bassFx = p => p.sound("{bass_sound}").gain({new_bass:.2f}).hpf({bass_hpf}).lpf({bass_lpf})
-let midFx = p => p.sound("{mid_sound}").gain({new_mid:.2f}).lpf({mid_lpf})
-let highFx = p => p.sound("{high_sound}").gain({new_high:.2f}).lpf({high_lpf})
-let drumsFx = p => p.bank("{drums_bank}").gain({new_drums:.2f})'''
+            raise RuntimeError(
+                f"LLM did not return code! This is a bug.\n"
+                f"AI result: {ai_result}\n"
+                f"Knowledge items: {len(knowledge)}\n"
+                f"Make sure Ollama is running: curl http://localhost:11434/api/tags"
+            )
 
         if improved_effects and improved_effects.strip():
             # Merge improved effects back into full code

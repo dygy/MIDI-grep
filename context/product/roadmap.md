@@ -452,9 +452,6 @@ _Fixing the core audio quality issues blocking high similarity scores._
   - [ ] **Automated Benchmarks:** Compare different configs
   - [ ] **Regression Tests:** Ensure changes improve similarity
 
-- [ ] **Report Size Optimization**
-  - [ ] **Stream Audio:** Don't embed in HTML
-  - [ ] **Lazy Loading:** Load stems on demand
 
 ---
 
