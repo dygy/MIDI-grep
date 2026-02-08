@@ -337,6 +337,127 @@ _Fine-tune transcription for specific genres and user samples._
 
 ---
 
+## Phase 10: Audio Similarity & Synthesis Quality 🔴 CRITICAL
+
+_Fixing the core audio quality issues blocking high similarity scores._
+
+### 🔴 Critical (Blocking 80%+ Similarity)
+
+- [ ] **Fix Drum Synthesis**
+  - [ ] **808 Kick Frequency Balance:** Current renders 62% sub-bass, should be 12% (punchy bass, not sub rumble)
+  - [ ] **Kick Transient:** Add click/punch transient before pitch envelope
+  - [ ] **Snare Frequency:** Too much sub, need more mid crack
+  - [ ] **Drum Mix Balance:** bass stem 78% → 35% currently (-43% off)
+
+- [ ] **Fix Voice Gain Defaults**
+  - [ ] **Bass Gain:** Increase from 0.3 to 0.8+ (currently too quiet)
+  - [ ] **Mid Gain:** Decrease from 1.0 to 0.5 (currently dominates)
+  - [ ] **Sub-Octave Gain:** Increase from 0.4 to 0.8 for 808-style bass
+
+- [ ] **Fix Tempo Detection**
+  - [ ] **Half-Time Detection:** 136 BPM detected as 92 BPM
+  - [ ] **Octave Correction:** Existing code not working for all cases
+  - [ ] **Prior-Based Selection:** Use genre BPM ranges to select correct octave
+
+- [ ] **Fix Frequency Balance**
+  - [ ] **Current:** 33.6% similarity (sub_bass -17%, bass -29%, mid +33%)
+  - [ ] **Target:** 80%+ frequency balance similarity
+  - [ ] **Approach:** Genre-specific voice gain presets
+
+### 🟠 High Priority (Blocking 85%+ Similarity)
+
+- [ ] **Genre-Specific Synthesis Configs**
+  - [ ] **Brazilian Funk:** Heavy 808 bass (gain 1.5), punchy kick, minimal mids
+  - [ ] **Electro Swing:** Brass emphasis, piano mids, swing timing
+  - [ ] **House/Techno:** 4-on-floor kick, sidechain bass, bright leads
+  - [ ] **Lo-Fi:** Vinyl noise, tape saturation, reduced highs
+
+- [ ] **Sub-Bass Synthesis**
+  - [ ] **Lower Frequency Reach:** Current synthesis not reaching 20-60Hz properly
+  - [ ] **Sub-Octave Mix:** sub_bass band chronically 15-17% under target
+  - [ ] **808 Sub Mode:** Add dedicated sub-bass oscillator for bass voice
+
+- [ ] **ClickHouse Learning Application**
+  - [ ] **Apply Stored Knowledge:** 83 knowledge items not being used
+  - [ ] **Genre Context Matching:** Use genre/BPM/key to find relevant learnings
+  - [ ] **Auto-Apply Best Configs:** Start from proven parameters, not defaults
+
+- [ ] **LLM Improvement Effectiveness**
+  - [ ] **29 iterations, still 64.6%:** LLM not understanding frequency fixes
+  - [ ] **Concrete Parameter Changes:** Give LLM exact gain multipliers to apply
+  - [ ] **Regression Prevention:** Don't accept changes that reduce similarity
+
+- [ ] **Sidechain/Ducking for Bass**
+  - [ ] **Kick Ducks Bass:** Essential for Brazilian funk/house punch
+  - [ ] **Configurable Depth:** 50-80% ducking on kick hits
+  - [ ] **Attack/Release Timing:** Fast attack, medium release
+
+### 🟡 Medium Priority (Targeting 90%+ Similarity)
+
+- [ ] **Real Sample Integration**
+  - [ ] **808 Kit Samples:** Load actual TR-808 samples instead of synthesis
+  - [ ] **Instrument Samples:** GM soundfont samples for more realistic timbre
+  - [ ] **Granular Models by Default:** Use trained models when available
+
+- [ ] **Drum Pattern Accuracy**
+  - [ ] **Current:** 44% drums similarity
+  - [ ] **Syncopation Detection:** Brazilian funk has specific off-beat patterns
+  - [ ] **Hi-Hat Patterns:** Open/closed timing not captured well
+
+- [ ] **Velocity Dynamics**
+  - [ ] **Variable Velocity:** Currently all notes same loudness
+  - [ ] **Ghost Notes:** Quiet notes between main hits
+  - [ ] **Accent Patterns:** Downbeat emphasis
+
+- [ ] **Saturation/Limiter Bass Preservation**
+  - [ ] **tanh Clipping:** May be compressing bass transients
+  - [ ] **Multiband Limiting:** Preserve bass while limiting mids/highs
+  - [ ] **Soft Knee:** Gentler limiting curve
+
+- [ ] **Master HPF Review**
+  - [ ] **Current:** 30Hz cutoff may be too aggressive
+  - [ ] **Brazilian Funk:** Needs sub-bass presence (lower to 20Hz)
+  - [ ] **Genre-Specific:** Different HPF per genre
+
+- [ ] **Swing Timing in Synthesis**
+  - [ ] **Detected but Unused:** Swing ratio calculated but not applied
+  - [ ] **Timing Offsets:** Apply swing to note start times
+  - [ ] **Genre-Appropriate:** More swing for jazz, less for electronic
+
+### 🟢 Lower Priority (Polish & Maintenance)
+
+- [ ] **Code Refactoring**
+  - [ ] **ai_improver.py:** 1619 lines → split into modules
+  - [ ] **generate_report.py:** 2038 lines → template-based
+  - [ ] **compare_audio.py:** 1397 lines → separate analysis functions
+
+- [ ] **Test Coverage**
+  - [ ] **compare_audio tests:** Verify MAE calculation
+  - [ ] **renderer tests:** Verify frequency band output
+  - [ ] **synthesis tests:** Verify voice gain balance
+
+- [ ] **Per-Track Config Caching**
+  - [ ] **Best Config Storage:** Cache winning synth config per track
+  - [ ] **Genre Config Library:** Build up genre-specific defaults over time
+
+- [ ] **Time Signature in Rendering**
+  - [ ] **6/8 Feel:** Different pattern grouping
+  - [ ] **3/4 Waltz:** Emphasis on beat 1
+
+- [ ] **Chord Detection Usage**
+  - [ ] **Harmonic Content:** Use detected chords in synthesis
+  - [ ] **Bass Note Selection:** Follow chord roots
+
+- [ ] **A/B Testing Framework**
+  - [ ] **Automated Benchmarks:** Compare different configs
+  - [ ] **Regression Tests:** Ensure changes improve similarity
+
+- [ ] **Report Size Optimization**
+  - [ ] **Stream Audio:** Don't embed in HTML
+  - [ ] **Lazy Loading:** Load stems on demand
+
+---
+
 ## Future Ideas (Backlog)
 
 _Ideas for future consideration, not yet prioritized._
@@ -413,3 +534,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.58 | 2026-02-08 | New weights: Freq Balance 40%, MFCC 20%, Energy 15%, Brightness 15%, Tempo/Chroma 5% |
 | 1.59 | 2026-02-08 | ClickHouse learning storage with 130+ runs tracked |
 | 1.60 | 2026-02-08 | LLM always runs all iterations (target 99% to ensure full analysis) |
+| 1.61 | 2026-02-08 | **Phase 10 added:** Audio Similarity & Synthesis Quality roadmap with 23 issues |
