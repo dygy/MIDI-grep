@@ -5,7 +5,6 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -180,20 +179,16 @@ func FolderNameForTrack(title, videoID string) string {
 	return sanitizeFolderName(title)
 }
 
-// KeyForFile generates a cache key from a file's content hash
+// KeyForFile generates a cache key from a file's name (not hash)
+// Using filename preserves track identity for cross-track learning
 func KeyForFile(path string) (string, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return "", fmt.Errorf("open file: %w", err)
-	}
-	defer file.Close()
+	// Get filename without extension
+	base := filepath.Base(path)
+	ext := filepath.Ext(base)
+	name := strings.TrimSuffix(base, ext)
 
-	hash := sha256.New()
-	if _, err := io.Copy(hash, file); err != nil {
-		return "", fmt.Errorf("hash file: %w", err)
-	}
-
-	return "file_" + hex.EncodeToString(hash.Sum(nil))[:16], nil
+	// Sanitize for folder name
+	return sanitizeFolderName(name), nil
 }
 
 // GetByKey retrieves cached stems for the given key (legacy support)
