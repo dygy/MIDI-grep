@@ -114,6 +114,13 @@ interface ParsedVoice {
   soundName?: string;  // The sound from .sound() in the code
 }
 
+interface StemOutputs {
+  mixed: Float32Array;
+  bass: Float32Array;
+  drums: Float32Array;
+  melodic: Float32Array;  // mid + high combined
+}
+
 // ============================================
 // SOUND-TO-SYNTHESIS MAPPING
 // Maps Strudel sound names to synthesis parameters for variety
@@ -1021,10 +1028,18 @@ function getModelType(name: string): 'melodic' | 'bass' | 'drums' {
 async function render(
   voices: ParsedVoice[],
   config: SynthConfig,
-  duration: number
-): Promise<Float32Array> {
+  duration: number,
+  separateStems: boolean = false
+): Promise<StemOutputs> {
   const totalSamples = Math.floor(duration * SAMPLE_RATE);
-  const output = new Float32Array(totalSamples);
+
+  // Create separate stem buffers
+  const stems: StemOutputs = {
+    mixed: new Float32Array(totalSamples),
+    bass: new Float32Array(totalSamples),
+    drums: new Float32Array(totalSamples),
+    melodic: new Float32Array(totalSamples),
+  };
 
   const bpm = config.tempo.bpm;
   const cyclesPerSecond = bpm / 60 / 4;
@@ -1143,10 +1158,20 @@ async function render(
           synthSample = synthNote(targetFreq, noteDuration, noteConfig, SAMPLE_RATE, config);
         }
 
-        // Mix into output
+        // Mix into appropriate stem and mixed output
         const len = Math.min(synthSample.length, totalSamples - startSample);
         for (let i = 0; i < len; i++) {
-          output[startSample + i] += synthSample[i];
+          const sample = synthSample[i];
+          stems.mixed[startSample + i] += sample;
+
+          // Route to correct stem
+          if (voice.modelType === 'drums') {
+            stems.drums[startSample + i] += sample;
+          } else if (voice.modelType === 'bass') {
+            stems.bass[startSample + i] += sample;
+          } else {
+            stems.melodic[startSample + i] += sample;
+          }
         }
       }
 
@@ -1155,24 +1180,24 @@ async function render(
     }
   }
 
-  // Apply master processing
+  // Apply master processing to mixed output
   console.log(`\nApplying master processing...`);
 
   // Master HPF
   if (config.master.hpf > 20) {
-    applyHPF(output, config.master.hpf, SAMPLE_RATE);
+    applyHPF(stems.mixed, config.master.hpf, SAMPLE_RATE);
   }
 
   // AI-derived brightness boost (high-shelf filter at 2kHz)
   const highShelfBoost = config.master.high_shelf_boost || 0;
   if (highShelfBoost > 0.1) {
-    applyHighShelf(output, 2000, highShelfBoost, SAMPLE_RATE);
+    applyHighShelf(stems.mixed, 2000, highShelfBoost, SAMPLE_RATE);
     console.log(`  High-shelf boost: +${highShelfBoost.toFixed(1)} dB above 2kHz`);
   }
 
   // Master gain
-  for (let i = 0; i < output.length; i++) {
-    output[i] *= config.master.gain;
+  for (let i = 0; i < stems.mixed.length; i++) {
+    stems.mixed[i] *= config.master.gain;
   }
 
   // Soft saturation: limits peaks while adding harmonics
@@ -1181,40 +1206,40 @@ async function render(
 
   // First, apply gain to bring up levels
   const saturationDrive = 3.0;  // How hard we drive into saturation
-  for (let i = 0; i < output.length; i++) {
-    output[i] *= saturationDrive;
+  for (let i = 0; i < stems.mixed.length; i++) {
+    stems.mixed[i] *= saturationDrive;
   }
 
   // Apply tanh saturation (soft clipping)
-  for (let i = 0; i < output.length; i++) {
-    output[i] = Math.tanh(output[i]);
+  for (let i = 0; i < stems.mixed.length; i++) {
+    stems.mixed[i] = Math.tanh(stems.mixed[i]);
   }
 
   // Tanh outputs -1 to 1, scale to desired peak
   const targetPeak = 0.85;  // Leave some headroom
-  for (let i = 0; i < output.length; i++) {
-    output[i] *= targetPeak;
+  for (let i = 0; i < stems.mixed.length; i++) {
+    stems.mixed[i] *= targetPeak;
   }
 
   // Calculate RMS after saturation
   let sumSq = 0;
-  for (let i = 0; i < output.length; i++) {
-    sumSq += output[i] * output[i];
+  for (let i = 0; i < stems.mixed.length; i++) {
+    sumSq += stems.mixed[i] * stems.mixed[i];
   }
-  const postSatRms = Math.sqrt(sumSq / output.length);
+  const postSatRms = Math.sqrt(sumSq / stems.mixed.length);
   console.log(`  Saturation: drive ${saturationDrive}×, post-sat RMS ${postSatRms.toFixed(4)}`)
 
   // Limiter AFTER compression (to control peaks)
   if (config.master.limiter) {
     const threshold = config.dynamics.limiter_threshold;
     let maxVal = 0;
-    for (let i = 0; i < output.length; i++) {
-      maxVal = Math.max(maxVal, Math.abs(output[i]));
+    for (let i = 0; i < stems.mixed.length; i++) {
+      maxVal = Math.max(maxVal, Math.abs(stems.mixed[i]));
     }
     if (maxVal > threshold) {
       const scale = threshold / maxVal;
-      for (let i = 0; i < output.length; i++) {
-        output[i] *= scale;
+      for (let i = 0; i < stems.mixed.length; i++) {
+        stems.mixed[i] *= scale;
       }
       console.log(`  Limiter: peak ${maxVal.toFixed(2)} → ${threshold}`);
     }
@@ -1224,30 +1249,30 @@ async function render(
   if (config.dynamics.target_rms > 0) {
     // Calculate current RMS after limiting
     let sumSquares = 0;
-    for (let i = 0; i < output.length; i++) {
-      sumSquares += output[i] * output[i];
+    for (let i = 0; i < stems.mixed.length; i++) {
+      sumSquares += stems.mixed[i] * stems.mixed[i];
     }
-    const currentRms = Math.sqrt(sumSquares / output.length);
+    const currentRms = Math.sqrt(sumSquares / stems.mixed.length);
 
     // Normalize to target RMS
     if (currentRms > 0.001) {
       const rmsScale = config.dynamics.target_rms / currentRms;
       // Allow up to 3x amplification (target / current), but cap at 0.95 peak
       const safeScale = Math.min(3.0, Math.max(0.1, rmsScale));
-      for (let i = 0; i < output.length; i++) {
-        output[i] *= safeScale;
+      for (let i = 0; i < stems.mixed.length; i++) {
+        stems.mixed[i] *= safeScale;
       }
 
       // Final peak check after RMS normalization
       let finalMax = 0;
-      for (let i = 0; i < output.length; i++) {
-        finalMax = Math.max(finalMax, Math.abs(output[i]));
+      for (let i = 0; i < stems.mixed.length; i++) {
+        finalMax = Math.max(finalMax, Math.abs(stems.mixed[i]));
       }
       if (finalMax > 0.98) {
         // Soft clip if we exceeded
         const clipScale = 0.98 / finalMax;
-        for (let i = 0; i < output.length; i++) {
-          output[i] *= clipScale;
+        for (let i = 0; i < stems.mixed.length; i++) {
+          stems.mixed[i] *= clipScale;
         }
       }
 
@@ -1256,7 +1281,29 @@ async function render(
     }
   }
 
-  return output;
+  // Normalize individual stems (for comparison, not master processing)
+  if (separateStems) {
+    normalizeStem(stems.bass, 0.9);
+    normalizeStem(stems.drums, 0.9);
+    normalizeStem(stems.melodic, 0.9);
+    console.log(`  Normalized individual stems for comparison`);
+  }
+
+  return stems;
+}
+
+// Normalize a stem to peak at targetPeak
+function normalizeStem(stem: Float32Array, targetPeak: number): void {
+  let maxVal = 0;
+  for (let i = 0; i < stem.length; i++) {
+    maxVal = Math.max(maxVal, Math.abs(stem[i]));
+  }
+  if (maxVal > 0.001) {
+    const scale = targetPeak / maxVal;
+    for (let i = 0; i < stem.length; i++) {
+      stem[i] *= scale;
+    }
+  }
 }
 
 // ============================================
@@ -1310,6 +1357,7 @@ async function main(): Promise<void> {
     console.log('  -d, --duration <sec>    Duration in seconds (default: 60)');
     console.log('  -c, --config <json>     Synthesis config JSON file (from analyze_synth_params.py)');
     console.log('  --bpm <bpm>             Override BPM');
+    console.log('  --stems                 Output separate stem files (bass, drums, melodic)');
     console.log('  -m, --models <dir>      Models directory (deprecated, using synthesis)');
     process.exit(0);
   }
@@ -1320,6 +1368,7 @@ async function main(): Promise<void> {
   let configPath = '';
   let duration = 60;
   let overrideBpm = 0;
+  let separateStems = false;
 
   for (let i = 0; i < args.length; i++) {
     const arg = args[i];
@@ -1331,6 +1380,8 @@ async function main(): Promise<void> {
       configPath = path.resolve(args[++i]);
     } else if (arg === '--bpm') {
       overrideBpm = parseFloat(args[++i]);
+    } else if (arg === '--stems') {
+      separateStems = true;
     } else if (arg === '-m' || arg === '--models') {
       i++; // Skip models dir (deprecated)
     } else if (!arg.startsWith('-')) {
@@ -1403,14 +1454,37 @@ async function main(): Promise<void> {
   }
 
   // Render
-  const audio = await render(voices, config, duration);
+  const stems = await render(voices, config, duration, separateStems);
 
-  // Save WAV
-  const wavBuffer = float32ToWav(audio, SAMPLE_RATE);
+  // Save WAV files
+  const wavBuffer = float32ToWav(stems.mixed, SAMPLE_RATE);
   fs.writeFileSync(outputPath, wavBuffer);
 
   console.log('\n' + '━'.repeat(60));
   console.log(`Saved: ${outputPath} (${(wavBuffer.length / 1024 / 1024).toFixed(1)} MB)`);
+
+  // Save separate stems if requested
+  if (separateStems) {
+    const outputDir = path.dirname(outputPath);
+    const baseName = path.basename(outputPath, '.wav');
+
+    const stemFiles = {
+      bass: path.join(outputDir, `${baseName}_bass.wav`),
+      drums: path.join(outputDir, `${baseName}_drums.wav`),
+      melodic: path.join(outputDir, `${baseName}_melodic.wav`),
+    };
+
+    for (const [stemName, stemPath] of Object.entries(stemFiles)) {
+      const stemData = stems[stemName as keyof typeof stems];
+      if (stemData && stemData !== stems.mixed) {
+        const stemBuffer = float32ToWav(stemData, SAMPLE_RATE);
+        fs.writeFileSync(stemPath, stemBuffer);
+        console.log(`Saved: ${stemPath} (${(stemBuffer.length / 1024 / 1024).toFixed(1)} MB)`);
+      }
+    }
+
+    console.log(`\nStem files ready for per-stem comparison`);
+  }
 }
 
 main().catch(err => {

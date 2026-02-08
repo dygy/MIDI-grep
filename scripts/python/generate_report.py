@@ -237,6 +237,296 @@ def generate_charts_html(comparison_results):
 
     return f'<div class="charts-grid">{"".join(html_parts)}</div>'
 
+def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data, render_data,
+                               render_melodic_data=None, render_drums_data=None, render_bass_data=None):
+    """Generate stylish audio comparison player with waveform visualizations."""
+
+    # Build audio sources for hidden audio elements
+    audio_elements = []
+    if melodic_data:
+        audio_elements.append(f'<audio id="audio-melodic" src="{melodic_data}" preload="auto"></audio>')
+    if drums_data:
+        audio_elements.append(f'<audio id="audio-drums" src="{drums_data}" preload="auto"></audio>')
+    if vocals_data:
+        audio_elements.append(f'<audio id="audio-vocals" src="{vocals_data}" preload="auto"></audio>')
+    if bass_data:
+        audio_elements.append(f'<audio id="audio-bass" src="{bass_data}" preload="auto"></audio>')
+    if render_data:
+        audio_elements.append(f'<audio id="audio-render" src="{render_data}" preload="auto"></audio>')
+    if render_melodic_data:
+        audio_elements.append(f'<audio id="audio-render-melodic" src="{render_melodic_data}" preload="auto"></audio>')
+    if render_drums_data:
+        audio_elements.append(f'<audio id="audio-render-drums" src="{render_drums_data}" preload="auto"></audio>')
+    if render_bass_data:
+        audio_elements.append(f'<audio id="audio-render-bass" src="{render_bass_data}" preload="auto"></audio>')
+
+    return f'''
+        <div class="card audio-comparison-card">
+            <div class="card-title">
+                <svg viewBox="0 0 16 16"><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm4.879-2.773 4.264 2.559a.25.25 0 0 1 0 .428l-4.264 2.559A.25.25 0 0 1 6 10.559V5.442a.25.25 0 0 1 .379-.215Z"/></svg>
+                Audio Comparison Studio
+            </div>
+
+            <!-- Hidden audio elements -->
+            <div style="display:none;">
+                {"".join(audio_elements)}
+            </div>
+
+            <!-- Main playback controls -->
+            <div class="studio-controls">
+                <div class="control-group">
+                    <div class="control-group-label">Original</div>
+                    <div class="control-buttons">
+                        <button class="studio-btn" onclick="playGroup('original-all')" data-group="original-all">
+                            <span class="btn-icon">▶</span>
+                            <span class="btn-label">All Stems</span>
+                        </button>
+                        <button class="studio-btn" onclick="playGroup('original-no-voice')" data-group="original-no-voice">
+                            <span class="btn-icon">▶</span>
+                            <span class="btn-label">No Vocals</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <div class="control-group-label">Rendered</div>
+                    <div class="control-buttons">
+                        <button class="studio-btn studio-btn-accent" onclick="playGroup('render-stems')" data-group="render-stems">
+                            <span class="btn-icon">▶</span>
+                            <span class="btn-label">All Stems</span>
+                        </button>
+                    </div>
+                </div>
+                <div class="control-group">
+                    <div class="control-group-label">Compare</div>
+                    <div class="control-buttons">
+                        <button class="studio-btn studio-btn-compare" onclick="playGroup('compare-ab')" data-group="compare-ab">
+                            <span class="btn-icon">⇄</span>
+                            <span class="btn-label">A/B Switch</span>
+                        </button>
+                    </div>
+                </div>
+                <button class="studio-btn studio-btn-stop" onclick="stopAll()">
+                    <span class="btn-icon">■</span>
+                    <span class="btn-label">Stop</span>
+                </button>
+            </div>
+
+            <!-- Waveform display -->
+            <div class="waveform-container">
+                <div class="waveform-header">
+                    <span class="time-display" id="time-current">0:00</span>
+                    <div class="waveform-title" id="now-playing">Ready to play</div>
+                    <span class="time-display" id="time-total">0:00</span>
+                </div>
+                <div class="waveform-wrapper" onclick="seekAudio(event)">
+                    <canvas id="waveform-canvas" width="800" height="120"></canvas>
+                    <div class="playhead" id="playhead"></div>
+                </div>
+                <div class="waveform-legend">
+                    <span class="legend-item"><span class="legend-color" style="background:#3fb950;"></span>Melodic</span>
+                    <span class="legend-item"><span class="legend-color" style="background:#58a6ff;"></span>Drums</span>
+                    <span class="legend-item"><span class="legend-color" style="background:#f85149;"></span>Bass</span>
+                    <span class="legend-item"><span class="legend-color" style="background:#d29922;"></span>Vocals</span>
+                </div>
+            </div>
+
+            <!-- Individual stem controls -->
+            <div class="stem-mixer">
+                <div class="mixer-title">Original Stems</div>
+                <div class="mixer-channels">
+                    <div class="mixer-channel" data-stem="melodic">
+                        <div class="channel-label">Melodic</div>
+                        <div class="channel-meter" id="meter-melodic"><div class="meter-fill"></div></div>
+                        <button class="channel-solo" onclick="toggleSolo('melodic')">S</button>
+                        <button class="channel-mute" onclick="toggleMute('melodic')">M</button>
+                    </div>
+                    <div class="mixer-channel" data-stem="drums">
+                        <div class="channel-label">Drums</div>
+                        <div class="channel-meter" id="meter-drums"><div class="meter-fill"></div></div>
+                        <button class="channel-solo" onclick="toggleSolo('drums')">S</button>
+                        <button class="channel-mute" onclick="toggleMute('drums')">M</button>
+                    </div>
+                    <div class="mixer-channel" data-stem="bass">
+                        <div class="channel-label">Bass</div>
+                        <div class="channel-meter" id="meter-bass"><div class="meter-fill"></div></div>
+                        <button class="channel-solo" onclick="toggleSolo('bass')">S</button>
+                        <button class="channel-mute" onclick="toggleMute('bass')">M</button>
+                    </div>
+                    <div class="mixer-channel" data-stem="vocals">
+                        <div class="channel-label">Vocals</div>
+                        <div class="channel-meter" id="meter-vocals"><div class="meter-fill"></div></div>
+                        <button class="channel-solo" onclick="toggleSolo('vocals')">S</button>
+                        <button class="channel-mute" onclick="toggleMute('vocals')">M</button>
+                    </div>
+                </div>
+            </div>
+            <div class="stem-mixer stem-mixer-render">
+                <div class="mixer-title">Rendered Stems</div>
+                <div class="mixer-channels">
+                    <div class="mixer-channel mixer-channel-render" data-stem="render-melodic">
+                        <div class="channel-label">Melodic</div>
+                        <div class="channel-meter" id="meter-render-melodic"><div class="meter-fill"></div></div>
+                        <button class="channel-solo" onclick="toggleSolo('render-melodic')">S</button>
+                        <button class="channel-mute" onclick="toggleMute('render-melodic')">M</button>
+                    </div>
+                    <div class="mixer-channel mixer-channel-render" data-stem="render-drums">
+                        <div class="channel-label">Drums</div>
+                        <div class="channel-meter" id="meter-render-drums"><div class="meter-fill"></div></div>
+                        <button class="channel-solo" onclick="toggleSolo('render-drums')">S</button>
+                        <button class="channel-mute" onclick="toggleMute('render-drums')">M</button>
+                    </div>
+                    <div class="mixer-channel mixer-channel-render" data-stem="render-bass">
+                        <div class="channel-label">Bass</div>
+                        <div class="channel-meter" id="meter-render-bass"><div class="meter-fill"></div></div>
+                        <button class="channel-solo" onclick="toggleSolo('render-bass')">S</button>
+                        <button class="channel-mute" onclick="toggleMute('render-bass')">M</button>
+                    </div>
+                </div>
+            </div>
+        </div>
+    '''
+
+
+def generate_stem_comparison_html(stem_results, stem_charts):
+    """Generate per-stem comparison HTML section."""
+    if not stem_results:
+        return ''
+
+    html_parts = []
+    aggregate = stem_results.get('aggregate', {})
+    per_stem = aggregate.get('per_stem', {})
+    worst_sections = aggregate.get('worst_sections', [])
+    windowed = stem_results.get('windowed', {})
+
+    # Weighted overall score
+    weighted_overall = aggregate.get('weighted_overall', 0) * 100
+    overall_color = '#3fb950' if weighted_overall >= 70 else '#d29922' if weighted_overall >= 50 else '#f85149'
+
+    html_parts.append(f'''
+        <div style="text-align: center; margin-bottom: 1.5rem;">
+            <div style="font-size: 2.5rem; font-weight: bold; color: {overall_color};">{weighted_overall:.1f}%</div>
+            <div style="color: var(--text-secondary);">Weighted Per-Stem Similarity</div>
+            <div style="font-size: 0.75rem; color: var(--text-secondary); margin-top: 0.25rem;">
+                (Melodic 45% + Drums 30% + Bass 25%)
+            </div>
+        </div>
+    ''')
+
+    # Per-stem breakdown table
+    if per_stem:
+        stem_rows = ''
+        for stem_name, metrics in per_stem.items():
+            overall = metrics.get('overall', 0) * 100
+            mfcc = metrics.get('mfcc', 0) * 100
+            freq_bal = metrics.get('freq_balance', 0) * 100
+            energy = metrics.get('energy', 0) * 100
+
+            color = '#3fb950' if overall >= 70 else '#d29922' if overall >= 50 else '#f85149'
+            stem_rows += f'''
+                <tr>
+                    <td style="padding: 0.5rem; font-weight: 600; text-transform: capitalize;">{stem_name}</td>
+                    <td style="padding: 0.5rem; text-align: center; color: {color}; font-weight: 600;">{overall:.0f}%</td>
+                    <td style="padding: 0.5rem; text-align: center;">{mfcc:.0f}%</td>
+                    <td style="padding: 0.5rem; text-align: center;">{freq_bal:.0f}%</td>
+                    <td style="padding: 0.5rem; text-align: center;">{energy:.0f}%</td>
+                </tr>
+            '''
+
+        html_parts.append(f'''
+            <div class="chart-item" style="padding: 1rem;">
+                <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Per-Stem Breakdown</h4>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr style="border-bottom: 1px solid var(--border);">
+                        <th style="padding: 0.5rem; text-align: left; color: var(--text-secondary);">Stem</th>
+                        <th style="padding: 0.5rem; text-align: center; color: var(--text-secondary);">Overall</th>
+                        <th style="padding: 0.5rem; text-align: center; color: var(--text-secondary);">Timbre</th>
+                        <th style="padding: 0.5rem; text-align: center; color: var(--text-secondary);">Freq Bal</th>
+                        <th style="padding: 0.5rem; text-align: center; color: var(--text-secondary);">Energy</th>
+                    </tr>
+                    {stem_rows}
+                </table>
+            </div>
+        ''')
+
+    # Worst sections with issues
+    if worst_sections:
+        section_rows = ''
+        for w in worst_sections[:8]:  # Show top 8
+            sim = w.get('similarity', 0) * 100
+            stem = w.get('stem', 'unknown')
+            time_start = w.get('time_start', 0)
+            time_end = w.get('time_end', 0)
+            issues = w.get('issues', [])
+
+            color = '#f85149' if sim < 40 else '#d29922' if sim < 60 else '#3fb950'
+            issues_str = ', '.join(issues[:2]) if issues else 'low similarity'
+
+            section_rows += f'''
+                <tr>
+                    <td style="padding: 0.4rem; text-transform: capitalize;">{stem}</td>
+                    <td style="padding: 0.4rem; text-align: center;">{time_start:.0f}-{time_end:.0f}s</td>
+                    <td style="padding: 0.4rem; text-align: center; color: {color}; font-weight: 600;">{sim:.0f}%</td>
+                    <td style="padding: 0.4rem; color: var(--text-secondary); font-size: 0.85rem;">{html.escape(issues_str)}</td>
+                </tr>
+            '''
+
+        html_parts.append(f'''
+            <div class="chart-item" style="padding: 1rem;">
+                <h4 style="margin-bottom: 1rem; color: var(--text-primary);">⚠️ Sections Needing Improvement</h4>
+                <table style="width: 100%; border-collapse: collapse;">
+                    <tr style="border-bottom: 1px solid var(--border);">
+                        <th style="padding: 0.4rem; text-align: left; color: var(--text-secondary);">Stem</th>
+                        <th style="padding: 0.4rem; text-align: center; color: var(--text-secondary);">Time</th>
+                        <th style="padding: 0.4rem; text-align: center; color: var(--text-secondary);">Score</th>
+                        <th style="padding: 0.4rem; text-align: left; color: var(--text-secondary);">Issues</th>
+                    </tr>
+                    {section_rows}
+                </table>
+            </div>
+        ''')
+
+    # Stem overview chart (if available)
+    if stem_charts.get('overview'):
+        html_parts.append(f'''
+            <div class="chart-item full-width">
+                <img src="{stem_charts['overview']}" alt="Stem Overview"/>
+                <div class="chart-caption">Per-Stem Similarity Metrics</div>
+            </div>
+        ''')
+
+    # Temporal charts for each stem
+    for stem_name in ['melodic', 'drums', 'bass']:
+        key = f'{stem_name}_temporal'
+        if stem_charts.get(key):
+            html_parts.append(f'''
+                <div class="chart-item full-width">
+                    <img src="{stem_charts[key]}" alt="{stem_name.title()} Temporal"/>
+                    <div class="chart-caption">{stem_name.title()} Stem - Time-Windowed Similarity</div>
+                </div>
+            ''')
+
+    # Worst sections chart
+    if stem_charts.get('worst_sections'):
+        html_parts.append(f'''
+            <div class="chart-item full-width">
+                <img src="{stem_charts['worst_sections']}" alt="Worst Sections"/>
+                <div class="chart-caption">Worst Performing Sections</div>
+            </div>
+        ''')
+
+    return f'''
+        <div class="card">
+            <div class="card-title">
+                <svg viewBox="0 0 16 16"><path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z"/></svg>
+                Per-Stem Comparison
+            </div>
+            <div class="charts-grid">
+                {"".join(html_parts)}
+            </div>
+        </div>
+    '''
+
+
 def generate_ai_analysis_card(ai_params):
     """Generate AI Analysis card HTML if params available."""
     if not ai_params:
@@ -324,6 +614,11 @@ def generate_report(cache_dir, version_dir, output_path=None):
             render_path = f
             break
 
+    # Rendered stem files (for per-stem comparison)
+    render_melodic_path = version_path / "render_melodic.wav"
+    render_drums_path = version_path / "render_drums.wav"
+    render_bass_path = version_path / "render_bass.wav"
+
     strudel_path = version_path / "output.strudel"
     if not strudel_path.exists():
         strudel_path = version_path / "output_latest.strudel"
@@ -341,6 +636,14 @@ def generate_report(cache_dir, version_dir, output_path=None):
 
     # Comparison results JSON (for HTML charts)
     comparison_json_path = version_path / "comparison.json"
+
+    # Per-stem comparison results JSON and charts
+    stem_comparison_json_path = version_path / "stem_comparison.json"
+    chart_stem_overview = version_path / "chart_stem_overview.png"
+    chart_stem_melodic_temporal = version_path / "chart_stem_melodic_temporal.png"
+    chart_stem_drums_temporal = version_path / "chart_stem_drums_temporal.png"
+    chart_stem_bass_temporal = version_path / "chart_stem_bass_temporal.png"
+    chart_worst_sections = version_path / "chart_worst_sections.png"
 
     # Legacy combined chart (fallback)
     comparison_path = version_path / "comparison.png"
@@ -389,6 +692,11 @@ def generate_report(cache_dir, version_dir, output_path=None):
     bass_data = encode_audio_base64(str(bass_path)) if bass_path.exists() else None
     render_data = encode_audio_base64(str(render_path)) if render_path.exists() else None
 
+    # Encode rendered stem audio files
+    render_melodic_data = encode_audio_base64(str(render_melodic_path)) if render_melodic_path.exists() else None
+    render_drums_data = encode_audio_base64(str(render_drums_path)) if render_drums_path.exists() else None
+    render_bass_data = encode_audio_base64(str(render_bass_path)) if render_bass_path.exists() else None
+
     # Encode chart images
     chart_frequency_data = encode_image_base64(str(chart_frequency)) if chart_frequency.exists() else None
     chart_similarity_data = encode_image_base64(str(chart_similarity)) if chart_similarity.exists() else None
@@ -406,6 +714,25 @@ def generate_report(cache_dir, version_dir, output_path=None):
     if comparison_json_path.exists():
         with open(comparison_json_path) as f:
             comparison_results = json.load(f)
+
+    # Load per-stem comparison results
+    stem_comparison_results = None
+    if stem_comparison_json_path.exists():
+        with open(stem_comparison_json_path) as f:
+            stem_comparison_results = json.load(f)
+
+    # Encode stem comparison charts
+    stem_charts = {}
+    if chart_stem_overview.exists():
+        stem_charts['overview'] = encode_image_base64(str(chart_stem_overview))
+    if chart_stem_melodic_temporal.exists():
+        stem_charts['melodic_temporal'] = encode_image_base64(str(chart_stem_melodic_temporal))
+    if chart_stem_drums_temporal.exists():
+        stem_charts['drums_temporal'] = encode_image_base64(str(chart_stem_drums_temporal))
+    if chart_stem_bass_temporal.exists():
+        stem_charts['bass_temporal'] = encode_image_base64(str(chart_stem_bass_temporal))
+    if chart_worst_sections.exists():
+        stem_charts['worst_sections'] = encode_image_base64(str(chart_worst_sections))
 
     # Legacy combined chart (fallback if no JSON)
     comparison_data = encode_image_base64(str(comparison_path)) if comparison_path.exists() else None
@@ -580,6 +907,281 @@ def generate_report(cache_dir, version_dir, output_path=None):
             letter-spacing: 0.05em;
         }}
 
+        /* ========== AUDIO STUDIO STYLES ========== */
+        .audio-comparison-card {{
+            background: linear-gradient(180deg, var(--bg-secondary) 0%, #0d1117 100%);
+        }}
+
+        .studio-controls {{
+            display: flex;
+            gap: 1.5rem;
+            align-items: flex-start;
+            flex-wrap: wrap;
+            margin-bottom: 1.5rem;
+            padding: 1rem;
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+        }}
+
+        .control-group {{
+            display: flex;
+            flex-direction: column;
+            gap: 0.5rem;
+        }}
+
+        .control-group-label {{
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }}
+
+        .control-buttons {{
+            display: flex;
+            gap: 0.5rem;
+        }}
+
+        .studio-btn {{
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.6rem 1rem;
+            background: var(--bg-secondary);
+            border: 1px solid var(--border);
+            border-radius: 6px;
+            color: var(--text-primary);
+            cursor: pointer;
+            transition: all 0.15s ease;
+            font-size: 0.85rem;
+        }}
+
+        .studio-btn:hover {{
+            background: var(--bg-primary);
+            border-color: var(--accent);
+            transform: translateY(-1px);
+        }}
+
+        .studio-btn.playing {{
+            background: var(--accent);
+            color: var(--bg-primary);
+            border-color: var(--accent);
+            box-shadow: 0 0 20px rgba(88, 166, 255, 0.3);
+        }}
+
+        .studio-btn-accent {{
+            border-color: var(--accent-green);
+        }}
+
+        .studio-btn-accent:hover {{
+            border-color: var(--accent-green);
+            box-shadow: 0 0 10px rgba(63, 185, 80, 0.2);
+        }}
+
+        .studio-btn-compare {{
+            border-color: var(--accent-orange);
+        }}
+
+        .studio-btn-stop {{
+            background: rgba(248, 81, 73, 0.1);
+            border-color: #f85149;
+            margin-left: auto;
+        }}
+
+        .studio-btn-stop:hover {{
+            background: #f85149;
+            color: white;
+        }}
+
+        .btn-icon {{
+            font-size: 0.9rem;
+        }}
+
+        .btn-label {{
+            font-weight: 500;
+        }}
+
+        /* Waveform display */
+        .waveform-container {{
+            background: var(--bg-primary);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 1.5rem;
+            border: 1px solid var(--border);
+        }}
+
+        .waveform-header {{
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            margin-bottom: 0.75rem;
+        }}
+
+        .time-display {{
+            font-family: 'SF Mono', Monaco, monospace;
+            font-size: 0.85rem;
+            color: var(--accent);
+            background: var(--bg-tertiary);
+            padding: 0.25rem 0.5rem;
+            border-radius: 4px;
+        }}
+
+        .waveform-title {{
+            font-size: 0.9rem;
+            color: var(--text-secondary);
+            font-weight: 500;
+        }}
+
+        .waveform-wrapper {{
+            position: relative;
+            height: 120px;
+            background: linear-gradient(180deg, rgba(88, 166, 255, 0.05) 0%, transparent 50%, rgba(88, 166, 255, 0.05) 100%);
+            border-radius: 6px;
+            cursor: pointer;
+            overflow: hidden;
+        }}
+
+        #waveform-canvas {{
+            width: 100%;
+            height: 100%;
+        }}
+
+        .playhead {{
+            position: absolute;
+            top: 0;
+            left: 0;
+            width: 2px;
+            height: 100%;
+            background: var(--accent);
+            box-shadow: 0 0 10px var(--accent);
+            pointer-events: none;
+            transition: left 0.05s linear;
+        }}
+
+        .waveform-legend {{
+            display: flex;
+            gap: 1.5rem;
+            margin-top: 0.75rem;
+            justify-content: center;
+        }}
+
+        .legend-item {{
+            display: flex;
+            align-items: center;
+            gap: 0.4rem;
+            font-size: 0.75rem;
+            color: var(--text-secondary);
+        }}
+
+        .legend-color {{
+            width: 12px;
+            height: 12px;
+            border-radius: 3px;
+        }}
+
+        /* Stem mixer */
+        .stem-mixer {{
+            background: var(--bg-tertiary);
+            border-radius: 8px;
+            padding: 1rem;
+            margin-bottom: 0.75rem;
+        }}
+
+        .stem-mixer-render {{
+            background: linear-gradient(135deg, rgba(63, 185, 80, 0.1) 0%, var(--bg-tertiary) 100%);
+            border: 1px solid rgba(63, 185, 80, 0.3);
+        }}
+
+        .mixer-title {{
+            font-size: 0.75rem;
+            text-transform: uppercase;
+            letter-spacing: 0.1em;
+            color: var(--text-secondary);
+            margin-bottom: 1rem;
+            font-weight: 600;
+        }}
+
+        .mixer-channels {{
+            display: flex;
+            gap: 0.75rem;
+            flex-wrap: wrap;
+        }}
+
+        .mixer-channel {{
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 0.5rem;
+            padding: 0.75rem;
+            background: var(--bg-secondary);
+            border-radius: 6px;
+            min-width: 70px;
+            border: 1px solid var(--border);
+        }}
+
+        .mixer-channel-render {{
+            border-color: var(--accent-green);
+            background: rgba(63, 185, 80, 0.05);
+        }}
+
+        .channel-label {{
+            font-size: 0.7rem;
+            text-transform: uppercase;
+            color: var(--text-secondary);
+            font-weight: 600;
+        }}
+
+        .channel-meter {{
+            width: 8px;
+            height: 40px;
+            background: var(--bg-primary);
+            border-radius: 4px;
+            overflow: hidden;
+            position: relative;
+        }}
+
+        .meter-fill {{
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+            height: 0%;
+            background: linear-gradient(to top, var(--accent-green), var(--accent-orange), #f85149);
+            transition: height 0.1s ease;
+        }}
+
+        .channel-solo, .channel-mute {{
+            width: 24px;
+            height: 24px;
+            border: none;
+            border-radius: 4px;
+            font-size: 0.7rem;
+            font-weight: 700;
+            cursor: pointer;
+            transition: all 0.15s ease;
+        }}
+
+        .channel-solo {{
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }}
+
+        .channel-solo.active {{
+            background: var(--accent-orange);
+            color: var(--bg-primary);
+        }}
+
+        .channel-mute {{
+            background: var(--bg-tertiary);
+            color: var(--text-secondary);
+        }}
+
+        .channel-mute.active {{
+            background: #f85149;
+            color: white;
+        }}
+
+        /* ========== END AUDIO STUDIO ========== */
+
         .code-block {{
             background: var(--bg-tertiary);
             border-radius: 6px;
@@ -726,50 +1328,8 @@ def generate_report(cache_dir, version_dir, output_path=None):
             </div>
         </header>
 
-        <div class="card">
-            <div class="card-title">
-                <svg viewBox="0 0 16 16"><path d="M8 0a8 8 0 1 1 0 16A8 8 0 0 1 8 0ZM1.5 8a6.5 6.5 0 1 0 13 0 6.5 6.5 0 0 0-13 0Zm4.879-2.773 4.264 2.559a.25.25 0 0 1 0 .428l-4.264 2.559A.25.25 0 0 1 6 10.559V5.442a.25.25 0 0 1 .379-.215Z"/></svg>
-                Audio Comparison
-            </div>
-            <div class="playback-controls">
-                <button class="play-btn" onclick="toggleSync('drums-melodic')" id="btn-drums-melodic">
-                    <svg viewBox="0 0 16 16" class="play-icon"><path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814l-3.5-2.5z"/></svg>
-                    <svg viewBox="0 0 16 16" class="stop-icon" style="display:none"><path d="M5 3.5h1.5v9H5v-9zm4.5 0H11v9H9.5v-9z"/></svg>
-                    Drums + Melodic
-                </button>
-                <button class="play-btn" onclick="toggleSync('all-stems')" id="btn-all-stems">
-                    <svg viewBox="0 0 16 16" class="play-icon"><path d="M6.79 5.093A.5.5 0 0 0 6 5.5v5a.5.5 0 0 0 .79.407l3.5-2.5a.5.5 0 0 0 0-.814l-3.5-2.5z"/></svg>
-                    <svg viewBox="0 0 16 16" class="stop-icon" style="display:none"><path d="M5 3.5h1.5v9H5v-9zm4.5 0H11v9H9.5v-9z"/></svg>
-                    All Stems
-                </button>
-                <button class="play-btn" onclick="stopAll()">
-                    <svg viewBox="0 0 16 16"><path d="M5 3.5A1.5 1.5 0 0 1 6.5 2h3A1.5 1.5 0 0 1 11 3.5v9A1.5 1.5 0 0 1 9.5 14h-3A1.5 1.5 0 0 1 5 12.5v-9z"/></svg>
-                    Stop All
-                </button>
-            </div>
-            <div class="audio-section">
-                <div class="audio-player">
-                    <label>Melodic</label>
-                    {f'<audio controls src="{melodic_data}" id="audio-melodic"></audio>' if melodic_data else '<div class="no-data">Not available</div>'}
-                </div>
-                <div class="audio-player">
-                    <label>Drums</label>
-                    {f'<audio controls src="{drums_data}" id="audio-drums"></audio>' if drums_data else '<div class="no-data">Not available</div>'}
-                </div>
-                <div class="audio-player">
-                    <label>Vocals</label>
-                    {f'<audio controls src="{vocals_data}" id="audio-vocals"></audio>' if vocals_data else '<div class="no-data">Not available</div>'}
-                </div>
-                <div class="audio-player">
-                    <label>Bass</label>
-                    {f'<audio controls src="{bass_data}" id="audio-bass"></audio>' if bass_data else '<div class="no-data">Not available</div>'}
-                </div>
-                <div class="audio-player">
-                    <label>Strudel Render</label>
-                    {f'<audio controls src="{render_data}" id="audio-render"></audio>' if render_data else '<div class="no-data">Not available</div>'}
-                </div>
-            </div>
-        </div>
+        {generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data, render_data,
+                                     render_melodic_data, render_drums_data, render_bass_data)}
 
         <div class="card">
             <div class="card-title">
@@ -802,6 +1362,8 @@ def generate_report(cache_dir, version_dir, output_path=None):
         </div>
 
         {generate_ai_analysis_card(ai_params)}
+
+        {generate_stem_comparison_html(stem_comparison_results, stem_charts)}
 
         {f"""<div class="card">
             <div class="card-title">
@@ -847,80 +1409,428 @@ def generate_report(cache_dir, version_dir, output_path=None):
             }});
         }}
 
-        // Synchronized playback
-        const audioGroups = {{
-            'drums-melodic': ['audio-drums', 'audio-melodic'],
-            'all-stems': ['audio-drums', 'audio-melodic', 'audio-vocals', 'audio-bass']
-        }};
+        // ========== AUDIO STUDIO ENGINE ==========
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        const audioNodes = {{}};  // Store audio nodes for each stem
+        const analyserNodes = {{}};  // Store analyser nodes for meters
+        const waveformData = {{}};  // Store decoded audio data for waveform drawing
 
         let activeGroup = null;
+        let isPlaying = false;
+        let abMode = false;
+        let abToggleInterval = null;
 
+        // Audio group definitions
+        const audioGroups = {{
+            'original-all': ['audio-melodic', 'audio-drums', 'audio-bass', 'audio-vocals'],
+            'original-no-voice': ['audio-melodic', 'audio-drums', 'audio-bass'],
+            'render-mix': ['audio-render'],
+            'render-stems': ['audio-render-melodic', 'audio-render-drums', 'audio-render-bass'],
+            'compare-ab': []  // Special handling for A/B
+        }};
+
+        // Stem state for solo/mute
+        const stemState = {{
+            melodic: {{ muted: false, solo: false }},
+            drums: {{ muted: false, solo: false }},
+            bass: {{ muted: false, solo: false }},
+            vocals: {{ muted: false, solo: false }},
+            render: {{ muted: false, solo: false }},
+            'render-melodic': {{ muted: false, solo: false }},
+            'render-drums': {{ muted: false, solo: false }},
+            'render-bass': {{ muted: false, solo: false }}
+        }};
+
+        // Initialize audio context and decode audio
+        async function initAudio() {{
+            const audioElements = document.querySelectorAll('audio');
+            for (const audio of audioElements) {{
+                const id = audio.id;
+                if (!id) continue;
+
+                try {{
+                    const response = await fetch(audio.src);
+                    const arrayBuffer = await response.arrayBuffer();
+                    const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+                    waveformData[id] = audioBuffer;
+                }} catch (e) {{
+                    console.log('Could not decode audio:', id);
+                }}
+            }}
+            drawWaveforms();
+            updateTotalTime();
+        }}
+
+        // Draw waveforms on canvas
+        function drawWaveforms() {{
+            const canvas = document.getElementById('waveform-canvas');
+            if (!canvas) return;
+
+            const ctx = canvas.getContext('2d');
+            const width = canvas.width = canvas.offsetWidth * 2;  // Retina
+            const height = canvas.height = canvas.offsetHeight * 2;
+
+            ctx.fillStyle = '#0d1117';
+            ctx.fillRect(0, 0, width, height);
+
+            const colors = {{
+                'audio-melodic': '#3fb950',
+                'audio-drums': '#58a6ff',
+                'audio-bass': '#f85149',
+                'audio-vocals': '#d29922',
+                'audio-render': '#a371f7',
+                'audio-render-melodic': '#3fb950',
+                'audio-render-drums': '#58a6ff',
+                'audio-render-bass': '#f85149'
+            }};
+
+            // Draw each waveform with slight transparency
+            let hasDrawn = false;
+            for (const [id, buffer] of Object.entries(waveformData)) {{
+                const color = colors[id] || '#58a6ff';
+                drawSingleWaveform(ctx, buffer, width, height, color, 0.5);
+                hasDrawn = true;
+            }}
+
+            if (!hasDrawn) {{
+                // Draw placeholder
+                ctx.fillStyle = '#21262d';
+                ctx.font = '24px system-ui';
+                ctx.textAlign = 'center';
+                ctx.fillText('Loading waveforms...', width/2, height/2);
+            }}
+
+            // Draw center line
+            ctx.strokeStyle = 'rgba(88, 166, 255, 0.3)';
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+            ctx.moveTo(0, height/2);
+            ctx.lineTo(width, height/2);
+            ctx.stroke();
+        }}
+
+        function drawSingleWaveform(ctx, buffer, width, height, color, alpha) {{
+            const data = buffer.getChannelData(0);
+            const step = Math.ceil(data.length / width);
+            const amp = height / 4;
+
+            ctx.globalAlpha = alpha;
+            ctx.strokeStyle = color;
+            ctx.lineWidth = 1;
+            ctx.beginPath();
+
+            for (let i = 0; i < width; i++) {{
+                const idx = Math.floor(i * step);
+                let min = 1.0, max = -1.0;
+
+                for (let j = 0; j < step; j++) {{
+                    const val = data[idx + j] || 0;
+                    if (val < min) min = val;
+                    if (val > max) max = val;
+                }}
+
+                const y1 = height/2 + min * amp;
+                const y2 = height/2 + max * amp;
+
+                ctx.moveTo(i, y1);
+                ctx.lineTo(i, y2);
+            }}
+
+            ctx.stroke();
+            ctx.globalAlpha = 1;
+        }}
+
+        // Update total time display
+        function updateTotalTime() {{
+            let maxDuration = 0;
+            document.querySelectorAll('audio').forEach(a => {{
+                if (a.duration && a.duration > maxDuration) {{
+                    maxDuration = a.duration;
+                }}
+            }});
+
+            if (maxDuration > 0) {{
+                document.getElementById('time-total').textContent = formatTime(maxDuration);
+            }}
+        }}
+
+        function formatTime(seconds) {{
+            const mins = Math.floor(seconds / 60);
+            const secs = Math.floor(seconds % 60);
+            return `${{mins}}:${{secs.toString().padStart(2, '0')}}`;
+        }}
+
+        // Play a group of audio tracks
+        function playGroup(group) {{
+            // Handle A/B comparison mode
+            if (group === 'compare-ab') {{
+                startABCompare();
+                return;
+            }}
+
+            // Stop any currently playing
+            stopAll();
+
+            const ids = audioGroups[group] || [];
+            const audios = ids.map(id => document.getElementById(id)).filter(a => a);
+
+            if (audios.length === 0) return;
+
+            // Resume audio context if suspended
+            if (audioCtx.state === 'suspended') {{
+                audioCtx.resume();
+            }}
+
+            // Set all to time 0 and play
+            audios.forEach(a => {{
+                a.currentTime = 0;
+                a.volume = 1;
+            }});
+
+            Promise.all(audios.map(a => a.play().catch(() => {{}}))).then(() => {{
+                activeGroup = group;
+                isPlaying = true;
+                updateNowPlaying(group);
+                updatePlayButtons(group);
+                startMeterAnimation();
+                startPlayheadAnimation();
+            }});
+
+            // End detection
+            audios[0].onended = () => stopAll();
+        }}
+
+        // A/B comparison - switch between original and rendered every 4 seconds
+        function startABCompare() {{
+            stopAll();
+
+            let showOriginal = true;
+            const origAudios = ['audio-melodic', 'audio-drums', 'audio-bass'].map(id => document.getElementById(id)).filter(a => a);
+            const rendAudios = ['audio-render-melodic', 'audio-render-drums', 'audio-render-bass'].map(id => document.getElementById(id)).filter(a => a);
+
+            if (origAudios.length === 0 || rendAudios.length === 0) return;
+
+            const allAudios = [...origAudios, ...rendAudios];
+            allAudios.forEach(a => {{ a.currentTime = 0; a.volume = 0; }});
+
+            // Start all but mute rendered
+            origAudios.forEach(a => {{ a.volume = 1; }});
+            rendAudios.forEach(a => {{ a.volume = 0; }});
+
+            Promise.all(allAudios.map(a => a.play().catch(() => {{}}))).then(() => {{
+                activeGroup = 'compare-ab';
+                isPlaying = true;
+                abMode = true;
+                updateNowPlaying('A/B: Original');
+                updatePlayButtons('compare-ab');
+                startMeterAnimation();
+                startPlayheadAnimation();
+            }});
+
+            // Toggle every 4 seconds
+            abToggleInterval = setInterval(() => {{
+                showOriginal = !showOriginal;
+                if (showOriginal) {{
+                    origAudios.forEach(a => {{ a.volume = 1; }});
+                    rendAudios.forEach(a => {{ a.volume = 0; }});
+                    updateNowPlaying('A/B: Original');
+                }} else {{
+                    origAudios.forEach(a => {{ a.volume = 0; }});
+                    rendAudios.forEach(a => {{ a.volume = 1; }});
+                    updateNowPlaying('A/B: Rendered');
+                }}
+            }}, 4000);
+
+            origAudios[0].onended = () => stopAll();
+        }}
+
+        // Stop all playback
         function stopAll() {{
             document.querySelectorAll('audio').forEach(a => {{
                 a.pause();
                 a.currentTime = 0;
+                a.volume = 1;
             }});
-            document.querySelectorAll('.play-btn').forEach(btn => {{
-                btn.classList.remove('playing');
-                const playIcon = btn.querySelector('.play-icon');
-                const stopIcon = btn.querySelector('.stop-icon');
-                if (playIcon) playIcon.style.display = '';
-                if (stopIcon) stopIcon.style.display = 'none';
-            }});
+
+            if (abToggleInterval) {{
+                clearInterval(abToggleInterval);
+                abToggleInterval = null;
+            }}
+
             activeGroup = null;
+            isPlaying = false;
+            abMode = false;
+
+            updateNowPlaying('Ready to play');
+            updatePlayButtons(null);
+            document.getElementById('time-current').textContent = '0:00';
+            document.getElementById('playhead').style.left = '0';
+
+            // Reset meters
+            document.querySelectorAll('.meter-fill').forEach(m => {{
+                m.style.height = '0%';
+            }});
         }}
 
-        function toggleSync(group) {{
-            const btn = document.getElementById('btn-' + group);
-            const isPlaying = btn.classList.contains('playing');
+        // Update now playing display
+        function updateNowPlaying(group) {{
+            const labels = {{
+                'original-all': 'Playing: All Original Stems',
+                'original-no-voice': 'Playing: Original (No Vocals)',
+                'render-mix': 'Playing: Rendered Mix',
+                'render-stems': 'Playing: Rendered Stems',
+                'compare-ab': 'A/B Comparison Mode'
+            }};
+            document.getElementById('now-playing').textContent = typeof group === 'string' && group.startsWith('A/B:') ? group : (labels[group] || group || 'Ready to play');
+        }}
 
-            // Stop everything first
-            stopAll();
-
-            if (!isPlaying) {{
-                // Start the group
-                const ids = audioGroups[group];
-                const audios = ids.map(id => document.getElementById(id)).filter(a => a);
-
-                if (audios.length > 0) {{
-                    // Sync all to time 0 and play
-                    audios.forEach(a => {{
-                        a.currentTime = 0;
-                    }});
-
-                    // Play all at once
-                    Promise.all(audios.map(a => a.play().catch(() => {{}}))).then(() => {{
-                        btn.classList.add('playing');
-                        const playIcon = btn.querySelector('.play-icon');
-                        const stopIcon = btn.querySelector('.stop-icon');
-                        if (playIcon) playIcon.style.display = 'none';
-                        if (stopIcon) stopIcon.style.display = '';
-                        activeGroup = group;
-                    }});
-
-                    // Listen for end on any audio
-                    audios.forEach(a => {{
-                        a.onended = () => {{
-                            if (activeGroup === group) stopAll();
-                        }};
-                    }});
+        // Update play button states
+        function updatePlayButtons(activeGroupName) {{
+            document.querySelectorAll('.studio-btn[data-group]').forEach(btn => {{
+                const group = btn.getAttribute('data-group');
+                if (group === activeGroupName) {{
+                    btn.classList.add('playing');
+                    btn.querySelector('.btn-icon').textContent = '⏸';
+                }} else {{
+                    btn.classList.remove('playing');
+                    btn.querySelector('.btn-icon').textContent = '▶';
                 }}
+            }});
+        }}
+
+        // Meter animation
+        let meterAnimId = null;
+        function startMeterAnimation() {{
+            if (meterAnimId) cancelAnimationFrame(meterAnimId);
+
+            function updateMeters() {{
+                if (!isPlaying) return;
+
+                // Original stems
+                const stems = ['melodic', 'drums', 'bass', 'vocals', 'render'];
+                stems.forEach(stem => {{
+                    const audioEl = document.getElementById('audio-' + stem);
+                    const meterEl = document.querySelector(`#meter-${{stem}} .meter-fill`);
+                    if (!audioEl || !meterEl) return;
+                    const vol = audioEl.paused ? 0 : (audioEl.volume * (0.5 + Math.random() * 0.5));
+                    meterEl.style.height = `${{vol * 100}}%`;
+                }});
+
+                // Rendered stems
+                const renderStems = ['render-melodic', 'render-drums', 'render-bass'];
+                renderStems.forEach(stem => {{
+                    const audioEl = document.getElementById('audio-' + stem);
+                    const meterEl = document.querySelector(`#meter-${{stem}} .meter-fill`);
+                    if (!audioEl || !meterEl) return;
+                    const vol = audioEl.paused ? 0 : (audioEl.volume * (0.5 + Math.random() * 0.5));
+                    meterEl.style.height = `${{vol * 100}}%`;
+                }});
+
+                meterAnimId = requestAnimationFrame(updateMeters);
+            }}
+
+            updateMeters();
+        }}
+
+        // Playhead animation
+        let playheadAnimId = null;
+        function startPlayheadAnimation() {{
+            if (playheadAnimId) cancelAnimationFrame(playheadAnimId);
+
+            function updatePlayhead() {{
+                if (!isPlaying) return;
+
+                // Get first playing audio for time
+                const ids = audioGroups[activeGroup] || [];
+                const audio = ids.map(id => document.getElementById(id)).find(a => a && !a.paused);
+
+                if (audio && audio.duration) {{
+                    const progress = audio.currentTime / audio.duration;
+                    const wrapper = document.querySelector('.waveform-wrapper');
+                    const playhead = document.getElementById('playhead');
+
+                    if (wrapper && playhead) {{
+                        playhead.style.left = `${{progress * 100}}%`;
+                    }}
+
+                    document.getElementById('time-current').textContent = formatTime(audio.currentTime);
+                }}
+
+                playheadAnimId = requestAnimationFrame(updatePlayhead);
+            }}
+
+            updatePlayhead();
+        }}
+
+        // Seek on waveform click
+        function seekAudio(event) {{
+            const wrapper = event.currentTarget;
+            const rect = wrapper.getBoundingClientRect();
+            const x = event.clientX - rect.left;
+            const progress = x / rect.width;
+
+            // Seek all playing audios
+            document.querySelectorAll('audio').forEach(a => {{
+                if (a.duration) {{
+                    a.currentTime = progress * a.duration;
+                }}
+            }});
+
+            // Update playhead immediately
+            document.getElementById('playhead').style.left = `${{progress * 100}}%`;
+        }}
+
+        // Solo/Mute controls
+        function toggleSolo(stem) {{
+            const state = stemState[stem];
+            if (!state) return;
+
+            state.solo = !state.solo;
+
+            const btn = document.querySelector(`.mixer-channel[data-stem="${{stem}}"] .channel-solo`);
+            if (btn) btn.classList.toggle('active', state.solo);
+
+            updateStemVolumes();
+        }}
+
+        function toggleMute(stem) {{
+            const state = stemState[stem];
+            if (!state) return;
+
+            state.muted = !state.muted;
+
+            const btn = document.querySelector(`.mixer-channel[data-stem="${{stem}}"] .channel-mute`);
+            if (btn) btn.classList.toggle('active', state.muted);
+
+            updateStemVolumes();
+        }}
+
+        function updateStemVolumes() {{
+            const hasSolo = Object.values(stemState).some(s => s.solo);
+
+            for (const [stem, state] of Object.entries(stemState)) {{
+                const audio = document.getElementById('audio-' + stem);
+                if (!audio) continue;
+
+                let volume = 1;
+                if (state.muted) {{
+                    volume = 0;
+                }} else if (hasSolo && !state.solo) {{
+                    volume = 0;
+                }}
+
+                audio.volume = volume;
             }}
         }}
 
-        // Sync seek when user scrubs one audio
-        document.querySelectorAll('audio').forEach(audio => {{
-            audio.addEventListener('seeked', () => {{
-                if (activeGroup) {{
-                    const ids = audioGroups[activeGroup];
-                    const time = audio.currentTime;
-                    ids.forEach(id => {{
-                        const a = document.getElementById(id);
-                        if (a && a !== audio) {{
-                            a.currentTime = time;
-                        }}
-                    }});
-                }}
+        // Initialize on load
+        document.addEventListener('DOMContentLoaded', () => {{
+            // Wait a bit for audio elements to be ready
+            setTimeout(initAudio, 500);
+
+            // Handle resize
+            window.addEventListener('resize', () => {{
+                drawWaveforms();
             }});
         }});
     </script>

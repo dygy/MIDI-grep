@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"os/signal"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -228,6 +229,7 @@ var (
 	useDeepGenre  bool   // Use deep learning for genre detection
 	renderAudio   string // Output path for rendered WAV
 	compareAudio  bool   // Compare rendered with original
+	stemCompare   bool   // Use per-stem comparison (more detailed, actionable)
 	stemQuality   string // Stem separation quality (fast, normal, high, best)
 	iterateCount     int     // AI-driven improvement iterations
 	targetSimilarity float64 // Target similarity for iteration
@@ -310,7 +312,8 @@ func init() {
 	extractCmd.Flags().StringVar(&genreOverride, "genre", "", "Override genre detection (brazilian_funk, brazilian_phonk, retro_wave, trance, house, lofi)")
 	extractCmd.Flags().BoolVar(&useDeepGenre, "deep-genre", true, "Use deep learning (CLAP) for genre detection")
 	extractCmd.Flags().StringVar(&renderAudio, "render", "auto", "Render output to WAV ('auto' saves in cache dir, 'none' to disable)")
-	extractCmd.Flags().BoolVar(&compareAudio, "compare", false, "Compare rendered audio with original stems (requires --render)")
+	extractCmd.Flags().BoolVar(&compareAudio, "compare", true, "Audio comparison (always enabled, kept for compatibility)")
+	extractCmd.Flags().BoolVar(&stemCompare, "stem-compare", true, "Per-stem comparison (always enabled, kept for compatibility)")
 	extractCmd.Flags().StringVar(&stemQuality, "quality", "normal", "Stem separation quality: fast, normal, high (better, slower), best (highest, slowest)")
 	extractCmd.Flags().IntVar(&iterateCount, "iterate", 5, "AI-driven improvement iterations (default: 5)")
 	extractCmd.Flags().Float64Var(&targetSimilarity, "target-similarity", 0.85, "Target similarity for --iterate (0.0-1.0)")
@@ -590,6 +593,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 
 	// Render audio if requested (default: auto, use "none" to disable)
 	var renderedPath string
+	var audioDuration float64 // Used for stem comparison
 	if renderAudio != "" && renderAudio != "none" {
 		fmt.Println("[6/7] Rendering audio preview...")
 
@@ -640,6 +644,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		}
 		if audioDur, err := getAudioDuration(melodicForDuration); err == nil {
 			duration = audioDur
+			audioDuration = audioDur // Store for stem comparison
 			fmt.Printf("       Source audio duration: %.3fs\n", duration)
 		}
 
@@ -708,22 +713,68 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	// Compare rendered audio with original stems and generate chart (automatic when render exists)
 	var comparisonChartPath string
 	if renderedPath != "" && result.CacheDir != "" {
-		fmt.Println("[+] Generating comparison chart...")
+		fmt.Println("[+] Generating comparison charts...")
 
-		// Use ORIGINAL input audio for comparison (from pipeline result)
+		outputDir := versionDir
+		if outputDir == "" {
+			outputDir = result.CacheDir
+		}
+
+		// Use ORIGINAL input audio for overall comparison (from pipeline result)
 		if result.OriginalPath != "" {
 			// Generate comparison chart against ORIGINAL audio
-			chartPath := filepath.Join(versionDir, "comparison.png")
-			if versionDir == "" {
-				chartPath = filepath.Join(result.CacheDir, "comparison.png")
-			}
+			chartPath := filepath.Join(outputDir, "comparison.png")
 			// Pass synth config for AI-derived tempo tolerance
-			synthConfigPath := filepath.Join(versionDir, "synth_config.json")
+			synthConfigPath := filepath.Join(outputDir, "synth_config.json")
 			if err := generateComparisonChart(result.OriginalPath, renderedPath, chartPath, synthConfigPath, findScriptsDir()); err != nil {
-				fmt.Printf("       Warning: Chart generation failed: %v\n", err)
+				fmt.Printf("       Warning: Overall comparison failed: %v\n", err)
 			} else {
-				fmt.Printf("       Comparison chart: %s\n", chartPath)
+				fmt.Printf("       Overall comparison: %s\n", chartPath)
 				comparisonChartPath = chartPath
+			}
+		}
+
+		// Per-stem comparison (ALWAYS run - default behavior for detailed actionable feedback)
+		baseName := strings.TrimSuffix(filepath.Base(renderedPath), ".wav")
+		stems := StemPaths{
+			OriginalBass:    filepath.Join(result.CacheDir, "bass.wav"),
+			RenderedBass:    filepath.Join(outputDir, baseName+"_bass.wav"),
+			OriginalDrums:   filepath.Join(result.CacheDir, "drums.wav"),
+			RenderedDrums:   filepath.Join(outputDir, baseName+"_drums.wav"),
+			OriginalMelodic: filepath.Join(result.CacheDir, "melodic.wav"),
+			RenderedMelodic: filepath.Join(outputDir, baseName+"_melodic.wav"),
+		}
+
+		// Check if rendered stems exist (should exist from main render path)
+		hasRenderedStems := false
+		for _, p := range []string{stems.RenderedBass, stems.RenderedDrums, stems.RenderedMelodic} {
+			if _, err := os.Stat(p); err == nil {
+				hasRenderedStems = true
+				break
+			}
+		}
+
+		// Fallback: Generate stem files if they don't exist (shouldn't happen normally)
+		if !hasRenderedStems {
+			strudelFile := filepath.Join(outputDir, "output.strudel")
+			if _, err := os.Stat(strudelFile); err == nil {
+				fmt.Println("       Generating stem files for per-stem comparison...")
+				stemOutputPath := filepath.Join(outputDir, baseName+".wav")
+				if err := renderStrudelNodeJS(strudelFile, stemOutputPath, audioDuration, true); err != nil {
+					fmt.Printf("       Warning: Could not generate stem files: %v\n", err)
+				} else {
+					hasRenderedStems = true
+				}
+			}
+		}
+
+		// Run per-stem comparison (always)
+		if hasRenderedStems {
+			fmt.Println("       Running per-stem comparison...")
+			if err := generateStemComparison(stems, outputDir, findScriptsDir(), audioDuration); err != nil {
+				fmt.Printf("       Warning: Per-stem comparison failed: %v\n", err)
+			} else {
+				fmt.Printf("       Per-stem comparison charts: %s/chart_stem_*.png\n", outputDir)
 			}
 		}
 	}
@@ -892,7 +943,8 @@ func renderStrudelToWavWithFeedback(code, outputPath string, duration float64, f
 }
 
 // renderStrudelNodeJS uses Node.js Strudel renderer (better harmonic content)
-func renderStrudelNodeJS(inputPath, outputPath string, duration float64) error {
+// If withStems is true, also outputs separate stem files (bass, drums, melodic)
+func renderStrudelNodeJS(inputPath, outputPath string, duration float64, withStems bool) error {
 	// Find Node.js renderer
 	exePath, err := os.Executable()
 	if err != nil {
@@ -922,6 +974,9 @@ func renderStrudelNodeJS(inputPath, outputPath string, duration float64) error {
 	if duration > 0 {
 		args = append(args, "--duration", fmt.Sprintf("%.2f", duration))
 	}
+	if withStems {
+		args = append(args, "--stems")
+	}
 
 	cmd := exec.Command("node", args...)
 	cmd.Stdout = os.Stdout
@@ -931,6 +986,7 @@ func renderStrudelNodeJS(inputPath, outputPath string, duration float64) error {
 }
 
 // renderStrudelToWav renders Strudel code to WAV (prefers Node.js for better quality)
+// Always outputs stems for per-stem comparison (default behavior)
 func renderStrudelToWav(code, outputPath string, duration float64) error {
 	// Write code to temp file
 	tmpFile, err := os.CreateTemp("", "strudel-*.strudel")
@@ -945,7 +1001,8 @@ func renderStrudelToWav(code, outputPath string, duration float64) error {
 	tmpFile.Close()
 
 	// Try Node.js renderer first (better harmonic content, 86%+ similarity)
-	if err := renderStrudelNodeJS(tmpFile.Name(), outputPath, duration); err == nil {
+	// Always use stems for per-stem comparison
+	if err := renderStrudelNodeJS(tmpFile.Name(), outputPath, duration, true); err == nil {
 		return nil
 	}
 
@@ -1123,6 +1180,7 @@ func renderWithGranularModels(strudelFile, modelsDir, outputPath, aiParamsPath, 
 	}
 
 	// PHASE 2: Use Node.js renderer with proper Strudel parsing
+	// ALWAYS output stems for per-stem comparison (default behavior)
 	nodeScript := filepath.Join(scriptsDir, "..", "node", "dist", "render-strudel-node.js")
 	if _, err := os.Stat(nodeScript); os.IsNotExist(err) {
 		return fmt.Errorf("render-strudel-node.js not found (run 'npm run build' in scripts/node)")
@@ -1132,6 +1190,7 @@ func renderWithGranularModels(strudelFile, modelsDir, outputPath, aiParamsPath, 
 		nodeScript,
 		strudelFile,
 		"-o", outputPath,
+		"--stems", // Always output stems for per-stem comparison
 	}
 
 	// Pass AI-analyzed synthesis config if available (includes correct BPM)
@@ -1171,6 +1230,59 @@ func generateComparisonChart(originalPath, renderedPath, outputPath, synthConfig
 		if _, err := os.Stat(synthConfigPath); err == nil {
 			args = append(args, "--config", synthConfigPath)
 		}
+	}
+
+	cmd := exec.Command(python, args...)
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	return cmd.Run()
+}
+
+// StemPaths holds paths to original and rendered stems
+type StemPaths struct {
+	OriginalBass    string
+	RenderedBass    string
+	OriginalDrums   string
+	RenderedDrums   string
+	OriginalMelodic string
+	RenderedMelodic string
+}
+
+// generateStemComparison runs per-stem comparison with time-windowed analysis
+func generateStemComparison(stems StemPaths, outputDir, scriptsDir string, duration float64) error {
+	script := filepath.Join(scriptsDir, "compare_audio.py")
+	if _, err := os.Stat(script); os.IsNotExist(err) {
+		return fmt.Errorf("compare_audio.py not found")
+	}
+
+	python := findPython(scriptsDir)
+	args := []string{script, "--stems", "--output-dir", outputDir}
+
+	// Add stem pairs that exist
+	if stems.OriginalBass != "" && stems.RenderedBass != "" {
+		if _, err := os.Stat(stems.OriginalBass); err == nil {
+			if _, err := os.Stat(stems.RenderedBass); err == nil {
+				args = append(args, "--original-bass", stems.OriginalBass, "--rendered-bass", stems.RenderedBass)
+			}
+		}
+	}
+	if stems.OriginalDrums != "" && stems.RenderedDrums != "" {
+		if _, err := os.Stat(stems.OriginalDrums); err == nil {
+			if _, err := os.Stat(stems.RenderedDrums); err == nil {
+				args = append(args, "--original-drums", stems.OriginalDrums, "--rendered-drums", stems.RenderedDrums)
+			}
+		}
+	}
+	if stems.OriginalMelodic != "" && stems.RenderedMelodic != "" {
+		if _, err := os.Stat(stems.OriginalMelodic); err == nil {
+			if _, err := os.Stat(stems.RenderedMelodic); err == nil {
+				args = append(args, "--original-melodic", stems.OriginalMelodic, "--rendered-melodic", stems.RenderedMelodic)
+			}
+		}
+	}
+
+	if duration > 0 {
+		args = append(args, "--duration", fmt.Sprintf("%.0f", duration))
 	}
 
 	cmd := exec.Command(python, args...)

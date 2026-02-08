@@ -33,6 +33,12 @@ type JobResult struct {
 	KeyConfidence float64
 	NotesRetained int
 	NotesRemoved  int
+	// Stem paths for audio playback
+	MelodicPath string
+	DrumsPath   string
+	BassPath    string
+	VocalsPath  string
+	RenderPath  string
 }
 
 // Job represents a processing job
@@ -143,6 +149,12 @@ func (m *JobManager) Process(job *Job) {
 	}
 	job.Updates <- "Piano stem extracted"
 
+	// Capture all stem paths for audio playback
+	melodicPath := job.WorkDir + "/melodic.wav"
+	drumsPath := job.WorkDir + "/drums.wav"
+	bassPath := job.WorkDir + "/bass.wav"
+	vocalsPath := job.WorkDir + "/vocals.wav"
+
 	// Stage 3: Analysis
 	job.Stage = "Analyzing audio..."
 	job.Updates <- job.Stage
@@ -206,6 +218,10 @@ func (m *JobManager) Process(job *Job) {
 		KeyConfidence: analysisResult.KeyConfidence,
 		NotesRetained: cleanResult.Retained,
 		NotesRemoved:  cleanResult.Removed,
+		MelodicPath:   melodicPath,
+		DrumsPath:     drumsPath,
+		BassPath:      bassPath,
+		VocalsPath:    vocalsPath,
 	}
 	job.Status = StatusComplete
 	job.Stage = "Complete!"
@@ -279,6 +295,12 @@ func (m *JobManager) ProcessYouTube(job *Job, url string) {
 	}
 	job.Updates <- "Piano stem extracted"
 
+	// Capture all stem paths for audio playback
+	melodicPath := job.WorkDir + "/melodic.wav"
+	drumsPath := job.WorkDir + "/drums.wav"
+	bassPath := job.WorkDir + "/bass.wav"
+	vocalsPath := job.WorkDir + "/vocals.wav"
+
 	// Stage 3: Analysis
 	job.Stage = "Analyzing audio..."
 	job.Updates <- job.Stage
@@ -341,6 +363,10 @@ func (m *JobManager) ProcessYouTube(job *Job, url string) {
 		KeyConfidence: analysisResult.KeyConfidence,
 		NotesRetained: cleanResult.Retained,
 		NotesRemoved:  cleanResult.Removed,
+		MelodicPath:   melodicPath,
+		DrumsPath:     drumsPath,
+		BassPath:      bassPath,
+		VocalsPath:    vocalsPath,
 	}
 	job.Status = StatusComplete
 	job.Stage = "Complete!"

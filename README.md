@@ -29,8 +29,10 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   - Automatic effect parameter optimization
   - Rendered vs original comparison with similarity scoring
 - **Self-Contained HTML Report**: Single-file report with everything embedded
-  - Audio players for all 4 stems + rendered output
-  - Synchronized playback controls (play stems together)
+  - **Audio Studio Player**: Two-section stem mixer (Original + Rendered)
+  - Solo/Mute controls per stem with waveform visualization
+  - A/B comparison mode (toggle between original and rendered)
+  - Per-stem comparison charts (bass, drums, melodic)
   - Visual comparison charts (spectrograms, chromagrams, frequency bands)
   - Copyable analysis data tables
   - Strudel code with copy button
@@ -259,7 +261,7 @@ This installs:
 | `--midi` | `-m` | Also save cleaned MIDI file |
 | `--copy` | `-c` | Copy result to clipboard |
 | `--verbose` | `-v` | Show verbose output |
-| `--render` | - | Render audio to WAV (default: `auto` saves to cache, `none` to disable) |
+| `--render` | - | Render audio to WAV (default: `auto` saves to cache, `none` to disable). **Always outputs 3 stems** |
 | `--quality` | - | Stem separation quality: `fast`, `normal` (default), `high`, `best` |
 | `--chords` | - | Use chord-based generation (better for electronic/funk) |
 | `--no-cache` | - | Skip stem cache, force fresh extraction |
@@ -270,10 +272,20 @@ This installs:
 | `--brazilian-funk` | - | Force Brazilian funk mode (auto-detected normally) |
 | `--genre` | - | Manual genre override: `brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz` |
 | `--deep-genre` | `true` | Use deep learning (CLAP) for genre detection (skipped when `--genre` is specified) |
-| `--iterate` | - | AI-driven improvement iterations (default: 0 = disabled) |
-| `--target-similarity` | - | Target similarity score to stop iteration (default: 0.70) |
+| `--iterate` | `5` | AI-driven improvement iterations (default: 5, always enabled) |
+| `--target-similarity` | `0.85` | Target similarity score to stop iteration (default: 0.85) |
 | `--ollama` | `true` | Use Ollama (free local LLM) for AI improvement |
-| `--ollama-model` | - | Ollama model to use (default: `codellama:7b`) |
+| `--ollama-model` | - | Ollama model to use (default: `deepseek-coder:6.7b`) |
+
+### Default Analysis Features
+
+All analysis features are **enabled by default**:
+
+- **Stem Rendering**: Outputs 3 separate stems (`render_bass.wav`, `render_drums.wav`, `render_melodic.wav`)
+- **Per-Stem Comparison**: Generates charts comparing each rendered stem vs original
+- **Overall Comparison**: Combined frequency/MFCC/chroma comparison chart
+- **AI Improvement**: 5 iterations targeting 85% similarity
+- **HTML Report**: Audio studio with Solo/Mute controls, A/B comparison, waveforms
 
 ### AI-Driven Code Improvement
 

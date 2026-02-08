@@ -98,14 +98,23 @@ Enable musicians and live coders to instantly extract piano riffs from any audio
 - MIDI file download
 - Clean styling with PicoCSS
 - Docker deployment option
+- **Drum pattern extraction** with onset detection and classification (kick, snare, hi-hat)
+- **Bass stem extraction** and pattern generation
+- **Audio rendering** with AI-driven synthesis (Node.js Strudel renderer)
+- **Self-contained HTML reports** with audio studio player:
+  - Two-section stem mixer (Original + Rendered stems)
+  - Solo/Mute controls per stem
+  - Waveform visualizations
+  - A/B comparison mode
+  - Per-stem comparison charts
+- **AI-driven iterative improvement** with Ollama/Claude (default: 5 iterations, 85% target)
+- **Per-stem comparison** charts and analysis (bass, drums, melodic)
 
 ### 3.2. What's Out-of-Scope (Non-Goals)
 
-- Extraction of other specific instruments (drums, bass, vocals)
 - User accounts or authentication
 - Persistent storage or history (stateless processing only)
 - Multiple output formats (TidalCycles, Sonic Pi, ABC notation)
 - Real-time/streaming audio processing
 - Mobile-specific UI optimization
-- Audio playback in browser
 - Complex JavaScript frameworks

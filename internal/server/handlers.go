@@ -191,6 +191,13 @@ func (s *Server) handleResult(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Check which audio files exist
+	hasMelodic := fileExists(filepath.Join(job.WorkDir, "melodic.wav"))
+	hasDrums := fileExists(filepath.Join(job.WorkDir, "drums.wav"))
+	hasBass := fileExists(filepath.Join(job.WorkDir, "bass.wav"))
+	hasVocals := fileExists(filepath.Join(job.WorkDir, "vocals.wav"))
+	hasRender := fileExists(filepath.Join(job.WorkDir, "render.wav"))
+
 	s.render(w, "result.html", map[string]any{
 		"JobID":       job.ID,
 		"Filename":    job.Filename,
@@ -200,6 +207,11 @@ func (s *Server) handleResult(w http.ResponseWriter, r *http.Request) {
 		"KeyConf":     fmt.Sprintf("%.0f%%", job.Result.KeyConfidence*100),
 		"NotesCount":  job.Result.NotesRetained,
 		"StrudelCode": job.Result.StrudelCode,
+		"HasMelodic":  hasMelodic,
+		"HasDrums":    hasDrums,
+		"HasBass":     hasBass,
+		"HasVocals":   hasVocals,
+		"HasRender":   hasRender,
 	})
 }
 
@@ -224,6 +236,45 @@ func (s *Server) handleDownloadMIDI(w http.ResponseWriter, r *http.Request) {
 	http.ServeFile(w, r, midiPath)
 }
 
+// handleAudioStem serves audio stem files for playback
+func (s *Server) handleAudioStem(w http.ResponseWriter, r *http.Request) {
+	jobID := chi.URLParam(r, "id")
+	stem := chi.URLParam(r, "stem")
+	job := s.jobs.Get(jobID)
+
+	if job == nil {
+		http.Error(w, "Not found", http.StatusNotFound)
+		return
+	}
+
+	// Map stem name to file
+	var audioPath string
+	switch stem {
+	case "melodic":
+		audioPath = filepath.Join(job.WorkDir, "melodic.wav")
+	case "drums":
+		audioPath = filepath.Join(job.WorkDir, "drums.wav")
+	case "bass":
+		audioPath = filepath.Join(job.WorkDir, "bass.wav")
+	case "vocals":
+		audioPath = filepath.Join(job.WorkDir, "vocals.wav")
+	case "render":
+		audioPath = filepath.Join(job.WorkDir, "render.wav")
+	default:
+		http.Error(w, "Invalid stem", http.StatusBadRequest)
+		return
+	}
+
+	if _, err := os.Stat(audioPath); os.IsNotExist(err) {
+		http.Error(w, "Audio file not available", http.StatusNotFound)
+		return
+	}
+
+	w.Header().Set("Content-Type", "audio/wav")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	http.ServeFile(w, r, audioPath)
+}
+
 // render renders a template
 func (s *Server) render(w http.ResponseWriter, name string, data any) {
 	w.Header().Set("Content-Type", "text/html; charset=utf-8")
@@ -240,4 +291,10 @@ func (s *Server) renderError(w http.ResponseWriter, message string, status int) 
 	s.templates.ExecuteTemplate(w, "error.html", map[string]any{
 		"Error": message,
 	})
+}
+
+// fileExists checks if a file exists
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }

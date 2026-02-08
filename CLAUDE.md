@@ -235,8 +235,14 @@ The `--render` flag synthesizes WAV audio from patterns:
 
 **HTML Report (`scripts/python/generate_report.py`):**
 - Self-contained single-file HTML report with embedded audio and charts
-- Audio players for all 4 stems (melodic, drums, vocals, bass) + rendered output
-- Synchronized playback controls ("Drums + Melodic", "All Stems", "Stop All")
+- **Audio Studio Player** with two-section stem mixer:
+  - **Original Stems**: melodic, drums, bass, vocals with Solo/Mute controls
+  - **Rendered Stems**: render-melodic, render-drums, render-bass with Solo/Mute controls
+  - Waveform visualizations with Web Audio API
+  - Volume faders per stem
+  - Synchronized playback controls
+  - A/B comparison mode (toggle between original and rendered)
+- **Per-stem comparison charts** (bass, drums, melodic)
 - Visual comparison charts (spectrograms, chromagrams, frequency bands, similarity)
 - HTML-based data tables (copyable text, not images)
 - Strudel code block with copy button
@@ -556,12 +562,22 @@ go build -o bin/midi-grep ./cmd/midi-grep
 | `--quantize` | Quantization (4, 8, 16) |
 | `--simplify` | Simplify notes (default: on) |
 | `--drum-kit` | Drum kit (tr808, tr909, linn, acoustic, lofi) |
-| `--render` | Render audio to WAV (default: `auto`, use `none` to disable) |
+| `--render` | Render audio to WAV (default: `auto`, use `none` to disable). **Always outputs stems** |
 | `--brazilian-funk` | Force Brazilian funk mode (auto-detected normally) |
 | `--genre` | Manual genre override (`brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz`) |
 | `--deep-genre` | Use deep learning (CLAP) for genre detection (default: enabled, skipped when `--genre` is specified) |
-| `--iterate N` | AI-driven improvement iterations (uses Claude to improve code) |
-| `--target-similarity` | Target similarity for --iterate (0.0-1.0, default: 0.70) |
+| `--iterate N` | AI-driven improvement iterations (default: 5) |
+| `--target-similarity` | Target similarity for --iterate (0.0-1.0, default: 0.85) |
+
+### Default Analysis Features (Always Enabled)
+
+The following analysis features are **always enabled by default**:
+
+1. **Stem Rendering**: Renders 3 separate stems (`render_bass.wav`, `render_drums.wav`, `render_melodic.wav`)
+2. **Per-Stem Comparison**: Generates per-stem comparison charts (`chart_stem_bass.png`, `chart_stem_drums.png`, `chart_stem_melodic.png`)
+3. **Overall Comparison**: Generates combined comparison chart and `comparison.json`
+4. **AI-Driven Improvement**: 5 iterations by default with 85% target similarity
+5. **HTML Report**: Self-contained report with audio studio player (Solo/Mute, A/B comparison)
 
 ### AI-Driven Iterative Improvement
 

@@ -6,6 +6,7 @@ Analyzes spectral, rhythmic, and timbral differences.
 
 import argparse
 import json
+import os
 import numpy as np
 import librosa
 import librosa.display
@@ -953,12 +954,306 @@ def generate_comparison_chart(results, original_path, rendered_path, output_path
     plt.close()
     print(f"Chart saved: {output_path}")
 
+def compare_stems(stem_pairs, duration=60, window_size=5.0):
+    """Compare multiple stem pairs and generate per-stem analysis.
+
+    Args:
+        stem_pairs: Dict of {stem_name: (original_path, rendered_path)}
+        duration: Max duration to analyze
+        window_size: Time window size in seconds for temporal analysis
+
+    Returns:
+        Dict with per-stem results and aggregated metrics
+    """
+    results = {
+        'stems': {},
+        'windowed': {},
+        'aggregate': {}
+    }
+
+    total_weight = 0
+    weighted_similarity = 0
+
+    # Weight each stem by importance
+    stem_weights = {
+        'melodic': 0.45,  # Most important - carries the melody
+        'drums': 0.30,    # Rhythm is critical
+        'bass': 0.25,     # Foundation
+    }
+
+    for stem_name, (orig_path, rend_path) in stem_pairs.items():
+        if not orig_path or not rend_path:
+            log(f"Skipping {stem_name}: missing files")
+            continue
+
+        if not os.path.exists(orig_path) or not os.path.exists(rend_path):
+            log(f"Skipping {stem_name}: file not found")
+            continue
+
+        log(f"\n{'='*40}")
+        log(f"Comparing {stem_name} stem")
+        log(f"{'='*40}")
+
+        # Full comparison
+        stem_result = compare_audio(orig_path, rend_path, duration)
+        if stem_result is None:
+            continue
+
+        results['stems'][stem_name] = stem_result
+
+        # Time-windowed comparison
+        windows = compare_windowed(orig_path, rend_path, duration, window_size)
+        results['windowed'][stem_name] = windows
+
+        # Aggregate weighted similarity
+        weight = stem_weights.get(stem_name, 0.33)
+        total_weight += weight
+        weighted_similarity += stem_result['comparison']['overall_similarity'] * weight
+
+    # Calculate aggregate metrics
+    if total_weight > 0:
+        results['aggregate']['weighted_overall'] = weighted_similarity / total_weight
+
+        # Find worst performing sections across all stems
+        worst_sections = []
+        for stem_name, windows in results['windowed'].items():
+            for w in windows:
+                if w['similarity'] < 0.6:  # Threshold for "bad" section
+                    worst_sections.append({
+                        'stem': stem_name,
+                        'time_start': w['time_start'],
+                        'time_end': w['time_end'],
+                        'similarity': w['similarity'],
+                        'issues': w.get('issues', [])
+                    })
+
+        # Sort by similarity (worst first)
+        worst_sections.sort(key=lambda x: x['similarity'])
+        results['aggregate']['worst_sections'] = worst_sections[:10]  # Top 10 worst
+
+        # Per-stem summary
+        results['aggregate']['per_stem'] = {}
+        for stem_name, stem_result in results['stems'].items():
+            results['aggregate']['per_stem'][stem_name] = {
+                'overall': stem_result['comparison']['overall_similarity'],
+                'mfcc': stem_result['comparison']['mfcc_similarity'],
+                'freq_balance': stem_result['comparison']['frequency_balance_similarity'],
+                'energy': stem_result['comparison']['energy_similarity'],
+            }
+
+    return results
+
+
+def compare_windowed(original_path, rendered_path, duration=60, window_size=5.0):
+    """Compare audio in time windows to find problematic sections.
+
+    Args:
+        original_path: Path to original audio
+        rendered_path: Path to rendered audio
+        duration: Max duration to analyze
+        window_size: Size of each window in seconds
+
+    Returns:
+        List of window results with similarity scores and identified issues
+    """
+    sr = 22050
+    orig_y = load_audio(original_path, sr=sr, duration=duration)
+    rend_y = load_audio(rendered_path, sr=sr, duration=duration)
+
+    if orig_y is None or rend_y is None:
+        return []
+
+    # Normalize lengths
+    min_len = min(len(orig_y), len(rend_y))
+    orig_y = orig_y[:min_len]
+    rend_y = rend_y[:min_len]
+
+    window_samples = int(window_size * sr)
+    num_windows = min_len // window_samples
+    windows = []
+
+    for i in range(num_windows):
+        start = i * window_samples
+        end = start + window_samples
+
+        orig_window = orig_y[start:end]
+        rend_window = rend_y[start:end]
+
+        # Compute features for this window
+        orig_mfcc = compute_mfcc_features(orig_window, sr)
+        rend_mfcc = compute_mfcc_features(rend_window, sr)
+
+        orig_bands = compute_frequency_bands(orig_window, sr)
+        rend_bands = compute_frequency_bands(rend_window, sr)
+
+        orig_rms = np.sqrt(np.mean(orig_window ** 2))
+        rend_rms = np.sqrt(np.mean(rend_window ** 2))
+
+        # Compute similarities
+        mfcc_sim = 1 - cosine(orig_mfcc, rend_mfcc) if np.sum(orig_mfcc) != 0 else 0
+
+        orig_band_arr = np.array(list(orig_bands.values()))
+        rend_band_arr = np.array(list(rend_bands.values()))
+        band_sim = 1 - cosine(orig_band_arr, rend_band_arr) if np.sum(orig_band_arr) > 0 else 0
+
+        energy_sim = min(orig_rms, rend_rms) / max(orig_rms, rend_rms, 1e-10)
+
+        # Overall window similarity
+        window_sim = 0.4 * mfcc_sim + 0.35 * band_sim + 0.25 * energy_sim
+
+        # Identify issues in this window
+        issues = []
+        for band_name, orig_val in orig_bands.items():
+            rend_val = rend_bands.get(band_name, 0)
+            if orig_val > 0.01:  # Only check if original has content
+                ratio = rend_val / orig_val
+                if ratio < 0.5:
+                    issues.append(f"{band_name} too quiet ({ratio:.0%})")
+                elif ratio > 2.0:
+                    issues.append(f"{band_name} too loud ({ratio:.0%})")
+
+        if energy_sim < 0.5:
+            if rend_rms < orig_rms:
+                issues.append(f"overall too quiet ({energy_sim:.0%})")
+            else:
+                issues.append(f"overall too loud ({energy_sim:.0%})")
+
+        windows.append({
+            'window_index': i,
+            'time_start': i * window_size,
+            'time_end': (i + 1) * window_size,
+            'similarity': float(window_sim),
+            'mfcc_similarity': float(mfcc_sim),
+            'band_similarity': float(band_sim),
+            'energy_similarity': float(energy_sim),
+            'bands_original': {k: float(v) for k, v in orig_bands.items()},
+            'bands_rendered': {k: float(v) for k, v in rend_bands.items()},
+            'issues': issues,
+        })
+
+    return windows
+
+
+def generate_stem_comparison_charts(stem_results, output_dir):
+    """Generate comparison charts for each stem and aggregate view."""
+    import os
+    from pathlib import Path
+
+    output_dir = Path(output_dir)
+    charts = {}
+
+    plt = setup_chart_style()
+
+    # 1. Per-stem similarity overview
+    if stem_results.get('aggregate', {}).get('per_stem'):
+        fig, ax = plt.subplots(figsize=(10, 6))
+        fig.patch.set_facecolor('#0d1117')
+        ax.set_facecolor('#161b22')
+
+        stems = list(stem_results['aggregate']['per_stem'].keys())
+        metrics = ['overall', 'mfcc', 'freq_balance', 'energy']
+        x = np.arange(len(stems))
+        width = 0.2
+        colors = ['#58a6ff', '#3fb950', '#d29922', '#f85149']
+
+        for i, metric in enumerate(metrics):
+            values = [stem_results['aggregate']['per_stem'][s].get(metric, 0) * 100 for s in stems]
+            ax.bar(x + i * width, values, width, label=metric.replace('_', ' ').title(), color=colors[i], alpha=0.85)
+
+        ax.set_ylabel('Similarity (%)')
+        ax.set_xticks(x + width * 1.5)
+        ax.set_xticklabels([s.title() for s in stems])
+        ax.legend(loc='upper right', facecolor='#21262d', edgecolor='#30363d', labelcolor='#c9d1d9')
+        ax.grid(True, alpha=0.15, axis='y')
+        ax.set_ylim(0, 105)
+
+        chart_path = output_dir / "chart_stem_overview.png"
+        plt.tight_layout()
+        plt.savefig(chart_path, dpi=150, facecolor='#0d1117', edgecolor='none', bbox_inches='tight')
+        plt.close()
+        charts['stem_overview'] = str(chart_path)
+
+    # 2. Time-windowed similarity heatmap for each stem
+    for stem_name, windows in stem_results.get('windowed', {}).items():
+        if not windows:
+            continue
+
+        fig, ax = plt.subplots(figsize=(14, 4))
+        fig.patch.set_facecolor('#0d1117')
+        ax.set_facecolor('#161b22')
+
+        times = [w['time_start'] for w in windows]
+        similarities = [w['similarity'] * 100 for w in windows]
+
+        # Color based on similarity
+        colors = []
+        for s in similarities:
+            if s >= 80:
+                colors.append('#238636')
+            elif s >= 60:
+                colors.append('#3fb950')
+            elif s >= 40:
+                colors.append('#d29922')
+            else:
+                colors.append('#f85149')
+
+        bars = ax.bar(times, similarities, width=windows[0]['time_end'] - windows[0]['time_start'] - 0.1,
+                      color=colors, alpha=0.85, edgecolor='#30363d')
+
+        ax.set_xlabel('Time (seconds)')
+        ax.set_ylabel('Similarity (%)')
+        ax.set_title(f'{stem_name.title()} Stem - Temporal Similarity', color='#c9d1d9')
+        ax.set_ylim(0, 105)
+        ax.axhline(y=70, color='#3fb950', linestyle='--', alpha=0.5, label='Target (70%)')
+        ax.legend(loc='lower right', facecolor='#21262d', edgecolor='#30363d', labelcolor='#c9d1d9')
+        ax.grid(True, alpha=0.15, axis='y')
+
+        chart_path = output_dir / f"chart_stem_{stem_name}_temporal.png"
+        plt.tight_layout()
+        plt.savefig(chart_path, dpi=150, facecolor='#0d1117', edgecolor='none', bbox_inches='tight')
+        plt.close()
+        charts[f'{stem_name}_temporal'] = str(chart_path)
+
+    # 3. Worst sections summary
+    worst = stem_results.get('aggregate', {}).get('worst_sections', [])
+    if worst:
+        fig, ax = plt.subplots(figsize=(12, 6))
+        fig.patch.set_facecolor('#0d1117')
+        ax.set_facecolor('#161b22')
+
+        labels = [f"{w['stem']} {w['time_start']:.0f}-{w['time_end']:.0f}s" for w in worst[:10]]
+        values = [w['similarity'] * 100 for w in worst[:10]]
+        colors = ['#f85149' if v < 40 else '#d29922' if v < 60 else '#3fb950' for v in values]
+
+        ax.barh(labels, values, color=colors, alpha=0.85)
+        ax.set_xlabel('Similarity (%)')
+        ax.set_title('Worst Performing Sections', color='#c9d1d9')
+        ax.set_xlim(0, 100)
+        ax.grid(True, alpha=0.15, axis='x')
+
+        # Add issue annotations
+        for i, w in enumerate(worst[:10]):
+            issues = w.get('issues', [])
+            if issues:
+                ax.annotate(', '.join(issues[:2]), xy=(values[i] + 2, i),
+                           fontsize=8, color='#8b949e', va='center')
+
+        chart_path = output_dir / "chart_worst_sections.png"
+        plt.tight_layout()
+        plt.savefig(chart_path, dpi=150, facecolor='#0d1117', edgecolor='none', bbox_inches='tight')
+        plt.close()
+        charts['worst_sections'] = str(chart_path)
+
+    log(f"Generated {len(charts)} stem comparison charts")
+    return charts
+
+
 def main():
     global _QUIET_MODE
 
     parser = argparse.ArgumentParser(description='Compare rendered audio with original')
-    parser.add_argument('original', help='Path to original audio file')
-    parser.add_argument('rendered', help='Path to rendered audio file')
+    parser.add_argument('original', nargs='?', help='Path to original audio file (for single-file mode)')
+    parser.add_argument('rendered', nargs='?', help='Path to rendered audio file (for single-file mode)')
     parser.add_argument('-d', '--duration', type=float, default=60,
                        help='Max duration to analyze in seconds')
     parser.add_argument('-j', '--json', action='store_true',
@@ -966,11 +1261,93 @@ def main():
     parser.add_argument('-c', '--chart', help='Output path for comparison chart PNG')
     parser.add_argument('--config', help='Path to synth_config.json for AI-derived tolerance')
 
+    # Per-stem comparison mode
+    parser.add_argument('--stems', action='store_true',
+                       help='Enable per-stem comparison mode')
+    parser.add_argument('--original-bass', help='Path to original bass stem')
+    parser.add_argument('--rendered-bass', help='Path to rendered bass stem')
+    parser.add_argument('--original-drums', help='Path to original drums stem')
+    parser.add_argument('--rendered-drums', help='Path to rendered drums stem')
+    parser.add_argument('--original-melodic', help='Path to original melodic stem')
+    parser.add_argument('--rendered-melodic', help='Path to rendered melodic stem')
+    parser.add_argument('--output-dir', help='Output directory for stem comparison charts')
+    parser.add_argument('--window-size', type=float, default=5.0,
+                       help='Time window size for temporal analysis (seconds)')
+
     args = parser.parse_args()
 
     # Enable quiet mode for JSON output (status to stderr, JSON to stdout)
     if args.json:
         _QUIET_MODE = True
+
+    # Per-stem comparison mode
+    if args.stems:
+        stem_pairs = {}
+
+        if args.original_bass and args.rendered_bass:
+            stem_pairs['bass'] = (args.original_bass, args.rendered_bass)
+        if args.original_drums and args.rendered_drums:
+            stem_pairs['drums'] = (args.original_drums, args.rendered_drums)
+        if args.original_melodic and args.rendered_melodic:
+            stem_pairs['melodic'] = (args.original_melodic, args.rendered_melodic)
+
+        if not stem_pairs:
+            print("Error: --stems requires at least one pair of stem files", file=sys.stderr)
+            print("  Use --original-bass/--rendered-bass, --original-drums/--rendered-drums,", file=sys.stderr)
+            print("  or --original-melodic/--rendered-melodic", file=sys.stderr)
+            sys.exit(1)
+
+        results = compare_stems(stem_pairs, args.duration, args.window_size)
+
+        if results is None:
+            sys.exit(1)
+
+        # Generate stem charts if output dir specified
+        if args.output_dir:
+            from pathlib import Path
+            output_dir = Path(args.output_dir)
+            output_dir.mkdir(parents=True, exist_ok=True)
+            generate_stem_comparison_charts(results, output_dir)
+
+            # Save JSON results
+            json_path = output_dir / "stem_comparison.json"
+            with open(json_path, 'w') as f:
+                json.dump(results, f, indent=2)
+            log(f"Saved stem comparison results: {json_path}")
+
+        if args.json:
+            print(json.dumps(results, indent=2))
+        else:
+            # Print stem comparison summary
+            print("\n" + "=" * 60)
+            print("PER-STEM COMPARISON RESULTS")
+            print("=" * 60)
+
+            if 'aggregate' in results and 'per_stem' in results['aggregate']:
+                for stem_name, metrics in results['aggregate']['per_stem'].items():
+                    print(f"\n{stem_name.upper()}:")
+                    print(f"  Overall:      {metrics['overall']*100:5.1f}%")
+                    print(f"  Timbre:       {metrics['mfcc']*100:5.1f}%")
+                    print(f"  Freq Balance: {metrics['freq_balance']*100:5.1f}%")
+                    print(f"  Energy:       {metrics['energy']*100:5.1f}%")
+
+            if 'aggregate' in results and 'weighted_overall' in results['aggregate']:
+                print(f"\nWEIGHTED OVERALL: {results['aggregate']['weighted_overall']*100:.1f}%")
+
+            # Show worst sections
+            worst = results.get('aggregate', {}).get('worst_sections', [])
+            if worst:
+                print(f"\nWORST SECTIONS (need improvement):")
+                for w in worst[:5]:
+                    issues_str = ', '.join(w.get('issues', [])[:2]) if w.get('issues') else 'low similarity'
+                    print(f"  {w['stem']:8} {w['time_start']:4.0f}-{w['time_end']:4.0f}s: {w['similarity']*100:4.0f}% - {issues_str}")
+
+        sys.exit(0)
+
+    # Single file comparison mode (original behavior)
+    if not args.original or not args.rendered:
+        parser.print_help()
+        sys.exit(1)
 
     results = compare_audio(args.original, args.rendered, args.duration, args.config)
 
@@ -985,6 +1362,7 @@ def main():
         print(json.dumps(results, indent=2))
     elif not args.chart:
         print_report(results)
+
 
 if __name__ == '__main__':
     main()

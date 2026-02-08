@@ -148,6 +148,58 @@ Original Audio                    Strudel Code
 **AI Scripts:**
 - `audio_to_strudel_params.py` - Analyzes original audio to suggest Strudel effect parameters
 - `compare_audio.py` - Compares rendered vs original for quality feedback
+- `ai_improver.py` - AI-driven iterative code improvement (Ollama/Claude)
+- `spectrogram_analyzer.py` - Deep mel spectrogram analysis for AI learning
+- `generate_report.py` - Self-contained HTML report with audio studio
+
+### Default Analysis Features (All Enabled)
+
+All analysis features run by default:
+
+```
+Strudel Code
+     │
+     ▼
+┌─────────────────────────┐
+│ Node.js Renderer        │ (render-strudel-node.ts)
+│ --stems flag ALWAYS on  │
+│ → render_bass.wav       │
+│ → render_drums.wav      │
+│ → render_melodic.wav    │
+│ → render.wav (mix)      │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│ Per-Stem Comparison     │ (compare_audio.py --stems)
+│ → chart_stem_bass.png   │
+│ → chart_stem_drums.png  │
+│ → chart_stem_melodic.png│
+│ → stem_comparison.json  │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│ AI Improvement          │ (5 iterations, 85% target)
+│ - Analyze gaps          │
+│ - LLM suggests changes  │
+│ - Apply & re-render     │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│ HTML Report             │ (generate_report.py)
+│ - Audio Studio Player   │
+│   - Original stems      │
+│   - Rendered stems      │
+│   - Solo/Mute controls  │
+│   - A/B comparison      │
+│ - Waveform visualizations
+│ - Per-stem charts       │
+│ - Comparison data       │
+│ - Strudel code          │
+└─────────────────────────┘
+```
 
 ---
 

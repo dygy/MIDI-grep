@@ -83,6 +83,7 @@ func (s *Server) setupRoutes() {
 	r.Get("/status/{id}", s.handleStatus)
 	r.Get("/result/{id}", s.handleResult)
 	r.Get("/download/{id}/midi", s.handleDownloadMIDI)
+	r.Get("/audio/{id}/{stem}", s.handleAudioStem)
 }
 
 // Run starts the server
