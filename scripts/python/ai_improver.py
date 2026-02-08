@@ -1390,20 +1390,70 @@ def improve_strudel(
             improved_code = merge_effect_functions(current_code, improved_effects)
             if improved_code == current_code:
                 print("       No effective changes this iteration, continuing...")
-                # DON'T break - keep iterating, LLM might give different suggestions next time
             else:
-                current_code = improved_code
-                # Save improved code
-                improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
-                with open(improved_path, 'w') as f:
+                # REGRESSION PREVENTION: Check if this is actually better
+                # We need to render and compare before accepting
+                test_path = Path(output_dir) / f"render_test.wav"
+                test_strudel = Path(output_dir) / f"output_test.strudel"
+                with open(test_strudel, 'w') as f:
                     f.write(improved_code)
-                # Update the main strudel file
-                with open(strudel_path, 'w') as f:
-                    f.write(improved_code)
-                print(f"Saved improved code to {improved_path}")
+
+                # Quick render to test
+                node_renderer = Path(__file__).parent.parent / "node" / "dist" / "render-strudel-node.js"
+                if node_renderer.exists():
+                    test_cmd = ["node", str(node_renderer), str(test_strudel), str(test_path),
+                               "--duration", f"{min(30, exact_duration):.2f}"]
+                    if synth_config_path.exists():
+                        test_cmd.extend(["--config", str(synth_config_path)])
+                    subprocess.run(test_cmd, capture_output=True)
+
+                    # Quick compare
+                    if test_path.exists():
+                        test_compare_cmd = [
+                            sys.executable,
+                            str(Path(__file__).parent / "compare_audio.py"),
+                            original_audio, str(test_path),
+                            "-d", f"{min(30, exact_duration):.2f}"
+                        ]
+                        test_result = subprocess.run(test_compare_cmd, capture_output=True, text=True)
+                        try:
+                            test_comparison = json.loads(test_result.stdout)
+                            test_similarity = test_comparison.get("comparison", {}).get("overall_similarity", 0)
+
+                            if test_similarity > best_similarity:
+                                print(f"       ✓ IMPROVEMENT: {best_similarity*100:.1f}% → {test_similarity*100:.1f}%")
+                                best_similarity = test_similarity
+                                best_code = improved_code
+                                current_code = improved_code
+                                # Save improved code
+                                improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
+                                with open(improved_path, 'w') as f:
+                                    f.write(improved_code)
+                                with open(strudel_path, 'w') as f:
+                                    f.write(improved_code)
+                                print(f"       Saved improved code to {improved_path}")
+                            else:
+                                print(f"       ✗ REGRESSION: {best_similarity*100:.1f}% → {test_similarity*100:.1f}% - REVERTING")
+                                current_code = best_code  # Revert to best
+                                with open(strudel_path, 'w') as f:
+                                    f.write(best_code)
+                        except json.JSONDecodeError:
+                            print("       ⚠ Could not parse test comparison, accepting change")
+                            current_code = improved_code
+                    else:
+                        print("       ⚠ Test render failed, accepting change")
+                        current_code = improved_code
+                else:
+                    # No Node renderer, accept change blindly
+                    current_code = improved_code
+                    improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
+                    with open(improved_path, 'w') as f:
+                        f.write(improved_code)
+                    with open(strudel_path, 'w') as f:
+                        f.write(improved_code)
+                    print(f"       Saved improved code to {improved_path}")
         else:
             print("       No code changes this iteration, continuing...")
-            # DON'T break - keep iterating
 
         current_version += 1
 
