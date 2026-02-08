@@ -405,3 +405,11 @@ _Ideas for future consideration, not yet prioritized._
 | 1.50 | 2026-02-03 | Render by default: `--render auto` is now default, use `--render none` to disable |
 | 1.51 | 2026-02-03 | Stem quality presets: `--quality` flag with fast/normal/high/best options |
 | 1.52 | 2026-02-03 | High-quality separation: htdemucs_ft model, TTA shifts, WAV output, GPU acceleration |
+| 1.53 | 2026-02-06 | Node.js Strudel renderer with stem output (render_bass/drums/melodic.wav) |
+| 1.54 | 2026-02-06 | Sound variety system: 67 drum machines, 128 GM instruments, 17 genre palettes |
+| 1.55 | 2026-02-07 | Per-stem comparison charts and stem_comparison.json |
+| 1.56 | 2026-02-08 | DAW-style HTML report with isolated Original/Rendered stem groups |
+| 1.57 | 2026-02-08 | **CRITICAL FIX:** Similarity score now uses MAE (not cosine) - was hiding 20%+ band errors |
+| 1.58 | 2026-02-08 | New weights: Freq Balance 40%, MFCC 20%, Energy 15%, Brightness 15%, Tempo/Chroma 5% |
+| 1.59 | 2026-02-08 | ClickHouse learning storage with 130+ runs tracked |
+| 1.60 | 2026-02-08 | LLM always runs all iterations (target 99% to ensure full analysis) |

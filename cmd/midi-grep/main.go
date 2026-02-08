@@ -316,7 +316,7 @@ func init() {
 	extractCmd.Flags().BoolVar(&stemCompare, "stem-compare", true, "Per-stem comparison (always enabled, kept for compatibility)")
 	extractCmd.Flags().StringVar(&stemQuality, "quality", "normal", "Stem separation quality: fast, normal, high (better, slower), best (highest, slowest)")
 	extractCmd.Flags().IntVar(&iterateCount, "iterate", 5, "AI-driven improvement iterations (default: 5)")
-	extractCmd.Flags().Float64Var(&targetSimilarity, "target-similarity", 0.85, "Target similarity for --iterate (0.0-1.0)")
+	extractCmd.Flags().Float64Var(&targetSimilarity, "target-similarity", 0.99, "Target similarity for --iterate (0.99 = always run all iterations)")
 	extractCmd.Flags().BoolVar(&useOllama, "ollama", true, "Use Ollama (local LLM) - free, no API key needed")
 	extractCmd.Flags().StringVar(&ollamaModel, "ollama-model", "llama3:8b", "Ollama model to use")
 

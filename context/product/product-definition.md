@@ -107,8 +107,12 @@ Enable musicians and live coders to instantly extract piano riffs from any audio
   - Waveform visualizations
   - A/B comparison mode
   - Per-stem comparison charts
-- **AI-driven iterative improvement** with Ollama/Claude (default: 5 iterations, 85% target)
+- **AI-driven iterative improvement** with Ollama/Claude (default: 5 iterations, 99% target to ensure all iterations run)
 - **Per-stem comparison** charts and analysis (bass, drums, melodic)
+- **Accurate similarity scoring** using MAE-based frequency balance (not cosine distance)
+- **DAW-style audio player** with isolated Original/Rendered stem groups
+- **Sound variety system** with 67 drum machines + 128 GM instruments + 17 genre palettes
+- **ClickHouse learning storage** for tracking improvements across tracks
 
 ### 3.2. What's Out-of-Scope (Non-Goals)
 

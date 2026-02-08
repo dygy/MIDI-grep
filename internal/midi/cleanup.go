@@ -19,21 +19,34 @@ type Note struct {
 
 // LoopInfo contains detected loop information
 type LoopInfo struct {
-	Detected    bool    `json:"detected"`
+	Detected           bool    `json:"detected"`
+	Bars               int     `json:"bars"`
+	Confidence         float64 `json:"confidence"`
+	StartBeat          float64 `json:"start_beat"`
+	EndBeat            float64 `json:"end_beat"`
+	Notes              []Note  `json:"notes"`
+	Repetitions        int     `json:"repetitions"`
+	ReferenceIteration int     `json:"reference_iteration,omitempty"`
+	PatternType        string  `json:"pattern_type,omitempty"` // "single", "alternating", or "none"
+	VariationA         []Note  `json:"variation_a,omitempty"`
+	VariationB         []Note  `json:"variation_b,omitempty"`
+}
+
+// VoiceLoopInfo contains loop info for a single voice
+type VoiceLoopInfo struct {
 	Bars        int     `json:"bars"`
 	Confidence  float64 `json:"confidence"`
-	StartBeat   float64 `json:"start_beat"`
-	EndBeat     float64 `json:"end_beat"`
-	Notes       []Note  `json:"notes"`
+	PatternType string  `json:"pattern_type,omitempty"`
 	Repetitions int     `json:"repetitions"`
 }
 
 // CleanupResult contains the cleaned notes and statistics
 type CleanupResult struct {
-	Notes    []Note    `json:"notes"`
-	Retained int       `json:"retained"`
-	Removed  int       `json:"removed"`
-	Loop     *LoopInfo `json:"loop,omitempty"`
+	Notes      []Note                    `json:"notes"`
+	Retained   int                       `json:"retained"`
+	Removed    int                       `json:"removed"`
+	Loop       *LoopInfo                 `json:"loop,omitempty"`
+	VoiceLoops map[string]*VoiceLoopInfo `json:"voice_loops,omitempty"` // Per-voice loop detection
 }
 
 // CleanupOptions configures the cleanup process
@@ -44,6 +57,11 @@ type CleanupOptions struct {
 	MaxNotesPerBeat int
 	PreferredOctave int
 	MergeThreshold  float64
+	// Loop detection options
+	TimeSignature   string  // Time signature for loop detection (e.g., "4/4", "3/4", "6/8")
+	SwingRatio      float64 // Swing timing ratio (1.0=straight, 1.5-2.0=swing)
+	SwingConfidence float64 // Confidence of swing detection (0.0-1.0)
+	MultiVoiceLoops bool    // Detect loops separately for each voice
 }
 
 // DefaultCleanupOptions returns sensible defaults
@@ -55,6 +73,10 @@ func DefaultCleanupOptions() CleanupOptions {
 		MaxNotesPerBeat: 1,              // Only 1 note per beat for clear patterns
 		PreferredOctave: 4,
 		MergeThreshold:  0.1,            // Merge notes within 100ms
+		TimeSignature:   "4/4",          // Default 4/4 time
+		SwingRatio:      1.0,            // Straight timing by default
+		SwingConfidence: 0.0,
+		MultiVoiceLoops: false,
 	}
 }
 
@@ -90,6 +112,20 @@ func (c *Cleaner) CleanWithOptions(ctx context.Context, inputMIDI, outputJSON st
 		args = append(args, fmt.Sprintf("--max-notes-per-beat=%d", opts.MaxNotesPerBeat))
 		args = append(args, fmt.Sprintf("--preferred-octave=%d", opts.PreferredOctave))
 		args = append(args, fmt.Sprintf("--merge-threshold=%.3f", opts.MergeThreshold))
+	}
+
+	// Loop detection options
+	if opts.TimeSignature != "" {
+		args = append(args, fmt.Sprintf("--time-signature=%s", opts.TimeSignature))
+	}
+	if opts.SwingRatio > 0 {
+		args = append(args, fmt.Sprintf("--swing-ratio=%.2f", opts.SwingRatio))
+	}
+	if opts.SwingConfidence > 0 {
+		args = append(args, fmt.Sprintf("--swing-confidence=%.2f", opts.SwingConfidence))
+	}
+	if opts.MultiVoiceLoops {
+		args = append(args, "--multi-voice-loops")
 	}
 
 	// Run cleanup script

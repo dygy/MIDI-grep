@@ -562,10 +562,51 @@ def build_improvement_prompt(
     if context_str:
         context_str = f"\nCONTEXT:{context_str}\n"
 
-    # Build the research-oriented prompt - give LLM full control
-    return f'''You are an audio mixing AI. Your goal: make the rendered audio match the original.
-{context_str}
+    # Per-stem issues (the REAL problems, not hidden by overall score)
+    per_stem_issues = previous_run.get('per_stem_issues', [])
+    stem_issues_str = ""
+    if per_stem_issues:
+        stem_issues_str = "\n\nPER-STEM ISSUES (these are the REAL problems to fix):\n"
+        for issue in per_stem_issues:
+            stem_issues_str += f"- {issue}\n"
+        stem_issues_str += "\nIMPORTANT: Overall similarity may look OK but individual stems need fixing!\n"
 
+    # Build the research-oriented prompt - give LLM full control
+    return f'''You are a STRUDEL MUSIC EXPERT and audio mixing AI.
+
+STRUDEL KNOWLEDGE:
+Strudel is a live coding music environment. Code generates audio patterns in real-time.
+- Patterns use mini-notation: "c3 d3 e3" plays notes, "~" is rest, "~*4" is 4 rests
+- Effects chain: p.sound("...").gain(...).lpf(...).attack(...) etc.
+- The code has 4 voices: bass, mid, high, drums - each with effect functions (bassFx, midFx, etc.)
+
+MIXING PRINCIPLES:
+1. FREQUENCY BALANCE: Each voice should occupy its own frequency range
+   - Bass (20-250Hz): .lpf(300-500), .hpf(30-60) - keep it low and punchy
+   - Mid (250-2kHz): .lpf(4000-6000), .hpf(200-400) - main melodic content
+   - High (2k-10kHz): .lpf(10000-15000), .hpf(400-800) - brightness and air
+   - Avoid overlap! If bass is bleeding into mid, lower bass .lpf()
+
+2. GAIN STAGING:
+   - Bass should be felt, not heard: gain 0.1-0.4
+   - Mid carries the melody: gain 0.5-1.5
+   - High adds sparkle: gain 0.3-0.8
+   - If a band is too loud, REDUCE gain. If too quiet, INCREASE gain.
+
+3. ENVELOPES (ADSR):
+   - attack: 0.001-0.01 for punchy, 0.05-0.2 for soft
+   - decay: 0.05-0.3 for tight, 0.3-1.0 for sustained
+   - sustain: 0.3-0.9 (how loud during hold)
+   - release: 0.1-0.5 for clean, 0.5-2.0 for ambient
+
+4. EFFECTS:
+   - room(0-0.4): reverb - more on highs, less on bass
+   - delay(0-0.3): echo - good for highs, careful on bass
+   - distort(0-0.3): saturation - adds harmonics
+   - phaser(0-0.5): movement - good for pads
+   - crush(8-16): lo-fi grit
+{context_str}
+{stem_issues_str}
 COMPARISON DATA (rendered minus original):
 - Bass: {band_bass*100:+.0f}% (positive=too loud, negative=too quiet)
 - Mid: {band_mid*100:+.0f}%
@@ -618,10 +659,23 @@ let midFx = p => p.sound("<gm_electric_piano_2 gm_lead_3_calliope>").gain(1.2).l
 let highFx = p => p.sound("<gm_music_box gm_vibraphone>").gain(0.8).lpf(12000)
 let drumsFx = p => p.bank("<RolandTR909 LinnDrum>").gain(0.9)
 
-TASK: Output your improved effect functions with SPECIFIC NUMERIC VALUES.
-Use the spectrogram analysis insights to determine precise gain multipliers and envelope settings.
+TASK: Fix the frequency balance issues shown in COMPARISON DATA.
+- If bass is -20%, INCREASE bass gain by ~25% (e.g., 0.3 → 0.38)
+- If mid is +30%, DECREASE mid gain by ~25% (e.g., 1.0 → 0.75)
+- Use the spectrogram insights for precise dB-to-gain conversions
+- Choose sounds that match the genre (not the same sounds every time!)
 
-Output ONLY the 4 lines (no comments, no explanation):'''
+CRITICAL RULES:
+1. Bass MUST have .lpf(500) or lower to stay out of mid range
+2. Each voice needs .hpf() and .lpf() to prevent frequency overlap
+3. Use perlin.range() for natural gain variation: perlin.range(0.3, 0.5).slow(8)
+4. Conservative changes - adjust by 20-30% per iteration, not 200%
+
+Output ONLY these 4 lines (no explanation, no comments):
+let bassFx = p => p.sound("...").gain(...).hpf(...).lpf(...)...
+let midFx = p => p.sound("...").gain(...).hpf(...).lpf(...)...
+let highFx = p => p.sound("...").gain(...).hpf(...).lpf(...)...
+let drumsFx = p => p.bank("...").gain(...)...'''
 
 
 def analyze_with_ollama(
@@ -1040,7 +1094,7 @@ def improve_strudel(
     previous_code = current_code
     previous_similarity = 0.0
 
-    # Check for previous runs
+    # Check for previous runs (most recent for version numbering)
     previous_run = get_previous_run(track_hash)
     if previous_run:
         current_version = previous_run["version"] + 1
@@ -1048,6 +1102,24 @@ def improve_strudel(
     else:
         current_version = 1
         print(f"\nNo previous runs found, starting fresh")
+
+    # CRITICAL: Get the BEST run ever (from ClickHouse, survives cache clear)
+    # This ensures v228 knows everything about the best code from all 227 previous versions
+    best_run = get_best_run(track_hash)
+    if best_run and best_run.get("strudel_code"):
+        best_ever_similarity = best_run.get("similarity_overall", 0)
+        best_ever_code = best_run.get("strudel_code", "")
+        best_ever_version = best_run.get("version", 0)
+        print(f"📊 Best ever: v{best_ever_version} with {best_ever_similarity*100:.1f}% similarity (from ClickHouse)")
+
+        # Start from best code if it's better than what we'd start with
+        if best_ever_code and best_ever_similarity > 0:
+            current_code = best_ever_code
+            previous_similarity = best_ever_similarity
+            print(f"   Starting from best known code (not fresh)")
+    else:
+        best_ever_similarity = 0
+        best_ever_code = None
 
     # Get learned knowledge
     key_type = "minor" if "minor" in metadata.get("key", "").lower() else "major"
@@ -1059,7 +1131,7 @@ def improve_strudel(
     if knowledge:
         print(f"Loaded {len(knowledge)} knowledge items for this context")
 
-    best_similarity = 0
+    best_similarity = previous_similarity if best_run else 0
     best_code = current_code
 
     # Get exact duration from original audio (millisecond precision)
@@ -1125,6 +1197,18 @@ def improve_strudel(
         current_similarity = comp_scores.get("overall_similarity", 0)
         print(f"Similarity: {current_similarity*100:.1f}%")
 
+        # Load per-stem comparison if available (shows real issues even when overall looks good)
+        stem_comparison = {}
+        stem_comparison_path = Path(output_dir) / "stem_comparison.json"
+        if stem_comparison_path.exists():
+            with open(stem_comparison_path) as f:
+                stem_comparison = json.load(f)
+            agg = stem_comparison.get("aggregate", {}).get("per_stem", {})
+            worst = stem_comparison.get("aggregate", {}).get("worst_sections", [])
+            print(f"       Per-stem: bass={agg.get('bass', {}).get('overall', 0)*100:.0f}% drums={agg.get('drums', {}).get('overall', 0)*100:.0f}% melodic={agg.get('melodic', {}).get('overall', 0)*100:.0f}%")
+            if worst:
+                print(f"       Worst: {worst[0].get('stem', '?')} {worst[0].get('time_range', '?')}: {worst[0].get('issues', '?')}")
+
         # Learn from improvement (if this iteration improved over previous)
         if iteration > 0 and current_similarity > previous_similarity:
             key_type = "minor" if "minor" in metadata.get("key", "").lower() else "major"
@@ -1160,19 +1244,13 @@ def improve_strudel(
             ai_suggestions=None
         )
 
-        # 4. Check if target reached
-        if current_similarity >= target_similarity:
-            print(f"\n✓ Target similarity reached!")
-            best_similarity = current_similarity
-            best_code = current_code
-            break
-
         # Track best
         if current_similarity > best_similarity:
             best_similarity = current_similarity
             best_code = current_code
 
-        # 5. Get AI suggestions for improvement
+        # 4. ALWAYS run LLM analysis - even if overall looks good, per-stem may have issues
+        # The overall score can hide problems (e.g., bass 68%, drums 72% while melodic 93%)
         print("Analyzing with LLM...")
 
         # Extract data from comparison structure
@@ -1197,6 +1275,19 @@ def improve_strudel(
         rend_rms = rend_spectral.get("rms_mean", 0.1)
         energy_ratio = rend_rms / max(orig_rms, 0.001) if orig_rms else 1.0
 
+        # Build per-stem issues for LLM (the real problems, not hidden by overall score)
+        per_stem_issues = []
+        if stem_comparison:
+            agg = stem_comparison.get("aggregate", {})
+            per_stem = agg.get("per_stem", {})
+            for stem_name, stem_data in per_stem.items():
+                stem_overall = stem_data.get("overall", 0)
+                if stem_overall < 0.80:  # Only report issues below 80%
+                    per_stem_issues.append(f"{stem_name}: {stem_overall*100:.0f}% (needs improvement)")
+            worst = agg.get("worst_sections", [])
+            for w in worst[:3]:  # Top 3 worst sections
+                per_stem_issues.append(f"WORST: {w.get('stem', '?')} at {w.get('time_range', '?')} - {w.get('issues', '')}")
+
         run_data = {
             "similarity_overall": current_similarity,
             "similarity_mfcc": comp_scores.get("mfcc_similarity", 0),
@@ -1213,7 +1304,8 @@ def improve_strudel(
             "bpm": metadata.get("bpm", 120),
             "key": metadata.get("key", ""),
             "style": metadata.get("style", ""),
-            "genre": metadata.get("genre", "")
+            "genre": metadata.get("genre", ""),
+            "per_stem_issues": per_stem_issues  # The REAL problems
         }
 
         print(f"       Bands: bass={band_diffs.get('bass',0)*100:+.0f}% mid={band_diffs.get('mid',0)*100:+.0f}% high={band_diffs.get('high',0)*100:+.0f}%")
@@ -1372,22 +1464,27 @@ let drumsFx = p => p.bank("{drums_bank}").gain({new_drums:.2f})'''
             # Merge improved effects back into full code
             improved_code = merge_effect_functions(current_code, improved_effects)
             if improved_code == current_code:
-                print("No effective changes made, stopping")
-                break
-            current_code = improved_code
-            # Save improved code
-            improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
-            with open(improved_path, 'w') as f:
-                f.write(improved_code)
-            # Update the main strudel file
-            with open(strudel_path, 'w') as f:
-                f.write(improved_code)
-            print(f"Saved improved code to {improved_path}")
+                print("       No effective changes this iteration, continuing...")
+                # DON'T break - keep iterating, LLM might give different suggestions next time
+            else:
+                current_code = improved_code
+                # Save improved code
+                improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
+                with open(improved_path, 'w') as f:
+                    f.write(improved_code)
+                # Update the main strudel file
+                with open(strudel_path, 'w') as f:
+                    f.write(improved_code)
+                print(f"Saved improved code to {improved_path}")
         else:
-            print("No code changes suggested, stopping")
-            break
+            print("       No code changes this iteration, continuing...")
+            # DON'T break - keep iterating
 
         current_version += 1
+
+        # NEVER exit early - ALWAYS run ALL iterations
+        # The LLM and full analysis must run every single time
+        # Per-stem issues need multiple iterations to fix properly
 
     # Generate final comparison charts and report
     print("\nGenerating comparison charts and report...")
@@ -1443,7 +1540,12 @@ let drumsFx = p => p.bank("{drums_bank}").gain({new_drums:.2f})'''
 
         # Generate HTML report
         cache_dir = Path(output_dir).parent
-        version_num = Path(output_dir).name.replace("v", "")
+        dir_name = Path(output_dir).name
+        # Extract version number (e.g., "v001" -> "1", or use directory if no version pattern)
+        import re
+        version_match = re.search(r'v(\d+)', dir_name)
+        version_num = version_match.group(1) if version_match else "1"
+
         report_cmd = [
             sys.executable,
             str(Path(__file__).parent / "generate_report.py"),

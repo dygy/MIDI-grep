@@ -1,7 +1,7 @@
 # Functional Specification: Core Pipeline (Phase 1)
 
 - **Roadmap Item:** Phase 1: Core Pipeline — Audio Processing, Analysis, Output Generation, CLI Interface
-- **Status:** Draft
+- **Status:** Implemented (Feb 2026) - Note: Uses Demucs instead of Spleeter, many Phase 2/3 features now complete
 - **Author:** Poe (AI Product Analyst)
 
 ---

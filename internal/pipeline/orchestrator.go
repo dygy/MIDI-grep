@@ -226,7 +226,7 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 				quality = "normal"
 			}
 			if quality == "high" || quality == "best" {
-				o.progress.StageComplete(fmt.Sprintf("Using %s quality (this may take longer)", quality))
+				o.progress.StageComplete("Using %s quality (this may take longer)", quality)
 			}
 
 			stemResult, err = o.separator.SeparateWithModeAndQuality(stemCtx, cfg.InputPath, ws.Dir, stemMode, quality)
@@ -334,6 +334,13 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 		cleanOpts := midi.DefaultCleanupOptions()
 		cleanOpts.Quantize = cfg.Quantize
 		cleanOpts.Simplify = cfg.Simplify
+
+		// Pass time signature and swing info from analysis to cleanup for better loop detection
+		if analysisResult != nil {
+			cleanOpts.TimeSignature = analysisResult.TimeSignature
+			cleanOpts.SwingRatio = analysisResult.SwingRatio
+			cleanOpts.SwingConfidence = analysisResult.SwingConfidence
+		}
 
 		cleanResult, err = o.cleaner.CleanWithOptions(ctx, ws.RawMIDI(), ws.NotesJSON(), cleanOpts)
 		if err != nil {

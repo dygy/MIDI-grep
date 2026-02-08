@@ -28,8 +28,15 @@ This file provides context for Claude Code when working on this project.
    - AI analyzes differences and generates new parameters
    - Store learnings in ClickHouse for future tracks
 
-**Current achievement:** 90%+ similarity on electro swing tracks (91.2% Catgroove, 90.5% Booty Swing)
-**Target:** 90%+ similarity across all genres through AI learning, not hardcoding
+**Current achievement:** ~60-70% similarity with honest calculation (previous 90%+ was inflated by cosine bug)
+**Target:** 80%+ similarity across all genres through AI learning, not hardcoding
+
+**CRITICAL: Similarity Calculation Fix (Feb 2026)**
+The old cosine-based frequency balance was HIDING massive errors (25% sub_bass, 20% mid differences showed as 95%!).
+Now uses MAE (Mean Absolute Error) with per-band penalty:
+- Weights: Freq Balance 40%, MFCC 20%, Energy 15%, Brightness 15%, Tempo/Chroma 5% each
+- Penalty if any band is off by >15%
+- Real scores: Electro Swing 67%, Russian Hip-Hop 59%
 
 **Key implementation details:**
 - Original audio (full mix) is used for AI synthesis analysis (proper frequency balance)
@@ -196,10 +203,18 @@ The `--render` flag synthesizes WAV audio from patterns:
 
 **Audio Comparison (`scripts/python/compare_audio.py`):**
 - Compares rendered output vs original stems
-- Spectral similarity (centroid, bandwidth, rolloff)
-- Rhythmic similarity (onset alignment)
-- Timbral similarity (MFCC distance)
-- Overall similarity score for quality feedback
+- **CRITICAL: Uses MAE for frequency balance, NOT cosine similarity!**
+  - Cosine was hiding 20%+ band differences (showed 95% when sub_bass was -25% off!)
+  - MAE properly penalizes per-band differences
+  - Penalty if ANY band is >15% off
+- **Similarity Weights:**
+  - Frequency Balance: **40%** (most important - if bands are off, audio sounds wrong)
+  - MFCC (timbre): 20%
+  - Energy: 15%
+  - Brightness: 15%
+  - Tempo: 5% (usually matches)
+  - Chroma: 5% (often inflated)
+- Tracks per-band differences in `band_differences` and `worst_band_diff`
 - Generates 6 individual chart images + combined comparison chart
 - Saves comparison.json for HTML report data
 - Accepts `--config` for AI-derived tempo tolerance from synth_config.json
@@ -235,10 +250,15 @@ The `--render` flag synthesizes WAV audio from patterns:
 
 **HTML Report (`scripts/python/generate_report.py`):**
 - Self-contained single-file HTML report with embedded audio and charts
-- **Audio Studio Player** with two-section stem mixer:
-  - **Original Stems**: melodic, drums, bass, vocals with Solo/Mute controls
-  - **Rendered Stems**: render-melodic, render-drums, render-bass with Solo/Mute controls
-  - Waveform visualizations with Web Audio API
+- **DAW-Style Audio Studio Player** with ISOLATED stem groups:
+  - **Original Stems Section**: melodic, drums, bass, vocals
+    - Play/Stop button for entire section
+    - Individual mute (M) buttons per stem
+    - Waveform visualizations
+  - **Rendered Stems Section**: render-melodic, render-drums, render-bass
+    - Completely isolated from Original (NEVER play together)
+    - Same controls: Play/Stop + per-stem mute
+  - Web Audio API for synchronized playback
   - Volume faders per stem
   - Synchronized playback controls
   - A/B comparison mode (toggle between original and rendered)
@@ -576,8 +596,8 @@ The following analysis features are **always enabled by default**:
 1. **Stem Rendering**: Renders 3 separate stems (`render_bass.wav`, `render_drums.wav`, `render_melodic.wav`)
 2. **Per-Stem Comparison**: Generates per-stem comparison charts (`chart_stem_bass.png`, `chart_stem_drums.png`, `chart_stem_melodic.png`)
 3. **Overall Comparison**: Generates combined comparison chart and `comparison.json`
-4. **AI-Driven Improvement**: 5 iterations by default with 85% target similarity
-5. **HTML Report**: Self-contained report with audio studio player (Solo/Mute, A/B comparison)
+4. **AI-Driven Improvement**: 5 iterations by default with 99% target (ensures ALL iterations run)
+5. **HTML Report**: Self-contained DAW-style player with isolated Original/Rendered stem groups
 
 ### AI-Driven Iterative Improvement
 

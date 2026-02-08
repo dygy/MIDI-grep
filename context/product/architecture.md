@@ -138,19 +138,35 @@ Original Audio                    Strudel Code
              ▼
 ┌─────────────────────────┐
 │ Compare (compare_audio) │
-│ - Spectral similarity
-│ - Rhythmic alignment
-│ - Timbral distance
+│ - Frequency balance (MAE)
+│ - MFCC timbral match
+│ - Energy/loudness
+│ - Brightness (centroid)
+│ - Per-band difference tracking
 │ - Overall score (0-100%)
+│                         │
+│ WEIGHTS:                │
+│ - Freq Balance: 40%     │
+│ - MFCC: 20%             │
+│ - Energy: 15%           │
+│ - Brightness: 15%       │
+│ - Tempo: 5%             │
+│ - Chroma: 5%            │
 └─────────────────────────┘
 ```
 
 **AI Scripts:**
 - `audio_to_strudel_params.py` - Analyzes original audio to suggest Strudel effect parameters
 - `compare_audio.py` - Compares rendered vs original for quality feedback
+  - **CRITICAL:** Uses MAE-based frequency balance, not cosine (cosine hides 20%+ band errors!)
+  - Weights: Frequency Balance 40%, MFCC 20%, Energy 15%, Brightness 15%, Tempo/Chroma 5% each
+  - Penalty if any band off by >15%
 - `ai_improver.py` - AI-driven iterative code improvement (Ollama/Claude)
+- `ai_code_improver.py` - Gap analysis and Strudel code modification
+- `ai_iterative_codegen.py` - Iteration loop with automatic revert-on-regression
 - `spectrogram_analyzer.py` - Deep mel spectrogram analysis for AI learning
-- `generate_report.py` - Self-contained HTML report with audio studio
+- `sound_selector.py` - Complete sound catalog (67 drum machines, 128 GM instruments, 17 genre palettes)
+- `generate_report.py` - Self-contained HTML report with DAW-style audio studio
 
 ### Default Analysis Features (All Enabled)
 

@@ -238,10 +238,37 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     tempo_sim = max(0, 1 - best_tempo_diff / tolerance)
     results['comparison']['tempo_similarity'] = float(tempo_sim)
 
-    # Energy distribution similarity
+    # Energy distribution similarity - USE MEAN ABSOLUTE ERROR, NOT COSINE!
+    # Cosine similarity measures angle (shape), not magnitude differences
+    # If sub_bass is 25% vs 5% (-20% off), cosine might still give 95%!
+    # We need a metric that ACTUALLY penalizes per-band differences
     orig_bands = np.array(list(results['original']['bands'].values()))
     rend_bands = np.array(list(results['rendered']['bands'].values()))
-    band_sim = 1 - cosine(orig_bands, rend_bands) if np.sum(orig_bands) > 0 else 0
+
+    # Calculate per-band absolute differences
+    band_diffs = np.abs(orig_bands - rend_bands)
+
+    # Store per-band differences for debugging
+    band_names = list(results['original']['bands'].keys())
+    results['comparison']['band_differences'] = {
+        band_names[i]: float(band_diffs[i] * 100) for i in range(len(band_names))
+    }
+
+    # Mean absolute error - each 1% difference costs 1% similarity
+    # Max possible MAE is ~50% (if all energy in one band in orig, different band in rend)
+    # Scale to 0-1: 0% MAE = 1.0 similarity, 50% MAE = 0.0 similarity
+    mae = np.mean(band_diffs)
+    band_sim = max(0.0, 1.0 - mae * 2)  # 50% avg diff = 0% similarity
+
+    # Also calculate max band difference (worst offender)
+    max_diff = np.max(band_diffs)
+    results['comparison']['worst_band_diff'] = float(max_diff * 100)
+
+    # Penalize severely if ANY band is off by more than 15%
+    if max_diff > 0.15:
+        penalty = (max_diff - 0.15) * 2  # Each 1% over 15% costs 2%
+        band_sim = max(0.0, band_sim - penalty)
+
     results['comparison']['frequency_balance_similarity'] = float(band_sim)
 
     # RMS energy ratio
@@ -252,13 +279,15 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     results['comparison']['energy_similarity'] = float(rms_ratio)
 
     # Overall similarity (weighted average)
+    # FREQUENCY BALANCE is #1 priority - if bands are off, the audio sounds wrong
+    # Previous weights hid real problems (89% when sub_bass was -41% off!)
     weights = {
-        'mfcc_similarity': 0.25,
-        'chroma_similarity': 0.20,
-        'brightness_similarity': 0.15,
-        'tempo_similarity': 0.15,
-        'frequency_balance_similarity': 0.15,
-        'energy_similarity': 0.10
+        'frequency_balance_similarity': 0.40,  # Most important - frequency bands must match
+        'mfcc_similarity': 0.20,               # Timbre/texture
+        'energy_similarity': 0.15,             # Loudness/dynamics
+        'brightness_similarity': 0.15,         # Spectral balance
+        'tempo_similarity': 0.05,              # Tempo (usually matches)
+        'chroma_similarity': 0.05              # Pitch/harmony (often inflated)
     }
 
     overall = sum(results['comparison'][k] * w for k, w in weights.items())
@@ -476,9 +505,9 @@ def generate_similarity_chart(results, output_path):
 
     colors = [get_color(v) for v in values]
 
-    # Add weight indicators
-    weights = {'Timbre (MFCC)': 25, 'Harmony (Chroma)': 20, 'Brightness': 15,
-               'Tempo': 15, 'Frequency Balance': 15, 'Energy': 10}
+    # Add weight indicators (must match actual weights in compare_audio())
+    weights = {'Timbre (MFCC)': 20, 'Harmony (Chroma)': 5, 'Brightness': 15,
+               'Tempo': 5, 'Frequency Balance': 40, 'Energy': 15}
 
     bars = ax_main.barh(metric_labels, values, color=colors, alpha=0.9,
                         edgecolor=[c.replace('f8', 'ff').replace('3f', '5f') for c in colors],

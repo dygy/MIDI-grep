@@ -13,8 +13,42 @@ from collections import defaultdict
 from typing import List, Dict, Tuple, Optional
 
 
+# ============================================================================
+# TIME SIGNATURE HELPERS
+# ============================================================================
+
+def get_beats_per_bar(time_sig: str) -> int:
+    """Return number of beats per bar for given time signature."""
+    return {
+        "4/4": 4,
+        "3/4": 3,
+        "2/4": 2,
+        "6/8": 2,  # Compound meter: 2 dotted quarter notes
+        "5/4": 5,
+        "7/8": 7,
+    }.get(time_sig, 4)
+
+
+def get_beat_unit(time_sig: str) -> float:
+    """Return beat unit multiplier for compound meters.
+
+    For simple meters (4/4, 3/4, etc.) returns 1.0.
+    For compound meters (6/8, 7/8) returns the dotted note value.
+    """
+    return {
+        "6/8": 1.5,  # Dotted quarter = 1.5 eighth notes
+        "7/8": 0.5,  # Eighth note as beat unit
+    }.get(time_sig, 1.0)
+
+
+# ============================================================================
+# LOOP DETECTION
+# ============================================================================
+
 def detect_loop(notes: List[Dict], tempo: float, beat_duration: float,
-                bars_to_test: List[int] = [1, 2, 4, 8]) -> Optional[Dict]:
+                bars_to_test: List[int] = [1, 2, 4, 8],
+                time_sig: str = "4/4",
+                swing_ratio: float = 1.0) -> Optional[Dict]:
     """
     Detect repeating patterns in MIDI notes.
 
@@ -22,7 +56,9 @@ def detect_loop(notes: List[Dict], tempo: float, beat_duration: float,
         notes: List of note dictionaries with 'pitch' and 'start_quantized' keys
         tempo: Tempo in BPM
         beat_duration: Duration of one beat in seconds
-        bars_to_test: List of bar lengths to test (default: [1, 2, 4])
+        bars_to_test: List of bar lengths to test (default: [1, 2, 4, 8])
+        time_sig: Time signature string (default: "4/4")
+        swing_ratio: Swing timing ratio (1.0=straight, 1.5-2.0=swing)
 
     Returns:
         Dictionary with loop information or None if no loop detected
@@ -39,9 +75,12 @@ def detect_loop(notes: List[Dict], tempo: float, beat_duration: float,
     best_loop = None
     best_score = 0
 
+    # Use time signature for beats per bar
+    beats_per_bar = get_beats_per_bar(time_sig)
+    beat_unit = get_beat_unit(time_sig)
+
     for bar_count in bars_to_test:
-        beats_per_bar = 4  # Assuming 4/4 time signature
-        loop_length_beats = bar_count * beats_per_bar
+        loop_length_beats = bar_count * beats_per_bar * beat_unit
         loop_length_seconds = loop_length_beats * beat_duration
 
         # Need at least 2 repetitions to detect a loop
@@ -53,7 +92,8 @@ def detect_loop(notes: List[Dict], tempo: float, beat_duration: float,
             notes,
             loop_length_seconds,
             loop_length_beats,
-            beat_duration
+            beat_duration,
+            swing_ratio
         )
 
         if loop_info and loop_info['confidence'] > best_score:
@@ -68,7 +108,8 @@ def detect_loop(notes: List[Dict], tempo: float, beat_duration: float,
 
 
 def _find_repeating_pattern(notes: List[Dict], loop_length_seconds: float,
-                           loop_length_beats: float, beat_duration: float) -> Optional[Dict]:
+                           loop_length_beats: float, beat_duration: float,
+                           swing_ratio: float = 1.0) -> Optional[Dict]:
     """
     Find repeating pattern of given length.
 
@@ -77,6 +118,7 @@ def _find_repeating_pattern(notes: List[Dict], loop_length_seconds: float,
         loop_length_seconds: Length of pattern to test in seconds
         loop_length_beats: Length of pattern in beats
         beat_duration: Duration of one beat in seconds
+        swing_ratio: Swing timing ratio for tolerance adjustment
 
     Returns:
         Dictionary with loop info and confidence score or None
@@ -114,13 +156,18 @@ def _find_repeating_pattern(notes: List[Dict], loop_length_seconds: float,
     if not loop_iterations:
         return None
 
-    # Compare each iteration with the first one
-    similarities = []
-    reference = loop_iterations[0]
+    # Use consensus-based reference selection instead of always using first iteration
+    reference, reference_idx = _find_consensus_pattern(loop_iterations, swing_ratio)
 
-    for i in range(1, len(loop_iterations)):
-        similarity = _calculate_similarity(reference, loop_iterations[i])
-        similarities.append(similarity)
+    # Check for A-B-A-B alternating pattern
+    alternating = _detect_alternating_pattern(loop_iterations, swing_ratio)
+
+    # Calculate similarities against consensus reference
+    similarities = []
+    for i in range(len(loop_iterations)):
+        if i != reference_idx:
+            similarity = _calculate_similarity(reference, loop_iterations[i], swing_ratio)
+            similarities.append(similarity)
 
     if not similarities:
         return None
@@ -128,21 +175,137 @@ def _find_repeating_pattern(notes: List[Dict], loop_length_seconds: float,
     # Average similarity is our confidence
     avg_similarity = sum(similarities) / len(similarities)
 
-    # Find the most common pattern (use first as reference if similarity is high)
+    # Find the most common pattern (use consensus reference if similarity is high)
     if avg_similarity >= 0.45:
-        return {
+        result = {
             'detected': True,
             'confidence': round(avg_similarity, 2),
             'start_beat': 0,
             'end_beat': round(loop_length_beats, 2),
             'notes': reference,
-            'repetitions': num_loops
+            'repetitions': num_loops,
+            'reference_iteration': reference_idx,
+            'pattern_type': 'single'
+        }
+
+        # Add alternating pattern info if detected
+        if alternating:
+            result['pattern_type'] = 'alternating'
+            result['variation_a'] = alternating['variation_a']
+            result['variation_b'] = alternating['variation_b']
+
+        return result
+
+    return None
+
+
+def _find_consensus_pattern(iterations: List[List[Dict]], swing_ratio: float = 1.0) -> Tuple[List[Dict], int]:
+    """
+    Find the iteration that is most similar to all others (consensus pattern).
+
+    Instead of always using the first iteration as reference (which can fail on intro
+    variations), we build an NxN similarity matrix and pick the iteration with the
+    highest total similarity to all others.
+
+    Args:
+        iterations: List of loop iterations (each is a list of notes)
+        swing_ratio: Swing timing ratio for tolerance adjustment
+
+    Returns:
+        Tuple of (best pattern, best index)
+    """
+    n = len(iterations)
+
+    if n == 0:
+        return [], 0
+    if n == 1:
+        return iterations[0], 0
+
+    # Build NxN similarity matrix
+    sim_matrix = []
+    for i in range(n):
+        row = []
+        for j in range(n):
+            if i == j:
+                row.append(1.0)  # Perfect similarity with self
+            else:
+                row.append(_calculate_similarity(iterations[i], iterations[j], swing_ratio))
+        sim_matrix.append(row)
+
+    # Sum similarities for each iteration (total similarity to all others)
+    totals = [sum(row) for row in sim_matrix]
+
+    # Pick iteration with highest total similarity
+    best_idx = max(range(n), key=lambda i: totals[i])
+
+    return iterations[best_idx], best_idx
+
+
+def _detect_alternating_pattern(iterations: List[List[Dict]], swing_ratio: float = 1.0) -> Optional[Dict]:
+    """
+    Detect A-B-A-B alternating patterns (like verse-chorus alternation).
+
+    Algorithm:
+    1. Group iterations: odd (0,2,4...) = A, even (1,3,5...) = B
+    2. Check A-group internal similarity (>= 0.6)
+    3. Check B-group internal similarity (>= 0.6)
+    4. Check A-B cross-similarity (< 0.5 = different patterns)
+    5. If all criteria met, return both patterns
+
+    Args:
+        iterations: List of loop iterations
+        swing_ratio: Swing timing ratio
+
+    Returns:
+        Dictionary with variation_a and variation_b, or None
+    """
+    if len(iterations) < 4:
+        return None  # Need at least 4 iterations for A-B-A-B
+
+    # Split into A (even indices: 0,2,4...) and B (odd indices: 1,3,5...)
+    a_group = [iterations[i] for i in range(0, len(iterations), 2)]
+    b_group = [iterations[i] for i in range(1, len(iterations), 2)]
+
+    if len(a_group) < 2 or len(b_group) < 2:
+        return None
+
+    # Calculate internal similarity within A group
+    a_similarities = []
+    for i in range(len(a_group)):
+        for j in range(i + 1, len(a_group)):
+            a_similarities.append(_calculate_similarity(a_group[i], a_group[j], swing_ratio))
+
+    # Calculate internal similarity within B group
+    b_similarities = []
+    for i in range(len(b_group)):
+        for j in range(i + 1, len(b_group)):
+            b_similarities.append(_calculate_similarity(b_group[i], b_group[j], swing_ratio))
+
+    # Calculate cross-similarity between A and B
+    cross_similarities = []
+    for a_iter in a_group:
+        for b_iter in b_group:
+            cross_similarities.append(_calculate_similarity(a_iter, b_iter, swing_ratio))
+
+    # Check thresholds
+    avg_a_similarity = sum(a_similarities) / len(a_similarities) if a_similarities else 0
+    avg_b_similarity = sum(b_similarities) / len(b_similarities) if b_similarities else 0
+    avg_cross_similarity = sum(cross_similarities) / len(cross_similarities) if cross_similarities else 0
+
+    # A and B groups should be internally similar (>= 0.6)
+    # A and B should be different from each other (< 0.5)
+    if avg_a_similarity >= 0.6 and avg_b_similarity >= 0.6 and avg_cross_similarity < 0.5:
+        # Use first of each group as representative pattern
+        return {
+            'variation_a': a_group[0],
+            'variation_b': b_group[0]
         }
 
     return None
 
 
-def _calculate_similarity(pattern1: List[Dict], pattern2: List[Dict]) -> float:
+def _calculate_similarity(pattern1: List[Dict], pattern2: List[Dict],
+                         swing_ratio: float = 1.0) -> float:
     """
     Calculate similarity between two note patterns.
 
@@ -151,9 +314,13 @@ def _calculate_similarity(pattern1: List[Dict], pattern2: List[Dict]) -> float:
     - Timing alignment (normalized distance)
     - Note count ratio
 
+    Swing awareness: When swing_ratio > 1.1, expands time bins to account
+    for timing variations in swung rhythms.
+
     Args:
         pattern1: First pattern (list of notes)
         pattern2: Second pattern (list of notes)
+        swing_ratio: Swing timing ratio (1.0=straight, 1.5-2.0=swing)
 
     Returns:
         Similarity score between 0 and 1
@@ -177,20 +344,26 @@ def _calculate_similarity(pattern1: List[Dict], pattern2: List[Dict]) -> float:
         pitch_similarity = 1.0
 
     # 3. Sequence similarity - compare note-by-note with timing tolerance
-    time_tolerance = 0.05  # 50ms tolerance for timing
-    pitch_matches = 0
+    # Adjust bin size for swing - swung notes have more timing variation
+    base_bin_size = 0.05  # 50ms base tolerance
+    if swing_ratio > 1.1:
+        # Increase bin size proportionally to swing amount
+        # Light swing (1.2): 62.5ms, Heavy swing (2.0): 100ms
+        bin_size = base_bin_size * (1 + (swing_ratio - 1) * 0.5)
+    else:
+        bin_size = base_bin_size
 
     # Create time-binned representations for comparison
-    def create_time_bins(pattern, bin_size=0.05):
+    def create_time_bins(pattern, bin_sz):
         """Group notes into time bins"""
         bins = defaultdict(list)
         for note in pattern:
-            bin_idx = int(note['start'] / bin_size)
+            bin_idx = int(note['start'] / bin_sz)
             bins[bin_idx].append(note['pitch'])
         return bins
 
-    bins1 = create_time_bins(pattern1)
-    bins2 = create_time_bins(pattern2)
+    bins1 = create_time_bins(pattern1, bin_size)
+    bins2 = create_time_bins(pattern2, bin_size)
 
     all_bins = set(bins1.keys()) | set(bins2.keys())
     matching_bins = 0
@@ -217,6 +390,54 @@ def _calculate_similarity(pattern1: List[Dict], pattern2: List[Dict]) -> float:
     )
 
     return final_score
+
+
+def detect_loops_per_voice(notes: List[Dict], tempo: float, beat_duration: float,
+                           time_sig: str = "4/4", swing_ratio: float = 1.0,
+                           bars_to_test: List[int] = [1, 2, 4, 8]) -> Dict[str, Optional[Dict]]:
+    """
+    Detect loops separately for each voice (bass, mid, high).
+
+    Different musical parts often have different loop lengths - bass might have
+    a 2-bar pattern while melody has a 4-bar pattern. This function runs loop
+    detection independently on each voice range.
+
+    Args:
+        notes: List of all note dictionaries
+        tempo: Tempo in BPM
+        beat_duration: Duration of one beat in seconds
+        time_sig: Time signature string
+        swing_ratio: Swing timing ratio
+        bars_to_test: List of bar lengths to test
+
+    Returns:
+        Dictionary with 'bass', 'mid', 'high' keys, each containing loop info or None
+    """
+    # Separate notes by voice range
+    # Bass: C0-B2 (MIDI 24-47), Mid: C3-B4 (48-71), High: C5+ (72+)
+    voices = {
+        'bass': [n for n in notes if n.get('pitch', 60) < 48],
+        'mid': [n for n in notes if 48 <= n.get('pitch', 60) < 72],
+        'high': [n for n in notes if n.get('pitch', 60) >= 72]
+    }
+
+    result = {}
+    for voice_name, voice_notes in voices.items():
+        # Need at least 4 notes to detect a meaningful loop
+        if len(voice_notes) >= 4:
+            loop_info = detect_loop(
+                voice_notes,
+                tempo,
+                beat_duration,
+                bars_to_test,
+                time_sig,
+                swing_ratio
+            )
+            result[voice_name] = loop_info
+        else:
+            result[voice_name] = None
+
+    return result
 
 
 def remove_octave_duplicates(notes: List[Dict], preferred_octave: int = 4) -> List[Dict]:
@@ -395,6 +616,15 @@ def main():
                         help='Maximum notes per beat (default: 4)')
     parser.add_argument('--preferred-octave', type=int, default=4,
                         help='Preferred octave for deduplication (default: 4, C4=middle C)')
+    # Loop detection options
+    parser.add_argument('--time-signature', type=str, default='4/4',
+                        help='Time signature for loop detection (e.g., 4/4, 3/4, 6/8)')
+    parser.add_argument('--swing-ratio', type=float, default=1.0,
+                        help='Swing ratio for timing tolerance (1.0=straight, 1.5-2.0=swing)')
+    parser.add_argument('--swing-confidence', type=float, default=0.0,
+                        help='Confidence of swing detection (0.0-1.0)')
+    parser.add_argument('--multi-voice-loops', action='store_true',
+                        help='Detect loops separately for each voice (bass, mid, high)')
 
     args = parser.parse_args()
 
@@ -495,8 +725,13 @@ def main():
         else:
             total_beats = 0
 
-        # Detect loops
-        loop_info = detect_loop(unique, tempo, beat_duration)
+        # Detect loops with time signature and swing awareness
+        loop_info = detect_loop(
+            unique, tempo, beat_duration,
+            bars_to_test=[1, 2, 4, 8],
+            time_sig=args.time_signature,
+            swing_ratio=args.swing_ratio
+        )
 
         # Format loop info for output
         if loop_info:
@@ -519,8 +754,31 @@ def main():
                 'start_beat': loop_info['start_beat'],
                 'end_beat': loop_info['end_beat'],
                 'notes': loop_notes_formatted,
-                'repetitions': loop_info.get('repetitions', 0)
+                'repetitions': loop_info.get('repetitions', 0),
+                'reference_iteration': loop_info.get('reference_iteration', 0),
+                'pattern_type': loop_info.get('pattern_type', 'single')
             }
+
+            # Add A-B variation notes if alternating pattern detected
+            if loop_info.get('pattern_type') == 'alternating':
+                loop_output['variation_a'] = [
+                    {
+                        'pitch': n['pitch'],
+                        'start': round(n['start'], 4),
+                        'duration': round(n['duration'], 4),
+                        'velocity': n['velocity']
+                    }
+                    for n in loop_info.get('variation_a', [])
+                ]
+                loop_output['variation_b'] = [
+                    {
+                        'pitch': n['pitch'],
+                        'start': round(n['start'], 4),
+                        'duration': round(n['duration'], 4),
+                        'velocity': n['velocity']
+                    }
+                    for n in loop_info.get('variation_b', [])
+                ]
         else:
             loop_output = {
                 'detected': False,
@@ -528,8 +786,29 @@ def main():
                 'confidence': 0.0,
                 'start_beat': 0,
                 'end_beat': 0,
-                'notes': []
+                'notes': [],
+                'pattern_type': 'none'
             }
+
+        # Detect per-voice loops if requested
+        voice_loops_output = None
+        if args.multi_voice_loops:
+            voice_loops = detect_loops_per_voice(
+                unique, tempo, beat_duration,
+                time_sig=args.time_signature,
+                swing_ratio=args.swing_ratio
+            )
+            voice_loops_output = {}
+            for voice_name, voice_loop in voice_loops.items():
+                if voice_loop:
+                    voice_loops_output[voice_name] = {
+                        'bars': voice_loop['bars'],
+                        'confidence': voice_loop['confidence'],
+                        'pattern_type': voice_loop.get('pattern_type', 'single'),
+                        'repetitions': voice_loop.get('repetitions', 0)
+                    }
+                else:
+                    voice_loops_output[voice_name] = None
 
         result = {
             'notes': format_notes(unique),
@@ -553,8 +832,14 @@ def main():
             'grid_size': grid_size,
             'total_beats': round(total_beats, 2),
             'quantize': args.quantize,
+            'time_signature': args.time_signature,
+            'swing_ratio': args.swing_ratio,
             'loop': loop_output
         }
+
+        # Add voice loops if detected
+        if voice_loops_output:
+            result['voice_loops'] = voice_loops_output
 
         with open(args.output_json, 'w') as f:
             json.dump(result, f, indent=2)
@@ -568,12 +853,26 @@ def main():
 
         if loop_info:
             print(f"\nLoop detected:")
-            print(f"  Pattern: {loop_info['bars']} bar(s)")
+            print(f"  Pattern: {loop_info['bars']} bar(s) ({args.time_signature})")
             print(f"  Confidence: {loop_info['confidence']:.0%}")
             print(f"  Repetitions: {loop_info.get('repetitions', 0)}")
             print(f"  Notes in pattern: {len(loop_info['notes'])}")
+            print(f"  Reference iteration: {loop_info.get('reference_iteration', 0)}")
+            if loop_info.get('pattern_type') == 'alternating':
+                print(f"  Pattern type: A-B-A-B alternating")
+            if args.swing_ratio > 1.1:
+                print(f"  Swing-aware: ratio={args.swing_ratio:.2f}")
         else:
             print(f"\nNo repeating loop detected")
+
+        # Print per-voice loops if detected
+        if voice_loops_output:
+            print(f"\nPer-voice loops:")
+            for voice_name, voice_loop in voice_loops_output.items():
+                if voice_loop:
+                    print(f"  {voice_name}: {voice_loop['bars']} bar(s), {voice_loop['confidence']:.0%} confidence")
+                else:
+                    print(f"  {voice_name}: no loop detected")
 
     except ImportError:
         print("Error: pretty_midi not installed. Run: pip install pretty_midi", file=sys.stderr)

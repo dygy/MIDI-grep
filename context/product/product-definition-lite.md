@@ -2,7 +2,7 @@
 
 ## Vision
 
-Enable musicians and live coders to instantly extract piano riffs from audio and transform them into playable Strudel patterns. Go-powered CLI + HTMX web app, no JavaScript.
+Enable musicians and live coders to instantly extract musical content from audio and transform it into playable Strudel patterns. Go-powered CLI + HTMX web app, no JavaScript frameworks.
 
 ## Target Audience
 
@@ -13,17 +13,35 @@ Enable musicians and live coders to instantly extract piano riffs from audio and
 
 ## Core Features
 
-- **Audio Input** - WAV/MP3 upload (web) or CLI argument
-- **Stem Separation** - Piano isolation via Spleeter/Demucs
+- **Audio Input** - WAV/MP3/YouTube URL via CLI or web upload
+- **Stem Separation** - Melodic/bass/drums/vocals via Demucs
 - **MIDI Transcription** - Audio-to-MIDI via Basic Pitch
 - **MIDI Cleanup** - Quantization, noise removal, loop detection
-- **BPM & Key Detection** - Tempo and scale analysis
-- **Strudel Generator** - Output playable `note()` patterns
+- **BPM & Key Detection** - Tempo, scale, time signature analysis
+- **Strudel Generator** - Bar arrays + effect functions for bass/mid/high/drums
+- **Audio Rendering** - Node.js renderer with stem output
+- **AI Improvement** - LLM-driven iterative code optimization (Ollama/Claude)
+- **Audio Comparison** - MAE-based similarity scoring (frequency bands, MFCC, energy)
+- **DAW-Style Reports** - HTML reports with isolated Original/Rendered stem players
 - **HTMX Web UI** - Reactive, zero-JS frontend with Go templates
-- **CLI Interface** - Terminal-based workflow
+- **CLI Interface** - Full-featured terminal workflow
 
-## V1 Boundaries
+## Current State (Feb 2026)
 
-**In:** CLI, Web UI, piano extraction, MIDI cleanup, Strudel output, Docker deploy
+**Implemented:**
+- All stem separation and transcription
+- 67 drum machines + 128 GM instruments + 17 genre palettes
+- Per-stem comparison charts
+- AI-driven improvement (5 iterations, ClickHouse learning storage)
+- Accurate similarity scoring (MAE-based, not cosine)
+- Self-contained HTML reports with audio studio
 
-**Out:** YouTube download, other instruments, user accounts, multiple output formats
+**In Progress:**
+- Loop detection improvements (time signature support, consensus-based reference)
+- Higher similarity scores through synthesis improvements
+
+## Key Metrics
+
+- Similarity: ~60-70% with honest calculation (freq balance weighted 40%)
+- Processing: YouTube URL to Strudel code in ~2 minutes
+- Rendering: Full track audio in ~30 seconds

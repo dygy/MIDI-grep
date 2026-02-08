@@ -96,9 +96,52 @@ The loop detection runs automatically during MIDI cleanup. It uses:
 - May miss loops with significant variation
 - Works best with quantized, clean MIDI data
 
-## Future Enhancements
+## Implemented Features (Feb 2026)
 
-- Support for different time signatures (3/4, 6/8, etc.)
-- Detection of loops with variations (A-B-A-B patterns)
-- Multiple simultaneous loops in different voices
-- Swing and groove quantization awareness
+All planned enhancements are now implemented:
+
+| Feature | Status | Implementation |
+|---------|--------|----------------|
+| **Time Signature Support** | ✅ Done | `get_beats_per_bar()` handles 3/4, 6/8, 5/4, 7/8 |
+| **Consensus-Based Reference** | ✅ Done | `_find_consensus_pattern()` builds NxN similarity matrix |
+| **A-B-A-B Detection** | ✅ Done | `_detect_alternating_pattern()` for verse-chorus patterns |
+| **Swing Awareness** | ✅ Done | `_calculate_similarity()` adjusts bin size for swing |
+| **Multi-Voice Loops** | ✅ Done | `detect_loops_per_voice()` for bass/mid/high separately |
+
+### Time Signature Support
+
+```python
+def get_beats_per_bar(time_sig: str) -> int:
+    return {"4/4": 4, "3/4": 3, "2/4": 2, "6/8": 2, "5/4": 5, "7/8": 7}.get(time_sig, 4)
+```
+
+### Consensus Reference Selection
+
+Instead of always using first iteration (fails on intro variations), we build NxN similarity matrix:
+
+```python
+def _find_consensus_pattern(iterations, swing_ratio):
+    # Build similarity matrix
+    sim_matrix = [[_calculate_similarity(i, j) for j in iterations] for i in iterations]
+    # Pick iteration with highest total similarity
+    totals = [sum(row) for row in sim_matrix]
+    best_idx = max(range(len(totals)), key=lambda i: totals[i])
+    return iterations[best_idx], best_idx
+```
+
+### Swing Awareness
+
+Time bins expand for swung rhythms:
+```python
+if swing_ratio > 1.1:
+    bin_size = base_bin_size * (1 + (swing_ratio - 1) * 0.5)
+    # Light swing (1.2): 62.5ms, Heavy swing (2.0): 100ms
+```
+
+### Go Integration
+
+Time signature and swing are passed from analysis to cleanup:
+```go
+cleanOpts.TimeSignature = analysisResult.TimeSignature
+cleanOpts.SwingRatio = analysisResult.SwingRatio
+```
