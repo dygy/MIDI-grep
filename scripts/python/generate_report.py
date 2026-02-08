@@ -319,14 +319,6 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
 
             <!-- Transport controls -->
             <div class="daw-transport">
-                <div class="transport-left">
-                    <button class="transport-btn transport-play" onclick="playAll()" id="btn-play">
-                        <span class="transport-icon">▶</span>
-                    </button>
-                    <button class="transport-btn transport-stop" onclick="stopAll()">
-                        <span class="transport-icon">■</span>
-                    </button>
-                </div>
                 <div class="transport-center">
                     <span class="transport-time" id="time-current">0:00.0</span>
                     <span class="transport-separator">/</span>
@@ -1683,8 +1675,6 @@ def generate_report(cache_dir, version_dir, output_path=None):
                     if (audio) audio.pause();
                 }});
                 isPlaying = false;
-                document.getElementById('btn-play').classList.remove('playing');
-                document.getElementById('btn-play').querySelector('.transport-icon').textContent = '▶';
                 return;
             }}
 
@@ -1708,8 +1698,6 @@ def generate_report(cache_dir, version_dir, output_path=None):
 
             Promise.all(audios.map(a => a.play().catch(() => {{}}))).then(() => {{
                 isPlaying = true;
-                document.getElementById('btn-play').classList.add('playing');
-                document.getElementById('btn-play').querySelector('.transport-icon').textContent = '⏸';
                 updateNowPlaying(activeGroup);
                 updateGroupButtons(activeGroup);
                 startPlayheadAnimation();
@@ -1759,8 +1747,6 @@ def generate_report(cache_dir, version_dir, output_path=None):
             // Play ONLY the selected group (not all)
             Promise.all(audios.map(a => a.play().catch(() => {{}}))).then(() => {{
                 isPlaying = true;
-                document.getElementById('btn-play').classList.add('playing');
-                document.getElementById('btn-play').querySelector('.transport-icon').textContent = '⏸';
                 updateNowPlaying(group);
                 updateGroupButtons(group);
                 startPlayheadAnimation();
@@ -1790,8 +1776,6 @@ def generate_report(cache_dir, version_dir, output_path=None):
                 activeGroup = 'compare-ab';
                 isPlaying = true;
                 abMode = true;
-                document.getElementById('btn-play').classList.add('playing');
-                document.getElementById('btn-play').querySelector('.transport-icon').textContent = '⏸';
                 updateNowPlaying('A/B: Original');
                 updateGroupButtons('compare-ab');
                 startPlayheadAnimation();
@@ -1831,8 +1815,6 @@ def generate_report(cache_dir, version_dir, output_path=None):
             isPlaying = false;
             abMode = false;
 
-            document.getElementById('btn-play').classList.remove('playing');
-            document.getElementById('btn-play').querySelector('.transport-icon').textContent = '▶';
             updateNowPlaying('Ready to play');
             updateGroupButtons(null);
             document.getElementById('time-current').textContent = '0:00.0';
