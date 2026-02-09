@@ -116,9 +116,10 @@ func (g *BrazilianFunkGenerator) Generate(analysisResult *analysis.Result) strin
 	sb.WriteString("let snareFx = p => p.bank(\"RolandTR808\").gain(0.85).room(0.08).hpf(200)\n")
 	sb.WriteString("let hhFx = p => p.bank(\"RolandTR808\").gain(0.9).hpf(6000)\n\n")
 
-	// 808 bass - reduced to balance with mids
+	// 808 bass - lpf(400) to spread energy, gain(0.12) to avoid bass overload
+	// Was: lpf(100).gain(0.6) = 4812% bass band overload
 	sb.WriteString("let bassFx = p => p.sound(\"sawtooth\")\n")
-	sb.WriteString("  .lpf(100).gain(0.6).distort(0.4)\n")
+	sb.WriteString("  .lpf(400).gain(0.12).distort(0.3)\n")
 	sb.WriteString("  .attack(0.001).decay(0.2).sustain(0.4).release(0.15)\n")
 	sb.WriteString("  .slide(0.1)\n\n")
 

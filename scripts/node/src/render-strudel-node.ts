@@ -372,12 +372,14 @@ function getDefaultConfig(): SynthConfig {
     },
     voices: {
       bass: {
-        gain: 0.3, lpf: 500, hpf: 40,
+        // Reduced from 0.3 to 0.1 - bass was 4812% too loud
+        gain: 0.1, lpf: 400, hpf: 40,
         envelope: { attack: 0.005, decay: 0.2, sustain: 0.6, release: 0.1 },
-        waveform: 'saw', sub_octave_gain: 0.4
+        waveform: 'saw', sub_octave_gain: 0.3
       },
       mid: {
-        gain: 1.0, lpf: 6000, hpf: 200,
+        // Reduced from 1.0 to 0.6 - mids were dominating (+31%)
+        gain: 0.6, lpf: 6000, hpf: 200,
         envelope: { attack: 0.01, decay: 0.15, sustain: 0.7, release: 0.2 },
         waveform: 'saw', detune_cents: 5
       },
