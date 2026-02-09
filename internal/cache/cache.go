@@ -187,6 +187,20 @@ func KeyForFile(path string) (string, error) {
 	ext := filepath.Ext(base)
 	name := strings.TrimSuffix(base, ext)
 
+	// If filename is generic (original, input, audio, etc.), use parent directory name
+	genericNames := map[string]bool{
+		"original": true, "input": true, "audio": true, "track": true,
+		"source": true, "file": true, "music": true, "song": true,
+	}
+	if genericNames[strings.ToLower(name)] {
+		parentDir := filepath.Dir(path)
+		parentName := filepath.Base(parentDir)
+		// Don't use parent if it's also generic or root
+		if parentName != "" && parentName != "." && parentName != "/" && !genericNames[strings.ToLower(parentName)] {
+			name = parentName
+		}
+	}
+
 	// Sanitize for folder name
 	return sanitizeFolderName(name), nil
 }
