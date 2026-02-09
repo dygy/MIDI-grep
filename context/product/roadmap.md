@@ -360,10 +360,10 @@ _Fixing the core audio quality issues blocking high similarity scores._
   - [x] **Octave Correction:** Fixed - compare_audio.py uses expected_bpm instead of re-detecting
   - [x] **Prior-Based Selection:** Implemented - original analysis BPM passed to comparison
 
-- [ ] **Fix Frequency Balance**
-  - [ ] **Current:** Bass was 4812% too loud, now fixed with gain reduction
-  - [ ] **Target:** 80%+ frequency balance similarity
-  - [ ] **Next:** Test new gains, measure improvement
+- [x] **Fix Frequency Balance** ✅ (Feb 2026)
+  - [x] **Fixed:** Bass was 4812% too loud → now 87.5% similarity
+  - [x] **Achieved:** 81.4% weighted overall (target was 80%)
+  - [x] **Solution:** lpf(100).gain(0.6) → lpf(400).gain(0.12)
 
 ### 🟠 High Priority (Blocking 85%+ Similarity)
 
