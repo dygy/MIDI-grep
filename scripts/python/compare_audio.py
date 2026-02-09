@@ -885,10 +885,20 @@ def generate_comparison_chart(results, original_path, rendered_path, output_path
     output_dir = Path(output_path).parent
     if output_path.endswith('/') or Path(output_path).is_dir():
         output_dir = Path(output_path)
-        save_comparison_json(results, str(output_dir / "comparison.json"))
-        return generate_comparison_charts(results, original_path, rendered_path, str(output_dir))
 
-    # Save comparison JSON for HTML report
+    # NEVER write charts to current directory - must be in cache
+    if str(output_dir) in ['.', '', './', '/']:
+        print(f"ERROR: Refusing to write charts to root/current directory. Use absolute path.", file=sys.stderr)
+        print(f"  Got: {output_path}", file=sys.stderr)
+        return {}
+
+    # Ensure output directory exists and is in cache
+    output_dir = output_dir.resolve()
+    if '.cache' not in str(output_dir) and '/tmp' not in str(output_dir):
+        print(f"WARNING: Charts should be in .cache directory, got: {output_dir}", file=sys.stderr)
+
+    output_dir.mkdir(parents=True, exist_ok=True)
+
     save_comparison_json(results, str(output_dir / "comparison.json"))
 
     # Generate individual charts in same directory

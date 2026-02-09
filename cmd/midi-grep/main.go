@@ -1521,22 +1521,6 @@ func runPythonScript(python string, args []string) error {
 	return cmd.Run()
 }
 
-// runAudioComparison runs the compare_audio.py script
-func runAudioComparison(originalPath, renderedPath, scriptsDir string) error {
-	compareScript := filepath.Join(scriptsDir, "compare_audio.py")
-	if _, err := os.Stat(compareScript); os.IsNotExist(err) {
-		return fmt.Errorf("compare_audio.py not found at %s", compareScript)
-	}
-
-	python := findPython(scriptsDir)
-
-	cmd := exec.Command(python, compareScript, originalPath, renderedPath, "-d", "30")
-	cmd.Stdout = os.Stdout
-	cmd.Stderr = os.Stderr
-
-	return cmd.Run()
-}
-
 // Generative pipeline commands
 
 func runGenProcess(cmd *cobra.Command, args []string) error {
