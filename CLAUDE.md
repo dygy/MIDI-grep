@@ -167,13 +167,13 @@ The `--render` flag synthesizes WAV audio from patterns:
   - `synthBass()` - Sawtooth + sub-octave sine, low-pass filtered for warmth
   - `synthLead()` - Detuned saws + triangle, filter envelope for movement
   - `synthHigh()` - Odd-harmonic square wave + saw for brightness
-- **Mix levels tuned for melodic content:**
-  - Bass: 0.08x gain (minimal to avoid mud)
-  - Mids: 3.0x gain (dominant, matches typical melodic stems)
-  - Highs: 2.5x gain (bright presence)
-  - Drums: 0.15x gain, kicks extra low at 0.2x
-- 80Hz high-pass filter on master to reduce sub-bass mud
-- Achieves ~79% similarity against melodic stems, 99% frequency balance
+- **Voice gain defaults (Feb 2026):**
+  - Bass: 0.1x gain, lpf 400Hz (reduced from 0.3 - was 4812% too loud)
+  - Mids: 0.6x gain, lpf 6kHz (reduced from 1.0 - was +31% too loud)
+  - Highs: 0.8x gain, lpf 12kHz
+  - Drums: 0.7x gain with transient boost
+- 30Hz high-pass filter on master
+- Achieves ~76% weighted similarity on per-stem comparison
 - Outputs 16-bit 44.1kHz mono WAV files
 - Build: `cd scripts/node && npm run build`
 - Usage: `node dist/render-strudel-node.js input.strudel -o output.wav -d 30`

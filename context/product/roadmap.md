@@ -349,10 +349,11 @@ _Fixing the core audio quality issues blocking high similarity scores._
   - [ ] **Snare Frequency:** Too much sub, need more mid crack
   - [ ] **Drum Mix Balance:** bass stem 78% → 35% currently (-43% off)
 
-- [ ] **Fix Voice Gain Defaults**
-  - [ ] **Bass Gain:** Increase from 0.3 to 0.8+ (currently too quiet)
-  - [ ] **Mid Gain:** Decrease from 1.0 to 0.5 (currently dominates)
-  - [ ] **Sub-Octave Gain:** Increase from 0.4 to 0.8 for 808-style bass
+- [x] **Fix Voice Gain Defaults** ✅ (Feb 2026)
+  - [x] **Bass Gain:** 0.3 → 0.1 (was 4812% too loud, not too quiet!)
+  - [x] **Mid Gain:** 1.0 → 0.6 (was dominating +31%)
+  - [x] **Sub-Octave Gain:** 0.4 → 0.3 (reduced to balance)
+  - [x] **Brazilian Funk:** lpf(100).gain(0.6) → lpf(400).gain(0.12)
 
 - [x] **Fix Tempo Detection** ✅ (Feb 2026)
   - [x] **Half-Time Detection:** Fixed - now uses known BPM from synth_config.json
@@ -360,9 +361,9 @@ _Fixing the core audio quality issues blocking high similarity scores._
   - [x] **Prior-Based Selection:** Implemented - original analysis BPM passed to comparison
 
 - [ ] **Fix Frequency Balance**
-  - [ ] **Current:** 33.6% similarity (sub_bass -17%, bass -29%, mid +33%)
+  - [ ] **Current:** Bass was 4812% too loud, now fixed with gain reduction
   - [ ] **Target:** 80%+ frequency balance similarity
-  - [ ] **Approach:** Genre-specific voice gain presets
+  - [ ] **Next:** Test new gains, measure improvement
 
 ### 🟠 High Priority (Blocking 85%+ Similarity)
 
