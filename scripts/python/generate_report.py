@@ -341,13 +341,10 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
                 </div>
             </div>
 
-            <!-- Track sections - ISOLATED: each has its own play button -->
+            <!-- Track sections -->
             <div class="daw-section">
                 <div class="section-header">
                     <span>Original Stems</span>
-                    <button class="section-play-btn" onclick="playGroup('original-all')" id="btn-original">
-                        <span class="play-icon">▶</span> Play
-                    </button>
                 </div>
                 <div class="daw-tracks" id="tracks-original">
                     {"".join(original_tracks)}
@@ -357,9 +354,6 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
             <div class="daw-section daw-section-rendered">
                 <div class="section-header">
                     <span>Rendered Stems</span>
-                    <button class="section-play-btn" onclick="playGroup('render-stems')" id="btn-rendered">
-                        <span class="play-icon">▶</span> Play
-                    </button>
                 </div>
                 <div class="daw-tracks" id="tracks-rendered">
                     {"".join(rendered_tracks)}
@@ -1109,34 +1103,6 @@ def generate_report(cache_dir, version_dir, output_path=None):
             align-items: center;
         }}
 
-        .section-play-btn {{
-            background: var(--accent);
-            color: white;
-            border: none;
-            padding: 0.4rem 1rem;
-            border-radius: 4px;
-            font-size: 0.75rem;
-            font-weight: 600;
-            cursor: pointer;
-            display: flex;
-            align-items: center;
-            gap: 0.4rem;
-            text-transform: none;
-            letter-spacing: normal;
-        }}
-
-        .section-play-btn:hover {{
-            background: var(--accent-hover);
-        }}
-
-        .section-play-btn.playing {{
-            background: #f85149;
-        }}
-
-        .section-play-btn .play-icon {{
-            font-size: 0.65rem;
-        }}
-
         .daw-tracks {{
             display: flex;
             flex-direction: column;
@@ -1842,22 +1808,6 @@ def generate_report(cache_dir, version_dir, output_path=None):
                 btn.classList.toggle('active', group === activeGroupName);
             }});
 
-            // Update section play buttons
-            const btnOriginal = document.getElementById('btn-original');
-            const btnRendered = document.getElementById('btn-rendered');
-
-            if (btnOriginal) {{
-                const isPlaying = activeGroupName === 'original-all';
-                btnOriginal.classList.toggle('playing', isPlaying);
-                btnOriginal.querySelector('.play-icon').textContent = isPlaying ? '⏸' : '▶';
-                btnOriginal.lastChild.textContent = isPlaying ? ' Stop' : ' Play';
-            }}
-            if (btnRendered) {{
-                const isPlaying = activeGroupName === 'render-stems';
-                btnRendered.classList.toggle('playing', isPlaying);
-                btnRendered.querySelector('.play-icon').textContent = isPlaying ? '⏸' : '▶';
-                btnRendered.lastChild.textContent = isPlaying ? ' Stop' : ' Play';
-            }}
         }}
 
         // Playhead animation
