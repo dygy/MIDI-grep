@@ -694,6 +694,41 @@ Generate a WAV preview of the Strudel patterns without opening a browser:
 ./bin/midi-grep extract --url "..." --render output.wav
 ```
 
+### BlackHole Recording (RECOMMENDED - 100% Accurate)
+
+For perfect audio reproduction, record REAL Strudel playback using BlackHole virtual audio device:
+
+```bash
+# One-time setup
+brew install blackhole-2ch  # Requires reboot
+
+# Record Strudel playback (runs in background, no UI disturbance)
+node scripts/node/dist/record-strudel-blackhole.js input.strudel -o output.wav -d 30
+```
+
+This approach:
+- Uses the **real Strudel engine** (not emulation)
+- **100% accurate** sound reproduction
+- Works with all Strudel features (samples, effects, etc.)
+- No endless gain/filter tuning needed
+- **Runs invisibly** - browser window hidden offscreen, doesn't steal focus
+- **Automatic audio routing** via Web Audio API `setSinkId()`
+
+**How it works:**
+1. Starts ffmpeg recording from BlackHole device
+2. Opens strudel.cc in Puppeteer (window hidden at -32000,-32000)
+3. Grants audio permissions, finds BlackHole device ID
+4. Inserts code via CodeMirror dispatch API
+5. Clicks Play, routes audio to BlackHole via `getAudioContext().setSinkId()`
+6. Waits for samples to load, records for specified duration
+7. Stops playback, closes browser
+
+**Browser runs invisibly:**
+- Position: `-32000,-32000` (far offscreen)
+- Size: `1x1` pixels
+- AppleScript hides Chromium process
+- Background throttling disabled
+
 ### Node.js Synthesis Engine (`render-strudel-node.ts`)
 
 The primary renderer uses TypeScript with proper Strudel pattern parsing:

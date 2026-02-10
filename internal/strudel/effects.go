@@ -1984,7 +1984,10 @@ func BuildEffectChain(effects VoiceEffects, includeFilter bool) string {
 	// Reverb
 	if effects.Reverb.Room > 0 {
 		parts = append(parts, fmt.Sprintf(".room(%.2f)", effects.Reverb.Room))
-		parts = append(parts, fmt.Sprintf(".size(%.2f)", effects.Reverb.Size))
+		// Only output size if > 0 (size=0 causes Strudel buffer creation error)
+		if effects.Reverb.Size > 0 {
+			parts = append(parts, fmt.Sprintf(".size(%.2f)", effects.Reverb.Size))
+		}
 	}
 
 	// Delay
@@ -2201,7 +2204,10 @@ func BuildEffectChainFromAIParams(params *AIParams, voice string) string {
 			roomMult = 2.0
 		}
 		parts = append(parts, fmt.Sprintf(".room(%.2f)", params.Room*roomMult))
-		parts = append(parts, fmt.Sprintf(".size(%.2f)", params.Size*roomMult))
+		// Only output size if > 0 (size=0 causes Strudel buffer creation error)
+		if params.Size*roomMult > 0 {
+			parts = append(parts, fmt.Sprintf(".size(%.2f)", params.Size*roomMult))
+		}
 	}
 
 	// Delay (high voice mainly)

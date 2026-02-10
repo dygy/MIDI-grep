@@ -34,6 +34,8 @@ def main():
                         help='Separation mode: piano (default), drums, or full')
     parser.add_argument('--quality', choices=['fast', 'normal', 'high', 'best'], default='normal',
                         help='Quality preset: fast (quick), normal (default), high (better, slower), best (highest quality, slowest)')
+    parser.add_argument('--prefix', default='',
+                        help='Prefix for output stem names (e.g., --prefix render produces render_melodic.wav)')
 
     args = parser.parse_args()
 
@@ -134,7 +136,8 @@ def main():
             piano_dst = find_and_copy_stem(
                 demucs_out, input_name, output_dir,
                 ['no_vocals', 'other'],
-                'piano'
+                'piano',
+                args.prefix
             )
             if piano_dst:
                 print(f"Piano/instrumental stem saved to: {piano_dst}")
@@ -157,7 +160,8 @@ def main():
             drums_dst = find_and_copy_stem(
                 demucs_out, input_name, output_dir,
                 ['drums'],
-                'drums'
+                'drums',
+                args.prefix
             )
             if drums_dst:
                 print(f"Drums stem saved to: {drums_dst}")
@@ -188,7 +192,8 @@ def main():
             melodic_dst = find_and_copy_stem(
                 demucs_out, input_name, output_dir,
                 ['other'],
-                'melodic'
+                'melodic',
+                args.prefix
             )
             if melodic_dst:
                 print(f"Melodic stem saved to: {melodic_dst}")
@@ -198,7 +203,8 @@ def main():
             bass_dst = find_and_copy_stem(
                 demucs_out, input_name, output_dir,
                 ['bass'],
-                'bass'
+                'bass',
+                args.prefix
             )
             if bass_dst:
                 print(f"Bass stem saved to: {bass_dst}")
@@ -208,7 +214,8 @@ def main():
             drums_dst = find_and_copy_stem(
                 demucs_out, input_name, output_dir,
                 ['drums'],
-                'drums'
+                'drums',
+                args.prefix
             )
             if drums_dst:
                 print(f"Drums stem saved to: {drums_dst}")
@@ -218,7 +225,8 @@ def main():
             vocals_dst = find_and_copy_stem(
                 demucs_out, input_name, output_dir,
                 ['vocals'],
-                'vocals'
+                'vocals',
+                args.prefix
             )
             if vocals_dst:
                 print(f"Vocals stem saved to: {vocals_dst}")
@@ -246,7 +254,7 @@ def main():
         sys.exit(1)
 
 
-def find_and_copy_stem(demucs_out, input_name, output_dir, stem_names, output_name):
+def find_and_copy_stem(demucs_out, input_name, output_dir, stem_names, output_name, prefix=''):
     """
     Find a stem file from demucs output and copy it to the output directory.
 
@@ -256,10 +264,14 @@ def find_and_copy_stem(demucs_out, input_name, output_dir, stem_names, output_na
         output_dir: Where to copy the stem
         stem_names: List of possible stem names to look for (in order of preference)
         output_name: Name to use for output file (e.g., 'piano', 'drums')
+        prefix: Optional prefix for output name (e.g., 'render' -> 'render_melodic')
 
     Returns:
         Path to copied file, or None if not found
     """
+    # Apply prefix if provided
+    if prefix:
+        output_name = f"{prefix}_{output_name}"
     # Build list of possible paths
     possible_paths = []
     for model_name in ['htdemucs_ft', 'htdemucs']:  # Check both models

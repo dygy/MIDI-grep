@@ -161,22 +161,53 @@ The `--render` flag synthesizes WAV audio from patterns:
 - TypeScript-based offline audio rendering with Strudel pattern parsing
 - Uses `@strudel/mini` v1.1.0 for accurate mini-notation parsing
 - **Synthesis engine with frequency-balanced mix:**
-  - `synthKick()` - 808-style kick with pitch envelope (150→40Hz), amp decay, click transient
+  - `synthKick()` - 808-style kick with pitch envelope (150→35Hz for sub-bass), amp decay, click transient
   - `synthSnare()` - Dual-sine body (180Hz + 330Hz) + high-passed noise for wires
   - `synthHihat()` - Metallic multi-frequency noise with envelope (open/closed variants)
-  - `synthBass()` - Sawtooth + sub-octave sine, low-pass filtered for warmth
+  - `synthBass()` - Sawtooth + sub-octave sine (0.5x), low-pass filtered for warmth
   - `synthLead()` - Detuned saws + triangle, filter envelope for movement
   - `synthHigh()` - Odd-harmonic square wave + saw for brightness
-- **Voice gain defaults (Feb 2026):**
-  - Bass: 0.1x gain, lpf 400Hz (reduced from 0.3 - was 4812% too loud)
-  - Mids: 0.6x gain, lpf 6kHz (reduced from 1.0 - was +31% too loud)
-  - Highs: 0.8x gain, lpf 12kHz
-  - Drums: 0.7x gain with transient boost
+- **Voice gain defaults (Feb 2026 - tuned for Brazilian funk):**
+  - Bass: 0.6x gain, sub_octave 0.5x, lpf 400Hz, hpf 30Hz
+  - Mids: 0.5x gain, lpf 5kHz, hpf 200Hz
+  - Highs: 0.4x gain, lpf 8kHz, hpf 400Hz
+  - Drums: 0.7x gain with transient boost 0.4x
 - 30Hz high-pass filter on master
-- Achieves ~76% weighted similarity on per-stem comparison
+- Achieves ~72% similarity on Brazilian funk (up from 32% after 808 fix)
 - Outputs 16-bit 44.1kHz mono WAV files
 - Build: `cd scripts/node && npm run build`
 - Usage: `node dist/render-strudel-node.js input.strudel -o output.wav -d 30`
+
+**Puppeteer BlackHole Recorder (`scripts/node/src/record-strudel-blackhole.ts`):** *(RECOMMENDED)*
+- Records REAL Strudel playback using BlackHole virtual audio device
+- Opens strudel.cc in browser, loads code, plays, records via ffmpeg
+- **Runs invisibly** - browser hidden offscreen, doesn't steal focus
+- **Setup required:**
+  1. Install BlackHole: `brew install blackhole-2ch` (requires reboot)
+  2. Create Multi-Output Device in Audio MIDI Setup (BlackHole + speakers)
+  3. Set system audio output to Multi-Output Device
+- **Usage:**
+  ```bash
+  node dist/record-strudel-blackhole.js input.strudel -o output.wav -d 30
+  ```
+- Produces 100% accurate Strudel audio (uses real Strudel engine, not emulation)
+
+**Key implementation details:**
+- `--autoplay-policy=no-user-gesture-required` bypasses gesture requirement
+- Use default context (NOT incognito) - preserves sample cache
+- **DO NOT use settings UI** - it doesn't actually route audio
+- **DO use `setSinkId()` directly on AudioContext** - this works!
+- `headless: false` required (Web Audio quirks in headless mode)
+- **Code insertion:** Use `cmContent.cmView.view.dispatch({changes: {...}})` not textContent
+- **setSinkId timing:** Must be AFTER clicking play (after superdough initializes)
+
+**Hidden window configuration:**
+- Position: `--window-position=-32000,-32000` (far offscreen)
+- Size: `--window-size=1,1` (minimal)
+- AppleScript hides Chromium process visibility
+- Background flags: `--disable-background-timer-throttling`, `--disable-backgrounding-occluded-windows`, `--disable-renderer-backgrounding`
+
+**Key files:** `scripts/node/src/record-strudel-blackhole.ts`
 
 **AI Parameter Suggestion (`scripts/python/audio_to_strudel_params.py`):**
 - Analyzes original audio spectral/dynamic characteristics
@@ -658,6 +689,25 @@ ollama pull llama3:8b
 | `mistral:7b` | 4.1GB | Fast | ⭐⭐⭐⭐ | Good general model |
 
 **Why `llama3:8b`?** The LLM needs to understand audio/music concepts ("bass sounds muddy", "mids are harsh", "drums lack punch") not just generate code. General-purpose models with broad knowledge outperform code-only models for this task.
+
+**Strudel Code Validation (`scripts/python/ollama_agent.py`):**
+
+LLMs sometimes hallucinate invalid Strudel methods. The agent validates generated code and rejects invalid methods:
+
+```python
+INVALID_METHODS = [
+    '.peak(',      # Doesn't exist - use .hpf() instead
+    '.volume(',    # Should be .gain()
+    '.eq(',        # Use .lpf/.hpf instead
+    '.filter(',    # Too generic
+    '.bass()', '.treble()', '.mid()', '.high()', '.low()',  # Not methods
+]
+```
+
+- `_validate_code()` rejects code with invalid methods
+- `last_validation_error` tracks rejection reason
+- `ai_improver.py` skips iteration on validation failure (continues instead of crash)
+- System prompt tells LLM what methods NOT to use
 
 **ClickHouse for Learning Storage (`scripts/python/ai_improver.py`):**
 

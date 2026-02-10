@@ -641,19 +641,36 @@ func (g *Generator) GenerateFullOutput(melodicCode string, drumResult *drums.Det
 			if kitInfo.Bank != "" {
 				bankStr = fmt.Sprintf(".bank(\"%s\")", kitInfo.Bank)
 			}
-			drumFx := fmt.Sprintf("let drumsFx = p => p%s.room(0.15).gain(0.9)\n", bankStr)
+			// Use AI-derived drum gain if available, otherwise use default
+			drumGain := g.GetAIDrumGain()
+			if drumGain <= 0 {
+				drumGain = 0.9 // Default fallback only if AI didn't provide a value
+			}
+			drumFx := fmt.Sprintf("let drumsFx = p => p%s.room(0.15).gain(%.2f)\n", bankStr, drumGain)
 			result = result[:effectsEnd] + "\n" + drumFx + result[effectsEnd:]
 		}
 
 		// Update the stack to include drums
 		// The new format uses: bassFx(cat(...bass.map(b => note(b))))
 		// For drums we use: drumsFx(cat(...drums.map(b => s(b))))
-		// Find the last voice line ending with ))))\n before the stack close
-		stackClose := strings.Index(result, "))))\n)\n\n// Play specific bars:")
+		// Find the closing paren of the stack before "// Static version" comment
+		// Pattern: voice line ends with "0.6)))\n" then ")\n\n// Static version"
+		stackClose := strings.Index(result, ")))\n)\n\n// Static version")
+		insertLen := 3 // After )))
+		if stackClose == -1 {
+			// Try 4-paren pattern
+			stackClose = strings.Index(result, "))))\n)\n\n// Static version")
+			insertLen = 4
+		}
+		if stackClose == -1 {
+			// Fallback: try older format
+			stackClose = strings.Index(result, ")))\n)\n\n// Play specific bars:")
+			insertLen = 3
+		}
 		if stackClose > 0 {
-			// Insert after the )))) but before \n)
-			insertPos := stackClose + 4 // After ))))
-			drumsLine := ",\n  drumsFx(cat(...drums.map(b => s(b))))"
+			// Insert after the last ))) or )))) but before \n)
+			insertPos := stackClose + insertLen
+			drumsLine := ",\n  cat(...drums.map((b, i) => drumsFx(s(b)).gain(0.6 + bar_energy[i % bar_energy.length] * 0.4)))"
 			result = result[:insertPos] + drumsLine + result[insertPos:]
 		}
 

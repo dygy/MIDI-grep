@@ -100,7 +100,9 @@ Enable musicians and live coders to instantly extract piano riffs from any audio
 - Docker deployment option
 - **Drum pattern extraction** with onset detection and classification (kick, snare, hi-hat)
 - **Bass stem extraction** and pattern generation
-- **Audio rendering** with AI-driven synthesis (Node.js Strudel renderer)
+- **Audio rendering** with two approaches:
+  - **BlackHole Recording (RECOMMENDED):** 100% accurate via real Strudel playback recording
+  - **Node.js Synthesis (Fallback):** ~72% accuracy offline rendering
 - **Self-contained HTML reports** with audio studio player:
   - Two-section stem mixer (Original + Rendered stems)
   - Solo/Mute controls per stem

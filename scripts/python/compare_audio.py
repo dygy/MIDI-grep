@@ -33,6 +33,31 @@ def load_audio(path, sr=22050, duration=None):
         print(f"Error loading {path}: {e}", file=sys.stderr)
         return None
 
+def correct_octave_error(tempo, prior_center=120, prior_range=40):
+    """
+    Correct tempo octave errors by picking the candidate closest to expected range.
+    Synthesized audio often has dense transients that confuse beat trackers.
+    """
+    if tempo <= 0:
+        return 120.0
+
+    # Generate octave candidates
+    candidates = [
+        tempo,
+        tempo / 2,
+        tempo * 2,
+        tempo * 2 / 3,  # 3:2 ratio (e.g., 215 -> 143)
+        tempo * 3 / 2,
+    ]
+
+    # Filter to reasonable range (70-180 BPM for most music)
+    valid = [t for t in candidates if 70 <= t <= 180]
+    if not valid:
+        valid = candidates  # Fallback to all if none in range
+
+    # Pick closest to prior center (typically 120 BPM)
+    return min(valid, key=lambda t: abs(t - prior_center))
+
 def compute_spectral_features(y, sr=22050):
     """Compute spectral features for comparison."""
     features = {}
@@ -84,6 +109,8 @@ def compute_rhythm_features(y, sr=22050):
     # Handle both old and new librosa versions
     if hasattr(tempo, '__len__'):
         tempo = tempo[0] if len(tempo) > 0 else 120.0
+    # Correct octave errors (synthesized audio often confuses beat trackers)
+    tempo = correct_octave_error(float(tempo))
     features['tempo'] = float(tempo)
     features['beat_count'] = len(beats)
 
@@ -186,18 +213,19 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
 
     log("Computing rhythm features...")
     results['original']['rhythm'] = compute_rhythm_features(original)
+    results['rendered']['rhythm'] = compute_rhythm_features(rendered)
 
-    # For rendered audio: use known BPM if available (avoids octave detection errors)
-    # Synthesized audio has different transients that confuse beat tracker
+    # Use expected BPM for rendered audio if available
+    # Synthesized audio confuses beat trackers with dense transients
+    # We KNOW the tempo we rendered at - use that for accurate comparison
     if expected_bpm:
-        # Still compute other rhythm features, but override tempo with known value
-        results['rendered']['rhythm'] = compute_rhythm_features(rendered)
-        detected_tempo = results['rendered']['rhythm']['tempo']
+        orig_tempo = results['original']['rhythm']['tempo']
+        detected_rend_tempo = results['rendered']['rhythm']['tempo']
+        log(f"  Original detected: {orig_tempo:.1f} BPM")
+        log(f"  Rendered detected: {detected_rend_tempo:.1f} BPM (using known: {expected_bpm:.1f})")
+        # Override rendered tempo with known value - this is what we actually rendered
         results['rendered']['rhythm']['tempo'] = expected_bpm
-        results['rendered']['rhythm']['tempo_detected_raw'] = detected_tempo
-        log(f"  Rendered tempo: using {expected_bpm:.1f} BPM (raw detection was {detected_tempo:.1f})")
-    else:
-        results['rendered']['rhythm'] = compute_rhythm_features(rendered)
+        results['rendered']['rhythm']['tempo_detected'] = detected_rend_tempo  # Keep for debugging
 
     log("Computing frequency band energy...")
     results['original']['bands'] = compute_frequency_bands(original)
@@ -398,8 +426,11 @@ def print_report(results):
 
     print("\n--- SIMILARITY SCORES ---")
     for key, value in results['comparison'].items():
+        # Skip non-numeric values (like band_differences dict)
+        if not isinstance(value, (int, float)):
+            continue
         label = key.replace('_', ' ').title()
-        bar_len = int(value * 20)
+        bar_len = int(max(0, min(1, value)) * 20)  # Clamp to 0-1 range
         bar = "█" * bar_len + "░" * (20 - bar_len)
         print(f"{label:30} [{bar}] {value*100:5.1f}%")
 
@@ -560,11 +591,15 @@ def generate_similarity_chart(results, output_path):
     theta = np.linspace(np.pi, 0, 100)
     r = 1
 
+    # Handle NaN overall score
+    if np.isnan(overall):
+        overall = 0.0
+
     # Background arc (gray)
     ax_overall.plot(r * np.cos(theta), r * np.sin(theta), color='#30363d', linewidth=20, solid_capstyle='round')
 
     # Value arc
-    filled_theta = np.linspace(np.pi, np.pi - (overall/100) * np.pi, int(overall))
+    filled_theta = np.linspace(np.pi, np.pi - (overall/100) * np.pi, max(1, int(overall)))
     arc_color = get_color(overall)
     if len(filled_theta) > 1:
         ax_overall.plot(r * np.cos(filled_theta), r * np.sin(filled_theta),
@@ -1014,13 +1049,14 @@ def generate_comparison_chart(results, original_path, rendered_path, output_path
     plt.close()
     print(f"Chart saved: {output_path}")
 
-def compare_stems(stem_pairs, duration=60, window_size=5.0):
+def compare_stems(stem_pairs, duration=60, window_size=5.0, synth_config_path=None):
     """Compare multiple stem pairs and generate per-stem analysis.
 
     Args:
         stem_pairs: Dict of {stem_name: (original_path, rendered_path)}
         duration: Max duration to analyze
         window_size: Time window size in seconds for temporal analysis
+        synth_config_path: Path to synth_config.json for known BPM (avoids re-detection errors)
 
     Returns:
         Dict with per-stem results and aggregated metrics
@@ -1054,8 +1090,8 @@ def compare_stems(stem_pairs, duration=60, window_size=5.0):
         log(f"Comparing {stem_name} stem")
         log(f"{'='*40}")
 
-        # Full comparison
-        stem_result = compare_audio(orig_path, rend_path, duration)
+        # Full comparison (pass config for known BPM to avoid re-detection errors)
+        stem_result = compare_audio(orig_path, rend_path, duration, synth_config_path=synth_config_path)
         if stem_result is None:
             continue
 
@@ -1333,8 +1369,13 @@ def main():
     parser.add_argument('--output-dir', help='Output directory for stem comparison charts')
     parser.add_argument('--window-size', type=float, default=5.0,
                        help='Time window size for temporal analysis (seconds)')
+    parser.add_argument('-q', '--quiet', action='store_true',
+                       help='Suppress progress messages (only output JSON)')
 
     args = parser.parse_args()
+
+    if args.quiet:
+        _QUIET_MODE = True
 
     # Enable quiet mode for JSON output (status to stderr, JSON to stdout)
     if args.json:
@@ -1357,7 +1398,7 @@ def main():
             print("  or --original-melodic/--rendered-melodic", file=sys.stderr)
             sys.exit(1)
 
-        results = compare_stems(stem_pairs, args.duration, args.window_size)
+        results = compare_stems(stem_pairs, args.duration, args.window_size, synth_config_path=args.config)
 
         if results is None:
             sys.exit(1)

@@ -208,7 +208,11 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 							cfg.InputPath = cached.OriginalPath
 						}
 						usedCache = true
-						o.progress.StageComplete("Using cached stems (key: %s)", cacheKey[:8])
+						keyDisplay := cacheKey
+						if len(keyDisplay) > 8 {
+							keyDisplay = keyDisplay[:8]
+						}
+						o.progress.StageComplete("Using cached stems (key: %s)", keyDisplay)
 					}
 				}
 			}
@@ -277,6 +281,7 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 	var analysisResult *analysis.Result
 	var cleanResult *midi.CleanupResult
 	var strudelCode string
+	var synthConfigPath string // Track synth config path for copying to output
 
 	// Process melodic content (unless drums-only mode)
 	if !cfg.DrumsOnly && stemResult.PianoPath != "" {
@@ -374,44 +379,9 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 				cfg.BrazilianFunk = true
 			case "brazilian_phonk":
 				o.progress.StageComplete("Using manual genre: Brazilian Phonk")
-				bfGen := strudel.NewBrazilianFunkGenerator(analysisResult.BPM, analysisResult.Key)
-				result.StrudelCode = bfGen.Generate(analysisResult)
-				result.BPM = analysisResult.BPM
-				result.Key = analysisResult.Key
-				result.NotesRetained = cleanResult.Retained
-				result.Style = "brazilian_phonk"
+				cfg.SoundStyle = "electronic" // Use electronic style for phonk
 				result.Genre = "brazilian_phonk"
-
-				// Save output to cache
-				if cacheKey != "" {
-					if stemCache == nil {
-						stemCache, _ = cache.NewStemCache()
-					}
-					if stemCache != nil {
-						previousOutputs, _ := stemCache.GetOutputHistory(cacheKey)
-						result.PreviousOutputs = len(previousOutputs)
-						result.CacheKey = cacheKey
-						result.CacheDir = stemCache.GetCacheDir(cacheKey)
-
-						cachedOutput := &cache.CachedOutput{
-							Code:     result.StrudelCode,
-							BPM:      result.BPM,
-							Key:      result.Key,
-							Style:    result.Style,
-							Genre:    result.Genre,
-							Notes:    result.NotesRetained,
-							DrumHits: result.DrumHits,
-						}
-						if err := stemCache.SaveOutput(cacheKey, cachedOutput); err != nil {
-							o.progress.Warning("Failed to cache output: %v", err)
-						} else {
-							result.OutputVersion = cachedOutput.Version
-							o.progress.StageComplete("Output saved (v%d) to %s", cachedOutput.Version, result.CacheDir)
-						}
-					}
-				}
-				return result, nil
-
+				skipAutoDetection = true
 			case "retro_wave", "synthwave":
 				o.progress.StageComplete("Using manual genre: Retro Wave / Synthwave")
 				cfg.SoundStyle = "synthwave"
@@ -432,95 +402,21 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 		}
 
 		// Auto-detect genre based on audio characteristics (unless skipped by manual override)
-		// Priority: Brazilian Funk > Brazilian Phonk > Retro Wave > Standard styles
+		// No templates - always use transcription + AI generation
+		// Genre detection just sets style hints for the Strudel generator
 
 		// 1. Check for Brazilian Funk (funk carioca) - BPM 130-145 or half-time 85-95
 		if !skipAutoDetection && (shouldUseBrazilianFunkMode(analysisResult, cleanResult) || cfg.BrazilianFunk) {
-			o.progress.StageComplete("Auto-detected Brazilian Funk (Funk Carioca) - using tamborzão templates")
-
-			bfGen := strudel.NewBrazilianFunkGenerator(analysisResult.BPM, analysisResult.Key)
-			result.StrudelCode = bfGen.Generate(analysisResult)
-			result.BPM = analysisResult.BPM
-			result.Key = analysisResult.Key
-			result.NotesRetained = cleanResult.Retained
-			result.Style = "brazilian_funk"
+			o.progress.StageComplete("Auto-detected Brazilian Funk - using electronic style with AI generation")
+			cfg.SoundStyle = "electronic"
 			result.Genre = "brazilian_funk"
-
-			// Save output to cache
-			if cacheKey != "" {
-				if stemCache == nil {
-					stemCache, _ = cache.NewStemCache()
-				}
-				if stemCache != nil {
-					previousOutputs, _ := stemCache.GetOutputHistory(cacheKey)
-					result.PreviousOutputs = len(previousOutputs)
-					result.CacheKey = cacheKey
-					result.CacheDir = stemCache.GetCacheDir(cacheKey)
-
-					cachedOutput := &cache.CachedOutput{
-						Code:     result.StrudelCode,
-						BPM:      result.BPM,
-						Key:      result.Key,
-						Style:    result.Style,
-						Genre:    result.Genre,
-						Notes:    result.NotesRetained,
-						DrumHits: result.DrumHits,
-					}
-					if err := stemCache.SaveOutput(cacheKey, cachedOutput); err != nil {
-						o.progress.Warning("Failed to cache output: %v", err)
-					} else {
-						result.OutputVersion = cachedOutput.Version
-						o.progress.StageComplete("Output saved (v%d) to %s", cachedOutput.Version, result.CacheDir)
-					}
-				}
-			}
-
-			return result, nil
 		}
 
 		// 2. Check for Brazilian Phonk - BPM 80-100 or 145-180
 		if !skipAutoDetection && shouldUseBrazilianPhonkMode(analysisResult, cleanResult) {
-			o.progress.StageComplete("Auto-detected Brazilian Phonk - using phonk templates")
-
-			// Use Brazilian funk generator but with phonk style indication
-			bfGen := strudel.NewBrazilianFunkGenerator(analysisResult.BPM, analysisResult.Key)
-			result.StrudelCode = bfGen.Generate(analysisResult)
-			result.BPM = analysisResult.BPM
-			result.Key = analysisResult.Key
-			result.NotesRetained = cleanResult.Retained
-			result.Style = "brazilian_phonk"
+			o.progress.StageComplete("Auto-detected Brazilian Phonk - using electronic style with AI generation")
+			cfg.SoundStyle = "electronic"
 			result.Genre = "brazilian_phonk"
-
-			// Save output to cache
-			if cacheKey != "" {
-				if stemCache == nil {
-					stemCache, _ = cache.NewStemCache()
-				}
-				if stemCache != nil {
-					previousOutputs, _ := stemCache.GetOutputHistory(cacheKey)
-					result.PreviousOutputs = len(previousOutputs)
-					result.CacheKey = cacheKey
-					result.CacheDir = stemCache.GetCacheDir(cacheKey)
-
-					cachedOutput := &cache.CachedOutput{
-						Code:     result.StrudelCode,
-						BPM:      result.BPM,
-						Key:      result.Key,
-						Style:    result.Style,
-						Genre:    result.Genre,
-						Notes:    result.NotesRetained,
-						DrumHits: result.DrumHits,
-					}
-					if err := stemCache.SaveOutput(cacheKey, cachedOutput); err != nil {
-						o.progress.Warning("Failed to cache output: %v", err)
-					} else {
-						result.OutputVersion = cachedOutput.Version
-						o.progress.StageComplete("Output saved (v%d) to %s", cachedOutput.Version, result.CacheDir)
-					}
-				}
-			}
-
-			return result, nil
 		}
 
 		// 3. Check for Retro Wave (Polish, Russian, etc.) - BPM 130-170, longer synth notes
@@ -562,6 +458,26 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 		} else {
 			// Standard generation
 			generator := strudel.NewGeneratorWithStyle(cfg.Quantize, style)
+
+			// AI synthesis analysis: analyze original audio to derive gains/effects
+			// NO HARDCODING - all parameters come from AI analysis
+			synthConfigPath = filepath.Join(ws.Dir, "synth_config.json")
+			audioToAnalyze := cfg.InputPath
+			if audioToAnalyze == "" && stemResult != nil {
+				audioToAnalyze = stemResult.PianoPath // Use melodic stem
+			}
+			if audioToAnalyze != "" {
+				_, err := o.runner.RunScript(ctx, "analyze_synth_params.py", audioToAnalyze, "-o", synthConfigPath, "-d", "60")
+				if err != nil {
+					o.progress.Warning("AI synthesis analysis failed: %v", err)
+				} else {
+					if loadErr := generator.LoadAIParamsFromJSON(synthConfigPath); loadErr != nil {
+						o.progress.Warning("Failed to load AI params: %v", loadErr)
+					} else {
+						o.progress.StageComplete("Loaded AI-derived synthesis parameters")
+					}
+				}
+			}
 
 			// Pass style candidates for header output
 			if len(styleCandidates) > 0 {
@@ -691,6 +607,10 @@ processDrums:
 	} else if drumResult != nil && strudelCode != "" {
 		// Combined melodic + drums output (standard mode)
 		generator := strudel.NewGeneratorWithStyle(cfg.Quantize, style)
+		// Load AI params if available (for drum gain etc.)
+		if synthConfigPath != "" && fileExists(synthConfigPath) {
+			_ = generator.LoadAIParamsFromJSON(synthConfigPath)
+		}
 		result.StrudelCode = generator.GenerateFullOutput(strudelCode, drumResult, kit)
 	} else {
 		// Melodic only
@@ -730,6 +650,18 @@ processDrums:
 			} else {
 				result.OutputVersion = cachedOutput.Version
 				o.progress.StageComplete("Output saved (v%d) to %s", cachedOutput.Version, result.CacheDir)
+
+				// Copy synth_config.json to version output directory
+				// This allows the renderer to access AI-derived parameters
+				if synthConfigPath != "" && fileExists(synthConfigPath) {
+					versionDir := filepath.Join(result.CacheDir, fmt.Sprintf("v%03d", cachedOutput.Version))
+					destConfig := filepath.Join(versionDir, "synth_config.json")
+					if data, readErr := os.ReadFile(synthConfigPath); readErr == nil {
+						if writeErr := os.WriteFile(destConfig, data, 0644); writeErr == nil {
+							o.progress.StageComplete("Copied AI synth config to output")
+						}
+					}
+				}
 			}
 		}
 	}

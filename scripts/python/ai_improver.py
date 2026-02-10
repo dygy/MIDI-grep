@@ -40,9 +40,27 @@ try:
 except ImportError:
     HAS_CODE_IMPROVER = False
 
+# Import orchestrator for multi-prompt generation
+try:
+    from ai_orchestrator import (
+        prompt_sections, prompt_voice, prompt_drums, prompt_mix,
+        assemble_code, normalize_pattern,
+        BASS_SOUNDS, MID_SOUNDS, HIGH_SOUNDS, DRUM_KITS
+    )
+    HAS_ORCHESTRATOR = True
+except ImportError:
+    HAS_ORCHESTRATOR = False
+
+# Import agentic Ollama wrapper
+try:
+    from ollama_agent import OllamaAgent
+    HAS_AGENT = True
+except ImportError:
+    HAS_AGENT = False
+
 # Ollama configuration
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-DEFAULT_OLLAMA_MODEL = "tinyllama:latest"
+DEFAULT_OLLAMA_MODEL = "llama3.1:8b"
 
 
 def get_audio_duration(audio_path: str) -> float:
@@ -73,6 +91,65 @@ def get_track_hash(audio_path: str) -> str:
         # Read first 1MB for hash (faster than full file)
         content = f.read(1024 * 1024)
     return hashlib.sha256(content).hexdigest()[:16]
+
+
+def init_clickhouse():
+    """Initialize ClickHouse database and tables if they don't exist."""
+    CLICKHOUSE_DB.mkdir(parents=True, exist_ok=True)
+
+    init_queries = [
+        "CREATE DATABASE IF NOT EXISTS midi_grep",
+        """CREATE TABLE IF NOT EXISTS midi_grep.runs (
+            track_hash String,
+            version UInt32,
+            created_at DateTime DEFAULT now(),
+            similarity_overall Float64,
+            similarity_mfcc Float64,
+            similarity_chroma Float64,
+            similarity_freq_balance Float64,
+            similarity_energy Float64,
+            strudel_code String,
+            parameters String,
+            genre String,
+            bpm Float64,
+            key_type String
+        ) ENGINE = MergeTree()
+        ORDER BY (track_hash, version)""",
+        """CREATE TABLE IF NOT EXISTS midi_grep.knowledge (
+            id UUID DEFAULT generateUUIDv4(),
+            created_at DateTime DEFAULT now(),
+            parameter_name String,
+            parameter_old_value String,
+            parameter_new_value String,
+            similarity_improvement Float64,
+            confidence Float64,
+            genre String,
+            bpm_range_low Float64,
+            bpm_range_high Float64,
+            key_type String,
+            track_hash String
+        ) ENGINE = MergeTree()
+        ORDER BY (parameter_name, created_at)"""
+    ]
+
+    for query in init_queries:
+        cmd = [
+            str(CLICKHOUSE_BIN), "local",
+            "--path", str(CLICKHOUSE_DB),
+            "--query", query
+        ]
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0 and "already exists" not in result.stderr.lower():
+            print(f"ClickHouse init error: {result.stderr}", file=sys.stderr)
+            raise RuntimeError(f"Failed to initialize ClickHouse: {result.stderr}")
+
+
+# Initialize ClickHouse on module load
+try:
+    init_clickhouse()
+except Exception as e:
+    print(f"ClickHouse initialization failed: {e}", file=sys.stderr)
+    raise
 
 
 def clickhouse_query(query: str, format: str = "JSONEachRow") -> List[Dict]:
@@ -507,8 +584,32 @@ def extract_effect_functions(code: str) -> str:
 
 
 def merge_effect_functions(original_code: str, improved_effects: str) -> str:
-    """Merge improved effect functions back into the original code."""
+    """Merge improved effect functions back into the original code.
+
+    Also handles setcps() tempo control at the top of the code.
+    """
     import re
+
+    result = original_code
+
+    # Handle setcps() tempo control
+    setcps_match = re.search(r'setcps\([^)]+\)', improved_effects)
+    if setcps_match:
+        new_setcps = setcps_match.group()
+        # Check if original has setcps
+        if re.search(r'setcps\([^)]+\)', result):
+            # Replace existing setcps
+            result = re.sub(r'setcps\([^)]+\)', new_setcps, result)
+        else:
+            # Add setcps at the beginning (after any comments)
+            lines = result.split('\n')
+            insert_idx = 0
+            for i, line in enumerate(lines):
+                if not line.strip().startswith('//') and line.strip():
+                    insert_idx = i
+                    break
+            lines.insert(insert_idx, new_setcps)
+            result = '\n'.join(lines)
 
     # Parse improved effects into a dict
     improved_dict = {}
@@ -518,10 +619,9 @@ def merge_effect_functions(original_code: str, improved_effects: str) -> str:
         improved_dict[name] = f'let {name} = {body}'
 
     if not improved_dict:
-        return original_code
+        return result
 
     # Replace each effect function in the original
-    result = original_code
     for name, new_def in improved_dict.items():
         # Pattern to match the full function definition
         old_pattern = rf'let\s+{name}\s*=\s*p\s*=>\s*p[^\n]*(?:\n\s+\.[^\n]*)*'
@@ -542,167 +642,199 @@ def build_improvement_prompt(
     original_code: str,
     spectrogram_insights: str = None,
     genre: str = "",
-    artist: str = ""
+    artist: str = "",
+    bpm: float = 120
 ) -> str:
-    """Build the prompt for LLM analysis - let LLM decide everything."""
+    """Build the prompt for LLM analysis with INTERACTIVE CONTROLS."""
 
     # Extract full effect functions (the LLM needs to see all effects)
     effects_code = extract_effect_functions(original_code)
 
     # Get frequency band differences
-    band_bass = previous_run.get('band_bass', 0)
-    band_mid = previous_run.get('band_mid', 0)
-    band_high = previous_run.get('band_high', 0)
+    band_bass = previous_run.get('band_bass', 0) + previous_run.get('band_sub_bass', 0)
+    band_mid = previous_run.get('band_mid', 0) + previous_run.get('band_low_mid', 0)
+    band_high = previous_run.get('band_high', 0) + previous_run.get('band_high_mid', 0)
 
     # Get spectral metrics
     brightness_ratio = previous_run.get('brightness_ratio', 1.0)
     energy_ratio = previous_run.get('energy_ratio', 1.0)
 
-    # Include learned knowledge if available - MAKE IT MANDATORY
+    # Include learned knowledge if available
     knowledge_str = ""
     if learned_knowledge:
-        knowledge_str = """
-
-⚠️ MANDATORY KNOWLEDGE FROM DATABASE - YOU MUST USE THESE VALUES ⚠️
-These are PROVEN improvements from previous tracks. DO NOT IGNORE.
-If the current code doesn't have these values, ADD THEM.
-"""
-        for k in learned_knowledge[:10]:  # Show more items
+        knowledge_str = "\n## PROVEN IMPROVEMENTS (from database)\n"
+        for k in learned_knowledge[:5]:
             param = k.get('parameter_name', '')
             new_val = k.get('parameter_new_value', '')
             improvement = k.get('similarity_improvement', 0) * 100
-            knowledge_str += f"  ✓ SET {param} = {new_val} (proven +{improvement:.0f}% improvement)\n"
-        knowledge_str += "\nFAILURE TO APPLY THESE WILL RESULT IN LOWER SIMILARITY SCORES.\n"
+            knowledge_str += f"- {param} = {new_val} (+{improvement:.0f}%)\n"
 
-    # Include spectrogram insights if available (deep analysis)
+    # Include spectrogram insights if available
     spectrogram_str = ""
     if spectrogram_insights:
-        spectrogram_str = f"\n\nDEEP SPECTROGRAM ANALYSIS:\n{spectrogram_insights}\n"
+        spectrogram_str = f"\n## SPECTROGRAM ANALYSIS\n{spectrogram_insights}\n"
 
-    # Include genre/artist context
-    context_str = ""
-    if genre:
-        context_str += f"\nGENRE: {genre}"
-    if artist:
-        context_str += f"\nARTIST: {artist}"
-    if context_str:
-        context_str = f"\nCONTEXT:{context_str}\n"
-
-    # Per-stem issues (the REAL problems, not hidden by overall score)
+    # Per-stem issues
     per_stem_issues = previous_run.get('per_stem_issues', [])
     stem_issues_str = ""
     if per_stem_issues:
-        stem_issues_str = "\n\nPER-STEM ISSUES (these are the REAL problems to fix):\n"
-        for issue in per_stem_issues:
+        stem_issues_str = "\n## PER-STEM ISSUES\n"
+        for issue in per_stem_issues[:5]:
             stem_issues_str += f"- {issue}\n"
-        stem_issues_str += "\nIMPORTANT: Overall similarity may look OK but individual stems need fixing!\n"
 
-    # Build the research-oriented prompt - give LLM full control
-    return f'''You are a STRUDEL MUSIC EXPERT and audio mixing AI.
+    # Calculate suggested gains based on comparison
+    bass_status = "too loud" if band_bass > 0.05 else "too quiet" if band_bass < -0.05 else "OK"
+    mid_status = "too loud" if band_mid > 0.05 else "too quiet" if band_mid < -0.05 else "OK"
+    high_status = "too loud" if band_high > 0.05 else "too quiet" if band_high < -0.05 else "OK"
 
-STRUDEL KNOWLEDGE:
-Strudel is a live coding music environment. Code generates audio patterns in real-time.
-- Patterns use mini-notation: "c3 d3 e3" plays notes, "~" is rest, "~*4" is 4 rests
-- Effects chain: p.sound("...").gain(...).lpf(...).attack(...) etc.
-- The code has 4 voices: bass, mid, high, drums - each with effect functions (bassFx, midFx, etc.)
+    # CPS calculation for tempo
+    cps = bpm / 60 / 4  # cycles per second for 4 beats/cycle
 
-MIXING PRINCIPLES:
-1. FREQUENCY BALANCE: Each voice should occupy its own frequency range
-   - Bass (20-250Hz): .lpf(300-500), .hpf(30-60) - keep it low and punchy
-   - Mid (250-2kHz): .lpf(4000-6000), .hpf(200-400) - main melodic content
-   - High (2k-10kHz): .lpf(10000-15000), .hpf(400-800) - brightness and air
-   - Avoid overlap! If bass is bleeding into mid, lower bass .lpf()
+    return f'''# STRUDEL LIVE CODING AI
 
-2. GAIN STAGING:
-   - Bass should be felt, not heard: gain 0.1-0.4
-   - Mid carries the melody: gain 0.5-1.5
-   - High adds sparkle: gain 0.3-0.8
-   - If a band is too loud, REDUCE gain. If too quiet, INCREASE gain.
+You are an expert at Strudel, the live coding music environment.
+Your output will be used for LIVE PERFORMANCE - make it INTERACTIVE!
 
-3. ENVELOPES (ADSR):
-   - attack: 0.001-0.01 for punchy, 0.05-0.2 for soft
-   - decay: 0.05-0.3 for tight, 0.3-1.0 for sustained
-   - sustain: 0.3-0.9 (how loud during hold)
-   - release: 0.1-0.5 for clean, 0.5-2.0 for ambient
+## STRUDEL INTERACTIVE CONTROLS (USE THESE!)
 
-4. EFFECTS:
-   - room(0-0.4): reverb - more on highs, less on bass
-   - delay(0-0.3): echo - good for highs, careful on bass
-   - distort(0-0.3): saturation - adds harmonics
-   - phaser(0-0.5): movement - good for pads
-   - crush(8-16): lo-fi grit
-{context_str}
-{stem_issues_str}
-COMPARISON DATA (rendered minus original):
-- Bass: {band_bass*100:+.0f}% (positive=too loud, negative=too quiet)
-- Mid: {band_mid*100:+.0f}%
-- High: {band_high*100:+.0f}%
-- Brightness: {brightness_ratio:.0%} of original
-- Energy: {energy_ratio:.0%} of original
+### Inline Sliders - Draggable UI controls in code
+```javascript
+slider(default, min, max, step)
+// Example: .lpf(slider(500, 100, 2000, 1))
+// Example: .gain(slider(0.5, 0, 1, 0.01))
+```
+
+### Tempo Control
+```javascript
+setcps({cps:.3f})  // Current: {bpm:.0f} BPM
+// Or with slider: setcps(slider({cps:.3f}, 0.3, 1.0, 0.01))
+```
+
+### Dynamic Modulation (LFOs)
+```javascript
+sine.range(min, max).slow(cycles)    // Smooth LFO
+perlin.range(min, max).slow(cycles)  // Organic noise
+// Example: .lpf(sine.range(400, 4000).slow(8))
+// Example: .gain(perlin.range(0.3, 0.7).slow(16))
+```
+
+### Probability Variation
+```javascript
+.sometimes(x => x.speed(2))    // 50% chance
+.rarely(x => x.rev())          // 25% chance
+.degradeBy(slider(0.3, 0, 1))  // Slider-controlled note drop
+```
+
+## CURRENT ANALYSIS
+
+| Voice | Status | Difference |
+|-------|--------|------------|
+| Bass  | {bass_status} | {band_bass*100:+.0f}% |
+| Mid   | {mid_status} | {band_mid*100:+.0f}% |
+| High  | {high_status} | {band_high*100:+.0f}% |
+
+Brightness: {brightness_ratio:.0%} of original
+Energy: {energy_ratio:.0%} of original
 {spectrogram_str}
-CURRENT EFFECT FUNCTIONS:
-{effects_code}
+{stem_issues_str}
 {knowledge_str}
-AVAILABLE EFFECTS:
-- .gain(0.01-2.0) - volume
-- .hpf(20-2000) - high pass filter (removes bass)
-- .lpf(200-20000) - low pass filter (removes treble)
-- .attack(0.001-0.5) - envelope attack time
-- .decay(0.01-1.0) - envelope decay time
-- .sustain(0-1) - envelope sustain level
-- .release(0.01-2.0) - envelope release time
-- .crush(1-16) - bit depth (lower=more distortion)
-- .coarse(1-16) - sample rate reduction
-- .room(0-1) - reverb amount
-- .delay(0-1) - delay wet mix
-- .distort(0-1) - distortion amount
-- .phaser(0-1) - phaser effect
 
-SOUND PALETTE (choose sounds that match the genre/timbre):
-WAVEFORMS: sine, sawtooth, square, triangle, supersaw
-BASS: gm_acoustic_bass, gm_electric_bass_finger, gm_electric_bass_pick, gm_fretless_bass, gm_slap_bass_1, gm_synth_bass_1, gm_synth_bass_2
-LEAD/MID: gm_lead_1_square, gm_lead_2_sawtooth, gm_lead_3_calliope, gm_lead_5_charang, gm_lead_6_voice, gm_lead_7_fifths
-PADS: gm_pad_1_new_age, gm_pad_2_warm, gm_pad_3_polysynth, gm_pad_4_choir, gm_string_ensemble_1, gm_synth_strings_1
-KEYS: gm_acoustic_grand_piano, gm_bright_acoustic_piano, gm_electric_piano_1, gm_electric_piano_2, gm_harpsichord, gm_clavinet
-BRASS: gm_trumpet, gm_trombone, gm_alto_sax, gm_tenor_sax, gm_brass_section, gm_synth_brass_1
-PERCUSSION: gm_glockenspiel, gm_music_box, gm_vibraphone, gm_marimba, gm_xylophone, gm_celesta
-FX: gm_fx_1_rain, gm_fx_3_crystal, gm_fx_4_atmosphere, gm_fx_7_echoes
-DRUM BANKS: RolandTR808, RolandTR909, RolandTR707, LinnDrum, OberheimDMX, AlesisHR16, BossDR110
+## CURRENT EFFECT FUNCTIONS
+```javascript
+{effects_code}
+```
 
-SOUND ALTERNATION - Use "<sound1 sound2>" for variety:
-Example: .sound("<supersaw gm_synth_bass_1>") alternates between sounds
-Example: .bank("<RolandTR808 RolandTR909>") alternates drum kits
+## GENRE CONTEXT
+Genre: {genre or 'auto'}
+Artist: {artist or 'unknown'}
+BPM: {bpm:.0f}
 
-IMPORTANT: Don't use the same sounds for every track! Choose sounds that match the genre:
-- Brazilian Funk: RolandTR808, gm_synth_bass_1, gm_lead_2_sawtooth
-- Electro Swing: LinnDrum, gm_acoustic_bass, gm_trumpet, gm_clarinet
-- Trance: RolandTR909, supersaw, gm_pad_7_halo, gm_lead_7_fifths
-- LoFi: BossDR110, triangle, gm_electric_piano_1, gm_vibraphone
+## GENRE-SPECIFIC SOUNDS
+- **Brazilian Funk**: RolandTR808, gm_synth_bass_1, gm_lead_2_sawtooth
+- **Electro Swing**: LinnDrum, gm_acoustic_bass, gm_trumpet, gm_clarinet
+- **Trance**: RolandTR909, supersaw, gm_pad_7_halo, gm_lead_7_fifths
+- **LoFi**: BossDR110, triangle, gm_electric_piano_1, gm_vibraphone
+- **House**: RolandTR909, gm_synth_bass_2, supersaw
+- **Jazz**: AkaiLinn, gm_acoustic_bass, gm_electric_piano_1
 
-EXAMPLE OUTPUT (what I expect):
-let bassFx = p => p.sound("<gm_electric_bass_finger gm_synth_bass_1>").gain(0.15).hpf(60).lpf(500).attack(0.01)
-let midFx = p => p.sound("<gm_electric_piano_2 gm_lead_3_calliope>").gain(1.2).lpf(5000).attack(0.05).release(0.3)
-let highFx = p => p.sound("<gm_music_box gm_vibraphone>").gain(0.8).lpf(12000)
-let drumsFx = p => p.bank("<RolandTR909 LinnDrum>").gain(0.9)
+## TASK: Generate BEAT-SYNCED Strudel code
 
-TASK: Fix the frequency balance issues shown in COMPARISON DATA.
-- If bass is -20%, INCREASE bass gain by ~25% (e.g., 0.3 → 0.38)
-- If mid is +30%, DECREASE mid gain by ~25% (e.g., 1.0 → 0.75)
-- Use the spectrogram insights for precise dB-to-gain conversions
-- Choose sounds that match the genre (not the same sounds every time!)
+Fix frequency balance and add BEAT-SYNCED dynamics using Strudel patterns.
 
-CRITICAL RULES (MUST FOLLOW):
-1. **APPLY ALL MANDATORY KNOWLEDGE ABOVE** - These are proven improvements from the database. If it says "SET bassFx.gain = 0.6", then bassFx MUST have .gain(0.6). No exceptions.
-2. Bass MUST have .lpf(500) or lower to stay out of mid range
-3. Each voice needs .hpf() and .lpf() to prevent frequency overlap
-4. Use perlin.range() for natural gain variation: perlin.range(0.3, 0.5).slow(8)
-5. Conservative changes - adjust by 20-30% per iteration, not 200%
+### BEAT-SYNCED VALUES (MANDATORY - DO NOT USE PERLIN FOR GAIN!)
 
-Output ONLY these 4 lines (no explanation, no comments):
-let bassFx = p => p.sound("...").gain(...).hpf(...).lpf(...)...
-let midFx = p => p.sound("...").gain(...).hpf(...).lpf(...)...
-let highFx = p => p.sound("...").gain(...).hpf(...).lpf(...)...
-let drumsFx = p => p.bank("...").gain(...)...'''
+**CRITICAL RULES:**
+- ❌ FORBIDDEN: `perlin.range(0.5, 0.6)` - ranges too narrow, inaudible
+- ❌ FORBIDDEN: Any gain range smaller than 0.3 difference
+- ✅ REQUIRED: Use `"<v1 v2 v3 v4>".slow(16)` for section dynamics
+- ✅ REQUIRED: Wide ranges (0.2 to 0.8, not 0.5 to 0.6)
+
+```javascript
+// CORRECT - Beat-synced with wide range:
+.gain("<0.2 0.4 0.8 0.5>".slow(16))  // 4 sections, dramatic changes
+
+// WRONG - Too subtle, inaudible:
+.gain(perlin.range(0.5, 0.6).slow(8))  // Only 10% variation - USELESS!
+
+// CORRECT - Filter sweep with wide range:
+.lpf("<400 1000 4000 2000>".slow(16))
+
+// For buildups use saw:
+.lpf(saw.range(400, 4000).slow(16))  // Ramps 400→4000 over 16 beats
+```
+
+### SECTION STRUCTURE (64 beats total)
+
+```
+Beats 0-16:   INTRO    - quiet, filtered (gain 0.2-0.3, lpf low)
+Beats 16-32:  BUILDUP  - rising energy (gain 0.4-0.5, lpf sweeping up)
+Beats 32-48:  DROP     - full power (gain 0.7-1.0, lpf open)
+Beats 48-64:  OUTRO    - wind down (gain decreasing)
+```
+
+### Example Effect Functions
+
+```javascript
+setcps({cps:.3f})
+
+// Bass: Quiet intro → loud drop
+let bassFx = p => p.sound("sawtooth")
+  .gain("<0.2 0.3 0.5 0.4>".slow(16))  // Section-based gain
+  .lpf(saw.range(300, 800).slow(32))   // Filter opens over 32 beats
+  .hpf(40)
+
+// Mid: Buildup with filter sweep
+let midFx = p => p.sound("triangle")
+  .gain("<0.3 0.5 0.9 0.6>".slow(16))  // Intro→build→drop→outro
+  .lpf("<2000 3000 6000 4000>".slow(16))
+
+// High: Comes in at drop
+let highFx = p => p.sound("square")
+  .gain("<0 0.2 0.6 0.3>".slow(16))    // Silent intro, appears at drop
+  .lpf(8000)
+
+// Drums: Builds energy
+let drumsFx = p => p.bank("RolandTR808")
+  .gain("<0.5 0.7 1.0 0.8>".slow(16))
+  .room("<0.3 0.2 0.1 0.2>".slow(16))  // Less reverb at drop (punchy)
+```
+
+### PATTERN SYNTAX (USE IN THIS ORDER OF PREFERENCE):
+1. `"<v1 v2 v3 v4>".slow(16)` - **PRIMARY** - Discrete section values (ALWAYS use for gain!)
+2. `saw.range(min, max).slow(n)` - Buildups only (min→max ramp)
+3. `sine.range(min, max).slow(n)` - Filter movement only, NOT for gain
+4. ~~perlin~~ - DO NOT USE for gain (too subtle)
+
+### MANDATORY RULES:
+1. **GAIN MUST use `"<...>".slow(16)`** - NO perlin, NO sine for gain!
+2. **MINIMUM RANGE 0.3** - Values must differ by at least 0.3 (e.g., 0.2→0.5→0.8)
+3. Bass: gain `"<0.1 0.2 0.5 0.3>".slow(16)`, lpf 300-800
+4. Mid: gain `"<0.3 0.5 0.9 0.6>".slow(16)`, lpf 2000-8000
+5. High: gain `"<0 0.2 0.7 0.4>".slow(16)` (can start silent)
+6. Drums: gain `"<0.5 0.7 1.0 0.7>".slow(16)`
+7. Filter OPENS as energy increases (low lpf = dark intro, high lpf = bright drop)
+
+Output ONLY the effect functions in a javascript code block, no explanation.'''
 
 
 def analyze_with_ollama(
@@ -712,7 +844,8 @@ def analyze_with_ollama(
     model: str = None,
     spectrogram_insights: str = None,
     genre: str = "",
-    artist: str = ""
+    artist: str = "",
+    bpm: float = 120
 ) -> Dict[str, Any]:
     """Use Ollama (local LLM) to analyze results and suggest improvements."""
 
@@ -723,7 +856,7 @@ def analyze_with_ollama(
     ollama_model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
     prompt = build_improvement_prompt(
         previous_run, learned_knowledge, original_code,
-        spectrogram_insights, genre=genre, artist=artist
+        spectrogram_insights, genre=genre, artist=artist, bpm=bpm
     )
 
     try:
@@ -763,26 +896,60 @@ def analyze_with_ollama(
             except:
                 pass
 
-        # Method 3: Extract code from markdown code blocks
+        # Method 3: Extract code AND automation from markdown code blocks
+        # Look for javascript/js block (Strudel code)
         code_match = re.search(r'```(?:scss|javascript|js)?\n?([\s\S]*?)```', result_text)
+        # Look for json block (automation timeline)
+        automation_match = re.search(r'```json\n?([\s\S]*?)```', result_text)
+
         if code_match:
             extracted_code = code_match.group(1).strip()
-            # Check if it looks like effect functions
-            if 'Fx' in extracted_code or 'sound(' in extracted_code:
-                return {
+            # Check if it looks like Strudel code (effect functions, sound, or setcps)
+            if 'Fx' in extracted_code or 'sound(' in extracted_code or 'setcps(' in extracted_code:
+                result = {
                     "analysis": "Extracted from response",
                     "suggestions": ["Code extracted from markdown"],
                     "improved_code": extracted_code
                 }
 
-        # Method 4: Look for let *Fx patterns directly in text
+                # Try to extract automation timeline if present
+                if automation_match:
+                    try:
+                        automation_text = automation_match.group(1).strip()
+                        automation_json = json.loads(automation_text)
+                        result["automation"] = automation_json
+                        result["suggestions"].append("Automation timeline extracted")
+                    except json.JSONDecodeError as e:
+                        print(f"       Warning: Could not parse automation JSON: {e}")
+
+                return result
+
+        # Method 4: Look for let *Fx patterns and setcps directly in text
         fx_matches = re.findall(r'let\s+\w+Fx\s*=\s*p\s*=>\s*p[^\n]*(?:\n\s+\.[^\n]*)*', result_text)
-        if fx_matches:
-            return {
-                "analysis": "Extracted effect functions",
-                "suggestions": ["Effect functions extracted from response"],
-                "improved_code": '\n'.join(fx_matches)
+        setcps_match = re.search(r'setcps\([^)]+\)', result_text)
+
+        if fx_matches or setcps_match:
+            code_parts = []
+            if setcps_match:
+                code_parts.append(setcps_match.group())
+            code_parts.extend(fx_matches)
+
+            result = {
+                "analysis": "Extracted effect functions with tempo control",
+                "suggestions": ["Effect functions and setcps extracted from response"],
+                "improved_code": '\n'.join(code_parts)
             }
+
+            # Try to extract automation from json block
+            if automation_match:
+                try:
+                    automation_text = automation_match.group(1).strip()
+                    automation_json = json.loads(automation_text)
+                    result["automation"] = automation_json
+                except json.JSONDecodeError:
+                    pass
+
+            return result
 
         # Method 5: Parse natural language reasoning and extract values
         # Look for mentions of gain values, reduce/increase, etc.
@@ -837,7 +1004,8 @@ def analyze_with_claude(
     original_code: str,
     spectrogram_insights: str = None,
     genre: str = "",
-    artist: str = ""
+    artist: str = "",
+    bpm: float = 120
 ) -> Dict[str, Any]:
     """Use Claude API to analyze results and suggest improvements."""
 
@@ -850,7 +1018,7 @@ def analyze_with_claude(
 
     prompt = build_improvement_prompt(
         previous_run, learned_knowledge, original_code,
-        spectrogram_insights, genre=genre, artist=artist
+        spectrogram_insights, genre=genre, artist=artist, bpm=bpm
     )
     client = Anthropic(api_key=api_key)
 
@@ -883,32 +1051,58 @@ def analyze_with_llm(
     use_ollama: bool = False,
     spectrogram_insights: str = None,
     genre: str = "",
-    artist: str = ""
+    artist: str = "",
+    bpm: float = 120,
+    agent: 'OllamaAgent' = None  # Agentic mode with memory
 ) -> Dict[str, Any]:
     """
     Analyze and improve code using available LLM.
 
     Priority:
-    1. If use_ollama=True, use Ollama directly
-    2. Try Claude API if ANTHROPIC_API_KEY is set
-    3. Fall back to Ollama (local)
-    4. Return unchanged code if nothing works
+    1. If agent provided, use agentic Ollama with memory (PREFERRED)
+    2. If use_ollama=True, use Ollama directly (stateless)
+    3. Try Claude API if ANTHROPIC_API_KEY is set
+    4. Fall back to Ollama (local)
 
     Now enhanced with spectrogram_insights for deeper analysis.
     Genre and artist context helps with sound selection.
+    BPM is used for tempo control in generated code.
     """
+
+    # AGENTIC MODE - uses persistent memory, ClickHouse queries
+    if agent is not None and HAS_AGENT:
+        print("       Using Agentic Ollama (with memory + ClickHouse)...")
+        context = {
+            "genre": genre,
+            "bpm": bpm,
+            "similarity": previous_run.get("similarity_overall", 0),
+            "band_bass": previous_run.get("band_bass", 0) + previous_run.get("band_sub_bass", 0),
+            "band_mid": previous_run.get("band_mid", 0) + previous_run.get("band_low_mid", 0),
+            "band_high": previous_run.get("band_high", 0) + previous_run.get("band_high_mid", 0),
+        }
+        response = agent.generate(context)
+        code = agent.extract_code(response)
+        # Check if code was rejected by validation
+        analysis = response[:500]
+        if not code and hasattr(agent, 'last_validation_error') and agent.last_validation_error:
+            analysis = f"REJECTED: {agent.last_validation_error}"
+        return {
+            "analysis": analysis,
+            "suggestions": ["Agentic generation with memory"],
+            "improved_code": code
+        }
 
     if use_ollama:
         print("       Using Ollama (local LLM)...")
         return analyze_with_ollama(
             previous_run, learned_knowledge, original_code,
-            spectrogram_insights=spectrogram_insights, genre=genre, artist=artist
+            spectrogram_insights=spectrogram_insights, genre=genre, artist=artist, bpm=bpm
         )
 
     # Try Claude first
     result = analyze_with_claude(
         previous_run, learned_knowledge, original_code,
-        spectrogram_insights=spectrogram_insights, genre=genre, artist=artist
+        spectrogram_insights=spectrogram_insights, genre=genre, artist=artist, bpm=bpm
     )
     if result is not None:
         return result
@@ -917,7 +1111,7 @@ def analyze_with_llm(
     print("       Claude unavailable, using Ollama (local LLM)...")
     return analyze_with_ollama(
         previous_run, learned_knowledge, original_code,
-        spectrogram_insights=spectrogram_insights, genre=genre, artist=artist
+        spectrogram_insights=spectrogram_insights, genre=genre, artist=artist, bpm=bpm
     )
 
 
@@ -1027,6 +1221,163 @@ def analyze_original_audio(audio_path: str, output_dir: str) -> Optional[Dict]:
     return None
 
 
+def generate_orchestrated_effects(
+    code: str,
+    metadata: Dict,
+    comparison: Optional[Dict] = None
+) -> str:
+    """
+    Use the orchestrator to generate dynamic effects with beat-synced patterns.
+    Replaces the effect functions in the code with properly dynamic ones.
+    """
+    if not HAS_ORCHESTRATOR:
+        print("  Warning: Orchestrator not available, skipping dynamic effects")
+        return code
+
+    import re
+
+    # Extract bar_energy from code
+    bar_energy_match = re.search(r'let bar_energy = \[([\d., ]+)\]', code)
+    bar_energy = [0.5] * 16
+    if bar_energy_match:
+        try:
+            bar_energy = [float(x.strip()) for x in bar_energy_match.group(1).split(',')]
+        except:
+            pass
+
+    bpm = metadata.get('bpm', 120)
+    genre = metadata.get('genre', 'electronic')
+
+    # Extract spectrum info from comparison
+    spectrum = {'brightness': 0.5, 'energy': 0.7}
+    freq_balance = {}
+    if comparison:
+        freq_bands = comparison.get('frequency_bands', {})
+        freq_balance = {
+            'sub_bass_orig': freq_bands.get('sub_bass', {}).get('original', 0.1),
+            'sub_bass_curr': freq_bands.get('sub_bass', {}).get('rendered', 0.1),
+            'bass_orig': freq_bands.get('bass', {}).get('original', 0.2),
+            'bass_curr': freq_bands.get('bass', {}).get('rendered', 0.2),
+            'mid_orig': freq_bands.get('mid', {}).get('original', 0.4),
+            'mid_curr': freq_bands.get('mid', {}).get('rendered', 0.4),
+            'high_orig': freq_bands.get('high', {}).get('original', 0.2),
+            'high_curr': freq_bands.get('high', {}).get('rendered', 0.2),
+        }
+        spectrum['brightness'] = comparison.get('brightness', {}).get('original', 0.5)
+        spectrum['energy'] = comparison.get('energy', {}).get('original', 0.7)
+
+    print("\n  [Orchestrator] Generating dynamic effects with beat-synced patterns...")
+
+    # Step 1: Analyze sections
+    print("    [1/6] Analyzing sections...")
+    sections_result = prompt_sections(bar_energy, bpm)
+    sections = sections_result.get('sections', [
+        {"name": "intro", "start_bar": 0, "end_bar": 8, "energy": 0.4},
+        {"name": "main", "start_bar": 8, "end_bar": 24, "energy": 0.8},
+        {"name": "outro", "start_bar": 24, "end_bar": 32, "energy": 0.4}
+    ])
+    print(f"      Found {len(sections)} sections: {[s['name'] for s in sections]}")
+
+    # Step 2-4: Generate voice configs
+    print("    [2/6] Generating bass...")
+    bass_config = prompt_voice("bass", BASS_SOUNDS, spectrum, sections, genre)
+    print(f"      Sound: {bass_config.get('sound')}, Gain: {bass_config.get('gain_pattern')}")
+
+    print("    [3/6] Generating mid...")
+    mid_config = prompt_voice("mid", MID_SOUNDS, spectrum, sections, genre)
+    print(f"      Sound: {mid_config.get('sound')}, Gain: {mid_config.get('gain_pattern')}")
+
+    print("    [4/6] Generating high...")
+    high_config = prompt_voice("high", HIGH_SOUNDS, spectrum, sections, genre)
+    print(f"      Sound: {high_config.get('sound')}, Gain: {high_config.get('gain_pattern')}")
+
+    # Step 5: Drums
+    print("    [5/6] Generating drums...")
+    rhythm_density = comparison.get('rhythm', {}).get('density', 0.6) if comparison else 0.6
+    drums_config = prompt_drums(sections, rhythm_density, genre)
+    print(f"      Kit: {drums_config.get('kit')}, Gain: {drums_config.get('gain_pattern')}")
+
+    # Step 6: Mix balance
+    print("    [6/6] Balancing mix...")
+    mix_config = prompt_mix(bass_config, mid_config, high_config, drums_config, freq_balance)
+    print(f"      Multipliers: bass={mix_config.get('bass_mult')}, mid={mix_config.get('mid_mult')}")
+
+    # Apply mix multipliers and normalize patterns
+    def apply_mult(pattern, mult):
+        pattern = normalize_pattern(pattern)
+        if mult == 1.0:
+            return pattern
+        if pattern.startswith("<") and pattern.endswith(">"):
+            values = pattern[1:-1].split()
+            new_values = [f"{float(v) * mult:.2f}" for v in values]
+            return f"<{' '.join(new_values)}>"
+        return pattern
+
+    bass_gain = apply_mult(bass_config.get('gain_pattern', '<0.3 0.5 0.7 0.5>'), mix_config.get('bass_mult', 1.0))
+    mid_gain = apply_mult(mid_config.get('gain_pattern', '<0.3 0.5 0.9 0.5>'), mix_config.get('mid_mult', 1.0))
+    high_gain = apply_mult(high_config.get('gain_pattern', '<0.2 0.4 0.7 0.4>'), mix_config.get('high_mult', 1.0))
+    drums_gain = apply_mult(drums_config.get('gain_pattern', '<0.5 0.7 1.0 0.7>'), mix_config.get('drums_mult', 1.0))
+    drums_room = normalize_pattern(drums_config.get('room_pattern', '<0.2 0.15 0.1 0.15>'))
+
+    # Build new effect functions
+    new_effects = f'''// Effects (applied at playback) - AI Orchestrated with beat-synced dynamics
+let bassFx = p => p.sound("{bass_config.get('sound', 'sawtooth')}")
+    .gain("{bass_gain}".slow({bass_config.get('gain_slow', 16)}))
+    .lpf({bass_config.get('lpf', 600)})
+    .hpf({bass_config.get('hpf', 40)})
+    .room({bass_config.get('room', 0.1)})
+
+let midFx = p => p.sound("{mid_config.get('sound', 'triangle')}")
+    .gain("{mid_gain}".slow({mid_config.get('gain_slow', 16)}))
+    .lpf({mid_config.get('lpf', 4000)})
+    .hpf({mid_config.get('hpf', 200)})
+    .room({mid_config.get('room', 0.2)})
+
+let highFx = p => p.sound("{high_config.get('sound', 'square')}")
+    .gain("{high_gain}".slow({high_config.get('gain_slow', 16)}))
+    .lpf({high_config.get('lpf', 8000)})
+    .hpf({high_config.get('hpf', 500)})
+    .room({high_config.get('room', 0.2)})
+
+let drumsFx = p => p.bank("{drums_config.get('kit', 'RolandTR808')}")
+    .gain("{drums_gain}".slow({drums_config.get('gain_slow', 16)}))
+    .room("{drums_room}".slow({drums_config.get('room_slow', 16)}))'''
+
+    # Replace effect functions in code
+    # Find the effects section
+    effects_pattern = r'// Effects.*?let drumsFx = p => p\.bank\([^)]+\)[^\n]*(?:\n[^\n]*)*?(?=\n\n|\n// Play|$)'
+    new_code = re.sub(effects_pattern, new_effects, code, flags=re.DOTALL)
+
+    # If replacement didn't work, try simpler pattern
+    if new_code == code:
+        # Replace individual effect functions
+        new_code = re.sub(r'let bassFx = p => p[^\n]+(?:\n    \.[^\n]+)*',
+                         f'''let bassFx = p => p.sound("{bass_config.get('sound', 'sawtooth')}")
+    .gain("{bass_gain}".slow({bass_config.get('gain_slow', 16)}))
+    .lpf({bass_config.get('lpf', 600)})
+    .hpf({bass_config.get('hpf', 40)})
+    .room({bass_config.get('room', 0.1)})''', code)
+        new_code = re.sub(r'let midFx = p => p[^\n]+(?:\n    \.[^\n]+)*',
+                         f'''let midFx = p => p.sound("{mid_config.get('sound', 'triangle')}")
+    .gain("{mid_gain}".slow({mid_config.get('gain_slow', 16)}))
+    .lpf({mid_config.get('lpf', 4000)})
+    .hpf({mid_config.get('hpf', 200)})
+    .room({mid_config.get('room', 0.2)})''', new_code)
+        new_code = re.sub(r'let highFx = p => p[^\n]+(?:\n    \.[^\n]+)*',
+                         f'''let highFx = p => p.sound("{high_config.get('sound', 'square')}")
+    .gain("{high_gain}".slow({high_config.get('gain_slow', 16)}))
+    .lpf({high_config.get('lpf', 8000)})
+    .hpf({high_config.get('hpf', 500)})
+    .room({high_config.get('room', 0.2)})''', new_code)
+        new_code = re.sub(r'let drumsFx = p => p\.bank\([^\n]+',
+                         f'''let drumsFx = p => p.bank("{drums_config.get('kit', 'RolandTR808')}")
+    .gain("{drums_gain}".slow({drums_config.get('gain_slow', 16)}))
+    .room("{drums_room}".slow({drums_config.get('room_slow', 16)}))''', new_code)
+
+    print("  [Orchestrator] Done - effects now have beat-synced dynamics")
+    return new_code
+
+
 def improve_strudel(
     original_audio: str,
     strudel_path: str,
@@ -1061,6 +1412,13 @@ def improve_strudel(
     print(f"Hash: {track_hash}")
     print(f"Target: {target_similarity*100:.0f}% similarity")
     print(f"Max iterations: {max_iterations}")
+
+    # Create agentic Ollama wrapper with memory
+    agent = None
+    if HAS_AGENT and use_ollama:
+        print(f"  [Agentic Mode] Creating agent with ClickHouse access...")
+        agent = OllamaAgent(track_hash)
+        print(f"  [Agentic Mode] Agent ready (history: {len(agent.messages)} messages)")
 
     # Ensure output directory exists
     Path(output_dir).mkdir(parents=True, exist_ok=True)
@@ -1117,6 +1475,13 @@ def improve_strudel(
             with open(strudel_path, 'w') as f:
                 f.write(current_code)
 
+    # PHASE 2: Generate dynamic effects with orchestrator (beat-synced patterns)
+    if HAS_ORCHESTRATOR:
+        print("\n--- Phase 2: Generating beat-synced dynamic effects ---")
+        current_code = generate_orchestrated_effects(current_code, metadata, comparison=None)
+        with open(strudel_path, 'w') as f:
+            f.write(current_code)
+
     # Track previous code for learning
     previous_code = current_code
     previous_similarity = 0.0
@@ -1169,6 +1534,9 @@ def improve_strudel(
     exact_duration = get_audio_duration(original_audio)
     print(f"Original audio duration: {exact_duration:.6f}s")
 
+    # Track automation timeline across iterations (starts None, updated by LLM)
+    current_automation_path = None
+
     for iteration in range(max_iterations):
         print(f"\n--- Iteration {iteration + 1}/{max_iterations} (v{current_version}) ---")
 
@@ -1188,6 +1556,10 @@ def improve_strudel(
             if synth_config_path.exists():
                 render_cmd.extend(["--config", str(synth_config_path)])
                 print(f"       Using AI-analyzed synthesis config")
+            # Pass automation timeline if available (beat-synced parameter changes)
+            if current_automation_path and current_automation_path.exists():
+                render_cmd.extend(["--automation", str(current_automation_path)])
+                print(f"       Using automation timeline: {current_automation_path.name}")
         else:
             # Fallback to Python renderer
             render_cmd = [
@@ -1365,29 +1737,64 @@ def improve_strudel(
         except Exception as e:
             print(f"       Spectrogram analysis failed: {e}")
 
-        # Extract genre and artist from metadata for sound selection
+        # Extract genre, artist, and BPM from metadata for sound/tempo selection
         genre = metadata.get("genre", "")
         artist_context = artist if artist else metadata.get("artist", "")
+        track_bpm = metadata.get("bpm", 120)
+
+        # Update agent with iteration results (for learning)
+        if agent is not None:
+            improved = current_similarity > best_similarity
+            agent.add_iteration_result(
+                iteration=iteration + 1,
+                version=current_version,
+                similarity=current_similarity,
+                band_diffs=band_diffs,
+                code_generated=current_code,
+                improved=improved
+            )
+
         ai_result = analyze_with_llm(
             run_data, comparison, knowledge, current_code,
             use_ollama=use_ollama, spectrogram_insights=spectrogram_insights,
-            genre=genre, artist=artist_context
+            genre=genre, artist=artist_context, bpm=track_bpm,
+            agent=agent  # Pass agent for agentic mode
         )
 
         print(f"Analysis: {ai_result.get('analysis', 'N/A')[:100]}...")
         print(f"Suggestions: {ai_result.get('suggestions', [])[:3]}")
 
+        # Save automation timeline if LLM generated one
+        if ai_result.get("automation"):
+            automation_path = Path(output_dir) / f"automation_v{current_version:03d}.json"
+            with open(automation_path, 'w') as f:
+                json.dump(ai_result["automation"], f, indent=2)
+            print(f"       Saved automation timeline to {automation_path.name}")
+            # Also save as latest automation.json
+            latest_automation = Path(output_dir) / "automation.json"
+            with open(latest_automation, 'w') as f:
+                json.dump(ai_result["automation"], f, indent=2)
+            # Update for next iteration's render
+            current_automation_path = automation_path
+
         # 6. Update code for next iteration
         improved_effects = ai_result.get("improved_code", "")
 
-        # NO FALLBACKS - LLM MUST return code or we fail
+        # Handle validation failures or empty code gracefully
         if not improved_effects or not improved_effects.strip():
-            raise RuntimeError(
-                f"LLM did not return code! This is a bug.\n"
-                f"AI result: {ai_result}\n"
-                f"Knowledge items: {len(knowledge)}\n"
-                f"Make sure Ollama is running: curl http://localhost:11434/api/tags"
-            )
+            # Check if this is a validation failure (code was rejected)
+            if "REJECTED" in ai_result.get("analysis", ""):
+                print("       ⚠ LLM generated invalid Strudel code - skipping iteration")
+                current_version += 1
+                continue  # Skip this iteration, try again
+            else:
+                # This is a real bug - LLM didn't return any code
+                raise RuntimeError(
+                    f"LLM did not return code! This is a bug.\n"
+                    f"AI result: {ai_result}\n"
+                    f"Knowledge items: {len(knowledge)}\n"
+                    f"Make sure Ollama is running: curl http://localhost:11434/api/tags"
+                )
 
         if improved_effects and improved_effects.strip():
             # Merge improved effects back into full code
@@ -1409,6 +1816,9 @@ def improve_strudel(
                                "--duration", f"{min(30, exact_duration):.2f}"]
                     if synth_config_path.exists():
                         test_cmd.extend(["--config", str(synth_config_path)])
+                    # Include automation for test render too
+                    if current_automation_path and current_automation_path.exists():
+                        test_cmd.extend(["--automation", str(current_automation_path)])
                     subprocess.run(test_cmd, capture_output=True)
 
                     # Quick compare
@@ -1445,9 +1855,15 @@ def improve_strudel(
                         except json.JSONDecodeError:
                             print("       ⚠ Could not parse test comparison, accepting change")
                             current_code = improved_code
+                            # BUG FIX: Actually save the improved code to file
+                            with open(strudel_path, 'w') as f:
+                                f.write(improved_code)
                     else:
                         print("       ⚠ Test render failed, accepting change")
                         current_code = improved_code
+                        # BUG FIX: Actually save the improved code to file
+                        with open(strudel_path, 'w') as f:
+                            f.write(improved_code)
                 else:
                     # No Node renderer, accept change blindly
                     current_code = improved_code

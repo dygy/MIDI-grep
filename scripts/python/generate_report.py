@@ -9,6 +9,7 @@ import argparse
 import html
 import json
 import os
+import re
 import base64
 from pathlib import Path
 from datetime import datetime
@@ -319,6 +320,14 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
 
             <!-- Transport controls -->
             <div class="daw-transport">
+                <div class="transport-left">
+                    <button class="transport-btn transport-play" id="btn-play" onclick="togglePlay()" title="Play/Pause">
+                        <span class="transport-icon" id="play-icon">▶</span>
+                    </button>
+                    <button class="transport-btn transport-stop" onclick="stopAll()" title="Stop">
+                        <span class="transport-icon">■</span>
+                    </button>
+                </div>
                 <div class="transport-center">
                     <span class="transport-time" id="time-current">0:00.0</span>
                     <span class="transport-separator">/</span>
@@ -719,7 +728,18 @@ def generate_report(cache_dir, version_dir, output_path=None):
     # Generate HTML - escape all user-provided text for HTML safety
     track_name_raw = track_info.get('title') or clean_track_name(cache_path.name)
     track_name = html.escape(track_name_raw)
-    version = metadata.get('version', 1)
+
+    # Get version from directory name (v001, v002, etc.)
+    version_from_dir = 1
+    version_match = re.search(r'v(\d+)', version_path.name)
+    if version_match:
+        version_from_dir = int(version_match.group(1))
+    version = metadata.get('version') or version_from_dir
+
+    # Get YouTube info for thumbnail and link
+    youtube_url = track_info.get('url', '')
+    video_id = track_info.get('video_id', '')
+    youtube_thumbnail = f"https://img.youtube.com/vi/{video_id}/maxresdefault.jpg" if video_id else ''
 
     # Format BPM (round to integer) - use strudel_info as fallback
     bpm_raw = metadata.get('bpm') or strudel_info.get('bpm', 0)
@@ -728,8 +748,12 @@ def generate_report(cache_dir, version_dir, output_path=None):
     key_raw = metadata.get('key') or strudel_info.get('key', 'N/A') or 'N/A'
     key = html.escape(str(key_raw))
     style_raw = metadata.get('style') or strudel_info.get('style', 'N/A') or 'N/A'
-    style = html.escape(str(style_raw))
+    # Use genre when style is "auto"
     genre_raw = metadata.get('genre') or strudel_info.get('genre', '') or ''
+    if style_raw.lower() == 'auto' and genre_raw:
+        style = html.escape(str(genre_raw).replace('_', ' ').title())
+    else:
+        style = html.escape(str(style_raw))
     genre = html.escape(str(genre_raw))
 
     notes = metadata.get('notes') or strudel_info.get('notes', 0)
@@ -1375,12 +1399,18 @@ def generate_report(cache_dir, version_dir, output_path=None):
 <body>
     <div class="container">
         <header>
-            <h1>{track_name}</h1>
-            <div class="subtitle">
-                <span class="badge badge-blue">v{version}</span>
-                <span class="badge badge-green">{bpm} BPM</span>
-                <span class="badge badge-orange">{key}</span>
-                <span class="badge badge-blue">{style}</span>
+            <div class="header-content" style="display: flex; gap: 20px; align-items: flex-start;">
+                {'<a href="' + youtube_url + '" target="_blank" style="flex-shrink: 0;"><img src="' + youtube_thumbnail + '" alt="YouTube thumbnail" style="width: 200px; border-radius: 8px; box-shadow: 0 4px 12px rgba(0,0,0,0.3);"></a>' if youtube_thumbnail else ''}
+                <div>
+                    <h1 style="margin: 0 0 8px 0;">{track_name}</h1>
+                    <div class="subtitle">
+                        <span class="badge badge-blue">v{version}</span>
+                        <span class="badge badge-green">{bpm} BPM</span>
+                        <span class="badge badge-orange">{key}</span>
+                        <span class="badge badge-blue">{style}</span>
+                    </div>
+                    {'<a href="' + youtube_url + '" target="_blank" style="color: #58a6ff; text-decoration: none; font-size: 12px; margin-top: 8px; display: inline-block;">▶ Watch on YouTube</a>' if youtube_url else ''}
+                </div>
             </div>
         </header>
 
@@ -1715,6 +1745,7 @@ def generate_report(cache_dir, version_dir, output_path=None):
                 isPlaying = true;
                 updateNowPlaying(group);
                 updateGroupButtons(group);
+                updatePlayButton(true);
                 startPlayheadAnimation();
             }});
 
@@ -1783,8 +1814,52 @@ def generate_report(cache_dir, version_dir, output_path=None):
 
             updateNowPlaying('Ready to play');
             updateGroupButtons(null);
+            updatePlayButton(false);
             document.getElementById('time-current').textContent = '0:00.0';
             document.getElementById('playhead').style.left = '0';
+        }}
+
+        // Toggle play/pause
+        function togglePlay() {{
+            if (isPlaying) {{
+                // Pause all
+                document.querySelectorAll('audio').forEach(a => a.pause());
+                isPlaying = false;
+                updatePlayButton(false);
+                updateNowPlaying('Paused');
+            }} else {{
+                // Resume or start playing original stems
+                if (activeGroup) {{
+                    // Resume current group
+                    const audios = getGroupAudios(activeGroup);
+                    audios.forEach(a => {{ if (!stemMutes[a.id]) a.play(); }});
+                    isPlaying = true;
+                    updatePlayButton(true);
+                }} else {{
+                    // Start playing original stems by default
+                    playGroup('original-all');
+                }}
+            }}
+        }}
+
+        // Update play button icon
+        function updatePlayButton(playing) {{
+            const btn = document.getElementById('btn-play');
+            const icon = document.getElementById('play-icon');
+            if (btn && icon) {{
+                icon.textContent = playing ? '⏸' : '▶';
+                btn.classList.toggle('playing', playing);
+            }}
+        }}
+
+        // Get audio elements for a group
+        function getGroupAudios(group) {{
+            if (group === 'original-all') {{
+                return Array.from(document.querySelectorAll('audio')).filter(a => !a.id.includes('render'));
+            }} else if (group === 'render-stems') {{
+                return Array.from(document.querySelectorAll('audio')).filter(a => a.id.includes('render'));
+            }}
+            return [];
         }}
 
         // Update now playing display

@@ -537,20 +537,21 @@ type StyleCandidate struct {
 // generated code naturally matches the target characteristics
 type AIParams struct {
 	// Filter parameters (per voice)
-	LPFBass int     `json:"lpf_bass"`
-	LPFMid  int     `json:"lpf_mid"`
-	LPFHigh int     `json:"lpf_high"`
-	HPFBass int     `json:"hpf_bass"`
-	HPFMid  int     `json:"hpf_mid"`
-	HPFHigh int     `json:"hpf_high"`
+	LPFBass int `json:"lpf_bass"`
+	LPFMid  int `json:"lpf_mid"`
+	LPFHigh int `json:"lpf_high"`
+	HPFBass int `json:"hpf_bass"`
+	HPFMid  int `json:"hpf_mid"`
+	HPFHigh int `json:"hpf_high"`
 
 	// Dynamics
-	GainBass float64 `json:"gain_bass"`
-	GainMid  float64 `json:"gain_mid"`
-	GainHigh float64 `json:"gain_high"`
-	ClipBass float64 `json:"clip_bass"`
-	ClipMid  float64 `json:"clip_mid"`
-	ClipHigh float64 `json:"clip_high"`
+	GainBass  float64 `json:"gain_bass"`
+	GainMid   float64 `json:"gain_mid"`
+	GainHigh  float64 `json:"gain_high"`
+	GainDrums float64 `json:"gain_drums"`
+	ClipBass  float64 `json:"clip_bass"`
+	ClipMid   float64 `json:"clip_mid"`
+	ClipHigh  float64 `json:"clip_high"`
 
 	// Distortion/bitcrush
 	Distort float64 `json:"distort"`
@@ -666,29 +667,86 @@ func (g *Generator) SetAIParams(params *AIParams) {
 	g.aiParams = params
 }
 
-// LoadAIParamsFromJSON loads AI parameters from a JSON file
+// LoadAIParamsFromJSON loads AI parameters from synth_config.json
+// The JSON structure is: synth_config.voices.{bass,mid,high}.{gain,lpf,hpf}
 func (g *Generator) LoadAIParamsFromJSON(path string) error {
 	data, err := os.ReadFile(path)
 	if err != nil {
 		return fmt.Errorf("failed to read AI params: %w", err)
 	}
 
-	// The JSON has nested structure from ai_code_generator.py
-	var wrapper struct {
-		Params AIParams `json:"params"`
-	}
-	if err := json.Unmarshal(data, &wrapper); err != nil {
-		return fmt.Errorf("failed to parse AI params: %w", err)
+	// Parse the actual synth_config.json structure from analyze_synth_params.py
+	var config struct {
+		SynthConfig struct {
+			Voices struct {
+				Bass struct {
+					Gain          float64 `json:"gain"`
+					LPF           float64 `json:"lpf"`
+					HPF           float64 `json:"hpf"`
+					SubOctaveGain float64 `json:"sub_octave_gain"`
+				} `json:"bass"`
+				Mid struct {
+					Gain float64 `json:"gain"`
+					LPF  float64 `json:"lpf"`
+					HPF  float64 `json:"hpf"`
+				} `json:"mid"`
+				High struct {
+					Gain float64 `json:"gain"`
+					LPF  float64 `json:"lpf"`
+					HPF  float64 `json:"hpf"`
+				} `json:"high"`
+				Drums struct {
+					Gain float64 `json:"gain"`
+				} `json:"drums"`
+			} `json:"voices"`
+			Envelope struct {
+				Attack  float64 `json:"attack"`
+				Decay   float64 `json:"decay"`
+				Sustain float64 `json:"sustain"`
+				Release float64 `json:"release"`
+			} `json:"envelope"`
+			Filters struct {
+				LPFCutoff float64 `json:"lpf_cutoff"`
+				HPFCutoff float64 `json:"hpf_cutoff"`
+			} `json:"filters"`
+		} `json:"synth_config"`
 	}
 
-	wrapper.Params.Enabled = true
-	g.aiParams = &wrapper.Params
+	if err := json.Unmarshal(data, &config); err != nil {
+		return fmt.Errorf("failed to parse synth_config.json: %w", err)
+	}
+
+	// Map to AIParams (flat structure used by BuildEffectChainFromAIParams)
+	g.aiParams = &AIParams{
+		Enabled:   true,
+		GainBass:  config.SynthConfig.Voices.Bass.Gain,
+		GainMid:   config.SynthConfig.Voices.Mid.Gain,
+		GainHigh:  config.SynthConfig.Voices.High.Gain,
+		GainDrums: config.SynthConfig.Voices.Drums.Gain,
+		LPFBass:   int(config.SynthConfig.Voices.Bass.LPF),
+		LPFMid:    int(config.SynthConfig.Voices.Mid.LPF),
+		LPFHigh:   int(config.SynthConfig.Voices.High.LPF),
+		HPFBass:   int(config.SynthConfig.Voices.Bass.HPF),
+		HPFMid:    int(config.SynthConfig.Voices.Mid.HPF),
+		HPFHigh:   int(config.SynthConfig.Voices.High.HPF),
+		// Room and reverb from envelope analysis
+		Room: 0.2, // Default, could be derived from dynamics
+	}
+
 	return nil
 }
 
 // HasAIParams returns true if AI parameters are set
 func (g *Generator) HasAIParams() bool {
 	return g.aiParams != nil && g.aiParams.Enabled
+}
+
+// GetAIDrumGain returns the AI-derived drum gain, or 0 if not set
+func (g *Generator) GetAIDrumGain() float64 {
+	if g.aiParams != nil && g.aiParams.Enabled && g.aiParams.GainDrums > 0 {
+		return g.aiParams.GainDrums
+	}
+	return 0 // Return 0 to indicate no AI value set
 }
 
 // SetStyle changes the sound style
@@ -844,6 +902,13 @@ func (g *Generator) generateFromCleanup(result *CleanupResult, analysisResult *a
 	// Tempo
 	sb.WriteString(fmt.Sprintf("setcps(%.0f/60/4)\n\n", analysisResult.BPM))
 
+	// Add dynamic section data for the renderer to use
+	if sectionAnalysis != nil && len(sectionAnalysis.BeatDensities) > 0 {
+		sb.WriteString("// Dynamic data for section-aware rendering\n")
+		sb.WriteString(generateSectionDataArrays(sectionAnalysis, sections))
+		sb.WriteString("\n")
+	}
+
 	// Convert JSON notes to midi.Note (for pattern generation)
 	bass := jsonToNotes(result.Voices.Bass)
 	mid := jsonToNotes(result.Voices.Mid)
@@ -853,6 +918,76 @@ func (g *Generator) generateFromCleanup(result *CleanupResult, analysisResult *a
 	g.generateStackedPatternWithVelocity(&sb, bass, mid, high,
 		result.Voices.Bass, result.Voices.Mid, result.Voices.High,
 		analysisResult)
+
+	return sb.String()
+}
+
+// generateSectionDataArrays creates JavaScript arrays with per-bar dynamics data
+// for the renderer to use for section-aware gain/filter modulation
+func generateSectionDataArrays(analysis *SectionAnalysis, sections []Section) string {
+	var sb strings.Builder
+
+	// Normalize energy values to 0-1 range
+	maxDensity := 0.0
+	maxVelocity := 0.0
+	for _, d := range analysis.BeatDensities {
+		if d > maxDensity {
+			maxDensity = d
+		}
+	}
+	for _, v := range analysis.BeatVelocities {
+		if v > maxVelocity {
+			maxVelocity = v
+		}
+	}
+	if maxDensity == 0 {
+		maxDensity = 1
+	}
+	if maxVelocity == 0 {
+		maxVelocity = 1
+	}
+
+	// Energy array (combined density + velocity, normalized)
+	sb.WriteString("let bar_energy = [")
+	for i, d := range analysis.BeatDensities {
+		v := 0.0
+		if i < len(analysis.BeatVelocities) {
+			v = analysis.BeatVelocities[i]
+		}
+		// Energy = 60% density + 40% velocity (normalized)
+		energy := (d/maxDensity)*0.6 + (v/maxVelocity)*0.4
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(fmt.Sprintf("%.2f", energy))
+	}
+	sb.WriteString("]\n")
+
+	// Density array (for degradeBy - sparse sections drop more notes)
+	sb.WriteString("let bar_density = [")
+	for i, d := range analysis.BeatDensities {
+		if i > 0 {
+			sb.WriteString(", ")
+		}
+		sb.WriteString(fmt.Sprintf("%.2f", d/maxDensity))
+	}
+	sb.WriteString("]\n")
+
+	// Section types and boundaries (for section-aware sound selection)
+	if len(sections) > 0 {
+		sb.WriteString("let sections = [")
+		for i, s := range sections {
+			if i > 0 {
+				sb.WriteString(", ")
+			}
+			sb.WriteString(fmt.Sprintf("{start: %.1f, end: %.1f, type: \"%s\", energy: %.2f}",
+				s.StartBeat, s.EndBeat, s.Type, s.Energy))
+		}
+		sb.WriteString("]\n")
+	}
+
+	// Helper comment for using dynamic data
+	sb.WriteString("// Use: .gain(bar_energy[bar_index]) or .degradeBy(1 - bar_density[bar_index])\n")
 
 	return sb.String()
 }
@@ -994,20 +1129,27 @@ func (g *Generator) generateStackedPatternWithVelocity(sb *strings.Builder, bass
 						voiceCode += fmt.Sprintf("\n    .velocity(\"%s\")", velocityPattern)
 					}
 				}
-				// Use gain with optional LFO for dynamics
-				if v.gain != 1.0 {
-					if numBars > 8 {
-						// Long tracks: use perlin for organic dynamics
-						voiceCode += fmt.Sprintf("\n    .gain(perlin.range(%.2f, %.2f).slow(8))", v.gain*0.8, v.gain)
-					} else {
-						voiceCode += fmt.Sprintf("\n    .gain(%.2f)", v.gain)
-					}
-				} else if numBars > 8 {
-					voiceCode += "\n    .gain(perlin.range(0.8, 1.0).slow(8))"
-				}
 
-				// Add per-voice effect chain (filter, pan, reverb, delay, envelope, style FX, legato, echo)
-				effectChain := BuildEffectChain(effects, true)
+				// Use AI-derived effects when available (NO HARDCODING)
+				// Otherwise fall back to style-based effects
+				var effectChain string
+				if g.HasAIParams() {
+					// AI-derived gains and effects - no hardcoding
+					effectChain = BuildEffectChainFromAIParams(g.aiParams, v.name)
+				} else {
+					// Fallback: use gain with optional LFO for dynamics
+					if v.gain != 1.0 {
+						if numBars > 8 {
+							voiceCode += fmt.Sprintf("\n    .gain(perlin.range(%.2f, %.2f).slow(8))", v.gain*0.8, v.gain)
+						} else {
+							voiceCode += fmt.Sprintf("\n    .gain(%.2f)", v.gain)
+						}
+					} else if numBars > 8 {
+						voiceCode += "\n    .gain(perlin.range(0.8, 1.0).slow(8))"
+					}
+					// Add per-voice effect chain (filter, pan, reverb, delay, envelope, style FX, legato, echo)
+					effectChain = BuildEffectChain(effects, true)
+				}
 				if effectChain != "" {
 					voiceCode += "\n    " + effectChain
 				}
@@ -1226,17 +1368,39 @@ func (g *Generator) outputChunkedPatterns(sb *strings.Builder, activeVoices []st
 	}
 	sb.WriteString("\n")
 
-	// Play all - use cat() to concatenate bars properly
-	sb.WriteString("// Play all\n")
+	// Play all - use cat() with dynamic energy modulation per bar
+	sb.WriteString("// Play all (with dynamic energy from bar_energy array)\n")
 	sb.WriteString("$: stack(\n")
 	for i, v := range voices {
-		sb.WriteString(fmt.Sprintf("  %sFx(cat(...%s.map(b => note(b))))", v.name, v.name))
+		if v.name == "drums" {
+			// Drums use s() not note()
+			sb.WriteString(fmt.Sprintf("  cat(...%s.map((b, i) => %sFx(s(b)).gain(0.6 + bar_energy[i %% bar_energy.length] * 0.6)))", v.name, v.name))
+		} else {
+			// Melodic voices use note() with energy gain
+			sb.WriteString(fmt.Sprintf("  cat(...%s.map((b, i) => %sFx(note(b)).gain(0.6 + bar_energy[i %% bar_energy.length] * 0.6)))", v.name, v.name))
+		}
 		if i < len(voices)-1 {
 			sb.WriteString(",")
 		}
 		sb.WriteString("\n")
 	}
 	sb.WriteString(")\n\n")
+
+	// Also provide static version for comparison
+	sb.WriteString("// Static version (no dynamics):\n")
+	sb.WriteString("// $: stack(\n")
+	for i, v := range voices {
+		if v.name == "drums" {
+			sb.WriteString(fmt.Sprintf("//   %sFx(cat(...%s.map(b => s(b))))", v.name, v.name))
+		} else {
+			sb.WriteString(fmt.Sprintf("//   %sFx(cat(...%s.map(b => note(b))))", v.name, v.name))
+		}
+		if i < len(voices)-1 {
+			sb.WriteString(",")
+		}
+		sb.WriteString("\n")
+	}
+	sb.WriteString("// )\n")
 
 	// Examples
 	sb.WriteString("// Play specific bars:\n")

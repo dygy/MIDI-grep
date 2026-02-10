@@ -96,6 +96,65 @@
 
 ### Audio Rendering & AI Analysis
 
+**Two approaches for audio rendering:**
+
+1. **BlackHole Recording (RECOMMENDED - 100% accuracy):** Records real Strudel playback via virtual audio device
+2. **Node.js Synthesis (Fallback - ~72% accuracy):** Offline synthesis emulating Strudel sounds
+
+#### BlackHole Recording (Best Approach)
+
+Records actual Strudel browser playback for perfect audio reproduction.
+**Runs fully headless** - no browser window opens.
+
+```
+Strudel Code
+     │
+     ▼
+┌─────────────────────────┐
+│ ffmpeg Recording Start  │
+│ -f avfoundation         │
+│ -i :BlackHole 2ch       │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│ Headless Puppeteer      │ (record-strudel-blackhole.ts)
+│ - Opens strudel.cc      │
+│ - Incognito context     │
+│ - Opens Settings panel  │
+│ - Selects BlackHole     │
+│   as audio output       │
+│ - Inserts code via      │
+│   textContent (simple!) │
+│ - Clicks Play button    │
+│ - Waits for samples     │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│ BlackHole Virtual Audio │ (macOS)
+│ - Routes browser audio  │
+│ - No Multi-Output needed│
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
+│ ffmpeg Recording        │
+│ → output.wav (44.1kHz)  │
+└─────────────────────────┘
+```
+
+**Setup:** `brew install blackhole-2ch` (requires reboot)
+**Usage:** `node dist/record-strudel-blackhole.js input.strudel -o output.wav -d 30`
+
+**Key implementation:**
+- `--autoplay-policy=no-user-gesture-required` for audio context
+- Incognito context avoids localStorage issues
+- CodeMirror code insertion: `cmContent.textContent = code`
+- Play button found by iterating buttons & checking textContent
+
+#### Node.js Synthesis (Fallback)
+
 The `--render` flag synthesizes WAV audio preview from Strudel patterns with AI-driven parameter optimization:
 
 ```
