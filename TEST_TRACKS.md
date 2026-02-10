@@ -23,6 +23,7 @@ Use these verified YouTube URLs for testing. Do NOT guess or make up URLs.
 | Track | URL | Notes |
 |-------|-----|-------|
 | Enter - Instrybutor | https://youtu.be/3e9FAfPC5Lk | |
+| Enter - Druga Pixa | https://youtu.be/FEr7JgX0HhE | |
 | Enter - Pixa | https://youtu.be/aQOEAVV3Pis | |
 | Enter - Piąta Pixa | https://youtu.be/5OD7HO0f0nI | |
 
