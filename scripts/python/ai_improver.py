@@ -93,29 +93,68 @@ def get_track_hash(audio_path: str) -> str:
     return hashlib.sha256(content).hexdigest()[:16]
 
 
-def init_clickhouse():
-    """Initialize ClickHouse database and tables if they don't exist."""
-    CLICKHOUSE_DB.mkdir(parents=True, exist_ok=True)
+def _run_clickhouse_query(query: str) -> subprocess.CompletedProcess:
+    """Run a ClickHouse query and return result."""
+    cmd = [
+        str(CLICKHOUSE_BIN), "local",
+        "--path", str(CLICKHOUSE_DB),
+        "--query", query
+    ]
+    return subprocess.run(cmd, capture_output=True, text=True)
 
-    init_queries = [
+
+def _get_schema_version() -> int:
+    """Get current schema version from DB, or 0 if not initialized."""
+    result = _run_clickhouse_query(
+        "SELECT version FROM midi_grep.schema_version ORDER BY version DESC LIMIT 1"
+    )
+    if result.returncode != 0:
+        return 0
+    try:
+        return int(result.stdout.strip())
+    except (ValueError, AttributeError):
+        return 0
+
+
+# Migrations: list of (version, description, queries)
+# Each migration is atomic - all queries must succeed
+MIGRATIONS = [
+    (1, "Initial schema", [
         "CREATE DATABASE IF NOT EXISTS midi_grep",
-        """CREATE TABLE IF NOT EXISTS midi_grep.runs (
+        """CREATE TABLE midi_grep.schema_version (
+            version UInt32,
+            applied_at DateTime DEFAULT now(),
+            description String
+        ) ENGINE = MergeTree()
+        ORDER BY version""",
+        """CREATE TABLE midi_grep.runs (
             track_hash String,
+            track_name String,
             version UInt32,
             created_at DateTime DEFAULT now(),
+            bpm Float64,
+            key String,
+            key_type String,
+            style String,
+            genre String,
+            strudel_code String,
             similarity_overall Float64,
             similarity_mfcc Float64,
             similarity_chroma Float64,
-            similarity_freq_balance Float64,
-            similarity_energy Float64,
-            strudel_code String,
-            parameters String,
-            genre String,
-            bpm Float64,
-            key_type String
+            similarity_frequency Float64,
+            similarity_rhythm Float64,
+            band_sub_bass Float64,
+            band_bass Float64,
+            band_low_mid Float64,
+            band_mid Float64,
+            band_high_mid Float64,
+            band_high Float64,
+            mix_params String,
+            improved_from_version Nullable(UInt32),
+            ai_suggestions String
         ) ENGINE = MergeTree()
         ORDER BY (track_hash, version)""",
-        """CREATE TABLE IF NOT EXISTS midi_grep.knowledge (
+        """CREATE TABLE midi_grep.knowledge (
             id UUID DEFAULT generateUUIDv4(),
             created_at DateTime DEFAULT now(),
             parameter_name String,
@@ -129,19 +168,53 @@ def init_clickhouse():
             key_type String,
             track_hash String
         ) ENGINE = MergeTree()
-        ORDER BY (parameter_name, created_at)"""
-    ]
+        ORDER BY (parameter_name, created_at)""",
+    ]),
+    # Add future migrations here:
+    # (2, "Add new column", ["ALTER TABLE midi_grep.runs ADD COLUMN foo String"]),
+]
 
-    for query in init_queries:
-        cmd = [
-            str(CLICKHOUSE_BIN), "local",
-            "--path", str(CLICKHOUSE_DB),
-            "--query", query
-        ]
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0 and "already exists" not in result.stderr.lower():
-            print(f"ClickHouse init error: {result.stderr}", file=sys.stderr)
-            raise RuntimeError(f"Failed to initialize ClickHouse: {result.stderr}")
+
+def init_clickhouse():
+    """Initialize ClickHouse with migrations. Fails fast if any migration fails."""
+    CLICKHOUSE_DB.mkdir(parents=True, exist_ok=True)
+
+    # Ensure database exists first
+    result = _run_clickhouse_query("CREATE DATABASE IF NOT EXISTS midi_grep")
+    if result.returncode != 0:
+        raise RuntimeError(f"Failed to create database: {result.stderr}")
+
+    current_version = _get_schema_version()
+
+    # Apply pending migrations
+    for version, description, queries in MIGRATIONS:
+        if version <= current_version:
+            continue  # Already applied
+
+        print(f"  [ClickHouse] Applying migration {version}: {description}")
+
+        # Run all queries for this migration
+        for query in queries:
+            result = _run_clickhouse_query(query)
+            if result.returncode != 0:
+                # Check if it's just "already exists" for CREATE statements
+                if "already exists" in result.stderr.lower():
+                    continue
+                raise RuntimeError(
+                    f"Migration {version} failed on query:\n{query}\n\nError: {result.stderr}"
+                )
+
+        # Record successful migration
+        record_query = f"INSERT INTO midi_grep.schema_version (version, description) VALUES ({version}, '{description}')"
+        result = _run_clickhouse_query(record_query)
+        if result.returncode != 0:
+            raise RuntimeError(f"Failed to record migration {version}: {result.stderr}")
+
+        print(f"  [ClickHouse] Migration {version} applied successfully")
+
+    final_version = _get_schema_version()
+    if final_version > 0:
+        print(f"  [ClickHouse] Schema at version {final_version}")
 
 
 # Initialize ClickHouse on module load
@@ -176,25 +249,7 @@ def clickhouse_query(query: str, format: str = "JSONEachRow") -> List[Dict]:
 
 
 def clickhouse_insert(table: str, data: Dict[str, Any]):
-    """Insert a row into ClickHouse."""
-    # Escape string values
-    values = []
-    for k, v in data.items():
-        if v is None:
-            values.append(f"{k} = NULL")
-        elif isinstance(v, str):
-            escaped = v.replace("'", "\\'").replace("\\", "\\\\")
-            values.append(f"{k} = '{escaped}'")
-        elif isinstance(v, bool):
-            values.append(f"{k} = {1 if v else 0}")
-        elif isinstance(v, (int, float)):
-            values.append(f"{k} = {v}")
-        else:
-            values.append(f"{k} = '{json.dumps(v)}'")
-
-    query = f"INSERT INTO {table} SETTINGS input_format_skip_unknown_fields=1 FORMAT Values ({', '.join(values)})"
-
-    # Use INSERT with columns approach instead
+    """Insert a row into ClickHouse. Raises RuntimeError on failure."""
     cols = list(data.keys())
     vals = []
     for k in cols:
@@ -214,16 +269,9 @@ def clickhouse_insert(table: str, data: Dict[str, Any]):
 
     query = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(vals)})"
 
-    cmd = [
-        str(CLICKHOUSE_BIN), "local",
-        "--path", str(CLICKHOUSE_DB),
-        "--query", query
-    ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = _run_clickhouse_query(query)
     if result.returncode != 0:
-        print(f"ClickHouse insert error: {result.stderr}", file=sys.stderr)
-        return False
-    return True
+        raise RuntimeError(f"ClickHouse insert failed: {result.stderr}\nQuery: {query[:500]}")
 
 
 def get_previous_run(track_hash: str) -> Optional[Dict]:
