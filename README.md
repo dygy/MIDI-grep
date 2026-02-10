@@ -124,173 +124,109 @@ This diagram shows the full pipeline including AI-driven iteration (worst case: 
 
 ```mermaid
 flowchart TB
-    subgraph Input["📥 Input"]
-        CLI["CLI: extract --url/--file"]
-        YT["yt-dlp<br/>YouTube Download"]
-        FFprobe["ffprobe<br/>Get Duration"]
-    end
+    %% ===== INPUT & SEPARATION =====
+    CLI["CLI: extract --url/--file"] --> YT["yt-dlp download"]
+    YT --> CheckCache{"Cached stems?"}
+    CheckCache -->|No| Demucs["Demucs: melodic + drums + bass + vocals"]
+    CheckCache -->|Yes| LoadStems["Load cached stems"]
+    Demucs --> Analysis
+    LoadStems --> Analysis
 
-    subgraph Cache["💾 Cache Check"]
-        CheckCache{"Cached?<br/>.cache/stems/"}
-        LoadCache["Load cached stems<br/>+ metadata"]
-    end
+    %% ===== ANALYSIS =====
+    Analysis["librosa + CLAP"] --> Profile["AudioProfile extraction:<br/>30+ features"]
+    Profile --> Features["Spectrum, dynamics,<br/>rhythm, timbre, structure"]
 
-    subgraph Separation["🎚️ Stem Separation"]
-        Demucs["Demucs<br/>(facebook/demucs)"]
-        Stems["Output:<br/>melodic.wav<br/>drums.wav<br/>bass.wav<br/>vocals.wav"]
-    end
-
-    subgraph Analysis["🔍 Analysis"]
-        Librosa["librosa<br/>BPM, Key, Time Sig"]
-        CLAP["CLAP Model<br/>Genre Detection"]
-        GenreDetect{"Auto-detect:<br/>Brazilian Funk?<br/>Phonk? Synthwave?"}
-    end
-
-    subgraph Transcription["🎹 Transcription"]
-        BasicPitch["Basic Pitch<br/>(Spotify)"]
-        DrumDetect["Drum Detection<br/>bd/sd/hh"]
-        Cleanup["Quantization<br/>+ Simplification"]
-    end
-
-    subgraph AIAnalysis["🧠 AI Synthesis Analysis"]
-        AnalyzeSynth["analyze_synth_params.py<br/>Spectral envelope<br/>Transients, Harmonics"]
-        SynthConfig["synth_config.json<br/>BPM tolerance<br/>Per-voice gains"]
-    end
-
-    subgraph Generation["⚡ Strudel Generation"]
-        GenChoice{"Mode?"}
-        Standard["generator.go<br/>Bar arrays + effects"]
-        Brazilian["brazilian.go<br/>Tamborzão template"]
-        Chords["chord_to_strudel.py<br/>Chord detection"]
-        Effects["effects.go<br/>filter, reverb, delay<br/>FM, tremolo, duck"]
-        StrudelCode["output.strudel"]
-    end
-
-    subgraph Rendering["🎵 Audio Rendering"]
-        RenderChoice{"Method?"}
-        BlackHole["record-strudel-blackhole.ts<br/>Puppeteer + ffmpeg<br/>100% accurate"]
-        NodeJS["render-strudel-node.ts<br/>node-web-audio-api<br/>~72% similarity"]
-        RenderOut["render.wav<br/>+ render_*.wav stems"]
-    end
-
-    subgraph Comparison["📊 Comparison"]
-        Compare["compare_audio.py<br/>MAE-based scoring"]
-        Metrics["Metrics:<br/>Freq Balance 40%<br/>MFCC 20%<br/>Energy 15%<br/>Brightness 15%"]
-        Charts["comparison.png<br/>chart_stem_*.png"]
-        CompJSON["comparison.json"]
-    end
-
-    subgraph AILoop["🔄 AI Improvement Loop (--iterate N)"]
-        LoopStart{"iteration < N<br/>AND<br/>similarity < target?"}
-        GapAnalysis["ai_code_improver.py<br/>Which bands are off?"]
-
-        subgraph OllamaAgent["🤖 Ollama Agent"]
-            Agent["ollama_agent.py<br/>Persistent memory"]
-            SQLQuery["ClickHouse Query:<br/>What worked for<br/>similar tracks?"]
-            LLM["llama3:8b<br/>Generate improved code"]
-            Validate{"Valid Strudel?<br/>No .peak/.volume/.eq"}
-        end
-
-        ReRender["Re-render with<br/>improved code"]
-        ReCompare["Re-compare"]
-
-        subgraph Storage["💿 ClickHouse Storage"]
-            StoreRun["midi_grep.runs<br/>track_hash, version<br/>similarity_*, band_*"]
-            StoreKnowledge["midi_grep.knowledge<br/>parameter changes<br/>+ improvements"]
-        end
-    end
-
-    subgraph Report["📄 HTML Report"]
-        GenReport["generate_report.py"]
-        ReportHTML["report.html<br/>DAW-style player<br/>Original vs Rendered<br/>Per-stem controls"]
-    end
-
-    subgraph Output["✅ Final Output"]
-        OutputFiles["v001/<br/>├── output.strudel<br/>├── render.wav<br/>├── comparison.json<br/>├── report.html<br/>└── metadata.json"]
-    end
-
-    %% Main Flow
-    CLI --> YT
-    CLI --> FFprobe
-    YT --> CheckCache
-    FFprobe --> CheckCache
-    CheckCache -->|Yes| LoadCache
-    CheckCache -->|No| Demucs
-    LoadCache --> Analysis
-    Demucs --> Stems
-    Stems --> Analysis
-
-    Analysis --> Librosa
-    Analysis --> CLAP
-    Librosa --> GenreDetect
-    CLAP --> GenreDetect
-
-    GenreDetect --> Transcription
-    Transcription --> BasicPitch
-    Transcription --> DrumDetect
-    BasicPitch --> Cleanup
+    %% ===== TRANSCRIPTION =====
+    Features --> BasicPitch["Basic Pitch → MIDI notes"]
+    Features --> DrumDetect["Drum onset → bd/sd/hh"]
+    BasicPitch --> Cleanup["Quantize + Simplify"]
     DrumDetect --> Cleanup
 
-    Cleanup --> AIAnalysis
-    AIAnalysis --> AnalyzeSynth
-    AnalyzeSynth --> SynthConfig
+    %% ===== INITIAL GENERATION (LLM + ClickHouse) =====
+    Cleanup --> CheckBest{"Best previous run<br/>for this track?"}
+    CheckBest --> QueryBest["<sql>SELECT code, similarity<br/>FROM runs WHERE track_hash=X<br/>ORDER BY similarity DESC LIMIT 1</sql>"]
+    QueryBest --> CH[("ClickHouse")]
 
-    SynthConfig --> Generation
-    GenreDetect --> GenChoice
-    GenChoice -->|Standard| Standard
-    GenChoice -->|Brazilian| Brazilian
-    GenChoice -->|Chords| Chords
-    Standard --> Effects
-    Brazilian --> Effects
-    Chords --> Effects
-    Effects --> StrudelCode
+    CH -->|Found| StartFromBest["Start from best code<br/>(72% similarity)"]
+    CH -->|Not found| FreshGen["Generate fresh"]
 
-    StrudelCode --> Rendering
-    RenderChoice -->|BlackHole| BlackHole
-    RenderChoice -->|Node.js| NodeJS
-    BlackHole --> RenderOut
-    NodeJS --> RenderOut
+    StartFromBest --> Orchestrator["AI Orchestrator:<br/>6 focused prompts"]
+    FreshGen --> Orchestrator
 
-    RenderOut --> Comparison
-    Comparison --> Compare
-    Compare --> Metrics
-    Metrics --> Charts
-    Metrics --> CompJSON
+    Orchestrator --> P1["① Sections: energy → structure"]
+    Orchestrator --> P2["② Bass: sub + 808"]
+    Orchestrator --> P3["③ Mid: chords + leads"]
+    Orchestrator --> P4["④ High: arps + bells"]
+    Orchestrator --> P5["⑤ Drums: kit + patterns"]
+    Orchestrator --> P6["⑥ Mix: balance voices"]
 
-    CompJSON --> AILoop
-    LoopStart -->|Yes| GapAnalysis
-    GapAnalysis --> Agent
-    Agent --> SQLQuery
-    SQLQuery --> LLM
-    LLM --> Validate
-    Validate -->|Yes| ReRender
-    Validate -->|No| LLM
-    ReRender --> ReCompare
-    ReCompare --> StoreRun
-    StoreRun --> StoreKnowledge
-    StoreKnowledge --> LoopStart
-    LoopStart -->|No| Report
+    P1 --> InitCode["output.strudel v1"]
+    P2 --> InitCode
+    P3 --> InitCode
+    P4 --> InitCode
+    P5 --> InitCode
+    P6 --> InitCode
 
-    Report --> GenReport
-    GenReport --> ReportHTML
-    ReportHTML --> Output
-    OutputFiles --> Output
+    %% ===== RENDER & COMPARE =====
+    InitCode --> Render["Render WAV<br/>(BlackHole 100% / Node.js 72%)"]
+    Render --> Compare["compare_audio.py"]
+    Compare --> Metrics["Per-band diffs:<br/>sub_bass, bass, mid, high<br/>+ per-stem issues"]
 
-    %% Styling
-    style Input fill:#e3f2fd
-    style Cache fill:#fff3e0
-    style Separation fill:#e8f5e9
-    style Analysis fill:#f3e5f5
-    style Transcription fill:#e8f5e9
-    style AIAnalysis fill:#fce4ec
-    style Generation fill:#fff9c4
-    style Rendering fill:#ede7f6
-    style Comparison fill:#e0f2f1
-    style AILoop fill:#ffebee
-    style OllamaAgent fill:#fce4ec
-    style Storage fill:#e8eaf6
-    style Report fill:#f3e5f5
-    style Output fill:#c8e6c9
+    %% ===== AGENTIC IMPROVEMENT LOOP =====
+    Metrics --> LoopCheck{"iteration < N AND<br/>similarity < target?"}
+
+    LoopCheck -->|Yes| Agent["OllamaAgent<br/>(persistent per track)"]
+
+    %% ReAct Pattern
+    Agent --> Think["Agent thinks:<br/>'What was best for THIS track?'"]
+    Think --> SQL1["<sql>SELECT code, similarity<br/>FROM runs WHERE track_hash=X<br/>ORDER BY similarity DESC LIMIT 1</sql>"]
+    SQL1 --> CH[("ClickHouse")]
+    CH --> Results1["Best run: 72% similarity"]
+    Results1 --> Think2["Agent analyzes:<br/>'What changed between iterations?'"]
+    Think2 --> SQL2["<sql>SELECT * FROM knowledge<br/>WHERE track_hash=X</sql>"]
+    SQL2 --> CH
+    CH --> Results2["Learned: gain 0.6→0.4 = +8%"]
+    Results2 --> Generate["Generate improved code<br/>with beat-synced patterns"]
+
+    Generate --> Validate{"Valid Strudel?<br/>No .peak/.volume/.eq"}
+    Validate -->|No| Agent
+    Validate -->|Yes| TestCode["Quick render & compare"]
+
+    TestCode --> Regress{"new > best?"}
+    Regress -->|No| Revert["REVERT to best code"]
+    Regress -->|Yes| Accept["Accept improvement"]
+    Revert --> LoopCheck
+    Accept --> Learn["Store to ClickHouse:<br/>parameter deltas + improvement%"]
+    Learn --> Memory["Update agent memory:<br/>tried_values, best_code"]
+    Memory --> Render
+
+    %% ===== OUTPUT =====
+    LoopCheck -->|No| Report["generate_report.py"]
+    Report --> Output["v001/<br/>├── output.strudel<br/>├── render.wav<br/>├── comparison.json<br/>├── report.html<br/>└── agent memory"]
+
+    %% ===== PER-TRACK LEARNING =====
+    CH -.->|"Same track queries<br/>its own best runs"| Agent
+
+    %% ===== STYLING =====
+    style CLI fill:#1565c0,color:#fff
+    style Demucs fill:#2e7d32,color:#fff
+    style Analysis fill:#7b1fa2,color:#fff
+    style Profile fill:#7b1fa2,color:#fff
+    style Orchestrator fill:#f9a825,color:#000
+    style P1 fill:#fff3e0,color:#000
+    style P2 fill:#fff3e0,color:#000
+    style P3 fill:#fff3e0,color:#000
+    style P4 fill:#fff3e0,color:#000
+    style P5 fill:#fff3e0,color:#000
+    style P6 fill:#fff3e0,color:#000
+    style Render fill:#512da8,color:#fff
+    style Compare fill:#00796b,color:#fff
+    style Agent fill:#c62828,color:#fff
+    style CH fill:#303f9f,color:#fff
+    style Generate fill:#ad1457,color:#fff
+    style Learn fill:#1565c0,color:#fff
+    style Report fill:#6a1b9a,color:#fff
+    style Output fill:#1b5e20,color:#fff
 ```
 
 ### External Dependencies

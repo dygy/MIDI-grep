@@ -21,10 +21,16 @@ import numpy as np
 import librosa
 from scipy import signal
 from scipy.ndimage import gaussian_filter1d
+import subprocess
 import sys
 import os
 from dataclasses import dataclass, asdict
+from pathlib import Path
 from typing import List, Dict, Optional, Tuple
+
+# ClickHouse connection
+CLICKHOUSE_BIN = Path(__file__).parent.parent.parent / "bin" / "clickhouse"
+CLICKHOUSE_DB = Path(__file__).parent.parent.parent / ".clickhouse" / "db"
 
 # Import sound selector for varied sound palette
 try:
@@ -37,6 +43,43 @@ try:
 except ImportError:
     SOUND_SELECTOR_AVAILABLE = False
     print("Warning: sound_selector not available, using default sounds", file=sys.stderr)
+
+
+def get_best_previous_run(track_hash: str) -> Optional[Dict]:
+    """
+    Query ClickHouse for the best previous run for this exact track.
+    Returns the run with highest similarity, or None if no runs exist.
+    """
+    if not CLICKHOUSE_BIN.exists() or not CLICKHOUSE_DB.exists():
+        return None
+
+    sql = f"""
+    SELECT strudel_code, similarity_overall, version
+    FROM midi_grep.runs
+    WHERE track_hash = '{track_hash}'
+    ORDER BY similarity_overall DESC
+    LIMIT 1
+    """
+
+    cmd = [
+        str(CLICKHOUSE_BIN), "local",
+        "--path", str(CLICKHOUSE_DB),
+        "--query", sql,
+        "--format", "JSONEachRow"
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        data = json.loads(result.stdout.strip())
+        if data.get("strudel_code"):
+            print(f"Found best previous run: v{data.get('version', '?')} with {data.get('similarity_overall', 0)*100:.1f}% similarity", file=sys.stderr)
+            return data
+    except Exception as e:
+        print(f"ClickHouse query failed: {e}", file=sys.stderr)
+
+    return None
 
 
 @dataclass
@@ -579,8 +622,14 @@ def main():
     parser.add_argument('--output', '-o', help='Output JSON path')
     parser.add_argument('--duration', '-d', type=float, default=60, help='Analysis duration in seconds')
     parser.add_argument('--genre', '-g', default='', help='Genre hint for sound selection')
+    parser.add_argument('--track-hash', '-t', default='', help='Track hash for ClickHouse lookup')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
     args = parser.parse_args()
+
+    # Query ClickHouse for best previous run FIRST
+    best_previous = None
+    if args.track_hash:
+        best_previous = get_best_previous_run(args.track_hash)
 
     # Analyze audio
     profile = analyze_audio_complete(args.audio_path, duration=args.duration)
@@ -603,9 +652,19 @@ def main():
         'metadata': {
             'source': args.audio_path,
             'analysis_duration': args.duration,
-            'generator': 'ai_code_generator.py v1.0'
+            'generator': 'ai_code_generator.py v1.0',
+            'track_hash': args.track_hash or None
         }
     }
+
+    # Include best previous run if found (LLM should start from this)
+    if best_previous:
+        output['best_previous'] = {
+            'code': best_previous.get('strudel_code', ''),
+            'similarity': best_previous.get('similarity_overall', 0),
+            'version': best_previous.get('version', 0)
+        }
+        print(f"Starting from best previous: v{best_previous.get('version', '?')} ({best_previous.get('similarity_overall', 0)*100:.1f}%)", file=sys.stderr)
 
     if args.output:
         with open(args.output, 'w') as f:

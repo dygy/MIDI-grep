@@ -12,11 +12,54 @@ AI Orchestrator - Multi-prompt pipeline for Strudel code generation.
 """
 
 import json
+import subprocess
 import sys
 import os
 import argparse
 import requests
+from pathlib import Path
 from typing import Dict, List, Optional, Any
+
+# ClickHouse connection
+CLICKHOUSE_BIN = Path(__file__).parent.parent.parent / "bin" / "clickhouse"
+CLICKHOUSE_DB = Path(__file__).parent.parent.parent / ".clickhouse" / "db"
+
+
+def get_best_previous_run(track_hash: str) -> Optional[Dict]:
+    """
+    Query ClickHouse for the best previous run for this exact track.
+    Returns the run with highest similarity, or None if no runs exist.
+    """
+    if not track_hash or not CLICKHOUSE_BIN.exists() or not CLICKHOUSE_DB.exists():
+        return None
+
+    sql = f"""
+    SELECT strudel_code, similarity_overall, version
+    FROM midi_grep.runs
+    WHERE track_hash = '{track_hash}'
+    ORDER BY similarity_overall DESC
+    LIMIT 1
+    """
+
+    cmd = [
+        str(CLICKHOUSE_BIN), "local",
+        "--path", str(CLICKHOUSE_DB),
+        "--query", sql,
+        "--format", "JSONEachRow"
+    ]
+
+    try:
+        result = subprocess.run(cmd, capture_output=True, text=True, timeout=10)
+        if result.returncode != 0 or not result.stdout.strip():
+            return None
+        data = json.loads(result.stdout.strip())
+        if data.get("strudel_code"):
+            print(f"[ClickHouse] Found best previous run: v{data.get('version', '?')} with {data.get('similarity_overall', 0)*100:.1f}% similarity", file=sys.stderr)
+            return data
+    except Exception as e:
+        print(f"[ClickHouse] Query failed: {e}", file=sys.stderr)
+
+    return None
 
 # Sound catalogs for LLM context
 BASS_SOUNDS = """BASS SOUNDS (pick one):
@@ -564,9 +607,23 @@ def main():
     parser.add_argument("--patterns", required=True, help="Path to patterns.json")
     parser.add_argument("--comparison", default="", help="Path to comparison.json")
     parser.add_argument("--output", required=True, help="Output Strudel file")
+    parser.add_argument("--track-hash", default="", help="Track hash for ClickHouse lookup")
 
     args = parser.parse_args()
 
+    # Query ClickHouse for best previous run FIRST
+    if args.track_hash:
+        best_previous = get_best_previous_run(args.track_hash)
+        if best_previous and best_previous.get("strudel_code"):
+            # Use best previous code as starting point
+            print(f"[AI Orchestrator] Starting from best previous run (v{best_previous.get('version', '?')}, {best_previous.get('similarity_overall', 0)*100:.1f}%)")
+            with open(args.output, 'w') as f:
+                f.write(best_previous["strudel_code"])
+            print(f"Saved: {args.output}")
+            return
+
+    # No previous run found - generate fresh using 6-prompt pipeline
+    print("[AI Orchestrator] No previous run found, generating fresh...")
     run_orchestrated_pipeline(
         args.metadata,
         args.patterns,

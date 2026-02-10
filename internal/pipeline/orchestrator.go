@@ -2,6 +2,7 @@ package pipeline
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"io"
 	"os"
@@ -53,12 +54,12 @@ func DefaultConfig() Config {
 		SoundStyle:        "auto", // Auto-detect style from audio analysis
 		Simplify:          true,   // Enable by default for cleaner output
 		LoopOnly:          false,
-		EnableDrums:       true,   // Extract drums by default
+		EnableDrums:       true, // Extract drums by default
 		DrumsOnly:         false,
 		DrumKit:           "tr808",
 		Arrange:           false,
-		UseCache:          true,        // Use stem cache by default
-		StemQuality:       "normal",    // Normal quality by default
+		UseCache:          true,     // Use stem cache by default
+		StemQuality:       "normal", // Normal quality by default
 		StemTimeout:       5 * time.Minute,
 		TranscribeTimeout: 3 * time.Minute,
 	}
@@ -313,7 +314,6 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 			}
 		}
 
-
 		analysisResult, err = o.analyzer.Analyze(ctx, stemResult.PianoPath, ws.AnalysisJSON())
 		if err != nil {
 			o.progress.Warning("Analysis failed, using defaults: %v", err)
@@ -449,59 +449,90 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 			notesToUse = cleanResult.Notes
 		}
 
-		// Use arrangement-based generator if enabled
-		if cfg.Arrange {
-			o.progress.StageComplete("Using arrangement-based generation with chord detection")
-			arrGenerator := strudel.NewArrangementGenerator(cfg.Quantize, style)
-			// Note: drumResult will be nil here, drums added later if enabled
-			strudelCode = arrGenerator.GenerateArrangement(notesToUse, analysisResult, nil, strudel.ParseDrumKit(cfg.DrumKit))
-		} else {
-			// Standard generation
-			generator := strudel.NewGeneratorWithStyle(cfg.Quantize, style)
-
-			// AI synthesis analysis: analyze original audio to derive gains/effects
-			// NO HARDCODING - all parameters come from AI analysis
-			synthConfigPath = filepath.Join(ws.Dir, "synth_config.json")
-			audioToAnalyze := cfg.InputPath
-			if audioToAnalyze == "" && stemResult != nil {
-				audioToAnalyze = stemResult.PianoPath // Use melodic stem
-			}
-			if audioToAnalyze != "" {
-				_, err := o.runner.RunScript(ctx, "analyze_synth_params.py", audioToAnalyze, "-o", synthConfigPath, "-d", "60")
-				if err != nil {
-					o.progress.Warning("AI synthesis analysis failed: %v", err)
-				} else {
-					if loadErr := generator.LoadAIParamsFromJSON(synthConfigPath); loadErr != nil {
-						o.progress.Warning("Failed to load AI params: %v", loadErr)
-					} else {
-						o.progress.StageComplete("Loaded AI-derived synthesis parameters")
+		// Check ClickHouse for best previous run FIRST (LLM-first approach)
+		// If found, use that code directly instead of Go generator
+		usedClickHouse := false
+		if cacheKey != "" {
+			bestRunResult, chErr := o.runner.RunScript(ctx, "ai_code_generator.py",
+				stemResult.PianoPath,
+				"--track-hash", cacheKey,
+				"--duration", "30")
+			if chErr == nil && bestRunResult.Stdout != "" {
+				// Parse JSON output to check if best_previous was found
+				var aiOutput struct {
+					BestPrevious *struct {
+						Code       string  `json:"code"`
+						Similarity float64 `json:"similarity"`
+						Version    int     `json:"version"`
+					} `json:"best_previous"`
+				}
+				if json.Unmarshal([]byte(bestRunResult.Stdout), &aiOutput) == nil && aiOutput.BestPrevious != nil {
+					if aiOutput.BestPrevious.Code != "" && aiOutput.BestPrevious.Similarity > 0.5 {
+						o.progress.StageComplete("Using best previous run from ClickHouse (v%d, %.0f%% similarity)",
+							aiOutput.BestPrevious.Version, aiOutput.BestPrevious.Similarity*100)
+						strudelCode = aiOutput.BestPrevious.Code
+						usedClickHouse = true
 					}
 				}
 			}
+		}
 
-			// Pass style candidates for header output
-			if len(styleCandidates) > 0 {
-				strudelCandidates := make([]strudel.StyleCandidate, len(styleCandidates))
-				for i, c := range styleCandidates {
-					strudelCandidates[i] = strudel.StyleCandidate{Style: c.Style, Score: c.Score}
+		// Only run generators if ClickHouse didn't provide code
+		if !usedClickHouse {
+			// Use arrangement-based generator if enabled
+			if cfg.Arrange {
+				o.progress.StageComplete("Using arrangement-based generation with chord detection")
+				arrGenerator := strudel.NewArrangementGenerator(cfg.Quantize, style)
+				// Note: drumResult will be nil here, drums added later if enabled
+				strudelCode = arrGenerator.GenerateArrangement(notesToUse, analysisResult, nil, strudel.ParseDrumKit(cfg.DrumKit))
+			} else {
+				// Standard generation (fallback when no ClickHouse result)
+				generator := strudel.NewGeneratorWithStyle(cfg.Quantize, style)
+
+				// AI synthesis analysis: analyze original audio to derive gains/effects
+				// NO HARDCODING - all parameters come from AI analysis
+				synthConfigPath = filepath.Join(ws.Dir, "synth_config.json")
+				audioToAnalyze := cfg.InputPath
+				if audioToAnalyze == "" && stemResult != nil {
+					audioToAnalyze = stemResult.PianoPath // Use melodic stem
 				}
-				generator.SetStyleCandidates(strudelCandidates)
-			}
+				if audioToAnalyze != "" {
+					_, err := o.runner.RunScript(ctx, "analyze_synth_params.py", audioToAnalyze, "-o", synthConfigPath, "-d", "60")
+					if err != nil {
+						o.progress.Warning("AI synthesis analysis failed: %v", err)
+					} else {
+						if loadErr := generator.LoadAIParamsFromJSON(synthConfigPath); loadErr != nil {
+							o.progress.Warning("Failed to load AI params: %v", loadErr)
+						} else {
+							o.progress.StageComplete("Loaded AI-derived synthesis parameters")
+						}
+					}
+				}
 
-			// Try to use the detailed JSON output for richer generation
-			if !useLoopNotes {
-				// Can use JSON file which has voice separation
-				strudelCode, err = generator.GenerateFromJSON(ws.NotesJSON(), analysisResult)
-				if err != nil {
-					// Fallback to legacy method
-					o.progress.Warning("Using legacy generator: %v", err)
+				// Pass style candidates for header output
+				if len(styleCandidates) > 0 {
+					strudelCandidates := make([]strudel.StyleCandidate, len(styleCandidates))
+					for i, c := range styleCandidates {
+						strudelCandidates[i] = strudel.StyleCandidate{Style: c.Style, Score: c.Score}
+					}
+					generator.SetStyleCandidates(strudelCandidates)
+				}
+
+				// Try to use the detailed JSON output for richer generation
+				if !useLoopNotes {
+					// Can use JSON file which has voice separation
+					strudelCode, err = generator.GenerateFromJSON(ws.NotesJSON(), analysisResult)
+					if err != nil {
+						// Fallback to legacy method
+						o.progress.Warning("Using legacy generator: %v", err)
+						strudelCode = generator.Generate(notesToUse, analysisResult)
+					}
+				} else {
+					// Loop notes - use direct generation
 					strudelCode = generator.Generate(notesToUse, analysisResult)
 				}
-			} else {
-				// Loop notes - use direct generation
-				strudelCode = generator.Generate(notesToUse, analysisResult)
 			}
-		}
+		} // end if !usedClickHouse
 
 		// Build result with loop info if detected
 		notesRetained := cleanResult.Retained
@@ -1139,4 +1170,3 @@ func fileExists(path string) bool {
 	info, err := os.Stat(path)
 	return err == nil && !info.IsDir()
 }
-

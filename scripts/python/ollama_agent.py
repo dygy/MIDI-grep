@@ -65,7 +65,11 @@ class OllamaAgent:
             self.messages = [{"role": "system", "content": self._system_prompt()}]
 
     def _system_prompt(self) -> str:
-        return """You are an expert Strudel live coding AI with access to a ClickHouse database of previous runs.
+        return f"""You are an expert Strudel live coding AI with access to a ClickHouse database of previous runs.
+
+## THIS TRACK
+Track hash: {self.track_hash}
+Use this track_hash in ALL your SQL queries to get data specific to THIS track.
 
 ## YOUR GOAL
 Generate Strudel effect functions that make rendered audio match the original.
@@ -88,23 +92,28 @@ strudel_code String, genre String, bpm Float64,
 band_bass Float64, band_mid Float64, band_high Float64
 ```
 
-**midi_grep.knowledge** - Proven parameter improvements
+**midi_grep.knowledge** - Proven parameter improvements per track
 ```
-parameter_name String, parameter_old_value String, parameter_new_value String,
+track_hash String, parameter_name String, parameter_old_value String, parameter_new_value String,
 similarity_improvement Float64, genre String, bpm_range_low Float64, bpm_range_high Float64
 ```
 
 ### Example Queries
 
-Find what worked for similar tracks:
-<sql>SELECT strudel_code, similarity_overall FROM midi_grep.runs
-WHERE genre = 'brazilian_funk' AND similarity_overall > 0.85
-ORDER BY similarity_overall DESC LIMIT 3</sql>
+Find the BEST previous run for THIS track:
+<sql>SELECT strudel_code, similarity_overall, version FROM midi_grep.runs
+WHERE track_hash = '{track_hash}'
+ORDER BY similarity_overall DESC LIMIT 1</sql>
 
-Find proven parameter improvements:
-<sql>SELECT parameter_name, parameter_new_value, similarity_improvement
-FROM midi_grep.knowledge WHERE similarity_improvement > 0.05
-ORDER BY similarity_improvement DESC LIMIT 10</sql>
+Find what parameter changes improved THIS track:
+<sql>SELECT parameter_name, parameter_old_value, parameter_new_value, similarity_improvement
+FROM midi_grep.knowledge WHERE track_hash = '{track_hash}'
+ORDER BY similarity_improvement DESC LIMIT 5</sql>
+
+Compare iterations for THIS track:
+<sql>SELECT version, similarity_overall, band_bass, band_mid, band_high
+FROM midi_grep.runs WHERE track_hash = '{track_hash}'
+ORDER BY version DESC LIMIT 10</sql>
 
 ## CRITICAL RULES
 
@@ -347,7 +356,7 @@ Frequency issues:
 - Mid: {context.get('band_mid', 0)*100:+.1f}%
 - High: {context.get('band_high', 0)*100:+.1f}%
 
-Query the database to find what worked for similar tracks, then generate improved code."""
+Query the database using track_hash='{self.track_hash}' to find what worked for THIS track, then generate improved code."""
 
             self.messages.append({"role": "user", "content": context_msg})
 

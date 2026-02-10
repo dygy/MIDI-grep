@@ -399,6 +399,7 @@ def extract_parameters_from_code(code: str) -> Dict[str, Dict[str, Any]]:
 
 
 def learn_from_improvement(
+    track_hash: str,
     genre: str,
     bpm: float,
     key_type: str,
@@ -441,6 +442,7 @@ def learn_from_improvement(
             # Store the learned improvement
             full_param_name = f"{fx_name}.{param_name}"
             success = store_knowledge(
+                track_hash=track_hash,
                 genre=genre,
                 bpm=bpm,
                 key_type=key_type,
@@ -1217,6 +1219,7 @@ def store_run(
 
 
 def store_knowledge(
+    track_hash: str,
     genre: str,
     bpm: float,
     key_type: str,
@@ -1225,8 +1228,9 @@ def store_knowledge(
     new_value: str,
     improvement: float
 ):
-    """Store learned knowledge."""
+    """Store learned knowledge for this specific track."""
     data = {
+        "track_hash": track_hash,
         "genre": genre,
         "bpm_range_low": max(0, bpm - 20),
         "bpm_range_high": bpm + 20,
@@ -1664,6 +1668,7 @@ def improve_strudel(
         if iteration > 0 and current_similarity > previous_similarity:
             key_type = "minor" if "minor" in metadata.get("key", "").lower() else "major"
             learned = learn_from_improvement(
+                track_hash=track_hash,
                 genre=metadata.get("genre", ""),
                 bpm=metadata.get("bpm", 120),
                 key_type=key_type,
