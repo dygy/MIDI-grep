@@ -118,6 +118,197 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   └── SSE updates
 ```
 
+### Complete Orchestration Flow
+
+This diagram shows the full pipeline including AI-driven iteration (worst case: all iterations run).
+
+```mermaid
+flowchart TB
+    subgraph Input["📥 Input"]
+        CLI["CLI: extract --url/--file"]
+        YT["yt-dlp<br/>YouTube Download"]
+        FFprobe["ffprobe<br/>Get Duration"]
+    end
+
+    subgraph Cache["💾 Cache Check"]
+        CheckCache{"Cached?<br/>.cache/stems/"}
+        LoadCache["Load cached stems<br/>+ metadata"]
+    end
+
+    subgraph Separation["🎚️ Stem Separation"]
+        Demucs["Demucs<br/>(facebook/demucs)"]
+        Stems["Output:<br/>melodic.wav<br/>drums.wav<br/>bass.wav<br/>vocals.wav"]
+    end
+
+    subgraph Analysis["🔍 Analysis"]
+        Librosa["librosa<br/>BPM, Key, Time Sig"]
+        CLAP["CLAP Model<br/>Genre Detection"]
+        GenreDetect{"Auto-detect:<br/>Brazilian Funk?<br/>Phonk? Synthwave?"}
+    end
+
+    subgraph Transcription["🎹 Transcription"]
+        BasicPitch["Basic Pitch<br/>(Spotify)"]
+        DrumDetect["Drum Detection<br/>bd/sd/hh"]
+        Cleanup["Quantization<br/>+ Simplification"]
+    end
+
+    subgraph AIAnalysis["🧠 AI Synthesis Analysis"]
+        AnalyzeSynth["analyze_synth_params.py<br/>Spectral envelope<br/>Transients, Harmonics"]
+        SynthConfig["synth_config.json<br/>BPM tolerance<br/>Per-voice gains"]
+    end
+
+    subgraph Generation["⚡ Strudel Generation"]
+        GenChoice{"Mode?"}
+        Standard["generator.go<br/>Bar arrays + effects"]
+        Brazilian["brazilian.go<br/>Tamborzão template"]
+        Chords["chord_to_strudel.py<br/>Chord detection"]
+        Effects["effects.go<br/>filter, reverb, delay<br/>FM, tremolo, duck"]
+        StrudelCode["output.strudel"]
+    end
+
+    subgraph Rendering["🎵 Audio Rendering"]
+        RenderChoice{"Method?"}
+        BlackHole["record-strudel-blackhole.ts<br/>Puppeteer + ffmpeg<br/>100% accurate"]
+        NodeJS["render-strudel-node.ts<br/>node-web-audio-api<br/>~72% similarity"]
+        RenderOut["render.wav<br/>+ render_*.wav stems"]
+    end
+
+    subgraph Comparison["📊 Comparison"]
+        Compare["compare_audio.py<br/>MAE-based scoring"]
+        Metrics["Metrics:<br/>Freq Balance 40%<br/>MFCC 20%<br/>Energy 15%<br/>Brightness 15%"]
+        Charts["comparison.png<br/>chart_stem_*.png"]
+        CompJSON["comparison.json"]
+    end
+
+    subgraph AILoop["🔄 AI Improvement Loop (--iterate N)"]
+        LoopStart{"iteration < N<br/>AND<br/>similarity < target?"}
+        GapAnalysis["ai_code_improver.py<br/>Which bands are off?"]
+
+        subgraph OllamaAgent["🤖 Ollama Agent"]
+            Agent["ollama_agent.py<br/>Persistent memory"]
+            SQLQuery["ClickHouse Query:<br/>What worked for<br/>similar tracks?"]
+            LLM["llama3:8b<br/>Generate improved code"]
+            Validate{"Valid Strudel?<br/>No .peak/.volume/.eq"}
+        end
+
+        ReRender["Re-render with<br/>improved code"]
+        ReCompare["Re-compare"]
+
+        subgraph Storage["💿 ClickHouse Storage"]
+            StoreRun["midi_grep.runs<br/>track_hash, version<br/>similarity_*, band_*"]
+            StoreKnowledge["midi_grep.knowledge<br/>parameter changes<br/>+ improvements"]
+        end
+    end
+
+    subgraph Report["📄 HTML Report"]
+        GenReport["generate_report.py"]
+        ReportHTML["report.html<br/>DAW-style player<br/>Original vs Rendered<br/>Per-stem controls"]
+    end
+
+    subgraph Output["✅ Final Output"]
+        OutputFiles["v001/<br/>├── output.strudel<br/>├── render.wav<br/>├── comparison.json<br/>├── report.html<br/>└── metadata.json"]
+    end
+
+    %% Main Flow
+    CLI --> YT
+    CLI --> FFprobe
+    YT --> CheckCache
+    FFprobe --> CheckCache
+    CheckCache -->|Yes| LoadCache
+    CheckCache -->|No| Demucs
+    LoadCache --> Analysis
+    Demucs --> Stems
+    Stems --> Analysis
+
+    Analysis --> Librosa
+    Analysis --> CLAP
+    Librosa --> GenreDetect
+    CLAP --> GenreDetect
+
+    GenreDetect --> Transcription
+    Transcription --> BasicPitch
+    Transcription --> DrumDetect
+    BasicPitch --> Cleanup
+    DrumDetect --> Cleanup
+
+    Cleanup --> AIAnalysis
+    AIAnalysis --> AnalyzeSynth
+    AnalyzeSynth --> SynthConfig
+
+    SynthConfig --> Generation
+    GenreDetect --> GenChoice
+    GenChoice -->|Standard| Standard
+    GenChoice -->|Brazilian| Brazilian
+    GenChoice -->|Chords| Chords
+    Standard --> Effects
+    Brazilian --> Effects
+    Chords --> Effects
+    Effects --> StrudelCode
+
+    StrudelCode --> Rendering
+    RenderChoice -->|BlackHole| BlackHole
+    RenderChoice -->|Node.js| NodeJS
+    BlackHole --> RenderOut
+    NodeJS --> RenderOut
+
+    RenderOut --> Comparison
+    Comparison --> Compare
+    Compare --> Metrics
+    Metrics --> Charts
+    Metrics --> CompJSON
+
+    CompJSON --> AILoop
+    LoopStart -->|Yes| GapAnalysis
+    GapAnalysis --> Agent
+    Agent --> SQLQuery
+    SQLQuery --> LLM
+    LLM --> Validate
+    Validate -->|Yes| ReRender
+    Validate -->|No| LLM
+    ReRender --> ReCompare
+    ReCompare --> StoreRun
+    StoreRun --> StoreKnowledge
+    StoreKnowledge --> LoopStart
+    LoopStart -->|No| Report
+
+    Report --> GenReport
+    GenReport --> ReportHTML
+    ReportHTML --> Output
+    OutputFiles --> Output
+
+    %% Styling
+    style Input fill:#e3f2fd
+    style Cache fill:#fff3e0
+    style Separation fill:#e8f5e9
+    style Analysis fill:#f3e5f5
+    style Transcription fill:#e8f5e9
+    style AIAnalysis fill:#fce4ec
+    style Generation fill:#fff9c4
+    style Rendering fill:#ede7f6
+    style Comparison fill:#e0f2f1
+    style AILoop fill:#ffebee
+    style OllamaAgent fill:#fce4ec
+    style Storage fill:#e8eaf6
+    style Report fill:#f3e5f5
+    style Output fill:#c8e6c9
+```
+
+### External Dependencies
+
+| Component | Technology | Purpose |
+|-----------|------------|---------|
+| **yt-dlp** | Python CLI | YouTube audio download |
+| **ffmpeg/ffprobe** | C binary | Audio codec, duration |
+| **Demucs** | PyTorch | Stem separation (melodic/drums/bass/vocals) |
+| **Basic Pitch** | TensorFlow | Audio → MIDI transcription |
+| **librosa** | Python | BPM, key, onset detection |
+| **CLAP** | PyTorch | Zero-shot genre classification |
+| **Ollama** | Go binary | Local LLM (llama3:8b) |
+| **ClickHouse** | C++ binary | Learning database |
+| **Puppeteer** | Node.js | Browser automation for recording |
+| **node-web-audio-api** | Node.js | Offline audio synthesis |
+| **strudel.cc** | Web | Real Strudel engine (BlackHole recording) |
+
 ### Module Structure
 
 ```
