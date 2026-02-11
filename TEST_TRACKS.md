@@ -28,6 +28,12 @@ Use these verified YouTube URLs for testing. Do NOT guess or make up URLs.
 | Enter - Piąta Pixa | https://youtu.be/5OD7HO0f0nI | |
 | Enter - Nigdy Więcej Wojny | https://youtu.be/B74i6F8RD3M | 64.4% similarity |
 
+## Classical
+
+| Track | URL | Notes |
+|-------|-----|-------|
+| Debussy - Clair de Lune | https://youtu.be/WNcsUNKlAKw | 64.2% similarity, piano |
+
 ## Electro Swing
 
 | Track | URL | Notes |
