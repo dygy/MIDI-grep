@@ -18,6 +18,24 @@ def main():
         print(f"Error: Input file not found: {input_path}", file=sys.stderr)
         sys.exit(1)
 
+    # Check if audio is essentially silent (skip transcription for silent stems)
+    try:
+        import librosa
+        import numpy as np
+        y, sr = librosa.load(input_path, sr=22050, mono=True, duration=60)
+        rms = np.sqrt(np.mean(y**2))
+        SILENCE_THRESHOLD = 0.001
+        if rms < SILENCE_THRESHOLD:
+            print(f"  Audio is silent (RMS={rms:.6f} < {SILENCE_THRESHOLD}), creating empty MIDI")
+            # Create empty MIDI file
+            import pretty_midi
+            empty_midi = pretty_midi.PrettyMIDI()
+            empty_midi.write(output_path)
+            print(f"Empty MIDI saved to: {output_path}")
+            sys.exit(0)
+    except Exception as e:
+        print(f"  Warning: Could not check silence: {e}", file=sys.stderr)
+
     try:
         from basic_pitch.inference import predict_and_save
         from basic_pitch import ICASSP_2022_MODEL_PATH

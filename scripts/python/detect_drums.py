@@ -144,6 +144,24 @@ def detect_drums(audio_path, output_json, quantize=16, bpm=None):
     # Load audio
     y, sr = librosa.load(audio_path, sr=22050, mono=True)
 
+    # Check if audio is essentially silent (no real drums)
+    # This prevents false positives from noise in piano/classical tracks
+    rms = np.sqrt(np.mean(y**2))
+    SILENCE_THRESHOLD = 0.001  # Below this RMS, consider stem silent
+    if rms < SILENCE_THRESHOLD:
+        print(f"  Drums stem is silent (RMS={rms:.6f} < {SILENCE_THRESHOLD}), skipping detection")
+        result = {
+            'bpm': bpm or 120.0,
+            'quantize': quantize,
+            'total_hits': 0,
+            'hits': [],
+            'pattern': [],
+            'silent': True
+        }
+        with open(output_json, 'w') as f:
+            json.dump(result, f, indent=2)
+        return result
+
     # Estimate tempo if not provided
     if bpm is None:
         tempo, _ = librosa.beat.beat_track(y=y, sr=sr)
