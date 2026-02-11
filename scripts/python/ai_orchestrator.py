@@ -77,15 +77,15 @@ BASS_SOUNDS = """BASS SOUNDS (pick one):
 """
 
 MID_SOUNDS = """MID/PAD SOUNDS (pick one):
-- gm_pad_1_fantasia: lush, evolving, dreamy
-- gm_pad_2_warm: soft, ambient, cozy
-- gm_pad_3_polysynth: bright, synthetic, modern
-- gm_pad_4_choir: vocal, ethereal, atmospheric
+- gm_pad_new_age: lush, evolving, dreamy
+- gm_pad_warm: soft, ambient, cozy
+- gm_pad_poly: bright, synthetic, modern
+- gm_pad_choir: vocal, ethereal, atmospheric
 - gm_pad_sweep: moving, filter sweep, EDM
 - gm_string_ensemble_1: orchestral, lush, cinematic
 - gm_synth_strings_1: synthetic, smooth, pad-like
-- gm_electric_piano_1: warm, keys, soulful
-- gm_electric_piano_2: bright, digital, modern
+- gm_epiano1: warm, keys, soulful
+- gm_epiano2: bright, digital, modern
 - gm_organ_1: full, church, powerful
 - triangle: soft, pure, simple
 - sine: pure, sub, minimal
@@ -253,7 +253,7 @@ RULES:
     # Defaults per voice
     defaults = {
         "bass": {"sound": "sawtooth", "gain_pattern": "<0.2 0.3 0.6 0.4>", "gain_slow": 16, "lpf": 600, "hpf": 40, "room": 0.1},
-        "mid": {"sound": "gm_pad_2_warm", "gain_pattern": "<0.3 0.5 0.9 0.5>", "gain_slow": 16, "lpf": 4000, "hpf": 200, "room": 0.3},
+        "mid": {"sound": "gm_pad_warm", "gain_pattern": "<0.3 0.5 0.9 0.5>", "gain_slow": 16, "lpf": 4000, "hpf": 200, "room": 0.3},
         "high": {"sound": "gm_lead_1_square", "gain_pattern": "<0.1 0.3 0.7 0.4>", "gain_slow": 16, "lpf": 8000, "hpf": 500, "room": 0.2}
     }
     return defaults.get(voice_name, defaults["mid"])

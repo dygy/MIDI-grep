@@ -180,7 +180,7 @@ The `--render` flag synthesizes WAV audio from patterns:
 
 **Puppeteer BlackHole Recorder (`scripts/node/src/record-strudel-blackhole.ts`):** *(RECOMMENDED)*
 - Records REAL Strudel playback using BlackHole virtual audio device
-- Opens strudel.cc in browser, loads code, plays, records via ffmpeg
+- Opens `https://strudel.dygy.app/embed` in browser, loads code, plays, records via ffmpeg
 - **Runs invisibly** - browser hidden offscreen, doesn't steal focus
 - **Setup required:**
   1. Install BlackHole: `brew install blackhole-2ch` (requires reboot)
@@ -191,6 +191,7 @@ The `--render` flag synthesizes WAV audio from patterns:
   node dist/record-strudel-blackhole.js input.strudel -o output.wav -d 30
   ```
 - Produces 100% accurate Strudel audio (uses real Strudel engine, not emulation)
+- Uses self-hosted Strudel at `strudel.dygy.app` (spec: `.kiro/specs/midi-grep-embed-integration/`)
 
 **Key implementation details:**
 - `--autoplay-policy=no-user-gesture-required` bypasses gesture requirement

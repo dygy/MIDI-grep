@@ -802,10 +802,10 @@ BPM: {bpm:.0f}
 ## GENRE-SPECIFIC SOUNDS
 - **Brazilian Funk**: RolandTR808, gm_synth_bass_1, gm_lead_2_sawtooth
 - **Electro Swing**: LinnDrum, gm_acoustic_bass, gm_trumpet, gm_clarinet
-- **Trance**: RolandTR909, supersaw, gm_pad_7_halo, gm_lead_7_fifths
-- **LoFi**: BossDR110, triangle, gm_electric_piano_1, gm_vibraphone
+- **Trance**: RolandTR909, supersaw, gm_pad_halo, gm_lead_7_fifths
+- **LoFi**: BossDR110, triangle, gm_epiano1, gm_vibraphone
 - **House**: RolandTR909, gm_synth_bass_2, supersaw
-- **Jazz**: AkaiLinn, gm_acoustic_bass, gm_electric_piano_1
+- **Jazz**: AkaiLinn, gm_acoustic_bass, gm_epiano1
 
 ## TASK: Generate BEAT-SYNCED Strudel code
 

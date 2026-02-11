@@ -77,10 +77,9 @@ DRUM_BANKS = [
 # ALL 128 GENERAL MIDI INSTRUMENTS (gm_* prefix)
 # ============================================================================
 
-# Piano (1-8)
+# Piano (1-8) - NOTE: Strudel uses simplified names, not full GM names
 GM_PIANO = [
-    "gm_acoustic_grand_piano", "gm_bright_acoustic_piano", "gm_electric_grand_piano",
-    "gm_honkytonk_piano", "gm_electric_piano_1", "gm_electric_piano_2",
+    "gm_piano", "gm_epiano1", "gm_epiano2",
     "gm_harpsichord", "gm_clavinet"
 ]
 
@@ -93,7 +92,7 @@ GM_CHROMATIC_PERCUSSION = [
 # Organ (17-24)
 GM_ORGAN = [
     "gm_drawbar_organ", "gm_percussive_organ", "gm_rock_organ", "gm_church_organ",
-    "gm_reed_organ", "gm_accordion", "gm_harmonica", "gm_tango_accordion"
+    "gm_reed_organ", "gm_accordion", "gm_harmonica", "gm_bandoneon"
 ]
 
 # Guitar (25-32)
@@ -121,7 +120,7 @@ GM_STRINGS = [
 GM_ENSEMBLE = [
     "gm_string_ensemble_1", "gm_string_ensemble_2",
     "gm_synth_strings_1", "gm_synth_strings_2",
-    "gm_choir_aahs", "gm_voice_oohs", "gm_synth_voice", "gm_orchestra_hit"
+    "gm_choir_aahs", "gm_voice_oohs", "gm_synth_choir", "gm_orchestra_hit"
 ]
 
 # Brass (57-64)
@@ -149,22 +148,22 @@ GM_SYNTH_LEAD = [
     "gm_lead_7_fifths", "gm_lead_8_bass_lead"
 ]
 
-# Synth Pad (89-96)
+# Synth Pad (89-96) - NOTE: Strudel uses names without numbers
 GM_SYNTH_PAD = [
-    "gm_pad_1_new_age", "gm_pad_2_warm", "gm_pad_3_polysynth", "gm_pad_4_choir",
-    "gm_pad_5_bowed", "gm_pad_6_metallic", "gm_pad_7_halo", "gm_pad_8_sweep"
+    "gm_pad_new_age", "gm_pad_warm", "gm_pad_poly", "gm_pad_choir",
+    "gm_pad_bowed", "gm_pad_metallic", "gm_pad_halo", "gm_pad_sweep"
 ]
 
-# Synth Effects (97-104)
+# Synth Effects (97-104) - NOTE: Strudel uses names without numbers
 GM_SYNTH_FX = [
-    "gm_fx_1_rain", "gm_fx_2_soundtrack", "gm_fx_3_crystal", "gm_fx_4_atmosphere",
-    "gm_fx_5_brightness", "gm_fx_6_goblins", "gm_fx_7_echoes", "gm_fx_8_sci_fi"
+    "gm_fx_rain", "gm_fx_soundtrack", "gm_fx_crystal", "gm_fx_atmosphere",
+    "gm_fx_brightness", "gm_fx_goblins", "gm_fx_echoes", "gm_fx_sci_fi"
 ]
 
 # Ethnic (105-112)
 GM_ETHNIC = [
     "gm_sitar", "gm_banjo", "gm_shamisen", "gm_koto",
-    "gm_kalimba", "gm_bag_pipe", "gm_fiddle", "gm_shanai"
+    "gm_kalimba", "gm_bagpipe", "gm_fiddle", "gm_shanai"
 ]
 
 # Percussive (113-119)
@@ -176,7 +175,7 @@ GM_PERCUSSIVE = [
 # Sound Effects (120-128)
 GM_SOUND_FX = [
     "gm_reverse_cymbal", "gm_guitar_fret_noise", "gm_breath_noise",
-    "gm_seashore", "gm_bird_tweet", "gm_telephone_ring",
+    "gm_seashore", "gm_bird_tweet", "gm_telephone",
     "gm_helicopter", "gm_applause", "gm_gunshot"
 ]
 
@@ -231,7 +230,7 @@ GENRE_PALETTES = {
         "drums": ["RolandTR808", "RolandTR909", "AkaiMPC60"],
         "bass": ["sawtooth", "gm_synth_bass_1", "gm_synth_bass_2", "gm_slap_bass_1"],
         "lead": ["gm_lead_2_sawtooth", "gm_lead_1_square", "supersaw", "gm_synth_brass_1"],
-        "pad": ["gm_pad_3_polysynth", "gm_synth_brass_1", "gm_pad_6_metallic"],
+        "pad": ["gm_pad_poly", "gm_synth_brass_1", "gm_pad_metallic"],
         "high": ["gm_lead_5_charang", "square", "gm_music_box", "gm_synth_voice"],
         "character": "aggressive, punchy, 808-heavy"
     },
@@ -239,7 +238,7 @@ GENRE_PALETTES = {
         "drums": ["LinnDrum", "RolandTR909", "RolandTR808", "RolandCompurhythm78"],
         "bass": ["gm_acoustic_bass", "gm_electric_bass_finger", "triangle", "gm_contrabass"],
         "lead": ["gm_trumpet", "gm_clarinet", "gm_alto_sax", "gm_violin", "gm_trombone"],
-        "pad": ["gm_string_ensemble_1", "gm_pad_2_warm", "gm_choir_aahs"],
+        "pad": ["gm_string_ensemble_1", "gm_pad_warm", "gm_choir_aahs"],
         "high": ["gm_glockenspiel", "gm_vibraphone", "gm_music_box", "gm_celesta"],
         "character": "jazzy, brass, vintage samples"
     },
@@ -247,47 +246,47 @@ GENRE_PALETTES = {
         "drums": ["RolandTR909", "RolandTR808", "AlesisHR16", "KorgM1"],
         "bass": ["supersaw", "gm_synth_bass_1", "gm_lead_8_bass_lead", "sawtooth"],
         "lead": ["supersaw", "gm_lead_2_sawtooth", "gm_lead_7_fifths", "gm_synth_brass_1"],
-        "pad": ["gm_pad_6_metallic", "gm_pad_3_polysynth", "gm_synth_strings_1"],
-        "high": ["gm_lead_1_square", "gm_fx_3_crystal", "gm_lead_5_charang"],
+        "pad": ["gm_pad_metallic", "gm_pad_poly", "gm_synth_strings_1"],
+        "high": ["gm_lead_1_square", "gm_fx_crystal", "gm_lead_5_charang"],
         "character": "heavy, distorted, eurobeat"
     },
     "phonk": {
         "drums": ["RolandTR808", "CasioRZ1", "EmuSP12", "MPC1000"],
         "bass": ["sine", "triangle", "gm_synth_bass_2", "gm_fretless_bass"],
-        "lead": ["gm_fx_7_echoes", "gm_lead_6_voice", "gm_pad_4_choir", "gm_voice_oohs"],
-        "pad": ["gm_pad_8_sweep", "gm_fx_4_atmosphere", "gm_pad_5_bowed"],
+        "lead": ["gm_fx_echoes", "gm_lead_voice", "gm_pad_choir", "gm_voice_oohs"],
+        "pad": ["gm_pad_sweep", "gm_fx_atmosphere", "gm_pad_bowed"],
         "high": ["gm_music_box", "gm_celesta", "gm_glockenspiel", "gm_kalimba"],
         "character": "dark, lo-fi, Memphis rap samples"
     },
     "house": {
         "drums": ["RolandTR909", "RolandTR808", "LinnDrum", "OberheimDMX"],
         "bass": ["sine", "triangle", "gm_synth_bass_1", "gm_electric_bass_finger"],
-        "lead": ["gm_lead_2_sawtooth", "supersaw", "gm_pad_3_polysynth", "gm_synth_brass_1"],
-        "pad": ["gm_pad_2_warm", "gm_string_ensemble_1", "gm_pad_7_halo"],
-        "high": ["gm_electric_piano_1", "gm_vibraphone", "gm_marimba"],
+        "lead": ["gm_lead_2_sawtooth", "supersaw", "gm_pad_poly", "gm_synth_brass_1"],
+        "pad": ["gm_pad_warm", "gm_string_ensemble_1", "gm_pad_halo"],
+        "high": ["gm_epiano1", "gm_vibraphone", "gm_marimba"],
         "character": "4-on-floor, warm, classic"
     },
     "jpop": {
         "drums": ["RolandTR909", "RolandTR707", "YamahaRM50", "KorgM1"],
         "bass": ["gm_electric_bass_pick", "gm_synth_bass_1", "sawtooth", "gm_slap_bass_1"],
         "lead": ["gm_electric_guitar_clean", "gm_lead_2_sawtooth", "supersaw", "gm_bright_acoustic_piano"],
-        "pad": ["gm_pad_1_new_age", "gm_string_ensemble_1", "gm_synth_strings_1", "gm_choir_aahs"],
-        "high": ["gm_glockenspiel", "gm_music_box", "gm_electric_piano_1", "gm_celesta"],
+        "pad": ["gm_pad_new_age", "gm_string_ensemble_1", "gm_synth_strings_1", "gm_choir_aahs"],
+        "high": ["gm_glockenspiel", "gm_music_box", "gm_epiano1", "gm_celesta"],
         "character": "bright, layered, energetic"
     },
     "trance": {
         "drums": ["RolandTR909", "RolandTR808", "RolandTR707"],
         "bass": ["sawtooth", "supersaw", "gm_synth_bass_1", "gm_lead_8_bass_lead"],
         "lead": ["supersaw", "gm_lead_2_sawtooth", "gm_lead_7_fifths", "gm_synth_brass_1"],
-        "pad": ["gm_pad_7_halo", "gm_pad_3_polysynth", "supersaw", "gm_pad_1_new_age"],
-        "high": ["gm_fx_3_crystal", "gm_lead_5_charang", "gm_glockenspiel"],
+        "pad": ["gm_pad_halo", "gm_pad_poly", "supersaw", "gm_pad_new_age"],
+        "high": ["gm_fx_crystal", "gm_lead_5_charang", "gm_glockenspiel"],
         "character": "uplifting, supersaw-heavy, layered"
     },
     "lofi": {
         "drums": ["RolandTR707", "BossDR110", "CasioVL1", "RolandCompurhythm78"],
         "bass": ["triangle", "sine", "gm_acoustic_bass", "gm_fretless_bass"],
-        "lead": ["gm_electric_piano_1", "gm_vibraphone", "gm_acoustic_guitar_nylon", "gm_flute"],
-        "pad": ["gm_pad_2_warm", "gm_pad_1_new_age", "gm_string_ensemble_1"],
+        "lead": ["gm_epiano1", "gm_vibraphone", "gm_acoustic_guitar_nylon", "gm_flute"],
+        "pad": ["gm_pad_warm", "gm_pad_new_age", "gm_string_ensemble_1"],
         "high": ["gm_music_box", "gm_celesta", "gm_kalimba", "gm_glockenspiel"],
         "character": "warm, dusty, jazzy chords"
     },
@@ -295,32 +294,32 @@ GENRE_PALETTES = {
         "drums": ["RolandTR808", "LinnDrum", "OberheimDMX", "SimmonsSDS5"],
         "bass": ["sawtooth", "gm_synth_bass_1", "gm_synth_bass_2", "supersaw"],
         "lead": ["gm_lead_2_sawtooth", "supersaw", "gm_lead_5_charang", "gm_synth_brass_1"],
-        "pad": ["gm_pad_3_polysynth", "gm_pad_7_halo", "gm_synth_strings_1", "gm_pad_2_warm"],
-        "high": ["gm_fx_3_crystal", "gm_lead_1_square", "gm_electric_piano_1"],
+        "pad": ["gm_pad_poly", "gm_pad_halo", "gm_synth_strings_1", "gm_pad_warm"],
+        "high": ["gm_fx_crystal", "gm_lead_1_square", "gm_epiano1"],
         "character": "retro 80s, analog synths, neon"
     },
     "dnb": {
         "drums": ["RolandTR909", "AkaiMPC60", "EmuSP12", "AlesisHR16"],
         "bass": ["sawtooth", "gm_synth_bass_1", "supersaw", "gm_lead_8_bass_lead"],
-        "lead": ["gm_lead_2_sawtooth", "supersaw", "gm_pad_6_metallic", "gm_synth_brass_1"],
-        "pad": ["gm_pad_3_polysynth", "gm_fx_4_atmosphere", "gm_pad_8_sweep"],
-        "high": ["gm_fx_3_crystal", "gm_lead_5_charang", "gm_glockenspiel"],
+        "lead": ["gm_lead_2_sawtooth", "supersaw", "gm_pad_metallic", "gm_synth_brass_1"],
+        "pad": ["gm_pad_poly", "gm_fx_atmosphere", "gm_pad_sweep"],
+        "high": ["gm_fx_crystal", "gm_lead_5_charang", "gm_glockenspiel"],
         "character": "fast breaks, heavy bass, atmospheric"
     },
     "techno": {
         "drums": ["RolandTR909", "RolandTR808", "RolandTR606", "OberheimDMX"],
         "bass": ["sine", "sawtooth", "gm_synth_bass_1", "triangle"],
-        "lead": ["gm_lead_1_square", "gm_lead_2_sawtooth", "gm_fx_8_sci_fi"],
-        "pad": ["gm_pad_6_metallic", "gm_fx_4_atmosphere", "gm_pad_8_sweep"],
-        "high": ["gm_fx_3_crystal", "gm_percussion", "gm_lead_5_charang"],
+        "lead": ["gm_lead_1_square", "gm_lead_2_sawtooth", "gm_fx_sci_fi"],
+        "pad": ["gm_pad_metallic", "gm_fx_atmosphere", "gm_pad_sweep"],
+        "high": ["gm_fx_crystal", "gm_percussion", "gm_lead_5_charang"],
         "character": "minimal, industrial, hypnotic"
     },
     "jazz": {
         "drums": ["LinnDrum", "RolandCompurhythm78", "BossDR110"],
         "bass": ["gm_acoustic_bass", "gm_electric_bass_finger", "gm_fretless_bass"],
         "lead": ["gm_trumpet", "gm_alto_sax", "gm_tenor_sax", "gm_clarinet", "gm_flute"],
-        "pad": ["gm_string_ensemble_1", "gm_pad_2_warm", "gm_choir_aahs"],
-        "high": ["gm_vibraphone", "gm_electric_piano_1", "gm_acoustic_grand_piano"],
+        "pad": ["gm_string_ensemble_1", "gm_pad_warm", "gm_choir_aahs"],
+        "high": ["gm_vibraphone", "gm_epiano1", "gm_acoustic_grand_piano"],
         "character": "acoustic, swing, sophisticated"
     },
     "classical": {
@@ -333,17 +332,17 @@ GENRE_PALETTES = {
     },
     "ambient": {
         "drums": ["RolandTR707", "CasioVL1"],
-        "bass": ["sine", "triangle", "gm_pad_5_bowed"],
-        "lead": ["gm_pad_7_halo", "gm_fx_4_atmosphere", "gm_fx_7_echoes"],
-        "pad": ["gm_pad_1_new_age", "gm_pad_7_halo", "gm_fx_4_atmosphere", "gm_pad_2_warm"],
-        "high": ["gm_fx_3_crystal", "gm_music_box", "gm_celesta", "gm_tubular_bells"],
+        "bass": ["sine", "triangle", "gm_pad_bowed"],
+        "lead": ["gm_pad_halo", "gm_fx_atmosphere", "gm_fx_echoes"],
+        "pad": ["gm_pad_new_age", "gm_pad_halo", "gm_fx_atmosphere", "gm_pad_warm"],
+        "high": ["gm_fx_crystal", "gm_music_box", "gm_celesta", "gm_tubular_bells"],
         "character": "atmospheric, evolving, spacious"
     },
     "metal": {
         "drums": ["RolandTR909", "SimmonsSDS5", "AlesisHR16"],
         "bass": ["gm_distortion_guitar", "gm_electric_bass_pick", "sawtooth"],
         "lead": ["gm_distortion_guitar", "gm_overdriven_guitar", "gm_lead_5_charang"],
-        "pad": ["gm_pad_6_metallic", "gm_synth_strings_1"],
+        "pad": ["gm_pad_metallic", "gm_synth_strings_1"],
         "high": ["gm_distortion_guitar", "gm_lead_1_square"],
         "character": "heavy, distorted, aggressive"
     },
@@ -351,15 +350,15 @@ GENRE_PALETTES = {
         "drums": ["RolandTR808", "LinnDrum", "RolandCompurhythm78"],
         "bass": ["gm_electric_bass_finger", "gm_acoustic_bass", "sine"],
         "lead": ["gm_electric_guitar_clean", "gm_trumpet", "gm_harmonica"],
-        "pad": ["gm_drawbar_organ", "gm_rock_organ", "gm_pad_2_warm"],
+        "pad": ["gm_drawbar_organ", "gm_rock_organ", "gm_pad_warm"],
         "high": ["gm_electric_guitar_muted", "gm_glockenspiel"],
         "character": "offbeat, laid-back, warm"
     },
     "default": {
         "drums": ["RolandTR808", "RolandTR909", "LinnDrum"],
         "bass": ["sawtooth", "gm_synth_bass_1", "triangle", "gm_electric_bass_finger"],
-        "lead": ["gm_lead_2_sawtooth", "supersaw", "gm_electric_piano_1", "gm_trumpet"],
-        "pad": ["gm_pad_2_warm", "gm_string_ensemble_1", "gm_pad_3_polysynth"],
+        "lead": ["gm_lead_2_sawtooth", "supersaw", "gm_epiano1", "gm_trumpet"],
+        "pad": ["gm_pad_warm", "gm_string_ensemble_1", "gm_pad_poly"],
         "high": ["gm_music_box", "gm_glockenspiel", "gm_lead_5_charang", "gm_vibraphone"],
         "character": "balanced, versatile"
     }
@@ -409,23 +408,23 @@ def select_sounds_for_timbre(profile: TimbreProfile) -> Dict[str, List[str]]:
     if profile.brightness > 0.7 and profile.harmonic_richness > 0.6:
         sounds["lead"] = ["supersaw", "gm_lead_7_fifths", "gm_brass_section", "gm_synth_brass_1"]
     elif profile.brightness < 0.4:
-        sounds["lead"] = ["triangle", "gm_flute", "gm_pad_2_warm", "gm_recorder"]
+        sounds["lead"] = ["triangle", "gm_flute", "gm_pad_warm", "gm_recorder"]
     else:
         sounds["lead"] = list(base_palette["lead"])
 
     # Select pad sounds based on sustain and warmth
     if profile.sustain > 0.7:
-        sounds["pad"] = ["gm_string_ensemble_1", "gm_pad_7_halo", "gm_pad_5_bowed", "gm_choir_aahs"]
+        sounds["pad"] = ["gm_string_ensemble_1", "gm_pad_halo", "gm_pad_bowed", "gm_choir_aahs"]
     elif profile.warmth > 0.6:
-        sounds["pad"] = ["gm_pad_2_warm", "gm_pad_1_new_age", "gm_synth_strings_1"]
+        sounds["pad"] = ["gm_pad_warm", "gm_pad_new_age", "gm_synth_strings_1"]
     else:
         sounds["pad"] = list(base_palette["pad"])
 
     # Select high sounds based on brightness
     if profile.brightness > 0.8:
-        sounds["high"] = ["gm_glockenspiel", "gm_celesta", "gm_fx_3_crystal", "gm_piccolo"]
+        sounds["high"] = ["gm_glockenspiel", "gm_celesta", "gm_fx_crystal", "gm_piccolo"]
     elif profile.noise_content > 0.5:
-        sounds["high"] = ["gm_fx_7_echoes", "gm_fx_4_atmosphere", "gm_breath_noise"]
+        sounds["high"] = ["gm_fx_echoes", "gm_fx_atmosphere", "gm_breath_noise"]
     else:
         sounds["high"] = list(base_palette["high"])
 

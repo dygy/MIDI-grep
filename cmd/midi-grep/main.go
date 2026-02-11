@@ -1052,6 +1052,7 @@ func renderStrudelNodeJS(inputPath, outputPath string, duration float64, withSte
 
 // renderStrudelBlackHole uses BlackHole virtual audio device for 100% accurate Strudel recording
 // This opens Strudel in a browser and records the actual audio via BlackHole
+// After recording, it runs demucs to separate the mix into stems for per-stem comparison
 // Requires: brew install blackhole-2ch (and reboot after install)
 func renderStrudelBlackHole(inputPath, outputPath string, duration float64) error {
 	// Find BlackHole recorder script
@@ -1095,7 +1096,27 @@ func renderStrudelBlackHole(inputPath, outputPath string, duration float64) erro
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
 
-	return cmd.Run()
+	if err := cmd.Run(); err != nil {
+		return err
+	}
+
+	// After recording, separate the mix into stems using demucs for per-stem comparison
+	fmt.Println("       Separating BlackHole recording into stems...")
+	scriptsDir := findScriptsDir()
+	python := findPython(scriptsDir)
+	separateScript := filepath.Join(scriptsDir, "separate.py")
+	outputDir := filepath.Dir(outputPath)
+
+	// Run demucs to get stems from recorded audio (full mode for all stems, with render_ prefix)
+	sepCmd := exec.Command(python, separateScript, outputPath, outputDir, "--mode", "full", "--prefix", "render")
+	sepCmd.Stdout = os.Stdout
+	sepCmd.Stderr = os.Stderr
+	if err := sepCmd.Run(); err != nil {
+		// Non-fatal warning - continue without stems
+		fmt.Printf("       Warning: stem separation failed: %v\n", err)
+	}
+
+	return nil
 }
 
 // isBlackHoleAvailable checks if BlackHole virtual audio device is installed

@@ -140,9 +140,9 @@ STRUDEL_SOUND_LIBRARY = """
 
 ### General MIDI Instruments (gm_* prefix)
 **Bass**: gm_acoustic_bass, gm_electric_bass_finger, gm_electric_bass_pick, gm_fretless_bass, gm_slap_bass_1, gm_synth_bass_1, gm_synth_bass_2
-**Piano/Keys**: gm_acoustic_grand_piano, gm_bright_acoustic_piano, gm_electric_piano_1, gm_electric_piano_2, gm_harpsichord, gm_clavinet, gm_celesta
+**Piano/Keys**: gm_piano, gm_bright_acoustic_piano, gm_epiano1, gm_epiano2, gm_harpsichord, gm_clavinet, gm_celesta
 **Leads**: gm_lead_1_square, gm_lead_2_sawtooth, gm_lead_3_calliope, gm_lead_5_charang, gm_lead_6_voice, gm_lead_7_fifths
-**Pads**: gm_pad_1_new_age, gm_pad_2_warm, gm_pad_3_polysynth, gm_pad_4_choir, gm_string_ensemble_1, gm_synth_strings_1
+**Pads**: gm_pad_new_age, gm_pad_warm, gm_pad_poly, gm_pad_choir, gm_string_ensemble_1, gm_synth_strings_1
 **Brass**: gm_trumpet, gm_trombone, gm_alto_sax, gm_tenor_sax, gm_brass_section, gm_synth_brass_1
 **Strings**: gm_violin, gm_viola, gm_cello, gm_contrabass, gm_orchestral_harp
 **Percussion**: gm_glockenspiel, gm_music_box, gm_vibraphone, gm_marimba, gm_xylophone
@@ -300,7 +300,7 @@ def get_voice_prompt(voice_type: str, comparison_data: dict, current_fx: str) ->
         band_diff = comparison_data.get("band_mid", 0) + comparison_data.get("band_low_mid", 0)
         freq_range = "250Hz-2kHz"
         filter_advice = "Use .hpf(200-400) to leave room for bass. Use .lpf(4000-6000) for warmth."
-        sound_options = "gm_electric_piano_1, gm_lead_2_sawtooth, gm_pad_2_warm, supersaw"
+        sound_options = "gm_epiano1, gm_lead_2_sawtooth, gm_pad_warm, supersaw"
         gain_range = "0.5-1.5 (main melodic content)"
     elif voice_type == "high":
         band_diff = comparison_data.get("band_high", 0) + comparison_data.get("band_high_mid", 0)

@@ -7,10 +7,13 @@
  *
  * The script:
  * 1. Grants microphone permission (to enumerate audio devices)
- * 2. Opens strudel.cc
+ * 2. Opens strudel.dygy.app/embed (self-hosted Strudel REPL)
  * 3. Sets AudioContext.setSinkId to BlackHole (direct API, not settings UI)
  * 4. Inserts code and clicks play
  * 5. Records via ffmpeg from BlackHole
+ *
+ * Usage:
+ *   node dist/record-strudel-blackhole.js input.strudel -o output.wav -d 30
  */
 
 import puppeteer from 'puppeteer';
@@ -25,10 +28,15 @@ interface RecordOptions {
 async function recordStrudel(strudelCode: string, options: RecordOptions): Promise<void> {
   const { duration, outputPath } = options;
 
+  // URL configuration - use self-hosted Strudel embed endpoint
+  const STRUDEL_URL = 'https://strudel.dygy.app/embed';
+  const STRUDEL_ORIGIN = 'https://strudel.dygy.app';
+
   console.log('━'.repeat(60));
   console.log('Strudel BlackHole Recorder');
   console.log('━'.repeat(60));
   console.log(`Duration: ${duration}s | Output: ${outputPath}`);
+  console.log(`Using: ${STRUDEL_URL}`);
 
   // Start ffmpeg recording from BlackHole
   console.log('Starting ffmpeg recording from BlackHole...');
@@ -73,7 +81,7 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
 
   // Use default context (NOT incognito) to preserve cached samples
   const context = browser.defaultBrowserContext();
-  await context.overridePermissions('https://strudel.cc', ['microphone', 'camera']);
+  await context.overridePermissions(STRUDEL_ORIGIN, ['microphone', 'camera']);
 
   const page = await browser.newPage();
 
@@ -95,7 +103,7 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
     console.log(`[NET FAIL] ${request.url().substring(0, 100)} - ${request.failure()?.errorText}`);
   });
 
-  await page.goto('https://strudel.cc/', { waitUntil: 'networkidle2', timeout: 60000 });
+  await page.goto(STRUDEL_URL, { waitUntil: 'networkidle2', timeout: 60000 });
   await page.waitForSelector('.cm-content', { timeout: 30000 });
   console.log('Page loaded');
 
@@ -195,20 +203,29 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
   }
   console.log('Audio output set to BlackHole:', JSON.stringify(sinkResult));
 
-  // Wait for samples to load (button becomes "stop")
-  console.log('Waiting for samples to load...');
+  // Wait for playback to start (either "stop" button appears OR AudioContext is running)
+  console.log('Waiting for playback to start...');
   const startTime = Date.now();
   let isPlaying = false;
   while (Date.now() - startTime < 60000) {
     isPlaying = await page.evaluate(() => {
+      // Check for stop button (strudel.cc main site)
       const btns = document.querySelectorAll('button');
       for (const btn of btns) {
         if (btn.textContent?.toLowerCase().includes('stop')) return true;
       }
+      // Check if AudioContext is running (embed mode)
+      try {
+        // @ts-ignore - getAudioContext is Strudel's global function
+        const ctx = (window as any).getAudioContext?.();
+        if (ctx && ctx.state === 'running') return true;
+      } catch (e) {
+        // Ignore - AudioContext might not be ready yet
+      }
       return false;
     });
     if (isPlaying) {
-      console.log('Samples loaded, recording...');
+      console.log('Playback started, recording...');
       break;
     }
     await new Promise(r => setTimeout(r, 200));
@@ -266,6 +283,8 @@ async function main() {
   for (let i = 1; i < args.length; i++) {
     if (args[i] === '-o') outputPath = args[++i];
     else if (args[i] === '-d') duration = parseFloat(args[++i]);
+    // Ignore --local flag for backwards compatibility (now always uses strudel.dygy.app)
+    else if (args[i] === '--local') continue;
   }
 
   if (!fs.existsSync(inputFile)) {

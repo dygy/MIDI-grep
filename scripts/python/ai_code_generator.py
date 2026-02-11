@@ -523,7 +523,7 @@ def profile_to_strudel_params(profile: AudioProfile, genre: str = "") -> Dict:
         else:
             params['sound_mid'] = 'gm_pad_poly'
 
-        params['sound_pad'] = 'gm_pad_2_warm'
+        params['sound_pad'] = 'gm_pad_warm'
 
         # High sound based on brightness
         if profile.brightness in ['very_bright', 'bright']:
