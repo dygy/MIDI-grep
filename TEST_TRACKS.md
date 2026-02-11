@@ -26,6 +26,7 @@ Use these verified YouTube URLs for testing. Do NOT guess or make up URLs.
 | Enter - Druga Pixa | https://youtu.be/FEr7JgX0HhE | |
 | Enter - Pixa | https://youtu.be/aQOEAVV3Pis | |
 | Enter - Piąta Pixa | https://youtu.be/5OD7HO0f0nI | |
+| Enter - Nigdy Więcej Wojny | https://youtu.be/B74i6F8RD3M | 64.4% similarity |
 
 ## Electro Swing
 
