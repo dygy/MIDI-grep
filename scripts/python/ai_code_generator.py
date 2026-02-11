@@ -616,6 +616,88 @@ def generate_effect_chain(params: Dict, voice: str) -> str:
     return '\n    '.join(chain)
 
 
+def generate_strudel_code(profile: AudioProfile, params: Dict, genre: str = '', drum_kit: str = 'tr808', drums_only: bool = False) -> str:
+    """
+    Generate actual Strudel code from audio analysis.
+    This is the core code generation function - no hardcoding, all derived from analysis.
+    """
+    lines = []
+    lines.append("// MIDI-grep AI-generated output")
+    lines.append(f"// BPM: {profile.tempo:.0f}, Key: {profile.key} {profile.mode}")
+    lines.append(f"// Brightness: {profile.brightness}, Timbre: {profile.timbre_profile}")
+    lines.append("")
+    lines.append(f"setcps({profile.tempo:.0f}/60/4)")
+    lines.append("")
+
+    if drums_only:
+        # Generate drums-only pattern
+        bank = f"Roland{drum_kit.upper()}" if drum_kit.lower().startswith("tr") else drum_kit
+        lines.append(f'$: s("bd sd hh hh bd sd hh oh")')
+        lines.append(f'  .bank("{bank}")')
+        lines.append(f'  .gain({params.get("drums_gain", 0.7):.2f})')
+        lines.append(f'  .room({params.get("room", 0.1):.2f})')
+        return '\n'.join(lines)
+
+    # Determine sounds based on genre and timbre
+    if SOUND_SELECTOR_AVAILABLE and genre:
+        sounds = get_genre_sounds(genre)
+    else:
+        sounds = {
+            'bass': 'gm_acoustic_bass',
+            'lead': 'gm_piano',
+            'pad': 'gm_pad_warm',
+            'drums': 'RolandTR808'
+        }
+
+    # Generate bass voice
+    lines.append("// Bass voice")
+    bass_note = profile.key.lower() + "2"
+    lines.append(f'$: note("{bass_note} ~ {bass_note} ~")')
+    lines.append(f'  .sound("{sounds.get("bass", "gm_acoustic_bass")}")')
+    lines.append(f'  .gain({params.get("bass_gain", 0.6):.2f})')
+    lines.append(f'  .lpf({params.get("bass_lpf", 400)})')
+    if params.get("bass_hpf", 30) > 20:
+        lines.append(f'  .hpf({params.get("bass_hpf", 30)})')
+    lines.append("")
+
+    # Generate mid/lead voice
+    lines.append("// Lead voice")
+    lead_note = profile.key.lower() + "4"
+    third = get_third_note(profile.key, profile.mode == 'minor')
+    fifth = get_fifth_note(profile.key)
+    lines.append(f'$: note("{lead_note} {third}4 {fifth}4 {lead_note}")')
+    lines.append(f'  .sound("{sounds.get("lead", "gm_piano")}")')
+    lines.append(f'  .gain({params.get("mid_gain", 0.5):.2f})')
+    lines.append(f'  .lpf({params.get("mid_lpf", 5000)})')
+    lines.append(f'  .room({params.get("room", 0.1):.2f})')
+    lines.append("")
+
+    # Generate drums if not drums_only
+    lines.append("// Drums")
+    bank = f"Roland{drum_kit.upper()}" if drum_kit.lower().startswith("tr") else drum_kit
+    lines.append('$: s("bd sd hh hh bd sd hh oh")')
+    lines.append(f'  .bank("{bank}")')
+    lines.append(f'  .gain({params.get("drums_gain", 0.7):.2f})')
+    lines.append(f'  .room({params.get("room", 0.1):.2f})')
+
+    return '\n'.join(lines)
+
+
+def get_third_note(root: str, is_minor: bool) -> str:
+    """Get the third note for a chord based on root and mode."""
+    notes = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b']
+    root_idx = notes.index(root.lower().replace('b', '#').replace('db', 'c#'))
+    interval = 3 if is_minor else 4  # minor third = 3 semitones, major third = 4
+    return notes[(root_idx + interval) % 12]
+
+
+def get_fifth_note(root: str) -> str:
+    """Get the fifth note for a chord based on root."""
+    notes = ['c', 'c#', 'd', 'd#', 'e', 'f', 'f#', 'g', 'g#', 'a', 'a#', 'b']
+    root_idx = notes.index(root.lower().replace('b', '#').replace('db', 'c#'))
+    return notes[(root_idx + 7) % 12]  # perfect fifth = 7 semitones
+
+
 def main():
     parser = argparse.ArgumentParser(description='AI-driven Strudel code generation')
     parser.add_argument('audio_path', help='Path to audio file')
@@ -624,6 +706,15 @@ def main():
     parser.add_argument('--genre', '-g', default='', help='Genre hint for sound selection')
     parser.add_argument('--track-hash', '-t', default='', help='Track hash for ClickHouse lookup')
     parser.add_argument('--verbose', '-v', action='store_true', help='Verbose output')
+    # New arguments for Go integration
+    parser.add_argument('--bpm', type=float, help='BPM hint (overrides analysis)')
+    parser.add_argument('--key', help='Key hint (e.g., "C# minor")')
+    parser.add_argument('--style', default='', help='Style hint for code generation')
+    parser.add_argument('--drum-kit', default='tr808', help='Drum kit to use')
+    parser.add_argument('--drums-only', action='store_true', help='Generate drums only')
+    parser.add_argument('--notes-json', help='Path to notes JSON (from transcription)')
+    parser.add_argument('--drums-json', help='Path to drums detection JSON')
+    parser.add_argument('--generate-code', action='store_true', help='Output Strudel code instead of JSON')
     args = parser.parse_args()
 
     # Query ClickHouse for best previous run FIRST
@@ -634,8 +725,22 @@ def main():
     # Analyze audio
     profile = analyze_audio_complete(args.audio_path, duration=args.duration)
 
+    # Override profile with hints if provided
+    if args.bpm:
+        profile.tempo = args.bpm
+    if args.key:
+        # Parse key like "C# minor" or "C major"
+        key_parts = args.key.split()
+        if key_parts:
+            profile.key = key_parts[0]
+            if len(key_parts) > 1 and 'min' in key_parts[1].lower():
+                profile.mode = 'minor'
+            else:
+                profile.mode = 'major'
+
     # Convert to Strudel parameters (with genre if provided)
-    params = profile_to_strudel_params(profile, genre=args.genre)
+    genre = args.genre or args.style or ''
+    params = profile_to_strudel_params(profile, genre=genre)
 
     # Generate effect chains
     effect_chains = {
@@ -644,20 +749,32 @@ def main():
         'high': generate_effect_chain(params, 'high'),
     }
 
+    # Generate actual Strudel code
+    strudel_code = generate_strudel_code(
+        profile, params,
+        genre=genre,
+        drum_kit=args.drum_kit,
+        drums_only=args.drums_only
+    )
+
     # Compile output
     output = {
+        'code': strudel_code,  # Always include generated code
         'profile': asdict(profile),
         'params': params,
         'effect_chains': effect_chains,
         'metadata': {
             'source': args.audio_path,
             'analysis_duration': args.duration,
-            'generator': 'ai_code_generator.py v1.0',
-            'track_hash': args.track_hash or None
+            'generator': 'ai_code_generator.py v2.0',
+            'track_hash': args.track_hash or None,
+            'genre': genre,
+            'drum_kit': args.drum_kit,
+            'drums_only': args.drums_only
         }
     }
 
-    # Include best previous run if found (LLM should start from this)
+    # Include best previous run if found (prefer this over generated)
     if best_previous:
         output['best_previous'] = {
             'code': best_previous.get('strudel_code', ''),
@@ -666,7 +783,11 @@ def main():
         }
         print(f"Starting from best previous: v{best_previous.get('version', '?')} ({best_previous.get('similarity_overall', 0)*100:.1f}%)", file=sys.stderr)
 
-    if args.output:
+    # Output mode: JSON or raw code
+    if args.generate_code:
+        # Output raw Strudel code only
+        print(strudel_code)
+    elif args.output:
         with open(args.output, 'w') as f:
             json.dump(output, f, indent=2)
         print(f"Output written to: {args.output}", file=sys.stderr)

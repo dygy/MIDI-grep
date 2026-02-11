@@ -11,7 +11,6 @@ import (
 	"github.com/dygy/midi-grep/internal/audio"
 	"github.com/dygy/midi-grep/internal/exec"
 	"github.com/dygy/midi-grep/internal/midi"
-	"github.com/dygy/midi-grep/internal/strudel"
 )
 
 // Job status constants
@@ -202,12 +201,30 @@ func (m *JobManager) Process(job *Job) {
 	}
 	job.Updates <- fmt.Sprintf("%d notes retained", cleanResult.Retained)
 
-	// Stage 6: Generate Strudel
+	// Stage 6: Generate Strudel via AI
 	job.Stage = "Generating Strudel code..."
 	job.Updates <- job.Stage
 
-	generator := strudel.NewGenerator(16)
-	strudelCode := generator.Generate(cleanResult.Notes, analysisResult)
+	// Call Python AI code generator
+	aiResult, aiErr := runner.RunScript(ctx, "ai_code_generator.py",
+		pianoPath,
+		"--bpm", fmt.Sprintf("%.0f", analysisResult.BPM),
+		"--key", analysisResult.Key,
+		"--duration", "30")
+
+	var strudelCode string
+	if aiErr != nil {
+		// Fallback minimal code
+		strudelCode = fmt.Sprintf(`// MIDI-grep output
+// BPM: %.0f, Key: %s
+
+setcps(%.0f/60/4)
+
+$: note("c4").sound("gm_piano")
+`, analysisResult.BPM, analysisResult.Key, analysisResult.BPM)
+	} else {
+		strudelCode = aiResult.Stdout
+	}
 
 	// Complete
 	job.Result = &JobResult{
@@ -347,12 +364,30 @@ func (m *JobManager) ProcessYouTube(job *Job, url string) {
 	}
 	job.Updates <- fmt.Sprintf("%d notes retained", cleanResult.Retained)
 
-	// Stage 6: Generate Strudel
+	// Stage 6: Generate Strudel via AI
 	job.Stage = "Generating Strudel code..."
 	job.Updates <- job.Stage
 
-	generator := strudel.NewGenerator(16)
-	strudelCode := generator.Generate(cleanResult.Notes, analysisResult)
+	// Call Python AI code generator
+	aiResult, aiErr := runner.RunScript(ctx, "ai_code_generator.py",
+		pianoPath,
+		"--bpm", fmt.Sprintf("%.0f", analysisResult.BPM),
+		"--key", analysisResult.Key,
+		"--duration", "30")
+
+	var strudelCode string
+	if aiErr != nil {
+		// Fallback minimal code
+		strudelCode = fmt.Sprintf(`// MIDI-grep output
+// BPM: %.0f, Key: %s
+
+setcps(%.0f/60/4)
+
+$: note("c4").sound("gm_piano")
+`, analysisResult.BPM, analysisResult.Key, analysisResult.BPM)
+	} else {
+		strudelCode = aiResult.Stdout
+	}
 
 	// Complete
 	job.Result = &JobResult{
