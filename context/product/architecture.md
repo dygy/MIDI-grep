@@ -119,15 +119,15 @@ Strudel Code
              ▼
 ┌─────────────────────────┐
 │ Headless Puppeteer      │ (record-strudel-blackhole.ts)
-│ - Opens strudel.cc      │
-│ - Incognito context     │
-│ - Opens Settings panel  │
-│ - Selects BlackHole     │
-│   as audio output       │
+│ - Opens strudel.dygy.app│
+│   /embed endpoint       │
+│ - Default browser ctx   │
+│   (preserves sample $)  │
 │ - Inserts code via      │
-│   textContent (simple!) │
+│   CodeMirror dispatch   │
 │ - Clicks Play button    │
-│ - Waits for samples     │
+│ - Routes audio via      │
+│   setSinkId() API       │
 └────────────┬────────────┘
              │
              ▼

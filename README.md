@@ -243,7 +243,7 @@ flowchart TB
 | **ClickHouse** | C++ binary | Learning database |
 | **Puppeteer** | Node.js | Browser automation for recording |
 | **node-web-audio-api** | Node.js | Offline audio synthesis |
-| **strudel.cc** | Web | Real Strudel engine (BlackHole recording) |
+| **strudel.dygy.app** | Web | Self-hosted Strudel (BlackHole recording) |
 
 ### Module Structure
 
@@ -843,7 +843,7 @@ This approach:
 
 **How it works:**
 1. Starts ffmpeg recording from BlackHole device
-2. Opens strudel.cc in Puppeteer (window hidden at -32000,-32000)
+2. Opens strudel.dygy.app/embed in Puppeteer (window hidden at -32000,-32000)
 3. Grants audio permissions, finds BlackHole device ID
 4. Inserts code via CodeMirror dispatch API
 5. Clicks Play, routes audio to BlackHole via `getAudioContext().setSinkId()`

@@ -32,6 +32,91 @@ AGENTS_DIR = Path(__file__).parent.parent.parent / ".cache" / "agents"
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "llama3:8b")
 
+# ============================================================================
+# VALID STRUDEL SOUNDS (from gm.mjs + synth.mjs)
+# ============================================================================
+
+# Basic waveforms and synths
+VALID_SYNTHS = {
+    "sine", "sin", "triangle", "tri", "square", "sqr", "sawtooth", "saw",
+    "supersaw", "pulse", "sbd", "bytebeat",
+    "pink", "white", "brown", "crackle",
+    "zzfx", "z_sine", "z_sawtooth", "z_triangle", "z_square", "z_tan", "z_noise"
+}
+
+# Valid GM instrument names (from Strudel's gm.mjs)
+VALID_GM_SOUNDS = {
+    "gm_piano", "gm_epiano1", "gm_epiano2", "gm_harpsichord", "gm_clavinet",
+    "gm_celesta", "gm_glockenspiel", "gm_music_box", "gm_vibraphone",
+    "gm_marimba", "gm_xylophone", "gm_tubular_bells", "gm_dulcimer",
+    "gm_drawbar_organ", "gm_percussive_organ", "gm_rock_organ", "gm_church_organ",
+    "gm_reed_organ", "gm_accordion", "gm_harmonica", "gm_bandoneon",
+    "gm_acoustic_guitar_nylon", "gm_acoustic_guitar_steel",
+    "gm_electric_guitar_jazz", "gm_electric_guitar_clean",
+    "gm_electric_guitar_muted", "gm_overdriven_guitar",
+    "gm_distortion_guitar", "gm_guitar_harmonics",
+    "gm_acoustic_bass", "gm_electric_bass_finger", "gm_electric_bass_pick",
+    "gm_fretless_bass", "gm_slap_bass_1", "gm_slap_bass_2",
+    "gm_synth_bass_1", "gm_synth_bass_2",
+    "gm_violin", "gm_viola", "gm_cello", "gm_contrabass",
+    "gm_tremolo_strings", "gm_pizzicato_strings", "gm_orchestral_harp", "gm_timpani",
+    "gm_string_ensemble_1", "gm_string_ensemble_2",
+    "gm_synth_strings_1", "gm_synth_strings_2",
+    "gm_choir_aahs", "gm_voice_oohs", "gm_synth_choir", "gm_orchestra_hit",
+    "gm_trumpet", "gm_trombone", "gm_tuba", "gm_muted_trumpet",
+    "gm_french_horn", "gm_brass_section", "gm_synth_brass_1", "gm_synth_brass_2",
+    "gm_soprano_sax", "gm_alto_sax", "gm_tenor_sax", "gm_baritone_sax",
+    "gm_oboe", "gm_english_horn", "gm_bassoon", "gm_clarinet",
+    "gm_piccolo", "gm_flute", "gm_recorder", "gm_pan_flute",
+    "gm_blown_bottle", "gm_shakuhachi", "gm_whistle", "gm_ocarina",
+    "gm_lead_1_square", "gm_lead_2_sawtooth", "gm_lead_3_calliope",
+    "gm_lead_4_chiff", "gm_lead_5_charang", "gm_lead_6_voice",
+    "gm_lead_7_fifths", "gm_lead_8_bass_lead",
+    "gm_pad_new_age", "gm_pad_warm", "gm_pad_poly", "gm_pad_choir",
+    "gm_pad_bowed", "gm_pad_metallic", "gm_pad_halo", "gm_pad_sweep",
+    "gm_fx_rain", "gm_fx_soundtrack", "gm_fx_crystal", "gm_fx_atmosphere",
+    "gm_fx_brightness", "gm_fx_goblins", "gm_fx_echoes", "gm_fx_sci_fi",
+    "gm_sitar", "gm_banjo", "gm_shamisen", "gm_koto",
+    "gm_kalimba", "gm_bagpipe", "gm_fiddle", "gm_shanai",
+    "gm_tinkle_bell", "gm_agogo", "gm_steel_drums", "gm_woodblock",
+    "gm_taiko_drum", "gm_melodic_tom", "gm_synth_drum",
+    "gm_reverse_cymbal", "gm_guitar_fret_noise", "gm_breath_noise",
+    "gm_seashore", "gm_bird_tweet", "gm_telephone",
+    "gm_helicopter", "gm_applause", "gm_gunshot"
+}
+
+# Valid drum banks (from tidal-drum-machines)
+VALID_DRUM_BANKS = {
+    "RolandTR505", "RolandTR606", "RolandTR626", "RolandTR707", "RolandTR727",
+    "RolandTR808", "RolandTR909",
+    "RolandCompurhythm78", "RolandCompurhythm1000", "RolandCompurhythm8000",
+    "RolandD110", "RolandD70", "RolandDDR30", "RolandJD990",
+    "RolandMC202", "RolandMC303", "RolandMT32", "RolandR8",
+    "LinnDrum", "Linn9000", "LinnLM1", "LinnLM2",
+    "AkaiLinn", "AkaiMPC60", "AkaiXR10",
+    "BossDR55", "BossDR110", "BossDR220", "BossDR550",
+    "KorgDDM110", "KorgKPR77", "KorgKR55", "KorgKRZ",
+    "KorgM1", "KorgMinipops", "KorgPoly800", "KorgT3",
+    "CasioRZ1", "CasioSK1", "CasioVL1",
+    "EmuDrumulator", "EmuModular", "EmuSP12",
+    "AlesisHR16", "AlesisSR16", "OberheimDMX",
+    "SequentialCircuitsDrumtracks", "SequentialCircuitsTom",
+    "YamahaRM50", "SimmonsSDS400", "SimmonsSDS5"
+}
+
+# All valid sounds combined
+VALID_SOUNDS = VALID_SYNTHS | VALID_GM_SOUNDS | VALID_DRUM_BANKS
+
+# Invalid GM sound patterns that LLMs hallucinate (with numbers that don't exist)
+INVALID_GM_PATTERNS = [
+    r'gm_pad_\d+_',      # e.g., gm_pad_4_choir (should be gm_pad_choir)
+    r'gm_fx_\d+_',       # e.g., gm_fx_1_rain (should be gm_fx_rain)
+    r'gm_electric_piano_\d+',  # e.g., gm_electric_piano_1 (should be gm_epiano1)
+    r'gm_acoustic_grand',      # Not in Strudel (use gm_piano)
+    r'gm_bright_acoustic',     # Not in Strudel
+    r'gm_honkytonk',           # Not in Strudel
+]
+
 
 class OllamaAgent:
     """
@@ -102,17 +187,17 @@ similarity_improvement Float64, genre String, bpm_range_low Float64, bpm_range_h
 
 Find the BEST previous run for THIS track:
 <sql>SELECT strudel_code, similarity_overall, version FROM midi_grep.runs
-WHERE track_hash = '{track_hash}'
+WHERE track_hash = '{self.track_hash}'
 ORDER BY similarity_overall DESC LIMIT 1</sql>
 
 Find what parameter changes improved THIS track:
 <sql>SELECT parameter_name, parameter_old_value, parameter_new_value, similarity_improvement
-FROM midi_grep.knowledge WHERE track_hash = '{track_hash}'
+FROM midi_grep.knowledge WHERE track_hash = '{self.track_hash}'
 ORDER BY similarity_improvement DESC LIMIT 5</sql>
 
 Compare iterations for THIS track:
 <sql>SELECT version, similarity_overall, band_bass, band_mid, band_high
-FROM midi_grep.runs WHERE track_hash = '{track_hash}'
+FROM midi_grep.runs WHERE track_hash = '{self.track_hash}'
 ORDER BY version DESC LIMIT 10</sql>
 
 ## CRITICAL RULES
@@ -127,6 +212,14 @@ ORDER BY version DESC LIMIT 10</sql>
    - `.eq()`, `.filter()` - use `.lpf()` and `.hpf()` instead
    - `.bass()`, `.treble()`, `.mid()`, `.high()`, `.low()` - not methods
    - `.compress()` - use `.compressor()` if available, or skip
+6. **ONLY USE VALID SOUND NAMES** - Use EXACT Strudel sound names:
+   - WRONG: gm_pad_4_choir, gm_fx_1_rain, gm_electric_piano_1
+   - RIGHT: gm_pad_choir, gm_fx_rain, gm_epiano1
+   - Basic oscillators: sine, triangle, square, sawtooth, supersaw
+   - Pads: gm_pad_warm, gm_pad_poly, gm_pad_choir, gm_pad_bowed, gm_pad_sweep
+   - Leads: gm_lead_1_square, gm_lead_2_sawtooth, gm_lead_5_charang
+   - Bass: gm_acoustic_bass, gm_electric_bass_finger, gm_synth_bass_1
+   - Drum banks: RolandTR808, RolandTR909, LinnDrum, etc.
 
 ## OUTPUT FORMAT
 
@@ -442,7 +535,7 @@ Query the database using track_hash='{self.track_hash}' to find what worked for 
 
     def _validate_code(self, code: str) -> str:
         """
-        Validate Strudel code and reject if it contains invalid methods.
+        Validate Strudel code and reject if it contains invalid methods or sounds.
 
         Returns empty string if code is invalid, otherwise returns the code.
         """
@@ -467,6 +560,38 @@ Query the database using track_hash='{self.track_hash}' to find what worked for 
         for invalid in INVALID_METHODS:
             if invalid in code:
                 msg = f"REJECTED: Code contains invalid method {invalid} - LLM hallucinated a non-existent Strudel method"
+                print(f"  [Agent] {msg}")
+                self.last_validation_error = msg
+                return ""
+
+        # Check for invalid GM sound patterns (LLM often hallucinates numbered names)
+        for pattern in INVALID_GM_PATTERNS:
+            matches = re.findall(pattern, code)
+            if matches:
+                msg = f"REJECTED: Code contains invalid sound pattern {matches[0]} - use correct Strudel GM names (e.g., gm_pad_choir not gm_pad_4_choir)"
+                print(f"  [Agent] {msg}")
+                self.last_validation_error = msg
+                return ""
+
+        # Extract and validate all sounds in .sound("...") calls
+        sound_matches = re.findall(r'\.sound\(["\']([^"\']+)["\']', code)
+        for sound in sound_matches:
+            # Handle alternation patterns like "<sound1 sound2>"
+            sound_names = sound.strip('<>').split()
+            for s in sound_names:
+                s = s.strip()
+                if s and s not in VALID_SOUNDS:
+                    msg = f"REJECTED: Unknown sound '{s}' - not in Strudel's sound library"
+                    print(f"  [Agent] {msg}")
+                    self.last_validation_error = msg
+                    return ""
+
+        # Extract and validate all banks in .bank("...") calls
+        bank_matches = re.findall(r'\.bank\(["\']([^"\']+)["\']', code)
+        for bank in bank_matches:
+            bank = bank.strip()
+            if bank and bank not in VALID_DRUM_BANKS:
+                msg = f"REJECTED: Unknown drum bank '{bank}' - not in Strudel's drum library"
                 print(f"  [Agent] {msg}")
                 self.last_validation_error = msg
                 return ""

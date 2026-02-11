@@ -406,7 +406,7 @@ _Fixing the core audio quality issues blocking high similarity scores._
 **Best approach for 100% audio similarity - record real Strudel playback instead of emulating synthesis.**
 
 - [x] **BlackHole Virtual Audio Device:** Route browser audio to recorder via BlackHole 2ch
-- [x] **Puppeteer Automation:** `record-strudel-blackhole.ts` opens strudel.cc, plays code, records via ffmpeg
+- [x] **Puppeteer Automation:** `record-strudel-blackhole.ts` opens strudel.dygy.app/embed, plays code, records via ffmpeg
 - [x] **Multi-Output Device:** Audio MIDI Setup configuration for simultaneous playback + recording
 - [x] **100% Similarity:** Captures exact Strudel audio output (no synthesis approximation)
 

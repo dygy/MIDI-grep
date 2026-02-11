@@ -23,14 +23,15 @@ import * as fs from 'fs';
 interface RecordOptions {
   duration: number;
   outputPath: string;
+  useLocal?: boolean;  // Use localhost:4321 for testing
 }
 
 async function recordStrudel(strudelCode: string, options: RecordOptions): Promise<void> {
-  const { duration, outputPath } = options;
+  const { duration, outputPath, useLocal = false } = options;
 
-  // URL configuration - use self-hosted Strudel embed endpoint
-  const STRUDEL_URL = 'https://strudel.dygy.app/embed';
-  const STRUDEL_ORIGIN = 'https://strudel.dygy.app';
+  // URL configuration - use self-hosted Strudel embed endpoint (or localhost for testing)
+  const STRUDEL_URL = useLocal ? 'http://localhost:4321/embed' : 'https://strudel.dygy.app/embed';
+  const STRUDEL_ORIGIN = useLocal ? 'http://localhost:4321' : 'https://strudel.dygy.app';
 
   console.log('━'.repeat(60));
   console.log('Strudel BlackHole Recorder');
@@ -209,7 +210,7 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
   let isPlaying = false;
   while (Date.now() - startTime < 60000) {
     isPlaying = await page.evaluate(() => {
-      // Check for stop button (strudel.cc main site)
+      // Check for stop button (main site UI)
       const btns = document.querySelectorAll('button');
       for (const btn of btns) {
         if (btn.textContent?.toLowerCase().includes('stop')) return true;
@@ -272,19 +273,20 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
 async function main() {
   const args = process.argv.slice(2);
   if (args.length < 1) {
-    console.log('Usage: record-strudel-blackhole.js <input.strudel> [-o output.wav] [-d duration]');
+    console.log('Usage: record-strudel-blackhole.js <input.strudel> [-o output.wav] [-d duration] [--local]');
+    console.log('  --local  Use localhost:4321 instead of strudel.dygy.app (for testing)');
     process.exit(1);
   }
 
   const inputFile = args[0];
   let outputPath = '/tmp/strudel_recording.wav';
   let duration = 30;
+  let useLocal = false;
 
   for (let i = 1; i < args.length; i++) {
     if (args[i] === '-o') outputPath = args[++i];
     else if (args[i] === '-d') duration = parseFloat(args[++i]);
-    // Ignore --local flag for backwards compatibility (now always uses strudel.dygy.app)
-    else if (args[i] === '--local') continue;
+    else if (args[i] === '--local') useLocal = true;
   }
 
   if (!fs.existsSync(inputFile)) {
@@ -292,7 +294,7 @@ async function main() {
     process.exit(1);
   }
 
-  await recordStrudel(fs.readFileSync(inputFile, 'utf-8'), { duration, outputPath });
+  await recordStrudel(fs.readFileSync(inputFile, 'utf-8'), { duration, outputPath, useLocal });
 }
 
 main().catch(err => { console.error('Error:', err); process.exit(1); });

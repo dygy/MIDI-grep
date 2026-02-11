@@ -1091,6 +1091,8 @@ func renderStrudelBlackHole(inputPath, outputPath string, duration float64) erro
 	if duration > 0 {
 		args = append(args, "-d", fmt.Sprintf("%.0f", duration))
 	}
+	// Use local strudel-client for testing (localhost:4321)
+	args = append(args, "--local")
 
 	cmd := exec.Command("node", args...)
 	cmd.Stdout = os.Stdout
