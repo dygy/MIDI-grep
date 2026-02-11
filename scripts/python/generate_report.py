@@ -587,13 +587,34 @@ def generate_report(cache_dir, version_dir, output_path=None):
     cache_path = Path(cache_dir)
     version_path = Path(version_dir) if version_dir else cache_path
 
-    # Find files
+    # If cache_dir is actually a version dir (v001, v002, etc.), go to parent
+    if re.match(r'v\d{3}$', cache_path.name):
+        version_path = cache_path
+        cache_path = cache_path.parent
+
+    # Find files - original stems are in cache_path (parent of version)
     melodic_path = cache_path / "melodic.wav"
     if not melodic_path.exists():
         melodic_path = cache_path / "piano.wav"
     drums_path = cache_path / "drums.wav"
     vocals_path = cache_path / "vocals.wav"
     bass_path = cache_path / "bass.wav"
+
+    # CRITICAL: Validate original stems exist - report is useless without them
+    missing_stems = []
+    if not melodic_path.exists():
+        missing_stems.append("melodic.wav")
+    if not drums_path.exists():
+        missing_stems.append("drums.wav")
+    if not bass_path.exists():
+        missing_stems.append("bass.wav")
+
+    if missing_stems:
+        raise FileNotFoundError(
+            f"ERROR: Cannot generate report - missing original stems in {cache_path}:\n"
+            f"  Missing: {', '.join(missing_stems)}\n"
+            f"  Run demucs stem separation first or check cache directory structure."
+        )
 
     render_path = version_path / "render.wav"
     if not render_path.exists():
