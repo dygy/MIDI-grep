@@ -261,13 +261,37 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
     setTimeout(() => { ffmpeg.kill('SIGTERM'); resolve(); }, 3000);
   });
 
-  if (fs.existsSync(outputPath)) {
-    const mb = (fs.statSync(outputPath).size / 1024 / 1024).toFixed(1);
-    console.log(`━━━ Saved: ${outputPath} (${mb} MB) ━━━`);
-  } else {
+  if (!fs.existsSync(outputPath)) {
     console.error('Recording failed');
     process.exit(1);
   }
+
+  // Trim leading silence (Strudel takes a few seconds to load before audio starts)
+  console.log('Trimming leading silence...');
+  const trimmedPath = outputPath.replace('.wav', '_trimmed.wav');
+  const trimProcess = spawn('ffmpeg', [
+    '-i', outputPath,
+    '-af', 'silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB',
+    '-y', trimmedPath
+  ], { stdio: ['pipe', 'pipe', 'pipe'] });
+
+  await new Promise<void>((resolve, reject) => {
+    trimProcess.on('close', (code) => {
+      if (code === 0 && fs.existsSync(trimmedPath)) {
+        // Replace original with trimmed
+        fs.unlinkSync(outputPath);
+        fs.renameSync(trimmedPath, outputPath);
+        resolve();
+      } else {
+        console.log('Silence trim failed, keeping original');
+        resolve();
+      }
+    });
+    trimProcess.on('error', () => resolve());
+  });
+
+  const mb = (fs.statSync(outputPath).size / 1024 / 1024).toFixed(1);
+  console.log(`━━━ Saved: ${outputPath} (${mb} MB) ━━━`);
 }
 
 async function main() {
