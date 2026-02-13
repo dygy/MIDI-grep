@@ -86,7 +86,8 @@ MID_SOUNDS = """MID/PAD SOUNDS (pick one):
 - gm_synth_strings_1: synthetic, smooth, pad-like
 - gm_epiano1: warm, keys, soulful
 - gm_epiano2: bright, digital, modern
-- gm_organ_1: full, church, powerful
+- gm_drawbar_organ: full, warm, powerful
+- gm_rock_organ: aggressive, gritty, energy
 - triangle: soft, pure, simple
 - sine: pure, sub, minimal
 """
@@ -94,9 +95,12 @@ MID_SOUNDS = """MID/PAD SOUNDS (pick one):
 HIGH_SOUNDS = """HIGH/LEAD SOUNDS (pick one):
 - gm_lead_1_square: bright, cutting, retro
 - gm_lead_2_sawtooth: rich, aggressive, lead
+- gm_lead_3_calliope: bright, reed-like, circus
+- gm_lead_4_chiff: breathy, airy, subtle
 - gm_lead_5_charang: distorted, aggressive, rock
 - gm_lead_6_voice: vocal, expressive, unique
-- gm_synth_lead: modern, bright, EDM
+- gm_lead_7_fifths: wide, powerful, anthem
+- gm_lead_8_bass_lead: deep, synth lead, heavy
 - gm_trumpet: brass, punchy, bold
 - gm_alto_sax: jazzy, smooth, expressive
 - gm_flute: airy, light, delicate
@@ -109,7 +113,7 @@ HIGH_SOUNDS = """HIGH/LEAD SOUNDS (pick one):
 DRUM_KITS = """DRUM KITS (pick one):
 - RolandTR808: punchy, hip-hop, deep kick, classic
 - RolandTR909: bright, house/techno, punchy, dance
-- RolandCR78: vintage, disco, lo-fi, analog
+- RolandCompurhythm78: vintage, disco, lo-fi, analog
 - LinnDrum: crisp, 80s, iconic, pop
 - OberheimDMX: punchy, electro, fat, funky
 - AkaiLinn: jazzy, organic, natural, fusion

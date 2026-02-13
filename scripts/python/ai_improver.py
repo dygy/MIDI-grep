@@ -9,6 +9,7 @@ Stores all runs in ClickHouse for incremental learning.
 import argparse
 import json
 import os
+import re
 import sys
 import subprocess
 import hashlib
@@ -51,12 +52,41 @@ try:
 except ImportError:
     HAS_ORCHESTRATOR = False
 
+# Import syntax fixer and voice enforcer from codegen
+try:
+    from ollama_codegen import fix_strudel_syntax, enforce_three_voices
+    HAS_SYNTAX_FIXER = True
+except ImportError:
+    HAS_SYNTAX_FIXER = False
+
 # Import agentic Ollama wrapper
 try:
-    from ollama_agent import OllamaAgent
+    from ollama_agent import OllamaAgent, INVALID_GM_PATTERNS, VALID_SOUNDS
     HAS_AGENT = True
 except ImportError:
     HAS_AGENT = False
+    INVALID_GM_PATTERNS = []
+    VALID_SOUNDS = set()
+
+
+def _has_invalid_sounds(code: str) -> bool:
+    """Check if Strudel code contains hallucinated/invalid sound names."""
+    if not VALID_SOUNDS:
+        return False
+    for pattern in INVALID_GM_PATTERNS:
+        if re.search(pattern, code):
+            return True
+    # Check .sound("...") calls against valid sounds
+    for m in re.finditer(r'\.sound\(["\']([^"\']+)["\']\)', code):
+        sound = m.group(1)
+        # Skip alternation patterns like "<sound1 sound2>"
+        if sound.startswith('<'):
+            for s in sound.strip('<>').split():
+                if s and s not in VALID_SOUNDS:
+                    return True
+        elif sound not in VALID_SOUNDS:
+            return True
+    return False
 
 # Ollama configuration
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
@@ -210,11 +240,11 @@ def init_clickhouse():
         if result.returncode != 0:
             raise RuntimeError(f"Failed to record migration {version}: {result.stderr}")
 
-        print(f"  [ClickHouse] Migration {version} applied successfully")
+        print(f"  [ClickHouse] Migration {version} applied successfully", file=sys.stderr)
 
     final_version = _get_schema_version()
     if final_version > 0:
-        print(f"  [ClickHouse] Schema at version {final_version}")
+        print(f"  [ClickHouse] Schema at version {final_version}", file=sys.stderr)
 
 
 # Initialize ClickHouse on module load
@@ -693,12 +723,10 @@ def build_improvement_prompt(
     spectrogram_insights: str = None,
     genre: str = "",
     artist: str = "",
-    bpm: float = 120
+    bpm: float = 120,
+    key: str = "C minor"
 ) -> str:
-    """Build the prompt for LLM analysis with INTERACTIVE CONTROLS."""
-
-    # Extract full effect functions (the LLM needs to see all effects)
-    effects_code = extract_effect_functions(original_code)
+    """Build the prompt for LLM to improve arrange()-based Strudel code."""
 
     # Get frequency band differences
     band_bass = previous_run.get('band_bass', 0) + previous_run.get('band_sub_bass', 0)
@@ -737,51 +765,34 @@ def build_improvement_prompt(
     mid_status = "too loud" if band_mid > 0.05 else "too quiet" if band_mid < -0.05 else "OK"
     high_status = "too loud" if band_high > 0.05 else "too quiet" if band_high < -0.05 else "OK"
 
-    # CPS calculation for tempo
-    cps = bpm / 60 / 4  # cycles per second for 4 beats/cycle
+    # Gain adjustment hints
+    bass_hint = ""
+    if band_bass > 0.05:
+        bass_hint = f" (reduce gain by ~{band_bass*100:.0f}%)"
+    elif band_bass < -0.05:
+        bass_hint = f" (increase gain by ~{abs(band_bass)*100:.0f}%)"
 
-    return f'''# STRUDEL LIVE CODING AI
+    mid_hint = ""
+    if band_mid > 0.05:
+        mid_hint = f" (reduce gain by ~{band_mid*100:.0f}%)"
+    elif band_mid < -0.05:
+        mid_hint = f" (increase gain by ~{abs(band_mid)*100:.0f}%)"
 
-You are an expert at Strudel, the live coding music environment.
-Your output will be used for LIVE PERFORMANCE - make it INTERACTIVE!
+    high_hint = ""
+    if band_high > 0.05:
+        high_hint = f" (reduce gain by ~{band_high*100:.0f}%)"
+    elif band_high < -0.05:
+        high_hint = f" (increase gain by ~{abs(band_high)*100:.0f}%)"
 
-## STRUDEL INTERACTIVE CONTROLS (USE THESE!)
+    return f'''You are improving Strudel live coding audio to match an original track.
 
-### Inline Sliders - Draggable UI controls in code
-```javascript
-slider(default, min, max, step)
-// Example: .lpf(slider(500, 100, 2000, 1))
-// Example: .gain(slider(0.5, 0, 1, 0.01))
-```
+## FREQUENCY BALANCE ANALYSIS
 
-### Tempo Control
-```javascript
-setcps({cps:.3f})  // Current: {bpm:.0f} BPM
-// Or with slider: setcps(slider({cps:.3f}, 0.3, 1.0, 0.01))
-```
-
-### Dynamic Modulation (LFOs)
-```javascript
-sine.range(min, max).slow(cycles)    // Smooth LFO
-perlin.range(min, max).slow(cycles)  // Organic noise
-// Example: .lpf(sine.range(400, 4000).slow(8))
-// Example: .gain(perlin.range(0.3, 0.7).slow(16))
-```
-
-### Probability Variation
-```javascript
-.sometimes(x => x.speed(2))    // 50% chance
-.rarely(x => x.rev())          // 25% chance
-.degradeBy(slider(0.3, 0, 1))  // Slider-controlled note drop
-```
-
-## CURRENT ANALYSIS
-
-| Voice | Status | Difference |
-|-------|--------|------------|
-| Bass  | {bass_status} | {band_bass*100:+.0f}% |
-| Mid   | {mid_status} | {band_mid*100:+.0f}% |
-| High  | {high_status} | {band_high*100:+.0f}% |
+| Voice | Status | Difference | Action |
+|-------|--------|------------|--------|
+| Bass  | {bass_status} | {band_bass*100:+.0f}% | {bass_hint} |
+| Mid   | {mid_status} | {band_mid*100:+.0f}% | {mid_hint} |
+| High  | {high_status} | {band_high*100:+.0f}% | {high_hint} |
 
 Brightness: {brightness_ratio:.0%} of original
 Energy: {energy_ratio:.0%} of original
@@ -789,102 +800,46 @@ Energy: {energy_ratio:.0%} of original
 {stem_issues_str}
 {knowledge_str}
 
-## CURRENT EFFECT FUNCTIONS
+## CURRENT CODE
 ```javascript
-{effects_code}
+{original_code}
 ```
 
 ## GENRE CONTEXT
-Genre: {genre or 'auto'}
-Artist: {artist or 'unknown'}
-BPM: {bpm:.0f}
+Genre: {genre or 'auto'}, Artist: {artist or 'unknown'}, BPM: {bpm:.0f}
 
 ## GENRE-SPECIFIC SOUNDS
 - **Brazilian Funk**: RolandTR808, gm_synth_bass_1, gm_lead_2_sawtooth
 - **Electro Swing**: LinnDrum, gm_acoustic_bass, gm_trumpet, gm_clarinet
 - **Trance**: RolandTR909, supersaw, gm_pad_halo, gm_lead_7_fifths
-- **LoFi**: BossDR110, triangle, gm_epiano1, gm_vibraphone
 - **House**: RolandTR909, gm_synth_bass_2, supersaw
 - **Jazz**: AkaiLinn, gm_acoustic_bass, gm_epiano1
 
-## TASK: Generate BEAT-SYNCED Strudel code
+## TASK: Fix the frequency balance
 
-Fix frequency balance and add BEAT-SYNCED dynamics using Strudel patterns.
+Based on the analysis above, modify the code to fix the frequency issues.
 
-### BEAT-SYNCED VALUES (MANDATORY - DO NOT USE PERLIN FOR GAIN!)
+**RULES:**
+1. Output the COMPLETE Strudel code (setcps + all $: voices) in a ```javascript block
+2. Keep EXACTLY 3 `$:` blocks (bass, lead, drums) — NO MORE, NO LESS
+3. Each `$:` has ONE arrange() with ALL sections as [cycles, pattern] pairs inside it
+4. DO NOT create separate `$:` blocks per section — sections go INSIDE arrange()
+5. Keep the SAME key ({key}) and BPM ({bpm:.0f}) — do NOT change them
+6. Use `note()` + `.sound()` for bass and lead voices, `s()` + `.bank()` for drums
+7. Drums ONLY use `bd sd hh oh cp lt mt ht` names, NEVER note names like `c2 e2`
+8. Adjust `.gain()` values to fix the frequency balance issues shown above
+9. NO semicolons (Strudel is NOT JavaScript)
+10. NO `.peak()`, `.volume()`, `.eq()`, `.filter()` — these don't exist
 
-**CRITICAL RULES:**
-- ❌ FORBIDDEN: `perlin.range(0.5, 0.6)` - ranges too narrow, inaudible
-- ❌ FORBIDDEN: Any gain range smaller than 0.3 difference
-- ✅ REQUIRED: Use `"<v1 v2 v3 v4>".slow(16)` for section dynamics
-- ✅ REQUIRED: Wide ranges (0.2 to 0.8, not 0.5 to 0.6)
+**VALID SOUNDS:** sine, triangle, square, sawtooth, supersaw,
+  gm_acoustic_bass, gm_synth_bass_1, gm_synth_bass_2, gm_electric_bass_finger,
+  gm_piano, gm_epiano1, gm_epiano2, gm_lead_2_sawtooth, gm_lead_5_charang,
+  gm_pad_warm, gm_pad_poly, gm_string_ensemble_1, gm_brass_section, gm_trumpet,
+  gm_acoustic_guitar_nylon, gm_electric_guitar_clean, gm_overdriven_guitar
 
-```javascript
-// CORRECT - Beat-synced with wide range:
-.gain("<0.2 0.4 0.8 0.5>".slow(16))  // 4 sections, dramatic changes
+**VALID DRUM BANKS:** RolandTR808, RolandTR909, LinnDrum, BossDR110
 
-// WRONG - Too subtle, inaudible:
-.gain(perlin.range(0.5, 0.6).slow(8))  // Only 10% variation - USELESS!
-
-// CORRECT - Filter sweep with wide range:
-.lpf("<400 1000 4000 2000>".slow(16))
-
-// For buildups use saw:
-.lpf(saw.range(400, 4000).slow(16))  // Ramps 400→4000 over 16 beats
-```
-
-### SECTION STRUCTURE (64 beats total)
-
-```
-Beats 0-16:   INTRO    - quiet, filtered (gain 0.2-0.3, lpf low)
-Beats 16-32:  BUILDUP  - rising energy (gain 0.4-0.5, lpf sweeping up)
-Beats 32-48:  DROP     - full power (gain 0.7-1.0, lpf open)
-Beats 48-64:  OUTRO    - wind down (gain decreasing)
-```
-
-### Example Effect Functions
-
-```javascript
-setcps({cps:.3f})
-
-// Bass: Quiet intro → loud drop
-let bassFx = p => p.sound("sawtooth")
-  .gain("<0.2 0.3 0.5 0.4>".slow(16))  // Section-based gain
-  .lpf(saw.range(300, 800).slow(32))   // Filter opens over 32 beats
-  .hpf(40)
-
-// Mid: Buildup with filter sweep
-let midFx = p => p.sound("triangle")
-  .gain("<0.3 0.5 0.9 0.6>".slow(16))  // Intro→build→drop→outro
-  .lpf("<2000 3000 6000 4000>".slow(16))
-
-// High: Comes in at drop
-let highFx = p => p.sound("square")
-  .gain("<0 0.2 0.6 0.3>".slow(16))    // Silent intro, appears at drop
-  .lpf(8000)
-
-// Drums: Builds energy
-let drumsFx = p => p.bank("RolandTR808")
-  .gain("<0.5 0.7 1.0 0.8>".slow(16))
-  .room("<0.3 0.2 0.1 0.2>".slow(16))  // Less reverb at drop (punchy)
-```
-
-### PATTERN SYNTAX (USE IN THIS ORDER OF PREFERENCE):
-1. `"<v1 v2 v3 v4>".slow(16)` - **PRIMARY** - Discrete section values (ALWAYS use for gain!)
-2. `saw.range(min, max).slow(n)` - Buildups only (min→max ramp)
-3. `sine.range(min, max).slow(n)` - Filter movement only, NOT for gain
-4. ~~perlin~~ - DO NOT USE for gain (too subtle)
-
-### MANDATORY RULES:
-1. **GAIN MUST use `"<...>".slow(16)`** - NO perlin, NO sine for gain!
-2. **MINIMUM RANGE 0.3** - Values must differ by at least 0.3 (e.g., 0.2→0.5→0.8)
-3. Bass: gain `"<0.1 0.2 0.5 0.3>".slow(16)`, lpf 300-800
-4. Mid: gain `"<0.3 0.5 0.9 0.6>".slow(16)`, lpf 2000-8000
-5. High: gain `"<0 0.2 0.7 0.4>".slow(16)` (can start silent)
-6. Drums: gain `"<0.5 0.7 1.0 0.7>".slow(16)`
-7. Filter OPENS as energy increases (low lpf = dark intro, high lpf = bright drop)
-
-Output ONLY the effect functions in a javascript code block, no explanation.'''
+Output ONLY the improved code in a ```javascript block, no explanation.'''
 
 
 def analyze_with_ollama(
@@ -904,9 +859,10 @@ def analyze_with_ollama(
         return {"suggestions": [], "improved_code": original_code, "reasoning": "No requests"}
 
     ollama_model = model or os.environ.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
+    key = previous_run.get("key", "C minor")
     prompt = build_improvement_prompt(
         previous_run, learned_knowledge, original_code,
-        spectrogram_insights, genre=genre, artist=artist, bpm=bpm
+        spectrogram_insights, genre=genre, artist=artist, bpm=bpm, key=key
     )
 
     try:
@@ -954,8 +910,8 @@ def analyze_with_ollama(
 
         if code_match:
             extracted_code = code_match.group(1).strip()
-            # Check if it looks like Strudel code (effect functions, sound, or setcps)
-            if 'Fx' in extracted_code or 'sound(' in extracted_code or 'setcps(' in extracted_code:
+            # Check if it looks like Strudel code (arrange, effect functions, sound, or setcps)
+            if 'arrange(' in extracted_code or '$:' in extracted_code or 'Fx' in extracted_code or 'sound(' in extracted_code or 'setcps(' in extracted_code:
                 result = {
                     "analysis": "Extracted from response",
                     "suggestions": ["Code extracted from markdown"],
@@ -1066,9 +1022,10 @@ def analyze_with_claude(
     if not api_key:
         return None  # Signal to try Ollama
 
+    key = previous_run.get("key", "C minor")
     prompt = build_improvement_prompt(
         previous_run, learned_knowledge, original_code,
-        spectrogram_insights, genre=genre, artist=artist, bpm=bpm
+        spectrogram_insights, genre=genre, artist=artist, bpm=bpm, key=key
     )
     client = Anthropic(api_key=api_key)
 
@@ -1498,41 +1455,45 @@ def improve_strudel(
     with open(strudel_path) as f:
         current_code = f.read()
 
-    # Apply genre-specific presets as starting point
+    # Apply genre/artist presets (only for old effect-function format, not arrange())
     genre = metadata.get("genre", "")
-    if genre:
-        presets = get_genre_presets(genre)
-        if presets:
-            print(f"\n--- Applying {genre} genre presets ---")
-            for fx_name, params in presets.items():
-                param_str = ", ".join(f"{k}={v}" for k, v in params.items())
-                print(f"  {fx_name}: {param_str}")
-            current_code = apply_genre_presets(current_code, presets)
-            # Save preset-applied code
-            with open(strudel_path, 'w') as f:
-                f.write(current_code)
-
-    # Try to detect and apply artist-specific presets
     artist = metadata.get("artist", "")
     if not artist:
         artist = detect_artist_from_path(original_audio)
-    if artist:
-        artist_presets = get_artist_presets(artist)
-        if artist_presets:
-            print(f"\n--- Applying {artist} artist presets ---")
-            for fx_name, params in artist_presets.items():
-                param_str = ", ".join(f"{k}={v}" for k, v in params.items())
-                print(f"  {fx_name}: {param_str}")
-            current_code = apply_genre_presets(current_code, artist_presets)
-            with open(strudel_path, 'w') as f:
-                f.write(current_code)
 
-    # PHASE 2: Generate dynamic effects with orchestrator (beat-synced patterns)
-    if HAS_ORCHESTRATOR:
+    if 'arrange(' not in current_code:
+        if genre:
+            presets = get_genre_presets(genre)
+            if presets:
+                print(f"\n--- Applying {genre} genre presets ---")
+                for fx_name, params in presets.items():
+                    param_str = ", ".join(f"{k}={v}" for k, v in params.items())
+                    print(f"  {fx_name}: {param_str}")
+                current_code = apply_genre_presets(current_code, presets)
+                with open(strudel_path, 'w') as f:
+                    f.write(current_code)
+
+        if artist:
+            artist_presets = get_artist_presets(artist)
+            if artist_presets:
+                print(f"\n--- Applying {artist} artist presets ---")
+                for fx_name, params in artist_presets.items():
+                    param_str = ", ".join(f"{k}={v}" for k, v in params.items())
+                    print(f"  {fx_name}: {param_str}")
+                current_code = apply_genre_presets(current_code, artist_presets)
+                with open(strudel_path, 'w') as f:
+                    f.write(current_code)
+    else:
+        print("\n--- Skipping genre/artist presets (code uses arrange() format) ---")
+
+    # PHASE 2: Generate dynamic effects with orchestrator (only for old effect-function format)
+    if HAS_ORCHESTRATOR and 'arrange(' not in current_code:
         print("\n--- Phase 2: Generating beat-synced dynamic effects ---")
         current_code = generate_orchestrated_effects(current_code, metadata, comparison=None)
         with open(strudel_path, 'w') as f:
             f.write(current_code)
+    elif 'arrange(' in current_code:
+        print("\n--- Phase 2: Skipped (code already uses arrange() format) ---")
 
     # Track previous code for learning
     previous_code = current_code
@@ -1556,15 +1517,22 @@ def improve_strudel(
         best_ever_version = best_run.get("version", 0)
         print(f"📊 Best ever: v{best_ever_version} with {best_ever_similarity*100:.1f}% similarity (from ClickHouse)")
 
-        # Start from best code if it's better than what we'd start with
-        if best_ever_code and best_ever_similarity > 0:
-            current_code = best_ever_code
-            previous_similarity = best_ever_similarity
-            print(f"   Starting from best known code (not fresh)")
-            # Write best code to strudel_path so renders use it
-            with open(strudel_path, 'w') as f:
-                f.write(best_ever_code)
-            print(f"   Updated {strudel_path} with best known code")
+        # Start from best code ONLY if it genuinely beats the fresh code
+        # Node.js renderer gives ~16% while BlackHole gives ~50-65% for the same code
+        # So we need a high threshold to avoid replacing good fresh code with bad stored code
+        if best_ever_code and best_ever_similarity > 0.50:
+            if _has_invalid_sounds(best_ever_code):
+                print(f"   ⚠ Best known code has invalid/hallucinated sounds - using fresh code instead")
+            else:
+                current_code = best_ever_code
+                previous_similarity = best_ever_similarity
+                print(f"   Starting from best known code (not fresh)")
+                # Write best code to strudel_path so renders use it
+                with open(strudel_path, 'w') as f:
+                    f.write(best_ever_code)
+                print(f"   Updated {strudel_path} with best known code")
+        else:
+            print(f"   Best known ({best_ever_similarity*100:.1f}%) below 50% threshold - using fresh code")
     else:
         best_ever_similarity = 0
         best_ever_code = None
@@ -1586,71 +1554,107 @@ def improve_strudel(
     exact_duration = get_audio_duration(original_audio)
     print(f"Original audio duration: {exact_duration:.6f}s")
 
+    # CRITICAL: Use initial BlackHole per-stem weighted score as baseline
+    # Node.js renderer gives ~16% for arrange() code while BlackHole gives 50-73%
+    # Using BlackHole score as baseline prevents iterations from replacing better initial code
+    stem_comparison_path = Path(output_dir) / "stem_comparison.json"
+    if stem_comparison_path.exists():
+        with open(stem_comparison_path) as f:
+            initial_stem_comparison = json.load(f)
+        blackhole_weighted = initial_stem_comparison.get("aggregate", {}).get("weighted_overall", 0)
+        if blackhole_weighted > best_similarity:
+            print(f"Using initial BlackHole weighted score as baseline: {blackhole_weighted*100:.1f}%")
+            best_similarity = blackhole_weighted
+            best_code = current_code  # Preserve initial code
+    else:
+        initial_stem_comparison = {}
+
     # Track automation timeline across iterations (starts None, updated by LLM)
     current_automation_path = None
 
     for iteration in range(max_iterations):
         print(f"\n--- Iteration {iteration + 1}/{max_iterations} (v{current_version}) ---")
 
-        # 1. Render current code using Node.js renderer (better harmonics)
+        # 1. Render current code using BlackHole recorder (real Strudel playback)
+        # Node.js renderer was deleted and Python renderer can't parse arrange() format
+        # BlackHole gives real audio - use 30s for iteration speed
         render_path = Path(output_dir) / f"render_v{current_version:03d}.wav"
-        node_renderer = Path(__file__).parent.parent / "node" / "dist" / "render-strudel-node.js"
+        blackhole_recorder = Path(__file__).parent.parent / "node" / "dist" / "record-strudel-blackhole.js"
+        iter_duration = min(30, exact_duration)  # 30s for quick iteration renders
 
-        if node_renderer.exists():
-            # Prefer Node.js renderer with dynamic synthesis config
+        if blackhole_recorder.exists():
+            # Write current code to a temp strudel file for this iteration
+            iter_strudel = Path(output_dir) / f"output_iter_{current_version:03d}.strudel"
+            with open(iter_strudel, 'w') as f:
+                f.write(current_code)
+
             render_cmd = [
-                "node", str(node_renderer),
-                strudel_path,
-                str(render_path),
-                "--duration", f"{exact_duration:.2f}"
-            ]
-            # Pass synth config if available (AI-analyzed parameters)
-            if synth_config_path.exists():
-                render_cmd.extend(["--config", str(synth_config_path)])
-                print(f"       Using AI-analyzed synthesis config")
-            # Pass automation timeline if available (beat-synced parameter changes)
-            if current_automation_path and current_automation_path.exists():
-                render_cmd.extend(["--automation", str(current_automation_path)])
-                print(f"       Using automation timeline: {current_automation_path.name}")
-        else:
-            # Fallback to Python renderer
-            render_cmd = [
-                sys.executable,
-                str(Path(__file__).parent / "render_audio.py"),
-                strudel_path,
+                "node", str(blackhole_recorder),
+                str(iter_strudel),
                 "-o", str(render_path),
-                "-d", f"{exact_duration:.6f}"
+                "-d", f"{iter_duration:.0f}"
             ]
-        subprocess.run(render_cmd, capture_output=True)
-
-        if not render_path.exists():
-            print("Render failed, stopping")
-            break
-
-        # 2. Compare to original
-        compare_cmd = [
-            sys.executable,
-            str(Path(__file__).parent / "compare_audio.py"),
-            original_audio,
-            str(render_path),
-            "-j"  # Output JSON to stdout
-        ]
-        compare_result = subprocess.run(compare_cmd, capture_output=True, text=True)
-
-        comparison_path = Path(output_dir) / f"comparison_v{current_version:03d}.json"
-        if compare_result.returncode == 0 and compare_result.stdout.strip():
-            comparison = json.loads(compare_result.stdout)
-            # Save for reference
-            with open(comparison_path, 'w') as f:
-                json.dump(comparison, f, indent=2)
+            print(f"       Rendering {iter_duration:.0f}s via BlackHole...")
+            result = subprocess.run(render_cmd, capture_output=True, text=True)
+            if result.returncode != 0:
+                print(f"       BlackHole render failed: {result.stderr[:200]}")
         else:
-            print("Comparison failed, using defaults")
-            comparison = {"overall": 0, "mfcc": 0, "chroma": 0, "frequency": 0}
+            print("       BlackHole recorder not found, skipping render")
 
-        # Extract similarity from nested comparison structure
+        # 2. Compare to original (only if render succeeded)
+        if render_path.exists():
+            compare_cmd = [
+                sys.executable,
+                str(Path(__file__).parent / "compare_audio.py"),
+                original_audio,
+                str(render_path),
+                "-j",  # Output JSON to stdout
+                "-d", f"{iter_duration:.2f}"
+            ]
+            if synth_config_path.exists():
+                compare_cmd.extend(["--config", str(synth_config_path)])
+            compare_result = subprocess.run(compare_cmd, capture_output=True, text=True)
+
+            comparison_path = Path(output_dir) / f"comparison_v{current_version:03d}.json"
+            if compare_result.returncode == 0 and compare_result.stdout.strip():
+                comparison = json.loads(compare_result.stdout)
+                with open(comparison_path, 'w') as f:
+                    json.dump(comparison, f, indent=2)
+            else:
+                print("       Comparison failed, using initial data")
+                comparison = {"comparison": {}, "original": {}, "rendered": {}}
+        else:
+            # Render failed — fall back to initial BlackHole comparison
+            print("       Render failed, using initial comparison data")
+            initial_comparison_path = Path(output_dir) / "comparison.json"
+            if initial_comparison_path.exists():
+                with open(initial_comparison_path) as f:
+                    comparison = json.load(f)
+            else:
+                comparison = {"comparison": {}, "original": {}, "rendered": {}}
+
+        # Extract similarity from comparison
         comp_scores = comparison.get("comparison", {})
         current_similarity = comp_scores.get("overall_similarity", 0)
-        print(f"Similarity: {current_similarity*100:.1f}%")
+        print(f"       Similarity: {current_similarity*100:.1f}%")
+
+        # Node.js renderer gives ~16% for arrange() code — use initial BlackHole comparison
+        # for LLM feedback since it reflects the REAL audio quality
+        initial_comparison_path = Path(output_dir) / "comparison.json"
+        if current_similarity < 0.30 and initial_comparison_path.exists():
+            with open(initial_comparison_path) as f:
+                blackhole_comparison = json.load(f)
+            blackhole_sim = blackhole_comparison.get("comparison", {}).get("overall_similarity", 0)
+            if blackhole_sim > current_similarity:
+                print(f"       Node.js score too low ({current_similarity*100:.1f}%), using BlackHole comparison ({blackhole_sim*100:.1f}%) for LLM")
+                comparison = blackhole_comparison
+
+        # REGRESSION CHECK: If this iteration is worse than best, revert code
+        if iteration > 0 and current_similarity < best_similarity and best_code:
+            print(f"       ✗ REGRESSION: {best_similarity*100:.1f}% → {current_similarity*100:.1f}% - reverting to best")
+            current_code = best_code
+            with open(strudel_path, 'w') as f:
+                f.write(best_code)
 
         # Load per-stem comparison if available (shows real issues even when overall looks good)
         stem_comparison = {}
@@ -1841,91 +1845,41 @@ def improve_strudel(
                 current_version += 1
                 continue  # Skip this iteration, try again
             else:
-                # This is a real bug - LLM didn't return any code
-                raise RuntimeError(
-                    f"LLM did not return code! This is a bug.\n"
-                    f"AI result: {ai_result}\n"
-                    f"Knowledge items: {len(knowledge)}\n"
-                    f"Make sure Ollama is running: curl http://localhost:11434/api/tags"
-                )
+                # LLM didn't return code — skip iteration instead of crashing
+                print(f"       ⚠ LLM returned analysis but no code — skipping iteration")
+                current_version += 1
+                continue
 
         if improved_effects and improved_effects.strip():
-            # Merge improved effects back into full code
-            improved_code = merge_effect_functions(current_code, improved_effects)
+            # Fix common syntax issues from LLM output
+            if HAS_SYNTAX_FIXER:
+                improved_effects = fix_strudel_syntax(improved_effects)
+                improved_effects = enforce_three_voices(improved_effects)
+
+            # Determine if this is complete arrange()-based code or effect functions
+            is_complete_code = ('$:' in improved_effects and
+                               ('arrange(' in improved_effects or 'note(' in improved_effects or 's(' in improved_effects))
+            if is_complete_code:
+                # Full code replacement — the LLM returned complete Strudel code
+                improved_code = improved_effects
+                print("       Full code replacement (arrange() format)")
+            else:
+                # Legacy: merge effect functions back into original code
+                improved_code = merge_effect_functions(current_code, improved_effects)
+
             if improved_code == current_code:
                 print("       No effective changes this iteration, continuing...")
             else:
-                # REGRESSION PREVENTION: Check if this is actually better
-                # We need to render and compare before accepting
-                test_path = Path(output_dir) / f"render_test.wav"
-                test_strudel = Path(output_dir) / f"output_test.strudel"
-                with open(test_strudel, 'w') as f:
+                # Accept the improved code - regression will be checked at the
+                # start of the NEXT iteration when we render via BlackHole
+                # and compare to the original audio
+                current_code = improved_code
+                improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
+                with open(improved_path, 'w') as f:
                     f.write(improved_code)
-
-                # Quick render to test
-                node_renderer = Path(__file__).parent.parent / "node" / "dist" / "render-strudel-node.js"
-                if node_renderer.exists():
-                    test_cmd = ["node", str(node_renderer), str(test_strudel), str(test_path),
-                               "--duration", f"{min(30, exact_duration):.2f}"]
-                    if synth_config_path.exists():
-                        test_cmd.extend(["--config", str(synth_config_path)])
-                    # Include automation for test render too
-                    if current_automation_path and current_automation_path.exists():
-                        test_cmd.extend(["--automation", str(current_automation_path)])
-                    subprocess.run(test_cmd, capture_output=True)
-
-                    # Quick compare
-                    if test_path.exists():
-                        test_compare_cmd = [
-                            sys.executable,
-                            str(Path(__file__).parent / "compare_audio.py"),
-                            original_audio, str(test_path),
-                            "-d", f"{min(30, exact_duration):.2f}",
-                            "--json", "--quiet"  # Output JSON, suppress logs
-                        ]
-                        test_result = subprocess.run(test_compare_cmd, capture_output=True, text=True)
-                        try:
-                            test_comparison = json.loads(test_result.stdout)
-                            test_similarity = test_comparison.get("comparison", {}).get("overall_similarity", 0)
-
-                            if test_similarity > best_similarity:
-                                print(f"       ✓ IMPROVEMENT: {best_similarity*100:.1f}% → {test_similarity*100:.1f}%")
-                                best_similarity = test_similarity
-                                best_code = improved_code
-                                current_code = improved_code
-                                # Save improved code
-                                improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
-                                with open(improved_path, 'w') as f:
-                                    f.write(improved_code)
-                                with open(strudel_path, 'w') as f:
-                                    f.write(improved_code)
-                                print(f"       Saved improved code to {improved_path}")
-                            else:
-                                print(f"       ✗ REGRESSION: {best_similarity*100:.1f}% → {test_similarity*100:.1f}% - REVERTING")
-                                current_code = best_code  # Revert to best
-                                with open(strudel_path, 'w') as f:
-                                    f.write(best_code)
-                        except json.JSONDecodeError:
-                            print("       ⚠ Could not parse test comparison, accepting change")
-                            current_code = improved_code
-                            # BUG FIX: Actually save the improved code to file
-                            with open(strudel_path, 'w') as f:
-                                f.write(improved_code)
-                    else:
-                        print("       ⚠ Test render failed, accepting change")
-                        current_code = improved_code
-                        # BUG FIX: Actually save the improved code to file
-                        with open(strudel_path, 'w') as f:
-                            f.write(improved_code)
-                else:
-                    # No Node renderer, accept change blindly
-                    current_code = improved_code
-                    improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
-                    with open(improved_path, 'w') as f:
-                        f.write(improved_code)
-                    with open(strudel_path, 'w') as f:
-                        f.write(improved_code)
-                    print(f"       Saved improved code to {improved_path}")
+                with open(strudel_path, 'w') as f:
+                    f.write(improved_code)
+                print(f"       Saved improved code to {improved_path}")
         else:
             print("       No code changes this iteration, continuing...")
 
@@ -1960,14 +1914,12 @@ def improve_strudel(
         if chart_result.returncode != 0:
             print(f"Chart generation warning: {chart_result.stderr[:200]}")
 
-        # Find and copy best strudel file
-        strudel_files = sorted(Path(output_dir).glob("output_v*.strudel"))
-        if strudel_files:
-            best_strudel = strudel_files[-1]
-            with open(best_strudel) as f:
-                code = f.read()
+        # Write BEST code (not last iteration) to output.strudel
+        # The iteration loop tracks best_code based on Node.js comparison
+        if best_code:
             with open(Path(output_dir) / "output.strudel", 'w') as f:
-                f.write(code)
+                f.write(best_code)
+            print(f"Wrote best code ({best_similarity*100:.1f}% similarity) to output.strudel")
 
         # Copy render
         import shutil

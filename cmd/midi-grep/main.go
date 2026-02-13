@@ -209,29 +209,29 @@ Examples:
 
 var (
 	// extract flags
-	inputPath   string
-	inputURL    string
-	outputPath  string
-	midiOutput  string
-	quantize    int
-	soundStyle  string
-	verbose     bool
-	simplify    bool
-	loopOnly    bool
-	enableDrums bool
-	drumsOnly   bool
-	drumKit     string
-	arrange       bool
-	noCache       bool
-	chordMode     bool
-	brazilianFunk bool
-	genreOverride string // Manual genre override (brazilian_funk, brazilian_phonk, retro_wave, etc.)
-	useDeepGenre  bool   // Use deep learning for genre detection
-	renderAudio   string // Output path for rendered WAV
-	useBlackHole  bool   // Use BlackHole for 100% accurate recording (requires brew install blackhole-2ch)
-	compareAudio  bool   // Compare rendered with original
-	stemCompare   bool   // Use per-stem comparison (more detailed, actionable)
-	stemQuality   string // Stem separation quality (fast, normal, high, best)
+	inputPath        string
+	inputURL         string
+	outputPath       string
+	midiOutput       string
+	quantize         int
+	soundStyle       string
+	verbose          bool
+	simplify         bool
+	loopOnly         bool
+	enableDrums      bool
+	drumsOnly        bool
+	drumKit          string
+	arrange          bool
+	noCache          bool
+	chordMode        bool
+	brazilianFunk    bool
+	genreOverride    string  // Manual genre override (brazilian_funk, brazilian_phonk, retro_wave, etc.)
+	useDeepGenre     bool    // Use deep learning for genre detection
+	renderAudio      string  // Output path for rendered WAV
+	useBlackHole     bool    // Use BlackHole for 100% accurate recording (requires brew install blackhole-2ch)
+	compareAudio     bool    // Compare rendered with original
+	stemCompare      bool    // Use per-stem comparison (more detailed, actionable)
+	stemQuality      string  // Stem separation quality (fast, normal, high, best)
 	iterateCount     int     // AI-driven improvement iterations
 	targetSimilarity float64 // Target similarity for iteration
 	useOllama        bool    // Use Ollama (local LLM) instead of Claude API
@@ -255,17 +255,17 @@ var (
 	baseModel    string
 
 	// generative flags
-	genTrackID         string
-	genModelsPath      string
-	genGitHubRepo      string
-	genTrainingMode    string
-	genThreshold       float64
-	genModelName       string
-	genGrainMS         int
-	genAddToRepo       bool
-	genSync            bool
-	genPort            int
-	genOutputDir       string
+	genTrackID      string
+	genModelsPath   string
+	genGitHubRepo   string
+	genTrainingMode string
+	genThreshold    float64
+	genModelName    string
+	genGrainMS      int
+	genAddToRepo    bool
+	genSync         bool
+	genPort         int
+	genOutputDir    string
 
 	// report flags
 	reportVersion int
@@ -1091,8 +1091,6 @@ func renderStrudelBlackHole(inputPath, outputPath string, duration float64) erro
 	if duration > 0 {
 		args = append(args, "-d", fmt.Sprintf("%.0f", duration))
 	}
-	// Use local strudel-client for testing (localhost:4321)
-	args = append(args, "--local")
 
 	cmd := exec.Command("node", args...)
 	cmd.Stdout = os.Stdout

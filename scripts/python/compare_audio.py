@@ -234,21 +234,29 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     # Compute similarity scores
     log("Computing similarity scores...")
 
-    # MFCC similarity (timbre)
+    # MFCC similarity (timbre) - guard against NaN from zero-norm vectors
     mfcc_sim = 1 - cosine(orig_mfcc, rend_mfcc)
+    if np.isnan(mfcc_sim):
+        log("  WARNING: MFCC cosine returned NaN (zero-norm vector), defaulting to 0.0")
+        mfcc_sim = 0.0
     results['comparison']['mfcc_similarity'] = float(mfcc_sim)
 
-    # Chroma similarity (harmony)
+    # Chroma similarity (harmony) - guard against NaN from zero-norm vectors
     chroma_sim = 1 - cosine(orig_chroma, rend_chroma)
+    if np.isnan(chroma_sim):
+        log("  WARNING: Chroma cosine returned NaN (zero-norm vector), defaulting to 0.0")
+        chroma_sim = 0.0
     results['comparison']['chroma_similarity'] = float(chroma_sim)
 
-    # Spectral centroid difference (brightness)
-    centroid_diff = abs(results['original']['spectral']['centroid_mean'] -
-                       results['rendered']['spectral']['centroid_mean'])
-    centroid_ratio = min(results['original']['spectral']['centroid_mean'],
-                        results['rendered']['spectral']['centroid_mean']) / \
-                    max(results['original']['spectral']['centroid_mean'],
-                        results['rendered']['spectral']['centroid_mean'])
+    # Spectral centroid difference (brightness) - guard against 0/0
+    centroid_orig = results['original']['spectral']['centroid_mean']
+    centroid_rend = results['rendered']['spectral']['centroid_mean']
+    centroid_max = max(centroid_orig, centroid_rend)
+    if centroid_max > 0:
+        centroid_ratio = min(centroid_orig, centroid_rend) / centroid_max
+    else:
+        log("  WARNING: Both spectral centroids are 0, defaulting brightness to 0.0")
+        centroid_ratio = 0.0
     results['comparison']['brightness_similarity'] = float(centroid_ratio)
 
     # Tempo similarity with octave handling (half-time/double-time are musically equivalent)
@@ -340,6 +348,16 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     }
 
     overall = sum(results['comparison'][k] * w for k, w in weights.items())
+    if np.isnan(overall):
+        log("  WARNING: Overall similarity is NaN, recalculating with NaN-safe values")
+        safe_sum = 0.0
+        safe_weight = 0.0
+        for k, w in weights.items():
+            v = results['comparison'][k]
+            if not np.isnan(v):
+                safe_sum += v * w
+                safe_weight += w
+        overall = safe_sum / safe_weight if safe_weight > 0 else 0.0
     results['comparison']['overall_similarity'] = float(overall)
 
     # Generate insights
