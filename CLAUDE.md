@@ -579,7 +579,7 @@ go build -o bin/midi-grep ./cmd/midi-grep
 | `--brazilian-funk` | Force Brazilian funk mode (auto-detected normally) |
 | `--genre` | Manual genre override (`brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz`) |
 | `--deep-genre` | Use deep learning (CLAP) for genre detection (default: enabled, skipped when `--genre` is specified) |
-| `--iterate N` | AI-driven improvement iterations (default: 5) |
+| `--iterate N` | AI-driven improvement iterations (default: 20) |
 | `--target-similarity` | Target similarity for --iterate (0.0-1.0, default: 0.85) |
 
 ### Default Analysis Features (Always Enabled)
@@ -589,7 +589,7 @@ The following analysis features are **always enabled by default**:
 1. **Stem Rendering**: Renders 3 separate stems (`render_bass.wav`, `render_drums.wav`, `render_melodic.wav`)
 2. **Per-Stem Comparison**: Generates per-stem comparison charts (`chart_stem_bass.png`, `chart_stem_drums.png`, `chart_stem_melodic.png`)
 3. **Overall Comparison**: Generates combined comparison chart and `comparison.json`
-4. **AI-Driven Improvement**: 5 iterations by default with 99% target (ensures ALL iterations run)
+4. **AI-Driven Improvement**: 20 iterations by default with 99% target (ensures ALL iterations run)
 5. **HTML Report**: Self-contained DAW-style player with isolated Original/Rendered stem groups
 
 ### AI-Driven Iterative Improvement

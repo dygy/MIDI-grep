@@ -317,7 +317,7 @@ func init() {
 	extractCmd.Flags().BoolVar(&compareAudio, "compare", true, "Audio comparison (always enabled, kept for compatibility)")
 	extractCmd.Flags().BoolVar(&stemCompare, "stem-compare", true, "Per-stem comparison (always enabled, kept for compatibility)")
 	extractCmd.Flags().StringVar(&stemQuality, "quality", "normal", "Stem separation quality: fast, normal, high (better, slower), best (highest, slowest)")
-	extractCmd.Flags().IntVar(&iterateCount, "iterate", 5, "AI-driven improvement iterations (default: 5)")
+	extractCmd.Flags().IntVar(&iterateCount, "iterate", 20, "AI-driven improvement iterations (default: 20)")
 	extractCmd.Flags().Float64Var(&targetSimilarity, "target-similarity", 0.99, "Target similarity for --iterate (0.99 = always run all iterations)")
 	extractCmd.Flags().BoolVar(&useOllama, "ollama", true, "Use Ollama (local LLM) - free, no API key needed")
 	extractCmd.Flags().StringVar(&ollamaModel, "ollama-model", "llama3.1:8b", "Ollama model to use (llama3.1 supports tool calling)")
@@ -862,14 +862,40 @@ func runExtract(cmd *cobra.Command, args []string) error {
 				if renderErr != nil {
 					fmt.Printf("       Warning: Could not re-render improved code: %v\n", renderErr)
 				} else if _, err := os.Stat(stemOutputPath); err == nil {
-					// Render succeeded - run overall comparison on final render
+					// Render succeeded - copy as canonical render.wav so report uses improved audio
+					canonicalRender := filepath.Join(versionDir, "render.wav")
+					if srcData, err := os.ReadFile(stemOutputPath); err == nil {
+						if err := os.WriteFile(canonicalRender, srcData, 0644); err == nil {
+							fmt.Printf("       Updated render.wav with improved code\n")
+							renderedPath = canonicalRender
+						}
+					}
+
+					// Overwrite comparison.png (and comparison.json) with improved render data
 					fmt.Println("[AI] Running comparison on improved render...")
-					chartPath := filepath.Join(versionDir, "comparison_final.png")
+					chartPath := filepath.Join(versionDir, "comparison.png")
 					configPath := filepath.Join(versionDir, "synth_config.json")
 					if err := generateComparisonChart(result.OriginalPath, stemOutputPath, chartPath, configPath, findScriptsDir()); err != nil {
 						fmt.Printf("       Warning: Final comparison failed: %v\n", err)
 					} else {
-						fmt.Printf("       Final comparison: %s\n", chartPath)
+						fmt.Printf("       Updated comparison: %s\n", chartPath)
+					}
+
+					// Re-run per-stem comparison with improved stems
+					// BlackHole render already separated stems with --prefix render
+					finalStems := StemPaths{
+						OriginalBass:    filepath.Join(result.CacheDir, "bass.wav"),
+						RenderedBass:    filepath.Join(versionDir, "render_bass.wav"),
+						OriginalDrums:   filepath.Join(result.CacheDir, "drums.wav"),
+						RenderedDrums:   filepath.Join(versionDir, "render_drums.wav"),
+						OriginalMelodic: filepath.Join(result.CacheDir, "melodic.wav"),
+						RenderedMelodic: filepath.Join(versionDir, "render_melodic.wav"),
+					}
+					fmt.Println("[AI] Re-running per-stem comparison...")
+					if err := generateStemComparison(finalStems, versionDir, findScriptsDir(), audioDuration, configPath); err != nil {
+						fmt.Printf("       Warning: Per-stem comparison failed: %v\n", err)
+					} else {
+						fmt.Printf("       Updated stem comparison charts\n")
 					}
 				}
 			}

@@ -81,8 +81,9 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
   }
 
   // Use default context (NOT incognito) to preserve cached samples
+  // Grant microphone permission so enumerateDevices() returns device labels (including audiooutput)
   const context = browser.defaultBrowserContext();
-  await context.overridePermissions(STRUDEL_ORIGIN, ['microphone', 'camera']);
+  await context.overridePermissions(STRUDEL_ORIGIN, ['microphone']);
 
   const page = await browser.newPage();
 
@@ -108,26 +109,33 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
   await page.waitForSelector('.cm-content', { timeout: 30000 });
   console.log('Page loaded');
 
-  // Request mic permission to enumerate devices
-  console.log('Requesting audio permission...');
-  await page.evaluate(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      stream.getTracks().forEach(track => track.stop());
-    } catch (e) {
-      console.log('getUserMedia failed:', e);
-    }
-  });
-  await new Promise(r => setTimeout(r, 500));
-
-  // Get audio output devices and find BlackHole
+  // Step 1: Try enumerateDevices WITHOUT getUserMedia (modern Chrome supports this)
   console.log('Finding BlackHole device...');
-  const blackholeId = await page.evaluate(async () => {
+  let blackholeId = await page.evaluate(async () => {
     const devices = await navigator.mediaDevices.enumerateDevices();
     const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
     const blackhole = audioOutputs.find(d => d.label.includes('BlackHole'));
     return blackhole?.deviceId || null;
   });
+
+  // Step 2: If labels are empty (privacy restriction), fall back to getUserMedia with fake device
+  if (!blackholeId) {
+    console.log('Device labels restricted, requesting permission with fake device...');
+    await page.evaluate(async () => {
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+        stream.getTracks().forEach(track => track.stop());
+      } catch (e) { /* fake device via --use-fake-device-for-media-stream, ignore errors */ }
+    });
+    await new Promise(r => setTimeout(r, 500));
+
+    blackholeId = await page.evaluate(async () => {
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const audioOutputs = devices.filter(d => d.kind === 'audiooutput');
+      const blackhole = audioOutputs.find(d => d.label.includes('BlackHole'));
+      return blackhole?.deviceId || null;
+    });
+  }
 
   if (!blackholeId) {
     throw new Error('ERROR: BlackHole not found. Install with: brew install blackhole-2ch');

@@ -724,18 +724,122 @@ def build_improvement_prompt(
     genre: str = "",
     artist: str = "",
     bpm: float = 120,
-    key: str = "C minor"
+    key: str = "C minor",
+    stem_comparison: Dict = None,
+    comparison_data: Dict = None
 ) -> str:
-    """Build the prompt for LLM to improve arrange()-based Strudel code."""
+    """Build the prompt for LLM to improve arrange()-based Strudel code.
 
-    # Get frequency band differences
-    band_bass = previous_run.get('band_bass', 0) + previous_run.get('band_sub_bass', 0)
-    band_mid = previous_run.get('band_mid', 0) + previous_run.get('band_low_mid', 0)
-    band_high = previous_run.get('band_high', 0) + previous_run.get('band_high_mid', 0)
+    Enhanced with 6-band frequency breakdown, per-stem data, dynamics info.
+    """
+
+    # Get ALL 6 frequency band differences (don't combine - LLM needs granular data)
+    band_sub_bass = previous_run.get('band_sub_bass', 0)
+    band_bass = previous_run.get('band_bass', 0)
+    band_low_mid = previous_run.get('band_low_mid', 0)
+    band_mid = previous_run.get('band_mid', 0)
+    band_high_mid = previous_run.get('band_high_mid', 0)
+    band_high = previous_run.get('band_high', 0)
 
     # Get spectral metrics
     brightness_ratio = previous_run.get('brightness_ratio', 1.0)
     energy_ratio = previous_run.get('energy_ratio', 1.0)
+    overall_similarity = previous_run.get('similarity_overall', 0)
+
+    # Build 6-band frequency table with specific Hz ranges
+    def band_row(name, hz_range, diff):
+        if diff > 0.05:
+            return f"| {name} | {hz_range} | TOO LOUD | {diff*100:+.0f}% | Reduce gain by ~{diff*100:.0f}% |"
+        elif diff < -0.05:
+            return f"| {name} | {hz_range} | TOO QUIET | {diff*100:+.0f}% | Increase gain by ~{abs(diff)*100:.0f}% |"
+        else:
+            return f"| {name} | {hz_range} | OK | {diff*100:+.0f}% | No change needed |"
+
+    freq_table = f"""| Band | Hz Range | Status | Diff | Action |
+|------|----------|--------|------|--------|
+{band_row("Sub-bass", "20-60 Hz", band_sub_bass)}
+{band_row("Bass", "60-250 Hz", band_bass)}
+{band_row("Low-mid", "250-500 Hz", band_low_mid)}
+{band_row("Mid", "500-2k Hz", band_mid)}
+{band_row("High-mid", "2k-4k Hz", band_high_mid)}
+{band_row("High", "4k-20k Hz", band_high)}"""
+
+    # Extract original/rendered band values from comparison_data for context
+    band_context = ""
+    if comparison_data:
+        orig_bands = comparison_data.get("original", {}).get("bands", {})
+        rend_bands = comparison_data.get("rendered", {}).get("bands", {})
+        if orig_bands and rend_bands:
+            band_context = "\n**Absolute band energy (original → rendered):**\n"
+            for band_name in ["sub_bass", "bass", "low_mid", "mid", "high_mid", "high"]:
+                o_val = orig_bands.get(band_name, 0) * 100
+                r_val = rend_bands.get(band_name, 0) * 100
+                band_context += f"  {band_name}: {o_val:.1f}% → {r_val:.1f}%\n"
+
+    # Dynamics and energy analysis
+    dynamics_str = ""
+    if comparison_data:
+        orig_spec = comparison_data.get("original", {}).get("spectral", {})
+        rend_spec = comparison_data.get("rendered", {}).get("spectral", {})
+        orig_rms = orig_spec.get("rms_mean", 0)
+        rend_rms = rend_spec.get("rms_mean", 0)
+        orig_rms_std = orig_spec.get("rms_std", 0)
+        rend_rms_std = rend_spec.get("rms_std", 0)
+        dynamics_str = f"""
+## DYNAMICS ANALYSIS
+- **Overall energy**: rendered is {energy_ratio:.0%} of original ({rend_rms:.3f} vs {orig_rms:.3f} RMS)
+- **Dynamic variation**: rendered {rend_rms_std:.3f} vs original {orig_rms_std:.3f} std dev"""
+        if energy_ratio < 0.5:
+            dynamics_str += f"\n- **CRITICAL: Output is {(1-energy_ratio)*100:.0f}% too quiet!** Increase all gains significantly."
+        elif energy_ratio < 0.8:
+            dynamics_str += f"\n- Output is too quiet. Increase gains by ~{(1/energy_ratio - 1)*100:.0f}%."
+        if orig_rms_std > 0 and rend_rms_std / max(orig_rms_std, 0.001) < 0.5:
+            dynamics_str += f"\n- **Dynamic range is too flat!** Add gain variation with `.gain(\"<0.3 0.5 0.8 0.5>\".slow(16))` patterns."
+
+    # Per-stem detailed breakdown from stem_comparison
+    stem_detail_str = ""
+    if stem_comparison:
+        stems_data = stem_comparison.get("stems", {})
+        if stems_data:
+            stem_detail_str = "\n## PER-STEM FREQUENCY ANALYSIS\n"
+            for stem_name in ["bass", "drums", "melodic"]:
+                stem_info = stems_data.get(stem_name, {})
+                if not stem_info:
+                    continue
+                s_orig = stem_info.get("original", {}).get("bands", {})
+                s_rend = stem_info.get("rendered", {}).get("bands", {})
+                s_comp = stem_info.get("comparison", {})
+                s_overall = s_comp.get("overall_similarity", 0)
+                s_energy = s_comp.get("energy_similarity", 0)
+
+                # RMS comparison
+                s_orig_rms = stem_info.get("original", {}).get("spectral", {}).get("rms_mean", 0)
+                s_rend_rms = stem_info.get("rendered", {}).get("spectral", {}).get("rms_mean", 0)
+
+                stem_detail_str += f"\n### {stem_name.upper()} stem ({s_overall*100:.0f}% similar)\n"
+                stem_detail_str += f"Energy: {s_rend_rms:.3f} vs {s_orig_rms:.3f} RMS"
+                if s_orig_rms > 0:
+                    stem_detail_str += f" ({s_rend_rms/s_orig_rms:.0%} of original)"
+                stem_detail_str += "\n"
+
+                # Show worst band differences for this stem
+                s_band_diffs = s_comp.get("band_differences", {})
+                if s_band_diffs:
+                    worst_band = max(s_band_diffs, key=lambda k: abs(s_band_diffs[k]))
+                    stem_detail_str += f"Worst band: {worst_band} ({s_band_diffs[worst_band]:+.1f}%)\n"
+                    for b_name in ["sub_bass", "bass", "low_mid", "mid"]:
+                        if b_name in s_band_diffs and abs(s_band_diffs[b_name]) > 5:
+                            o_pct = s_orig.get(b_name, 0) * 100
+                            r_pct = s_rend.get(b_name, 0) * 100
+                            stem_detail_str += f"  {b_name}: {o_pct:.0f}% → {r_pct:.0f}% (diff: {s_band_diffs[b_name]:+.1f}%)\n"
+
+    # Per-stem issues (summary)
+    per_stem_issues = previous_run.get('per_stem_issues', [])
+    stem_issues_str = ""
+    if per_stem_issues:
+        stem_issues_str = "\n## WORST SECTIONS\n"
+        for issue in per_stem_issues[:5]:
+            stem_issues_str += f"- {issue}\n"
 
     # Include learned knowledge if available
     knowledge_str = ""
@@ -752,52 +856,18 @@ def build_improvement_prompt(
     if spectrogram_insights:
         spectrogram_str = f"\n## SPECTROGRAM ANALYSIS\n{spectrogram_insights}\n"
 
-    # Per-stem issues
-    per_stem_issues = previous_run.get('per_stem_issues', [])
-    stem_issues_str = ""
-    if per_stem_issues:
-        stem_issues_str = "\n## PER-STEM ISSUES\n"
-        for issue in per_stem_issues[:5]:
-            stem_issues_str += f"- {issue}\n"
-
-    # Calculate suggested gains based on comparison
-    bass_status = "too loud" if band_bass > 0.05 else "too quiet" if band_bass < -0.05 else "OK"
-    mid_status = "too loud" if band_mid > 0.05 else "too quiet" if band_mid < -0.05 else "OK"
-    high_status = "too loud" if band_high > 0.05 else "too quiet" if band_high < -0.05 else "OK"
-
-    # Gain adjustment hints
-    bass_hint = ""
-    if band_bass > 0.05:
-        bass_hint = f" (reduce gain by ~{band_bass*100:.0f}%)"
-    elif band_bass < -0.05:
-        bass_hint = f" (increase gain by ~{abs(band_bass)*100:.0f}%)"
-
-    mid_hint = ""
-    if band_mid > 0.05:
-        mid_hint = f" (reduce gain by ~{band_mid*100:.0f}%)"
-    elif band_mid < -0.05:
-        mid_hint = f" (increase gain by ~{abs(band_mid)*100:.0f}%)"
-
-    high_hint = ""
-    if band_high > 0.05:
-        high_hint = f" (reduce gain by ~{band_high*100:.0f}%)"
-    elif band_high < -0.05:
-        high_hint = f" (increase gain by ~{abs(band_high)*100:.0f}%)"
-
     return f'''You are improving Strudel live coding audio to match an original track.
+Current similarity: **{overall_similarity*100:.1f}%** — target is 80%+.
 
-## FREQUENCY BALANCE ANALYSIS
+## FREQUENCY BALANCE (6-band analysis)
 
-| Voice | Status | Difference | Action |
-|-------|--------|------------|--------|
-| Bass  | {bass_status} | {band_bass*100:+.0f}% | {bass_hint} |
-| Mid   | {mid_status} | {band_mid*100:+.0f}% | {mid_hint} |
-| High  | {high_status} | {band_high*100:+.0f}% | {high_hint} |
-
+{freq_table}
+{band_context}
 Brightness: {brightness_ratio:.0%} of original
-Energy: {energy_ratio:.0%} of original
-{spectrogram_str}
+{dynamics_str}
+{stem_detail_str}
 {stem_issues_str}
+{spectrogram_str}
 {knowledge_str}
 
 ## CURRENT CODE
@@ -806,7 +876,7 @@ Energy: {energy_ratio:.0%} of original
 ```
 
 ## GENRE CONTEXT
-Genre: {genre or 'auto'}, Artist: {artist or 'unknown'}, BPM: {bpm:.0f}
+Genre: {genre or 'auto'}, Artist: {artist or 'unknown'}, BPM: {bpm:.0f}, Key: {key}
 
 ## GENRE-SPECIFIC SOUNDS
 - **Brazilian Funk**: RolandTR808, gm_synth_bass_1, gm_lead_2_sawtooth
@@ -815,9 +885,13 @@ Genre: {genre or 'auto'}, Artist: {artist or 'unknown'}, BPM: {bpm:.0f}
 - **House**: RolandTR909, gm_synth_bass_2, supersaw
 - **Jazz**: AkaiLinn, gm_acoustic_bass, gm_epiano1
 
-## TASK: Fix the frequency balance
+## TASK: Fix the frequency balance and dynamics
 
-Based on the analysis above, modify the code to fix the frequency issues.
+Based on the analysis above, modify the code to fix the issues. Focus on:
+1. **Sub-bass** — if sub_bass is too quiet, bass notes must go LOWER (a1, e1 instead of a2, e2) and use deeper sounds
+2. **Energy/loudness** — if rendered is too quiet, increase ALL .gain() values proportionally
+3. **Dynamic variation** — use gain patterns like `.gain("<0.3 0.6 0.9 0.6>".slow(8))` for natural dynamics
+4. **Per-stem balance** — fix the worst-scoring stem first
 
 **RULES:**
 1. Output the COMPLETE Strudel code (setcps + all $: voices) in a ```javascript block
@@ -850,7 +924,9 @@ def analyze_with_ollama(
     spectrogram_insights: str = None,
     genre: str = "",
     artist: str = "",
-    bpm: float = 120
+    bpm: float = 120,
+    stem_comparison: Dict = None,
+    comparison_data: Dict = None
 ) -> Dict[str, Any]:
     """Use Ollama (local LLM) to analyze results and suggest improvements."""
 
@@ -862,7 +938,8 @@ def analyze_with_ollama(
     key = previous_run.get("key", "C minor")
     prompt = build_improvement_prompt(
         previous_run, learned_knowledge, original_code,
-        spectrogram_insights, genre=genre, artist=artist, bpm=bpm, key=key
+        spectrogram_insights, genre=genre, artist=artist, bpm=bpm, key=key,
+        stem_comparison=stem_comparison, comparison_data=comparison_data
     )
 
     try:
@@ -1011,7 +1088,9 @@ def analyze_with_claude(
     spectrogram_insights: str = None,
     genre: str = "",
     artist: str = "",
-    bpm: float = 120
+    bpm: float = 120,
+    stem_comparison: Dict = None,
+    comparison_data: Dict = None
 ) -> Dict[str, Any]:
     """Use Claude API to analyze results and suggest improvements."""
 
@@ -1025,7 +1104,8 @@ def analyze_with_claude(
     key = previous_run.get("key", "C minor")
     prompt = build_improvement_prompt(
         previous_run, learned_knowledge, original_code,
-        spectrogram_insights, genre=genre, artist=artist, bpm=bpm, key=key
+        spectrogram_insights, genre=genre, artist=artist, bpm=bpm, key=key,
+        stem_comparison=stem_comparison, comparison_data=comparison_data
     )
     client = Anthropic(api_key=api_key)
 
@@ -1060,7 +1140,8 @@ def analyze_with_llm(
     genre: str = "",
     artist: str = "",
     bpm: float = 120,
-    agent: 'OllamaAgent' = None  # Agentic mode with memory
+    agent: 'OllamaAgent' = None,  # Agentic mode with memory
+    stem_comparison: Dict = None
 ) -> Dict[str, Any]:
     """
     Analyze and improve code using available LLM.
@@ -1071,9 +1152,9 @@ def analyze_with_llm(
     3. Try Claude API if ANTHROPIC_API_KEY is set
     4. Fall back to Ollama (local)
 
-    Now enhanced with spectrogram_insights for deeper analysis.
-    Genre and artist context helps with sound selection.
-    BPM is used for tempo control in generated code.
+    Now enhanced with spectrogram_insights for deeper analysis,
+    stem_comparison for per-stem frequency data,
+    and comparison_data for dynamics/energy context.
     """
 
     # AGENTIC MODE - uses persistent memory, ClickHouse queries
@@ -1083,9 +1164,12 @@ def analyze_with_llm(
             "genre": genre,
             "bpm": bpm,
             "similarity": previous_run.get("similarity_overall", 0),
-            "band_bass": previous_run.get("band_bass", 0) + previous_run.get("band_sub_bass", 0),
-            "band_mid": previous_run.get("band_mid", 0) + previous_run.get("band_low_mid", 0),
-            "band_high": previous_run.get("band_high", 0) + previous_run.get("band_high_mid", 0),
+            "band_sub_bass": previous_run.get("band_sub_bass", 0),
+            "band_bass": previous_run.get("band_bass", 0),
+            "band_low_mid": previous_run.get("band_low_mid", 0),
+            "band_mid": previous_run.get("band_mid", 0),
+            "band_high_mid": previous_run.get("band_high_mid", 0),
+            "band_high": previous_run.get("band_high", 0),
         }
         response = agent.generate(context)
         code = agent.extract_code(response)
@@ -1103,13 +1187,15 @@ def analyze_with_llm(
         print("       Using Ollama (local LLM)...")
         return analyze_with_ollama(
             previous_run, learned_knowledge, original_code,
-            spectrogram_insights=spectrogram_insights, genre=genre, artist=artist, bpm=bpm
+            spectrogram_insights=spectrogram_insights, genre=genre, artist=artist, bpm=bpm,
+            stem_comparison=stem_comparison, comparison_data=comparison_data
         )
 
     # Try Claude first
     result = analyze_with_claude(
         previous_run, learned_knowledge, original_code,
-        spectrogram_insights=spectrogram_insights, genre=genre, artist=artist, bpm=bpm
+        spectrogram_insights=spectrogram_insights, genre=genre, artist=artist, bpm=bpm,
+        stem_comparison=stem_comparison, comparison_data=comparison_data
     )
     if result is not None:
         return result
@@ -1118,7 +1204,8 @@ def analyze_with_llm(
     print("       Claude unavailable, using Ollama (local LLM)...")
     return analyze_with_ollama(
         previous_run, learned_knowledge, original_code,
-        spectrogram_insights=spectrogram_insights, genre=genre, artist=artist, bpm=bpm
+        spectrogram_insights=spectrogram_insights, genre=genre, artist=artist, bpm=bpm,
+        stem_comparison=stem_comparison, comparison_data=comparison_data
     )
 
 
@@ -1196,8 +1283,7 @@ def store_knowledge(
         "parameter_old_value": old_value,
         "parameter_new_value": new_value,
         "similarity_improvement": improvement,
-        "confidence": 1.0,
-        "run_ids": "[]"
+        "confidence": 1.0
     }
     return clickhouse_insert("midi_grep.knowledge", data)
 
@@ -1387,6 +1473,394 @@ let drumsFx = p => p.bank("{drums_config.get('kit', 'RolandTR808')}")
     return new_code
 
 
+def _scale_fx_gain(fx_text: str, multiplier: float) -> str:
+    """Scale gain value(s) in an Fx function definition by a multiplier.
+
+    Handles three gain patterns:
+    1. .gain(0.6) - simple numeric
+    2. .gain(perlin.range(0.63, 0.77).slow(8)) - perlin range
+    3. .gain("<0.3 0.5 0.8 0.5>".slow(16)) - string pattern
+    """
+    # Pattern 1: perlin.range(low, high)
+    def scale_perlin(m):
+        low = round(min(1.5, max(0.01, float(m.group(1)) * multiplier)), 2)
+        high = round(min(1.5, max(0.01, float(m.group(2)) * multiplier)), 2)
+        return f'.gain(perlin.range({low}, {high})'
+
+    result = re.sub(r'\.gain\(perlin\.range\(([0-9.]+),\s*([0-9.]+)\)', scale_perlin, fx_text)
+    if result != fx_text:
+        return result
+
+    # Pattern 2: string pattern "<values>"
+    def scale_string_gain(m):
+        prefix = m.group(1)
+        text = m.group(2)
+        suffix = m.group(3)
+        def scale_val(vm):
+            v = round(min(1.5, max(0.01, float(vm.group()) * multiplier)), 2)
+            return str(v)
+        new_text = re.sub(r'[0-9]+\.?[0-9]*', scale_val, text)
+        return f'{prefix}{new_text}{suffix}'
+
+    result = re.sub(r'(\.gain\(")([<>0-9. ]+)(")', scale_string_gain, fx_text)
+    if result != fx_text:
+        return result
+
+    # Pattern 3: simple .gain(N)
+    def scale_simple(m):
+        v = round(min(1.5, max(0.01, float(m.group(1)) * multiplier)), 3)
+        return f'.gain({v})'
+
+    return re.sub(r'\.gain\(([0-9.]+)\)', scale_simple, fx_text)
+
+
+def _set_fx_numeric_param(fx_text: str, param: str, new_value) -> str:
+    """Set a simple numeric parameter value in an Fx function definition."""
+    pattern = rf'\.{param}\(([0-9.]+)\)'
+    match = re.search(pattern, fx_text)
+    if match:
+        return fx_text[:match.start(1)] + str(new_value) + fx_text[match.end(1):]
+    return fx_text
+
+
+def optimize_parameters(code: str, comparison: dict, stem_comparison: dict = None) -> tuple:
+    """Deterministic parameter optimizer. Adjusts gain/lpf/hpf/room based on comparison data.
+
+    No LLM call needed - pure math with 50% dampening to prevent oscillation.
+    Only modifies effect function parameters, never notes/sounds/structure.
+
+    Returns (optimized_code, list_of_change_descriptions).
+    """
+    fx_pattern = r'let\s+(\w+Fx)\s*=\s*p\s*=>\s*p[^\n]*(?:\n\s+\.[^\n]*)*'
+    fx_matches = list(re.finditer(fx_pattern, code, re.MULTILINE))
+
+    if not fx_matches:
+        return code, []
+
+    # Extract metrics from comparison
+    orig = comparison.get("original", {})
+    rend = comparison.get("rendered", {})
+    comp = comparison.get("comparison", {})
+
+    orig_rms = orig.get("spectral", {}).get("rms_mean", 0.1)
+    rend_rms = rend.get("spectral", {}).get("rms_mean", 0.1)
+    energy_ratio = rend_rms / max(orig_rms, 0.001)
+
+    orig_centroid = orig.get("spectral", {}).get("centroid_mean", 1)
+    rend_centroid = rend.get("spectral", {}).get("centroid_mean", 1)
+    brightness_ratio = rend_centroid / max(orig_centroid, 1) if orig_centroid else 1.0
+
+    orig_bands = orig.get("bands", {})
+    rend_bands = rend.get("bands", {})
+
+    changes = []
+    result = code
+
+    # Voice classification
+    bass_voices = {'bassFx', 'kickFx'}
+    drum_voices = {'drumsFx', 'snareFx', 'hhFx'}
+    melodic_voices = {'midFx', 'highFx', 'voxFx', 'stabFx', 'leadFx'}
+    all_voices = bass_voices | drum_voices | melodic_voices
+
+    modified_gains = set()
+
+    # --- 1. PER-STEM ENERGY FIX (most targeted) ---
+    stem_voice_map = {
+        'bass': bass_voices,
+        'drums': drum_voices,
+        'melodic': melodic_voices,
+    }
+
+    if stem_comparison:
+        stems_data = stem_comparison.get("stems", {})
+        for stem_name, voice_names in stem_voice_map.items():
+            stem_info = stems_data.get(stem_name, {})
+            if not stem_info:
+                continue
+            s_orig_rms = stem_info.get("original", {}).get("spectral", {}).get("rms_mean", 0)
+            s_rend_rms = stem_info.get("rendered", {}).get("spectral", {}).get("rms_mean", 0)
+
+            if s_orig_rms < 0.005:
+                continue  # near-silent stem, skip
+
+            stem_energy = s_rend_rms / s_orig_rms
+            if stem_energy < 0.6 or stem_energy > 1.5:
+                mult = 1 + (1 / stem_energy - 1) * 0.5  # 50% dampened
+                mult = max(0.5, min(2.0, mult))
+
+                fx_matches = list(re.finditer(fx_pattern, result, re.MULTILINE))
+                for match in fx_matches:
+                    fx_name = match.group(1)
+                    if fx_name in voice_names:
+                        fx_text = match.group()
+                        new_fx = _scale_fx_gain(fx_text, mult)
+                        if new_fx != fx_text:
+                            result = result.replace(fx_text, new_fx)
+                            modified_gains.add(fx_name)
+                            changes.append(f"{fx_name} gain *= {mult:.2f} ({stem_name} energy {stem_energy:.0%})")
+
+    # --- 2. OVERALL ENERGY FIX (for voices not adjusted by stem) ---
+    if energy_ratio < 0.7 or energy_ratio > 1.4:
+        mult = 1 + (1 / energy_ratio - 1) * 0.5
+        mult = max(0.5, min(2.0, mult))
+
+        fx_matches = list(re.finditer(fx_pattern, result, re.MULTILINE))
+        for match in fx_matches:
+            fx_name = match.group(1)
+            if fx_name not in modified_gains and fx_name in all_voices:
+                fx_text = match.group()
+                new_fx = _scale_fx_gain(fx_text, mult)
+                if new_fx != fx_text:
+                    result = result.replace(fx_text, new_fx)
+                    modified_gains.add(fx_name)
+                    changes.append(f"{fx_name} gain *= {mult:.2f} (overall energy {energy_ratio:.0%})")
+
+    # --- 3. BRIGHTNESS FIX (adjust LPF on melodic voices) ---
+    if brightness_ratio > 1.2 or brightness_ratio < 0.8:
+        lpf_factor = orig_centroid / max(rend_centroid, 1)
+        lpf_factor = 1 + (lpf_factor - 1) * 0.5  # dampened
+
+        fx_matches = list(re.finditer(fx_pattern, result, re.MULTILINE))
+        for match in fx_matches:
+            fx_name = match.group(1)
+            if fx_name in melodic_voices:
+                fx_text = match.group()
+                lpf_m = re.search(r'\.lpf\(([0-9.]+)\)', fx_text)
+                if lpf_m:
+                    old_lpf = float(lpf_m.group(1))
+                    new_lpf = round(max(200, min(16000, old_lpf * lpf_factor)))
+                    if abs(new_lpf - old_lpf) > 50:
+                        new_fx = _set_fx_numeric_param(fx_text, 'lpf', new_lpf)
+                        result = result.replace(fx_text, new_fx)
+                        changes.append(f"{fx_name}.lpf {old_lpf:.0f} -> {new_lpf} (brightness {brightness_ratio:.0%})")
+
+    # --- 4. REVERB CUT (if too quiet, reverb eats energy) ---
+    if energy_ratio < 0.7:
+        fx_matches = list(re.finditer(fx_pattern, result, re.MULTILINE))
+        for match in fx_matches:
+            fx_name = match.group(1)
+            fx_text = match.group()
+            room_m = re.search(r'\.room\(([0-9.]+)\)', fx_text)
+            if room_m:
+                old_room = float(room_m.group(1))
+                if old_room > 0.05:
+                    new_room = round(max(0.02, old_room * 0.7), 3)
+                    if abs(new_room - old_room) > 0.01:
+                        new_fx = _set_fx_numeric_param(fx_text, 'room', new_room)
+                        result = result.replace(fx_text, new_fx)
+                        changes.append(f"{fx_name}.room {old_room} -> {new_room} (preserve energy)")
+
+    # --- 5. SUB-BASS FIX (adjust bass HPF) ---
+    sub_orig = orig_bands.get("sub_bass", 0)
+    sub_rend = rend_bands.get("sub_bass", 0)
+    sub_diff_pct = (sub_rend - sub_orig) * 100
+
+    if abs(sub_diff_pct) > 10:
+        fx_matches = list(re.finditer(fx_pattern, result, re.MULTILINE))
+        for match in fx_matches:
+            fx_name = match.group(1)
+            if fx_name in bass_voices:
+                fx_text = match.group()
+                hpf_m = re.search(r'\.hpf\(([0-9.]+)\)', fx_text)
+                if hpf_m:
+                    old_hpf = float(hpf_m.group(1))
+                    if sub_diff_pct < -10:
+                        new_hpf = round(max(15, old_hpf * 0.7))
+                    else:
+                        new_hpf = round(min(200, old_hpf * 1.3))
+                    if abs(new_hpf - old_hpf) > 3:
+                        new_fx = _set_fx_numeric_param(fx_text, 'hpf', new_hpf)
+                        result = result.replace(fx_text, new_fx)
+                        changes.append(f"{fx_name}.hpf {old_hpf:.0f} -> {new_hpf} (sub-bass {sub_diff_pct:+.0f}%)")
+
+    # --- 6. HIGH FREQUENCY FIX (reduce LPF on bright voices) ---
+    high_orig = orig_bands.get("high", 0)
+    high_rend = rend_bands.get("high", 0)
+    high_diff_pct = (high_rend - high_orig) * 100
+
+    if high_diff_pct > 10:
+        fx_matches = list(re.finditer(fx_pattern, result, re.MULTILINE))
+        for match in fx_matches:
+            fx_name = match.group(1)
+            if fx_name in {'hhFx', 'highFx'}:
+                fx_text = match.group()
+                lpf_m = re.search(r'\.lpf\(([0-9.]+)\)', fx_text)
+                if lpf_m:
+                    old_lpf = float(lpf_m.group(1))
+                    new_lpf = round(max(2000, old_lpf * 0.8))
+                    if abs(new_lpf - old_lpf) > 100:
+                        new_fx = _set_fx_numeric_param(fx_text, 'lpf', new_lpf)
+                        result = result.replace(fx_text, new_fx)
+                        changes.append(f"{fx_name}.lpf {old_lpf:.0f} -> {new_lpf} (high freq +{high_diff_pct:.0f}%)")
+
+    return result, changes
+
+
+def build_constrained_llm_prompt(code: str, comparison: dict, stem_comparison: dict = None, genre: str = "") -> tuple:
+    """Build constrained prompt for Phase 2 - LLM picks from menu, doesn't write code.
+
+    Returns (prompt_text, options_list).
+    """
+    sim = comparison.get("comparison", {}).get("overall_similarity", 0)
+
+    # Extract current sounds/banks
+    sounds = {}
+    for m in re.finditer(r'let\s+(\w+Fx)\s*=.*?\.sound\("([^"]+)"\)', code, re.DOTALL):
+        sounds[m.group(1)] = m.group(2)
+    banks = {}
+    for m in re.finditer(r'let\s+(\w+Fx)\s*=.*?\.bank\("([^"]+)"\)', code, re.DOTALL):
+        banks[m.group(1)] = m.group(2)
+
+    # Per-stem scores
+    stem_lines = ""
+    worst_stem = None
+    worst_sim = 1.0
+    if stem_comparison:
+        agg = stem_comparison.get("aggregate", {}).get("per_stem", {})
+        for stem, data in agg.items():
+            s = data.get('overall', 1.0)
+            stem_lines += f"\n- {stem}: {s*100:.0f}%"
+            if s < worst_sim:
+                worst_sim = s
+                worst_stem = stem
+
+    # Build options based on worst stem
+    options = []
+    bass_alts = ['gm_synth_bass_1', 'gm_synth_bass_2', 'gm_acoustic_bass', 'gm_electric_bass_finger', 'sawtooth']
+    lead_alts = ['gm_lead_2_sawtooth', 'gm_lead_5_charang', 'supersaw', 'square', 'triangle', 'gm_pad_warm']
+    drum_alts = ['RolandTR808', 'RolandTR909', 'LinnDrum', 'BossDR110', 'AkaiLinn']
+
+    current_bass = sounds.get('bassFx', '')
+    current_lead = sounds.get('midFx', '') or sounds.get('highFx', '') or sounds.get('leadFx', '')
+    current_drums = banks.get('drumsFx', '') or banks.get('kickFx', '')
+
+    bass_alts = [a for a in bass_alts if a != current_bass][:2]
+    lead_alts = [a for a in lead_alts if a != current_lead][:2]
+    drum_alts = [a for a in drum_alts if a != current_drums][:2]
+
+    if worst_stem in ('bass', None):
+        for alt in bass_alts:
+            options.append(f"Change bass sound from '{current_bass}' to '{alt}'")
+
+    if worst_stem in ('melodic', None):
+        for alt in lead_alts:
+            options.append(f"Change lead sound from '{current_lead}' to '{alt}'")
+
+    if worst_stem in ('drums', None):
+        for alt in drum_alts:
+            options.append(f"Change drum bank from '{current_drums}' to '{alt}'")
+
+    options.append("No change needed - keep current sounds")
+
+    numbered = "\n".join(f"{i+1}. {opt}" for i, opt in enumerate(options))
+
+    prompt = f"""Similarity: {sim*100:.1f}% after parameter optimization.
+Per-stem scores:{stem_lines}
+Worst stem: {worst_stem or 'N/A'} ({worst_sim*100:.0f}%)
+
+Current sounds: bass='{current_bass}', lead='{current_lead}', drums='{current_drums}'
+Genre: {genre or 'auto'}
+
+Choose ONE change to improve the worst-scoring stem.
+Respond with the number ONLY, nothing else.
+
+{numbered}"""
+
+    return prompt, options
+
+
+def _apply_constrained_llm_choice(code: str, choice: int, options: list) -> tuple:
+    """Apply a constrained LLM choice to the code programmatically.
+
+    Returns (modified_code, description).
+    """
+    if choice < 1 or choice > len(options):
+        return code, "Invalid choice"
+
+    option_text = options[choice - 1]
+
+    if "Change bass sound" in option_text:
+        m = re.search(r"to '([^']+)'", option_text)
+        if m:
+            new_sound = m.group(1)
+            fx_pattern = r'(let\s+bassFx\s*=\s*p\s*=>\s*p.*?\.sound\(")[^"]+(")'
+            new_code = re.sub(fx_pattern, rf'\g<1>{new_sound}\g<2>', code, flags=re.DOTALL)
+            if new_code != code:
+                return new_code, f"Changed bass sound to {new_sound}"
+
+    elif "Change lead sound" in option_text:
+        m = re.search(r"to '([^']+)'", option_text)
+        if m:
+            new_sound = m.group(1)
+            modified = code
+            for fx in ['midFx', 'highFx', 'leadFx', 'voxFx', 'stabFx']:
+                fx_pattern = rf'(let\s+{fx}\s*=\s*p\s*=>\s*p.*?\.sound\(")[^"]+(")'
+                modified = re.sub(fx_pattern, rf'\g<1>{new_sound}\g<2>', modified, flags=re.DOTALL)
+            if modified != code:
+                return modified, f"Changed lead/melodic sound to {new_sound}"
+
+    elif "Change drum bank" in option_text:
+        m = re.search(r"to '([^']+)'", option_text)
+        if m:
+            new_bank = m.group(1)
+            modified = code
+            for fx in ['drumsFx', 'kickFx', 'snareFx', 'hhFx']:
+                fx_pattern = rf'(let\s+{fx}\s*=\s*p\s*=>\s*p.*?\.bank\(")[^"]+(")'
+                modified = re.sub(fx_pattern, rf'\g<1>{new_bank}\g<2>', modified, flags=re.DOTALL)
+            if modified != code:
+                return modified, f"Changed drum bank to {new_bank}"
+
+    elif "No change" in option_text:
+        return code, "No structural change needed"
+
+    return code, "Could not apply change"
+
+
+def _call_constrained_llm(prompt: str, use_ollama: bool = False) -> Optional[int]:
+    """Call LLM with constrained prompt, expecting a single number response."""
+    # Try Ollama first if requested
+    if use_ollama and HAS_REQUESTS:
+        ollama_model = os.environ.get("OLLAMA_MODEL", DEFAULT_OLLAMA_MODEL)
+        try:
+            response = requests.post(
+                f"{OLLAMA_URL}/api/generate",
+                json={
+                    "model": ollama_model,
+                    "prompt": prompt,
+                    "stream": False,
+                    "options": {"temperature": 0.1, "num_predict": 10}
+                },
+                timeout=60
+            )
+            response.raise_for_status()
+            text = response.json().get("response", "").strip()
+            m = re.search(r'\d+', text)
+            if m:
+                return int(m.group())
+        except Exception as e:
+            print(f"       Constrained LLM (Ollama) error: {e}")
+
+    # Try Claude API
+    if Anthropic is not None:
+        api_key = os.environ.get("ANTHROPIC_API_KEY")
+        if api_key:
+            try:
+                client = Anthropic(api_key=api_key)
+                response = client.messages.create(
+                    model="claude-sonnet-4-20250514",
+                    max_tokens=10,
+                    messages=[{"role": "user", "content": prompt}]
+                )
+                text = response.content[0].text.strip()
+                m = re.search(r'\d+', text)
+                if m:
+                    return int(m.group())
+            except Exception as e:
+                print(f"       Constrained LLM (Claude) error: {e}")
+
+    return None
+
+
 def improve_strudel(
     original_audio: str,
     strudel_path: str,
@@ -1549,6 +2023,7 @@ def improve_strudel(
 
     best_similarity = previous_similarity if best_run else 0
     best_code = current_code
+    best_render_path = None  # Track render file for best code
 
     # Get exact duration from original audio (millisecond precision)
     exact_duration = get_audio_duration(original_audio)
@@ -1566,11 +2041,16 @@ def improve_strudel(
             print(f"Using initial BlackHole weighted score as baseline: {blackhole_weighted*100:.1f}%")
             best_similarity = blackhole_weighted
             best_code = current_code  # Preserve initial code
+            best_render_path = Path(output_dir) / "render.wav"  # Initial render
     else:
         initial_stem_comparison = {}
 
     # Track automation timeline across iterations (starts None, updated by LLM)
     current_automation_path = None
+
+    # Deterministic optimizer state
+    deterministic_converged = False
+    deterministic_prev_similarity = 0.0
 
     for iteration in range(max_iterations):
         print(f"\n--- Iteration {iteration + 1}/{max_iterations} (v{current_version}) ---")
@@ -1704,102 +2184,36 @@ def improve_strudel(
             ai_suggestions=None
         )
 
-        # Track best
+        # Track best (code AND render file)
         if current_similarity > best_similarity:
             best_similarity = current_similarity
             best_code = current_code
+            best_render_path = render_path
 
-        # 4. ALWAYS run LLM analysis - even if overall looks good, per-stem may have issues
-        # The overall score can hide problems (e.g., bass 68%, drums 72% while melodic 93%)
-        print("Analyzing with LLM...")
+        # 4. OPTIMIZATION (Deterministic parameter tuning, then constrained LLM)
 
-        # Extract data from comparison structure
+        # Extract metrics for debugging output
         comp_scores = comparison.get("comparison", {})
         orig_bands = comparison.get("original", {}).get("bands", {})
         rend_bands = comparison.get("rendered", {}).get("bands", {})
 
-        # Compute band differences (rendered - original)
         band_diffs = {}
         for band in ["sub_bass", "bass", "low_mid", "mid", "high_mid", "high"]:
             band_diffs[band] = rend_bands.get(band, 0) - orig_bands.get(band, 0)
 
-        # Compute brightness and energy ratios
         orig_spectral = comparison.get("original", {}).get("spectral", {})
         rend_spectral = comparison.get("rendered", {}).get("spectral", {})
-
         orig_centroid = orig_spectral.get("centroid_mean", 1)
         rend_centroid = rend_spectral.get("centroid_mean", 1)
         brightness_ratio = rend_centroid / max(orig_centroid, 1) if orig_centroid else 1.0
-
         orig_rms = orig_spectral.get("rms_mean", 0.1)
         rend_rms = rend_spectral.get("rms_mean", 0.1)
         energy_ratio = rend_rms / max(orig_rms, 0.001) if orig_rms else 1.0
 
-        # Build per-stem issues for LLM (the real problems, not hidden by overall score)
-        per_stem_issues = []
-        if stem_comparison:
-            agg = stem_comparison.get("aggregate", {})
-            per_stem = agg.get("per_stem", {})
-            for stem_name, stem_data in per_stem.items():
-                stem_overall = stem_data.get("overall", 0)
-                if stem_overall < 0.80:  # Only report issues below 80%
-                    per_stem_issues.append(f"{stem_name}: {stem_overall*100:.0f}% (needs improvement)")
-            worst = agg.get("worst_sections", [])
-            for w in worst[:3]:  # Top 3 worst sections
-                per_stem_issues.append(f"WORST: {w.get('stem', '?')} at {w.get('time_range', '?')} - {w.get('issues', '')}")
-
-        run_data = {
-            "similarity_overall": current_similarity,
-            "similarity_mfcc": comp_scores.get("mfcc_similarity", 0),
-            "similarity_chroma": comp_scores.get("chroma_similarity", 0),
-            "similarity_frequency": comp_scores.get("frequency_balance_similarity", 0),
-            "band_sub_bass": band_diffs.get("sub_bass", 0),
-            "band_bass": band_diffs.get("bass", 0),
-            "band_low_mid": band_diffs.get("low_mid", 0),
-            "band_mid": band_diffs.get("mid", 0),
-            "band_high_mid": band_diffs.get("high_mid", 0),
-            "band_high": band_diffs.get("high", 0),
-            "brightness_ratio": brightness_ratio,
-            "energy_ratio": energy_ratio,
-            "bpm": metadata.get("bpm", 120),
-            "key": metadata.get("key", ""),
-            "style": metadata.get("style", ""),
-            "genre": metadata.get("genre", ""),
-            "per_stem_issues": per_stem_issues  # The REAL problems
-        }
-
-        print(f"       Bands: bass={band_diffs.get('bass',0)*100:+.0f}% mid={band_diffs.get('mid',0)*100:+.0f}% high={band_diffs.get('high',0)*100:+.0f}%")
+        print(f"       Bands: sub_bass={band_diffs.get('sub_bass',0)*100:+.0f}% bass={band_diffs.get('bass',0)*100:+.0f}% low_mid={band_diffs.get('low_mid',0)*100:+.0f}% mid={band_diffs.get('mid',0)*100:+.0f}% high={band_diffs.get('high',0)*100:+.0f}%")
         print(f"       Brightness: {brightness_ratio:.0%}  Energy: {energy_ratio:.0%}")
 
-        # Deep spectrogram analysis for AI learning
-        spectrogram_insights = None
-        try:
-            from spectrogram_analyzer import analyze_spectrograms, format_for_llm
-            print(f"       Running deep spectrogram analysis...")
-            spec_analysis = analyze_spectrograms(original_audio, str(render_path), duration=min(30, exact_duration))
-            spectrogram_insights = format_for_llm(spec_analysis)
-            spec_sim = spec_analysis.get('spectrogram_similarity', 0)
-            print(f"       Spectrogram similarity: {spec_sim*100:.1f}%")
-
-            # Save spectrogram analysis for learning
-            spec_path = Path(output_dir) / f"spectrogram_v{current_version:03d}.json"
-            with open(spec_path, 'w') as f:
-                json.dump(spec_analysis, f, indent=2)
-
-            # Add spectrogram insights to run_data for LLM
-            run_data['spectrogram_insights'] = spectrogram_insights
-            run_data['spectrogram_similarity'] = spec_sim
-        except ImportError:
-            pass
-        except Exception as e:
-            print(f"       Spectrogram analysis failed: {e}")
-
-        # Extract genre, artist, and BPM from metadata for sound/tempo selection
-        genre = metadata.get("genre", "")
-        artist_context = artist if artist else metadata.get("artist", "")
-        track_bpm = metadata.get("bpm", 120)
-
-        # Update agent with iteration results (for learning)
+        # Update agent learning history (even if not using agent for generation)
         if agent is not None:
             improved = current_similarity > best_similarity
             agent.add_iteration_result(
@@ -1811,93 +2225,71 @@ def improve_strudel(
                 improved=improved
             )
 
-        ai_result = analyze_with_llm(
-            run_data, comparison, knowledge, current_code,
-            use_ollama=use_ollama, spectrogram_insights=spectrogram_insights,
-            genre=genre, artist=artist_context, bpm=track_bpm,
-            agent=agent  # Pass agent for agentic mode
-        )
+        if not deterministic_converged:
+            # Phase 1: Deterministic parameter optimization (fast, safe, no LLM)
+            print("       Phase 1: Deterministic parameter optimization...")
+            optimized_code, opt_changes = optimize_parameters(current_code, comparison, stem_comparison)
 
-        print(f"Analysis: {ai_result.get('analysis', 'N/A')[:100]}...")
-        print(f"Suggestions: {ai_result.get('suggestions', [])[:3]}")
-
-        # Save automation timeline if LLM generated one
-        if ai_result.get("automation"):
-            automation_path = Path(output_dir) / f"automation_v{current_version:03d}.json"
-            with open(automation_path, 'w') as f:
-                json.dump(ai_result["automation"], f, indent=2)
-            print(f"       Saved automation timeline to {automation_path.name}")
-            # Also save as latest automation.json
-            latest_automation = Path(output_dir) / "automation.json"
-            with open(latest_automation, 'w') as f:
-                json.dump(ai_result["automation"], f, indent=2)
-            # Update for next iteration's render
-            current_automation_path = automation_path
-
-        # 6. Update code for next iteration
-        improved_effects = ai_result.get("improved_code", "")
-
-        # Handle validation failures or empty code gracefully
-        if not improved_effects or not improved_effects.strip():
-            # Check if this is a validation failure (code was rejected)
-            if "REJECTED" in ai_result.get("analysis", ""):
-                print("       ⚠ LLM generated invalid Strudel code - skipping iteration")
-                current_version += 1
-                continue  # Skip this iteration, try again
-            else:
-                # LLM didn't return code — skip iteration instead of crashing
-                print(f"       ⚠ LLM returned analysis but no code — skipping iteration")
-                current_version += 1
-                continue
-
-        if improved_effects and improved_effects.strip():
-            # Fix common syntax issues from LLM output
-            if HAS_SYNTAX_FIXER:
-                improved_effects = fix_strudel_syntax(improved_effects)
-                improved_effects = enforce_three_voices(improved_effects)
-
-            # Determine if this is complete arrange()-based code or effect functions
-            is_complete_code = ('$:' in improved_effects and
-                               ('arrange(' in improved_effects or 'note(' in improved_effects or 's(' in improved_effects))
-            if is_complete_code:
-                # Full code replacement — the LLM returned complete Strudel code
-                improved_code = improved_effects
-                print("       Full code replacement (arrange() format)")
-            else:
-                # Legacy: merge effect functions back into original code
-                improved_code = merge_effect_functions(current_code, improved_effects)
-
-            if improved_code == current_code:
-                print("       No effective changes this iteration, continuing...")
-            else:
-                # Accept the improved code - regression will be checked at the
-                # start of the NEXT iteration when we render via BlackHole
-                # and compare to the original audio
-                current_code = improved_code
+            if opt_changes:
+                for change in opt_changes:
+                    print(f"         {change}")
+                current_code = optimized_code
                 improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
                 with open(improved_path, 'w') as f:
-                    f.write(improved_code)
+                    f.write(optimized_code)
                 with open(strudel_path, 'w') as f:
-                    f.write(improved_code)
-                print(f"       Saved improved code to {improved_path}")
+                    f.write(optimized_code)
+                print(f"       Applied {len(opt_changes)} deterministic changes")
+            else:
+                print("       No deterministic changes possible")
+
+            # Check convergence: no changes, or similarity delta < 1%
+            if not opt_changes or (iteration > 0 and abs(current_similarity - deterministic_prev_similarity) < 0.01):
+                deterministic_converged = True
+                print("       Deterministic optimizer converged, switching to constrained LLM")
+            deterministic_prev_similarity = current_similarity
         else:
-            print("       No code changes this iteration, continuing...")
+            # Phase 2: Constrained LLM (structural sound choices only)
+            print("       Phase 2: Constrained LLM (sound selection)...")
+            prompt, options = build_constrained_llm_prompt(
+                current_code, comparison, stem_comparison,
+                metadata.get("genre", "")
+            )
+
+            choice = _call_constrained_llm(prompt, use_ollama=use_ollama)
+            if choice is not None and 0 < choice <= len(options):
+                modified_code, description = _apply_constrained_llm_choice(
+                    current_code, choice, options
+                )
+                if modified_code != current_code:
+                    current_code = modified_code
+                    improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
+                    with open(improved_path, 'w') as f:
+                        f.write(modified_code)
+                    with open(strudel_path, 'w') as f:
+                        f.write(modified_code)
+                    print(f"       LLM chose: {description}")
+                else:
+                    print(f"       LLM: {description}")
+            else:
+                print("       LLM: no valid choice returned")
 
         current_version += 1
 
-        # NEVER exit early - ALWAYS run ALL iterations
-        # The LLM and full analysis must run every single time
-        # Per-stem issues need multiple iterations to fix properly
+        # Run all iterations: Phase 1 (deterministic) converges fast,
+        # then Phase 2 (constrained LLM) handles structural changes
 
     # Generate final comparison charts and report
     print("\nGenerating comparison charts and report...")
 
-    # Find the latest render file in output directory
-    render_files = sorted(Path(output_dir).glob("render_v*.wav"))
-    if render_files:
-        best_render = render_files[-1]  # Latest version
+    # Use the render file that corresponds to best_code (not just the latest!)
+    # The latest render might be from a regressed iteration
+    if best_render_path and best_render_path.exists():
+        best_render = best_render_path
     else:
-        best_render = Path(output_dir) / "render.wav"
+        # Fallback: find any render file
+        render_files = sorted(Path(output_dir).glob("render_v*.wav"))
+        best_render = render_files[-1] if render_files else Path(output_dir) / "render.wav"
 
     if best_render.exists():
         print(f"Using render: {best_render.name}")
@@ -1926,26 +2318,81 @@ def improve_strudel(
         if best_render.name != "render.wav":
             shutil.copy(best_render, Path(output_dir) / "render.wav")
 
-        # Create metadata
+        # Separate render into stems for per-stem comparison in report
+        final_render = Path(output_dir) / "render.wav"
+        separate_script = Path(__file__).parent / "separate.py"
+        if final_render.exists() and separate_script.exists():
+            print("Separating render into stems...")
+            sep_cmd = [
+                sys.executable, str(separate_script),
+                str(final_render), str(output_dir),
+                "--mode", "full", "--prefix", "render"
+            ]
+            sep_result = subprocess.run(sep_cmd, capture_output=True, text=True)
+            if sep_result.returncode != 0:
+                print(f"Warning: render stem separation failed: {sep_result.stderr[:200]}")
+            else:
+                print("Render stems ready: render_melodic.wav, render_drums.wav, render_bass.wav")
+
+        # Create metadata (preserve existing fields like notes/drum_hits from pipeline)
+        existing_meta = {}
+        meta_path = Path(output_dir) / "metadata.json"
+        if meta_path.exists():
+            try:
+                with open(meta_path) as f:
+                    existing_meta = json.load(f)
+            except (json.JSONDecodeError, IOError):
+                pass
         meta = {
-            "bpm": metadata.get("bpm", 120),
-            "key": metadata.get("key", ""),
-            "style": metadata.get("style", ""),
-            "genre": metadata.get("genre", ""),
+            **existing_meta,  # Preserve existing fields (notes, drum_hits, etc.)
+            "bpm": metadata.get("bpm", existing_meta.get("bpm", 120)),
+            "key": metadata.get("key", existing_meta.get("key", "")),
+            "style": metadata.get("style", existing_meta.get("style", "")),
+            "genre": metadata.get("genre", existing_meta.get("genre", "")),
+            "notes": metadata.get("notes", existing_meta.get("notes", 0)),
+            "drum_hits": metadata.get("drum_hits", existing_meta.get("drum_hits", 0)),
             "ai_improved": True,
             "iterations": current_version,
             "similarity": best_similarity
         }
-        with open(Path(output_dir) / "metadata.json", 'w') as f:
+        with open(meta_path, 'w') as f:
             json.dump(meta, f, indent=2)
 
         # Generate HTML report
-        cache_dir = Path(output_dir).parent
-        dir_name = Path(output_dir).name
-        # Extract version number (e.g., "v001" -> "1", or use directory if no version pattern)
+        # Report expects: cache_dir/melodic.wav (original stems) + cache_dir/vNNN/ (version outputs)
+        # When run standalone, output_dir may be flat (not vNNN pattern).
+        # In that case, create a temporary structure for the report.
         import re
-        version_match = re.search(r'v(\d+)', dir_name)
-        version_num = version_match.group(1) if version_match else "1"
+        dir_name = Path(output_dir).name
+        version_match = re.search(r'^v(\d+)$', dir_name)
+
+        if version_match:
+            # Standard cache structure: output_dir is already vNNN inside cache_dir
+            cache_dir = Path(output_dir).parent
+            version_num = version_match.group(1)
+        else:
+            # Standalone mode: output_dir has everything flat.
+            # Create a temp version subdir and symlink/copy what the report needs.
+            cache_dir = Path(output_dir)
+            version_num = "1"
+            version_subdir = cache_dir / "v001"
+            version_subdir.mkdir(exist_ok=True)
+            # Copy/link version-specific files into v001/
+            for fname in ["render.wav", "render_melodic.wav", "render_melodic.mp3",
+                          "render_drums.wav", "render_drums.mp3",
+                          "render_bass.wav", "render_bass.mp3",
+                          "comparison.json", "comparison.png", "output.strudel",
+                          "metadata.json", "synth_config.json",
+                          "stem_comparison.json"]:
+                src = cache_dir / fname
+                dst = version_subdir / fname
+                if src.exists() and not dst.exists():
+                    shutil.copy(src, dst)
+            # Copy chart images
+            for chart in cache_dir.glob("chart_*.png"):
+                dst = version_subdir / chart.name
+                if not dst.exists():
+                    shutil.copy(chart, dst)
 
         report_cmd = [
             sys.executable,

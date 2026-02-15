@@ -593,21 +593,31 @@ def generate_report(cache_dir, version_dir, output_path=None):
         cache_path = cache_path.parent
 
     # Find files - original stems are in cache_path (parent of version)
-    melodic_path = cache_path / "melodic.wav"
-    if not melodic_path.exists():
-        melodic_path = cache_path / "piano.wav"
-    drums_path = cache_path / "drums.wav"
-    vocals_path = cache_path / "vocals.wav"
-    bass_path = cache_path / "bass.wav"
+    # Check .wav then .mp3 for each stem
+    def find_stem(name, fallback_name=None):
+        for ext in ('.wav', '.mp3'):
+            p = cache_path / f"{name}{ext}"
+            if p.exists():
+                return p
+            if fallback_name:
+                p = cache_path / f"{fallback_name}{ext}"
+                if p.exists():
+                    return p
+        return None
+
+    melodic_path = find_stem("melodic", "piano")
+    drums_path = find_stem("drums")
+    vocals_path = find_stem("vocals")
+    bass_path = find_stem("bass")
 
     # CRITICAL: Validate original stems exist - report is useless without them
     missing_stems = []
-    if not melodic_path.exists():
-        missing_stems.append("melodic.wav")
-    if not drums_path.exists():
-        missing_stems.append("drums.wav")
-    if not bass_path.exists():
-        missing_stems.append("bass.wav")
+    if not melodic_path:
+        missing_stems.append("melodic.wav/mp3")
+    if not drums_path:
+        missing_stems.append("drums.wav/mp3")
+    if not bass_path:
+        missing_stems.append("bass.wav/mp3")
 
     if missing_stems:
         raise FileNotFoundError(
@@ -623,10 +633,40 @@ def generate_report(cache_dir, version_dir, output_path=None):
             render_path = f
             break
 
-    # Rendered stem files (for per-stem comparison)
-    render_melodic_path = version_path / "render_melodic.wav"
-    render_drums_path = version_path / "render_drums.wav"
-    render_bass_path = version_path / "render_bass.wav"
+    if not render_path.exists():
+        raise FileNotFoundError(
+            f"ERROR: Cannot generate report - missing render.wav in {version_path}\n"
+            f"  Run BlackHole recording or Node.js renderer first."
+        )
+
+    # Rendered stem files (for per-stem comparison) - check .wav then .mp3
+    def find_render_stem(name):
+        wav = version_path / f"render_{name}.wav"
+        if wav.exists():
+            return wav
+        mp3 = version_path / f"render_{name}.mp3"
+        if mp3.exists():
+            return mp3
+        return None
+
+    render_melodic_path = find_render_stem("melodic")
+    render_drums_path = find_render_stem("drums")
+    render_bass_path = find_render_stem("bass")
+
+    missing_render_stems = []
+    if not render_melodic_path:
+        missing_render_stems.append("render_melodic.wav/mp3")
+    if not render_drums_path:
+        missing_render_stems.append("render_drums.wav/mp3")
+    if not render_bass_path:
+        missing_render_stems.append("render_bass.wav/mp3")
+
+    if missing_render_stems:
+        raise FileNotFoundError(
+            f"ERROR: Cannot generate report - missing rendered stems in {version_path}:\n"
+            f"  Missing: {', '.join(missing_render_stems)}\n"
+            f"  Run demucs on render.wav with --prefix render to produce rendered stems."
+        )
 
     strudel_path = version_path / "output.strudel"
     if not strudel_path.exists():
@@ -694,17 +734,17 @@ def generate_report(cache_dir, version_dir, output_path=None):
     # Extract info from strudel comments as fallback
     strudel_info = extract_info_from_strudel(strudel_code) if strudel_code else {}
 
-    # Encode files as base64
-    melodic_data = encode_audio_base64(str(melodic_path)) if melodic_path.exists() else None
-    drums_data = encode_audio_base64(str(drums_path)) if drums_path.exists() else None
-    vocals_data = encode_audio_base64(str(vocals_path)) if vocals_path.exists() else None
-    bass_data = encode_audio_base64(str(bass_path)) if bass_path.exists() else None
-    render_data = encode_audio_base64(str(render_path)) if render_path.exists() else None
+    # Encode files as base64 (stems and render validated above - guaranteed to exist)
+    melodic_data = encode_audio_base64(str(melodic_path))
+    drums_data = encode_audio_base64(str(drums_path))
+    vocals_data = encode_audio_base64(str(vocals_path)) if vocals_path else None
+    bass_data = encode_audio_base64(str(bass_path))
+    render_data = encode_audio_base64(str(render_path))
 
     # Encode rendered stem audio files
-    render_melodic_data = encode_audio_base64(str(render_melodic_path)) if render_melodic_path.exists() else None
-    render_drums_data = encode_audio_base64(str(render_drums_path)) if render_drums_path.exists() else None
-    render_bass_data = encode_audio_base64(str(render_bass_path)) if render_bass_path.exists() else None
+    render_melodic_data = encode_audio_base64(str(render_melodic_path))
+    render_drums_data = encode_audio_base64(str(render_drums_path))
+    render_bass_data = encode_audio_base64(str(render_bass_path))
 
     # Encode chart images
     chart_frequency_data = encode_image_base64(str(chart_frequency)) if chart_frequency.exists() else None
