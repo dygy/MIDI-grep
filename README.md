@@ -165,7 +165,7 @@ flowchart TB
 
     LoopCheck -->|Yes| Phase1["Phase 1: Deterministic<br/>optimize_parameters()<br/>gain/lpf/hpf/room math"]
     Phase1 --> Phase1Check{"Changes made?"}
-    Phase1Check -->|Yes| QuickRender["BlackHole render<br/>(short clip for speed)"]
+    Phase1Check -->|Yes| QuickRender["BlackHole render<br/>(full track)"]
     Phase1Check -->|No| Phase2["Phase 2: Constrained LLM<br/>sound selection menu<br/>(never writes code directly)"]
     Phase2 --> QuickRender
 

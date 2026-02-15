@@ -2057,10 +2057,10 @@ def improve_strudel(
 
         # 1. Render current code using BlackHole recorder (real Strudel playback)
         # Node.js renderer was deleted and Python renderer can't parse arrange() format
-        # BlackHole gives real audio - use 30s for iteration speed
+        # BlackHole gives real audio - use full duration to compare the whole track
         render_path = Path(output_dir) / f"render_v{current_version:03d}.wav"
         blackhole_recorder = Path(__file__).parent.parent / "node" / "dist" / "record-strudel-blackhole.js"
-        iter_duration = min(30, exact_duration)  # 30s for quick iteration renders
+        iter_duration = exact_duration
 
         if blackhole_recorder.exists():
             # Write current code to a temp strudel file for this iteration
