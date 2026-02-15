@@ -82,21 +82,21 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
 ```
                               MIDI-grep Pipeline
 
-   INPUT            SEPARATE          ANALYZE           TRANSCRIBE        OUTPUT
+   INPUT            SEPARATE          ANALYZE          AI GENERATE        OUTPUT
      │                 │                 │                  │                │
      ▼                 ▼                 ▼                  ▼                ▼
 ┌─────────┐     ┌────────────┐     ┌───────────┐     ┌──────────────┐    ┌─────────┐
-│ YouTube │     │  Demucs    │     │  librosa  │     │ Basic Pitch  │    │ Strudel │
-│ yt-dlp  │────▶│   stem     │────▶│  BPM/Key  │────▶│ Audio → MIDI │───▶│  code   │
-│ WAV/MP3 │     │ separation │     │  + CLAP   │     │ Drum onset   │    │  + WAV  │
+│ YouTube │     │  Demucs    │     │  librosa  │     │ Ollama LLM   │    │ Strudel │
+│ yt-dlp  │────▶│   stem     │────▶│  BPM/Key  │────▶│ AI code gen  │───▶│  code   │
+│ WAV/MP3 │     │ separation │     │  + CLAP   │     │ + iteration  │    │  + WAV  │
 └─────────┘     └────────────┘     └───────────┘     └──────────────┘    └─────────┘
-                    │                  │
-                    ▼                  ▼
-              ┌──────────┐      ┌───────────┐
-              │ melodic  │      │  Genre    │
-              │ bass     │      │ Detection │──┬── Standard: note transcription
-              │ drums    │      │           │  │
-              │ vocals   │      └───────────┘  └── Template: Brazilian funk/phonk
+                    │                  │                    │
+                    ▼                  ▼                    ▼
+              ┌──────────┐      ┌───────────┐       ┌──────────────┐
+              │ melodic  │      │  Genre    │       │  BlackHole   │
+              │ bass     │      │ Detection │       │  Recorder    │
+              │ drums    │      │           │       │ (real audio) │
+              │ vocals   │      └───────────┘       └──────────────┘
               └──────────┘
 
 ────────────────────────────────────────────────────────────────────────────────
@@ -105,14 +105,15 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   Go 1.21+                              Python 3.11+
   ├── CLI (Cobra)                       ├── demucs      - stem separation
   ├── HTTP (Chi)                        ├── basic-pitch - audio to MIDI
-  ├── Pipeline orchestration            ├── librosa     - audio analysis
-  └── Strudel generation                └── pretty_midi - MIDI processing
+  └── Pipeline orchestration            ├── librosa     - audio analysis
+                                        ├── ollama_agent - agentic LLM
+                                        └── ai_improver - iterative improvement
 
   TypeScript/Node.js                    External
-  └── @strudel/mini - pattern parsing   ├── yt-dlp  - YouTube download
-                                        └── ffmpeg  - audio conversion
-
-  Frontend
+  ├── BlackHole recorder (primary)      ├── yt-dlp     - YouTube download
+  └── Puppeteer + ffmpeg                ├── ffmpeg     - audio conversion
+                                        ├── Ollama     - local LLM
+  Frontend                              └── ClickHouse - learning DB
   ├── HTMX
   ├── PicoCSS
   └── SSE updates
@@ -133,7 +134,7 @@ flowchart TB
     LoadStems --> Analysis
 
     %% ===== ANALYSIS =====
-    Analysis["librosa + CLAP"] --> Profile["AudioProfile extraction:<br/>30+ features"]
+    Analysis["librosa + CLAP"] --> Profile["AudioProfile extraction:<br/>BPM, key, genre, spectrum"]
     Profile --> Features["Spectrum, dynamics,<br/>rhythm, timbre, structure"]
 
     %% ===== TRANSCRIPTION =====
@@ -142,91 +143,66 @@ flowchart TB
     BasicPitch --> Cleanup["Quantize + Simplify"]
     DrumDetect --> Cleanup
 
-    %% ===== INITIAL GENERATION (LLM + ClickHouse) =====
-    Cleanup --> CheckBest{"Best previous run<br/>for this track?"}
-    CheckBest --> QueryBest["<sql>SELECT code, similarity<br/>FROM runs WHERE track_hash=X<br/>ORDER BY similarity DESC LIMIT 1</sql>"]
-    QueryBest --> CH[("ClickHouse")]
+    %% ===== INITIAL GENERATION (LLM-first) =====
+    Cleanup --> CheckBest{"Best previous run<br/>in ClickHouse?"}
+    CheckBest --> QueryBest["Query best code + similarity<br/>for this track_hash"]
+    QueryBest --> CH[("ClickHouse<br/>runs + knowledge")]
 
-    CH -->|Found| StartFromBest["Start from best code<br/>(72% similarity)"]
-    CH -->|Not found| FreshGen["Generate fresh"]
+    CH -->|Found| StartFromBest["Start from best code"]
+    CH -->|Not found| FreshGen["Ollama generates fresh<br/>Strudel code"]
 
-    StartFromBest --> Orchestrator["AI Orchestrator:<br/>6 focused prompts"]
-    FreshGen --> Orchestrator
+    StartFromBest --> InitCode["output.strudel"]
+    FreshGen --> InitCode
 
-    Orchestrator --> P1["① Sections: energy → structure"]
-    Orchestrator --> P2["② Bass: sub + 808"]
-    Orchestrator --> P3["③ Mid: chords + leads"]
-    Orchestrator --> P4["④ High: arps + bells"]
-    Orchestrator --> P5["⑤ Drums: kit + patterns"]
-    Orchestrator --> P6["⑥ Mix: balance voices"]
+    %% ===== RENDER via BlackHole =====
+    InitCode --> Render["BlackHole Recorder<br/>(Puppeteer + ffmpeg)<br/>100% real Strudel audio"]
+    Render --> StemSep["Demucs: separate render<br/>into bass/drums/melodic"]
+    StemSep --> Compare["compare_audio.py<br/>(MAE, not cosine)"]
+    Compare --> Metrics["Per-stem diffs:<br/>bass, drums, melodic<br/>+ per-band analysis"]
 
-    P1 --> InitCode["output.strudel v1"]
-    P2 --> InitCode
-    P3 --> InitCode
-    P4 --> InitCode
-    P5 --> InitCode
-    P6 --> InitCode
-
-    %% ===== RENDER & COMPARE =====
-    InitCode --> Render["Render WAV<br/>(BlackHole 100% / Node.js 72%)"]
-    Render --> Compare["compare_audio.py"]
-    Compare --> Metrics["Per-band diffs:<br/>sub_bass, bass, mid, high<br/>+ per-stem issues"]
-
-    %% ===== AGENTIC IMPROVEMENT LOOP =====
+    %% ===== TWO-PHASE IMPROVEMENT LOOP =====
     Metrics --> LoopCheck{"iteration < N AND<br/>similarity < target?"}
 
-    LoopCheck -->|Yes| Agent["OllamaAgent<br/>(persistent per track)"]
+    LoopCheck -->|Yes| Phase1["Phase 1: Deterministic<br/>optimize_parameters()<br/>gain/lpf/hpf/room math"]
+    Phase1 --> Phase1Check{"Changes made?"}
+    Phase1Check -->|Yes| QuickRender["30s BlackHole render"]
+    Phase1Check -->|No| Phase2["Phase 2: Constrained LLM<br/>sound selection menu<br/>(never writes code directly)"]
+    Phase2 --> QuickRender
 
-    %% ReAct Pattern
-    Agent --> Think["Agent thinks:<br/>'What was best for THIS track?'"]
-    Think --> SQL1["<sql>SELECT code, similarity<br/>FROM runs WHERE track_hash=X<br/>ORDER BY similarity DESC LIMIT 1</sql>"]
-    SQL1 --> CH[("ClickHouse")]
-    CH --> Results1["Best run: 72% similarity"]
-    Results1 --> Think2["Agent analyzes:<br/>'What changed between iterations?'"]
-    Think2 --> SQL2["<sql>SELECT * FROM knowledge<br/>WHERE track_hash=X</sql>"]
-    SQL2 --> CH
-    CH --> Results2["Learned: gain 0.6→0.4 = +8%"]
-    Results2 --> Generate["Generate improved code<br/>with beat-synced patterns"]
-
-    Generate --> Validate{"Valid Strudel?<br/>No .peak/.volume/.eq"}
-    Validate -->|No| Agent
-    Validate -->|Yes| TestCode["Quick render & compare"]
-
-    TestCode --> Regress{"new > best?"}
+    QuickRender --> Regress{"new > best?"}
     Regress -->|No| Revert["REVERT to best code"]
-    Regress -->|Yes| Accept["Accept improvement"]
+    Regress -->|Yes| Accept["Accept + store to ClickHouse"]
     Revert --> LoopCheck
-    Accept --> Learn["Store to ClickHouse:<br/>parameter deltas + improvement%"]
-    Learn --> Memory["Update agent memory:<br/>tried_values, best_code"]
-    Memory --> Render
+    Accept --> LoopCheck
+
+    %% ===== VALIDATION =====
+    Phase2 --> Validate{"Valid Strudel?<br/>No .peak/.volume/.eq<br/>Valid sound names?"}
+    Validate -->|No| LoopCheck
+    Validate -->|Yes| QuickRender
 
     %% ===== OUTPUT =====
-    LoopCheck -->|No| Report["generate_report.py"]
-    Report --> Output["v001/<br/>├── output.strudel<br/>├── render.wav<br/>├── comparison.json<br/>├── report.html<br/>└── agent memory"]
+    LoopCheck -->|Done| FinalRender["Full-length BlackHole render<br/>+ Demucs stem separation"]
+    FinalRender --> Report["generate_report.py"]
+    Report --> Output["vNNN/<br/>├── output.strudel<br/>├── render.wav + stems<br/>├── comparison.json<br/>├── stem_comparison.json<br/>└── report.html"]
 
     %% ===== PER-TRACK LEARNING =====
-    CH -.->|"Same track queries<br/>its own best runs"| Agent
+    CH -.->|"Best runs + learned<br/>parameter deltas"| Phase1
 
     %% ===== STYLING =====
     style CLI fill:#1565c0,color:#fff
     style Demucs fill:#2e7d32,color:#fff
     style Analysis fill:#7b1fa2,color:#fff
     style Profile fill:#7b1fa2,color:#fff
-    style Orchestrator fill:#f9a825,color:#000
-    style P1 fill:#fff3e0,color:#000
-    style P2 fill:#fff3e0,color:#000
-    style P3 fill:#fff3e0,color:#000
-    style P4 fill:#fff3e0,color:#000
-    style P5 fill:#fff3e0,color:#000
-    style P6 fill:#fff3e0,color:#000
     style Render fill:#512da8,color:#fff
+    style StemSep fill:#2e7d32,color:#fff
     style Compare fill:#00796b,color:#fff
-    style Agent fill:#c62828,color:#fff
+    style Phase1 fill:#e65100,color:#fff
+    style Phase2 fill:#c62828,color:#fff
     style CH fill:#303f9f,color:#fff
-    style Generate fill:#ad1457,color:#fff
-    style Learn fill:#1565c0,color:#fff
+    style FinalRender fill:#512da8,color:#fff
     style Report fill:#6a1b9a,color:#fff
     style Output fill:#1b5e20,color:#fff
+    style FreshGen fill:#f9a825,color:#000
 ```
 
 ### External Dependencies
@@ -234,57 +210,59 @@ flowchart TB
 | Component | Technology | Purpose |
 |-----------|------------|---------|
 | **yt-dlp** | Python CLI | YouTube audio download |
-| **ffmpeg/ffprobe** | C binary | Audio codec, duration |
+| **ffmpeg/ffprobe** | C binary | Audio codec, duration, BlackHole recording |
 | **Demucs** | PyTorch | Stem separation (melodic/drums/bass/vocals) |
 | **Basic Pitch** | TensorFlow | Audio → MIDI transcription |
 | **librosa** | Python | BPM, key, onset detection |
 | **CLAP** | PyTorch | Zero-shot genre classification |
-| **Ollama** | Go binary | Local LLM (llama3:8b) |
-| **ClickHouse** | C++ binary | Learning database |
-| **Puppeteer** | Node.js | Browser automation for recording |
-| **node-web-audio-api** | Node.js | Offline audio synthesis |
-| **strudel.dygy.app** | Web | Self-hosted Strudel (BlackHole recording) |
+| **Ollama** | Go binary | Local LLM (llama3:8b) for code gen + iteration |
+| **ClickHouse** | C++ binary | Learning database (runs + knowledge) |
+| **Puppeteer** | Node.js | Browser automation for BlackHole recording |
+| **BlackHole** | macOS driver | Virtual audio device for recording |
+| **strudel.dygy.app** | Web | Self-hosted Strudel embed (recording target) |
 
 ### Module Structure
 
 ```
 midi-grep/
 ├── cmd/midi-grep/           # CLI entrypoint (Go)
-│   └── main.go              # Cobra commands: extract, serve, train
+│   └── main.go              # Cobra commands: extract, serve, generative
 │
 ├── internal/                # Go packages
 │   ├── audio/               # Input validation, YouTube download, stem separation
 │   ├── analysis/            # BPM & key detection (calls Python)
 │   ├── midi/                # Transcription & cleanup (calls Python)
-│   ├── strudel/             # MIDI → Strudel code generation
-│   ├── pipeline/            # Orchestrates the full extraction flow
+│   ├── pipeline/            # Orchestrates full flow (calls Python AI for code gen)
 │   ├── server/              # HTTP server, HTMX templates, SSE
 │   ├── exec/                # Python subprocess runner
-│   └── report/              # Go HTML report generation
+│   ├── cache/               # Stem + output caching with versioning
+│   ├── report/              # Go HTML report generation
+│   └── generative/          # RAVE neural synthesizer pipeline
 │
 ├── scripts/
 │   ├── midi-grep.sh         # Main CLI wrapper (Bash)
-│   ├── node/                # TypeScript audio rendering (primary)
+│   ├── node/                # TypeScript BlackHole recorder + rendering
 │   │   ├── src/
-│   │   │   └── render-strudel-node.ts  # Strudel renderer with synthesis
+│   │   │   └── record-strudel-blackhole.ts  # BlackHole recorder (primary)
 │   │   ├── dist/            # Compiled JavaScript output
-│   │   ├── package.json     # @strudel/mini, node-web-audio-api
+│   │   ├── package.json     # puppeteer, typescript
 │   │   └── tsconfig.json    # TypeScript configuration
-│   └── python/              # Python ML scripts
+│   └── python/              # Python ML + AI scripts
 │       ├── separate.py      # Demucs stem separation
 │       ├── transcribe.py    # Basic Pitch audio → MIDI
 │       ├── analyze.py       # librosa BPM/key detection
 │       ├── cleanup.py       # MIDI quantization & filtering
 │       ├── detect_drums.py  # Drum onset detection & classification
 │       ├── detect_genre_dl.py    # CLAP deep learning genre detection
-│       ├── detect_genre_essentia.py  # Essentia-based genre detection
-│       ├── analyze_synth_params.py  # AI audio analysis for synthesis parameters
-│       ├── render_audio.py  # WAV synthesis (fallback renderer)
-│       ├── ai_code_generator.py  # AI-driven Strudel code generation
-│       ├── ai_improver.py   # AI-driven iterative code improvement (Ollama/Claude)
-│       ├── thin_patterns.py # Pattern density control
-│       ├── render_with_models.py # Render with granular models (deprecated)
-│       └── training/        # Model fine-tuning
+│       ├── ai_improver.py   # AI-driven iterative improvement (Ollama/Claude)
+│       ├── ollama_agent.py  # Agentic LLM with ClickHouse memory
+│       ├── sound_selector.py     # Sound catalog (67 drums, 128 GM)
+│       ├── compare_audio.py      # Rendered vs original comparison (MAE)
+│       ├── generate_report.py    # Self-contained HTML report
+│       ├── analyze_synth_params.py  # AI audio analysis for synthesis
+│       ├── render_audio.py       # WAV synthesis (fallback renderer)
+│       ├── render_with_models.py # Render with granular models
+│       └── thin_patterns.py      # Pattern density control
 │
 └── context/                 # AWOS documentation
     ├── product/             # Product definition, roadmap
@@ -302,17 +280,23 @@ midi-grep/
    URL/file hash ──▶ Check .cache/stems/ ──▶ Use cached if valid
 
 3. STEM SEPARATION
-   audio.wav ──▶ Demucs ──▶ melodic.mp3 + drums.mp3 + bass.mp3
+   audio.wav ──▶ Demucs ──▶ melodic.mp3 + drums.mp3 + bass.mp3 + vocals.mp3
 
 4. ANALYSIS
-   melodic.mp3 ──▶ librosa ──▶ { bpm: 120, key: "A minor" }
+   melodic.mp3 ──▶ librosa + CLAP ──▶ { bpm: 136, key: "C# minor", genre: "brazilian_funk" }
 
 5. TRANSCRIPTION (parallel)
    melodic.mp3 ──▶ Basic Pitch ──▶ raw.mid ──▶ cleanup ──▶ notes.json
    drums.mp3 ──▶ onset detection ──▶ drum_hits.json
 
-6. GENERATION
-   notes.json + drum_hits.json + analysis ──▶ Strudel Generator ──▶ code.strudel
+6. AI CODE GENERATION (LLM-first)
+   notes + drums + analysis ──▶ Ollama (llama3:8b) ──▶ code.strudel
+   ClickHouse best runs ──▶ start from best known code
+
+7. RENDER & ITERATE
+   code.strudel ──▶ BlackHole Recorder ──▶ render.wav
+   render.wav ──▶ compare_audio.py ──▶ similarity score
+   similarity < target? ──▶ AI improver ──▶ iterate
 ```
 
 ## Quick Start
@@ -966,12 +950,14 @@ midi-grep/
 │   ├── audio/              # File validation, stems, YouTube
 │   ├── analysis/           # BPM & key detection
 │   ├── midi/               # Transcription & cleanup
-│   ├── strudel/            # Code generation
-│   ├── pipeline/           # Orchestration
-│   └── server/             # Web interface (HTMX)
+│   ├── pipeline/           # Orchestration (calls Python AI for code gen)
+│   ├── server/             # Web interface (HTMX)
+│   ├── cache/              # Stem + output caching
+│   └── report/             # Go HTML report generation
 ├── scripts/
 │   ├── midi-grep.sh        # Main CLI wrapper
-│   └── python/             # Python processing scripts
+│   ├── node/               # BlackHole recorder (TypeScript)
+│   └── python/             # AI + ML scripts (code gen, comparison, LLM)
 ├── context/                # AWOS product docs
 ├── Makefile
 ├── Dockerfile
