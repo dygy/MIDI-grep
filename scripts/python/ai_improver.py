@@ -2052,6 +2052,9 @@ def improve_strudel(
     deterministic_converged = False
     deterministic_prev_similarity = 0.0
 
+    # Iteration manifest for report
+    iterations_data = []
+
     for iteration in range(max_iterations):
         print(f"\n--- Iteration {iteration + 1}/{max_iterations} (v{current_version}) ---")
 
@@ -2118,6 +2121,28 @@ def improve_strudel(
         current_similarity = comp_scores.get("overall_similarity", 0)
         print(f"       Similarity: {current_similarity*100:.1f}%")
 
+        # Track iteration data for manifest
+        iter_data = {
+            "version": current_version,
+            "iteration": iteration + 1,
+            "similarity": current_similarity,
+            "code": current_code,
+            "render_path": str(render_path) if render_path.exists() else None,
+            "comparison": {
+                "overall": current_similarity,
+                "mfcc": comp_scores.get("mfcc_similarity", 0),
+                "chroma": comp_scores.get("chroma_similarity", 0),
+                "frequency_balance": comp_scores.get("frequency_balance_similarity", 0),
+                "brightness": comp_scores.get("brightness_similarity", 0),
+                "energy": comp_scores.get("energy_similarity", 0),
+                "tempo": comp_scores.get("tempo_similarity", 0),
+            },
+            "phase": None,  # Set below
+            "changes": [],  # Set below
+            "was_best": False,  # Set below
+            "reverted": False,  # Set below
+        }
+
         # Node.js renderer gives ~16% for arrange() code — use initial BlackHole comparison
         # for LLM feedback since it reflects the REAL audio quality
         initial_comparison_path = Path(output_dir) / "comparison.json"
@@ -2132,6 +2157,7 @@ def improve_strudel(
         # REGRESSION CHECK: If this iteration is worse than best, revert code
         if iteration > 0 and current_similarity < best_similarity and best_code:
             print(f"       ✗ REGRESSION: {best_similarity*100:.1f}% → {current_similarity*100:.1f}% - reverting to best")
+            iter_data["reverted"] = True
             current_code = best_code
             with open(strudel_path, 'w') as f:
                 f.write(best_code)
@@ -2189,6 +2215,7 @@ def improve_strudel(
             best_similarity = current_similarity
             best_code = current_code
             best_render_path = render_path
+            iter_data["was_best"] = True
 
         # 4. OPTIMIZATION (Deterministic parameter tuning, then constrained LLM)
 
@@ -2228,11 +2255,13 @@ def improve_strudel(
         if not deterministic_converged:
             # Phase 1: Deterministic parameter optimization (fast, safe, no LLM)
             print("       Phase 1: Deterministic parameter optimization...")
+            iter_data["phase"] = "deterministic"
             optimized_code, opt_changes = optimize_parameters(current_code, comparison, stem_comparison)
 
             if opt_changes:
                 for change in opt_changes:
                     print(f"         {change}")
+                iter_data["changes"] = list(opt_changes)
                 current_code = optimized_code
                 improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
                 with open(improved_path, 'w') as f:
@@ -2242,6 +2271,7 @@ def improve_strudel(
                 print(f"       Applied {len(opt_changes)} deterministic changes")
             else:
                 print("       No deterministic changes possible")
+                iter_data["changes"] = ["No deterministic changes possible"]
 
             # Check convergence: no changes, or similarity delta < 1%
             if not opt_changes or (iteration > 0 and abs(current_similarity - deterministic_prev_similarity) < 0.01):
@@ -2251,6 +2281,7 @@ def improve_strudel(
         else:
             # Phase 2: Constrained LLM (structural sound choices only)
             print("       Phase 2: Constrained LLM (sound selection)...")
+            iter_data["phase"] = "constrained_llm"
             prompt, options = build_constrained_llm_prompt(
                 current_code, comparison, stem_comparison,
                 metadata.get("genre", "")
@@ -2269,15 +2300,79 @@ def improve_strudel(
                     with open(strudel_path, 'w') as f:
                         f.write(modified_code)
                     print(f"       LLM chose: {description}")
+                    iter_data["changes"] = [description]
+
+                    # Reset deterministic optimizer after Phase 2 sound change
+                    # New sound needs re-tuned gains/filters before trying another sound change
+                    deterministic_converged = False
+                    deterministic_prev_similarity = 0.0
+                    print("       Reset deterministic optimizer for new sound")
                 else:
                     print(f"       LLM: {description}")
+                    iter_data["changes"] = [description]
             else:
                 print("       LLM: no valid choice returned")
+                iter_data["changes"] = ["No valid LLM choice"]
+
+        # Record iteration data (without large code field for JSON - code saved in .strudel files)
+        iterations_data.append(iter_data)
 
         current_version += 1
 
         # Run all iterations: Phase 1 (deterministic) converges fast,
         # then Phase 2 (constrained LLM) handles structural changes
+
+    # Save iteration manifest (strip code to keep JSON small - it's in .strudel files)
+    iterations_manifest = []
+    for it in iterations_data:
+        manifest_entry = {k: v for k, v in it.items() if k != "code"}
+        iterations_manifest.append(manifest_entry)
+    iterations_json_path = Path(output_dir) / "iterations.json"
+    with open(iterations_json_path, 'w') as f:
+        json.dump({"iterations": iterations_manifest, "best_similarity": best_similarity}, f, indent=2)
+    print(f"Saved iteration manifest: {iterations_json_path}")
+
+    # Batch stem separation for all iteration renders
+    separate_script = Path(__file__).parent / "separate.py"
+    if separate_script.exists():
+        print("\nSeparating iteration renders into stems...")
+        for entry in iterations_manifest:
+            render_path = entry.get("render_path")
+            if not render_path or not Path(render_path).exists():
+                continue
+            ver = entry.get("version", 0)
+            prefix = f"render_v{ver:03d}"
+            # Find stem file with either .wav or .mp3 extension (demucs output varies by quality)
+            def _find_stem(stem_name):
+                for ext in [".wav", ".mp3"]:
+                    p = Path(output_dir) / f"{prefix}_{stem_name}{ext}"
+                    if p.exists():
+                        return p
+                return None
+            # Check if stems already exist (idempotent re-runs)
+            existing = [_find_stem(s) for s in ["melodic", "drums", "bass"]]
+            if all(existing):
+                entry["stem_melodic_path"] = str(existing[0])
+                entry["stem_drums_path"] = str(existing[1])
+                entry["stem_bass_path"] = str(existing[2])
+                continue
+            print(f"  Separating v{ver:03d}...")
+            sep_cmd = [
+                sys.executable, str(separate_script),
+                render_path, str(output_dir),
+                "--mode", "full", "--prefix", prefix
+            ]
+            sep_result = subprocess.run(sep_cmd, capture_output=True, text=True)
+            if sep_result.returncode == 0:
+                entry["stem_melodic_path"] = str(_find_stem("melodic") or "")
+                entry["stem_drums_path"] = str(_find_stem("drums") or "")
+                entry["stem_bass_path"] = str(_find_stem("bass") or "")
+            else:
+                print(f"  Warning: stem separation failed for v{ver:03d}: {sep_result.stderr[:200]}")
+        # Re-save iterations.json with stem paths
+        with open(iterations_json_path, 'w') as f:
+            json.dump({"iterations": iterations_manifest, "best_similarity": best_similarity}, f, indent=2)
+        print("Updated iterations.json with stem paths")
 
     # Generate final comparison charts and report
     print("\nGenerating comparison charts and report...")
@@ -2383,11 +2478,20 @@ def improve_strudel(
                           "render_bass.wav", "render_bass.mp3",
                           "comparison.json", "comparison.png", "output.strudel",
                           "metadata.json", "synth_config.json",
-                          "stem_comparison.json"]:
+                          "stem_comparison.json", "iterations.json"]:
                 src = cache_dir / fname
                 dst = version_subdir / fname
                 if src.exists() and not dst.exists():
                     shutil.copy(src, dst)
+            # Copy iteration render files and stems
+            for render_file in cache_dir.glob("render_v*.wav"):
+                dst = version_subdir / render_file.name
+                if not dst.exists():
+                    shutil.copy(render_file, dst)
+            for render_file in cache_dir.glob("render_v*.mp3"):
+                dst = version_subdir / render_file.name
+                if not dst.exists():
+                    shutil.copy(render_file, dst)
             # Copy chart images
             for chart in cache_dir.glob("chart_*.png"):
                 dst = version_subdir / chart.name
@@ -2401,6 +2505,10 @@ def improve_strudel(
             "-v", version_num,
             "-o", str(Path(output_dir) / "report.html")
         ]
+        # Pass iterations manifest if available
+        iter_json = Path(output_dir) / "iterations.json"
+        if iter_json.exists():
+            report_cmd.extend(["--iterations-file", str(iter_json)])
         result = subprocess.run(report_cmd, capture_output=True, text=True)
         if result.returncode == 0:
             print(f"Report generated: {Path(output_dir) / 'report.html'}")

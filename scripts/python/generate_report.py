@@ -239,7 +239,8 @@ def generate_charts_html(comparison_results):
     return f'<div class="charts-grid">{"".join(html_parts)}</div>'
 
 def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data, render_data,
-                               render_melodic_data=None, render_drums_data=None, render_bass_data=None):
+                               render_melodic_data=None, render_drums_data=None, render_bass_data=None,
+                               iterations_data=None):
     """Generate DAW-style arrangement view with horizontal tracks."""
 
     # Build audio sources for hidden audio elements
@@ -306,6 +307,128 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
                 </div>
             ''')
 
+    # Build iteration tracks (stems per iteration when available, full mix fallback)
+    iteration_tracks = []
+    iteration_group_buttons = []
+    iter_audio_group_defs = {}
+    iter_stem_to_group_defs = {}
+    iter_stem_state_defs = {}
+    if iterations_data:
+        iter_list = iterations_data.get("iterations", [])
+        for it in iter_list:
+            ver = it.get("version", 0)
+            sim = it.get("similarity", 0) * 100
+            was_best = it.get("was_best", False)
+            sim_color = '#3fb950' if sim >= 70 else '#d29922' if sim >= 50 else '#f85149'
+            best_marker = ' <span style="color: #3fb950; font-size: 0.65rem;">[Best]</span>' if was_best else ''
+            group_name = f'iter-{ver}'
+
+            # Check for stem files first
+            stem_melodic_path = it.get("stem_melodic_path")
+            stem_drums_path = it.get("stem_drums_path")
+            stem_bass_path = it.get("stem_bass_path")
+            has_stems = (stem_melodic_path and os.path.exists(stem_melodic_path)
+                         and stem_drums_path and os.path.exists(stem_drums_path)
+                         and stem_bass_path and os.path.exists(stem_bass_path))
+
+            if has_stems:
+                # Encode stem audio
+                stem_configs = [
+                    ('melodic', 'Melodic', '#3fb950', stem_melodic_path),
+                    ('drums', 'Drums', '#58a6ff', stem_drums_path),
+                    ('bass', 'Bass', '#f85149', stem_bass_path),
+                ]
+                group_audio_ids = []
+                stem_tracks_html = []
+                for stem_suffix, label, color, spath in stem_configs:
+                    stem_id = f"iter-{ver}-{stem_suffix}"
+                    audio_id = f"audio-iter-{ver}-{stem_suffix}"
+                    stem_data = encode_audio_base64(spath)
+                    if not stem_data:
+                        continue
+                    audio_elements.append(f'<audio id="{audio_id}" src="{stem_data}" preload="auto"></audio>')
+                    group_audio_ids.append(audio_id)
+                    iter_stem_to_group_defs[stem_id] = group_name
+                    iter_stem_state_defs[stem_id] = {"muted": False, "solo": False}
+
+                    stem_tracks_html.append(f'''
+                        <div class="daw-track daw-track-iteration" data-stem="{stem_id}">
+                            <div class="track-header" style="--track-color: {color};">
+                                <div class="track-name">{label}</div>
+                                <button class="track-mute-btn" onclick="toggleStemMute('{stem_id}')" title="Mute/Unmute">M</button>
+                            </div>
+                            <div class="track-waveform" onclick="seekAudio(event)">
+                                <canvas class="track-canvas" data-stem="{stem_id}" data-color="{color}"></canvas>
+                            </div>
+                        </div>
+                    ''')
+
+                if group_audio_ids:
+                    iter_audio_group_defs[group_name] = group_audio_ids
+                    # Sub-header for this iteration
+                    iteration_tracks.append(f'''
+                        <div class="iter-subheader" style="padding: 0.3rem 0.75rem; font-size: 0.75rem; color: {sim_color}; background: var(--bg-tertiary); border-left: 3px solid {sim_color}; margin-top: 0.25rem;">
+                            v{ver} ({sim:.0f}%){best_marker}
+                        </div>
+                    ''')
+                    iteration_tracks.extend(stem_tracks_html)
+            else:
+                # Fallback: single full-mix track
+                render_path = it.get("render_path")
+                if not render_path or not os.path.exists(render_path):
+                    continue
+                audio_id = f"audio-iter-{ver}"
+                iter_audio_data = encode_audio_base64(render_path)
+                if not iter_audio_data:
+                    continue
+                audio_elements.append(f'<audio id="{audio_id}" src="{iter_audio_data}" preload="auto"></audio>')
+                iter_audio_group_defs[group_name] = [audio_id]
+                iter_stem_to_group_defs[group_name] = group_name
+                iter_stem_state_defs[group_name] = {"muted": False, "solo": False}
+
+                iteration_tracks.append(f'''
+                    <div class="daw-track daw-track-iteration" data-stem="{group_name}">
+                        <div class="track-header" style="--track-color: {sim_color};">
+                            <div class="track-name">v{ver} ({sim:.0f}%){best_marker}</div>
+                        </div>
+                        <div class="track-waveform" onclick="seekAudio(event)">
+                            <canvas class="track-canvas" data-stem="{group_name}" data-color="{sim_color}"></canvas>
+                        </div>
+                    </div>
+                ''')
+
+            iteration_group_buttons.append(
+                f'<button class="group-btn" onclick="playGroup(\'{group_name}\')" '
+                f'data-group="{group_name}" style="font-size:0.7rem;padding:0.35rem 0.6rem;">v{ver}</button>'
+            )
+
+    # Pass iteration audio group definitions as JS variables
+    iter_groups_json = json.dumps(iter_audio_group_defs) if iter_audio_group_defs else '{}'
+    iter_stem_to_group_json = json.dumps(iter_stem_to_group_defs) if iter_stem_to_group_defs else '{}'
+    iter_stem_state_json = json.dumps(iter_stem_state_defs) if iter_stem_state_defs else '{}'
+
+    iteration_section = ""
+    if iteration_tracks:
+        num_iterations = len(iter_audio_group_defs)
+        iteration_section = f'''
+            <div class="daw-section daw-section-iterations">
+                <div class="section-header">
+                    <span>Iteration History ({num_iterations} renders)</span>
+                </div>
+                <div class="daw-tracks" id="tracks-iterations">
+                    {"".join(iteration_tracks)}
+                </div>
+            </div>
+        '''
+
+    iter_buttons_html = ""
+    if iteration_group_buttons:
+        iter_buttons_html = f'''
+            <div class="transport-group-btns" style="margin-top: 0.5rem; flex-wrap: wrap; gap: 0.25rem;">
+                {"".join(iteration_group_buttons)}
+            </div>
+        '''
+
     return f'''
         <div class="card daw-card">
             <div class="card-title">
@@ -362,15 +485,27 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
 
             <div class="daw-section daw-section-rendered">
                 <div class="section-header">
-                    <span>Rendered Stems</span>
+                    <span>Rendered Stems (Best)</span>
                 </div>
                 <div class="daw-tracks" id="tracks-rendered">
                     {"".join(rendered_tracks)}
                 </div>
             </div>
 
+            {iteration_section}
+
+            <!-- Iteration playback buttons -->
+            {iter_buttons_html}
+
             <!-- Now playing indicator -->
             <div class="daw-status" id="now-playing">Ready to play</div>
+
+            <!-- Iteration audio group definitions for JS -->
+            <script>
+                var iterAudioGroups = {iter_groups_json};
+                var iterStemToGroup = {iter_stem_to_group_json};
+                var iterStemStates = {iter_stem_state_json};
+            </script>
         </div>
     '''
 
@@ -581,7 +716,340 @@ def generate_ai_analysis_card(ai_params):
         </div>
     '''
 
-def generate_report(cache_dir, version_dir, output_path=None):
+
+def generate_iteration_progression_html(iterations_data):
+    """Generate similarity progression chart and table as an HTML card."""
+    if not iterations_data:
+        return ''
+
+    iterations = iterations_data.get("iterations", [])
+    if not iterations:
+        return ''
+
+    best_sim = iterations_data.get("best_similarity", 0) * 100
+
+    # Build SVG line chart
+    n = len(iterations)
+    chart_width = 600
+    chart_height = 200
+    padding_left = 50
+    padding_right = 20
+    padding_top = 20
+    padding_bottom = 30
+    plot_w = chart_width - padding_left - padding_right
+    plot_h = chart_height - padding_top - padding_bottom
+
+    # Find min/max for Y axis
+    sims = [it.get("similarity", 0) * 100 for it in iterations]
+    y_min = max(0, min(sims) - 10)
+    y_max = min(100, max(sims) + 10)
+    y_range = max(y_max - y_min, 1)
+
+    def x_pos(i):
+        if n == 1:
+            return padding_left + plot_w / 2
+        return padding_left + (i / (n - 1)) * plot_w
+
+    def y_pos(val):
+        return padding_top + plot_h - ((val - y_min) / y_range) * plot_h
+
+    # Build polyline points
+    points = []
+    for i, it in enumerate(iterations):
+        sim = it.get("similarity", 0) * 100
+        points.append(f"{x_pos(i):.1f},{y_pos(sim):.1f}")
+
+    polyline = " ".join(points)
+
+    # Build dots and labels
+    dots_svg = ""
+    for i, it in enumerate(iterations):
+        sim = it.get("similarity", 0) * 100
+        was_best = it.get("was_best", False)
+        reverted = it.get("reverted", False)
+        px = x_pos(i)
+        py = y_pos(sim)
+
+        if was_best:
+            color = "#3fb950"
+            radius = 5
+        elif reverted:
+            color = "#f85149"
+            radius = 4
+        else:
+            color = "#58a6ff"
+            radius = 3.5
+
+        dots_svg += f'<circle cx="{px:.1f}" cy="{py:.1f}" r="{radius}" fill="{color}" />\n'
+
+    # Y-axis gridlines
+    grid_svg = ""
+    num_gridlines = 5
+    for i in range(num_gridlines + 1):
+        val = y_min + (y_range * i / num_gridlines)
+        y = y_pos(val)
+        grid_svg += f'<line x1="{padding_left}" y1="{y:.1f}" x2="{chart_width - padding_right}" y2="{y:.1f}" stroke="#30363d" stroke-width="1" />\n'
+        grid_svg += f'<text x="{padding_left - 5}" y="{y:.1f}" text-anchor="end" fill="#8b949e" font-size="10" dominant-baseline="middle">{val:.0f}%</text>\n'
+
+    # X-axis labels
+    x_labels_svg = ""
+    for i, it in enumerate(iterations):
+        px = x_pos(i)
+        ver = it.get("version", i + 1)
+        x_labels_svg += f'<text x="{px:.1f}" y="{chart_height - 5}" text-anchor="middle" fill="#8b949e" font-size="10">v{ver}</text>\n'
+
+    chart_svg = f'''
+        <svg viewBox="0 0 {chart_width} {chart_height}" style="width: 100%; max-width: {chart_width}px; height: auto;">
+            {grid_svg}
+            <polyline points="{polyline}" fill="none" stroke="#58a6ff" stroke-width="2" />
+            {dots_svg}
+            {x_labels_svg}
+        </svg>
+    '''
+
+    # Legend
+    legend = '''
+        <div style="display: flex; gap: 1.5rem; margin-top: 0.75rem; font-size: 0.75rem; color: var(--text-secondary);">
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#3fb950;margin-right:4px;vertical-align:middle;"></span>Best</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#f85149;margin-right:4px;vertical-align:middle;"></span>Reverted</span>
+            <span><span style="display:inline-block;width:10px;height:10px;border-radius:50%;background:#58a6ff;margin-right:4px;vertical-align:middle;"></span>Normal</span>
+        </div>
+    '''
+
+    # Build table rows
+    table_rows = ""
+    prev_sim = None
+    for it in iterations:
+        ver = it.get("version", 0)
+        sim = it.get("similarity", 0) * 100
+        phase = it.get("phase", "?")
+        changes = it.get("changes", [])
+        was_best = it.get("was_best", False)
+        reverted = it.get("reverted", False)
+
+        # Delta from previous
+        if prev_sim is not None:
+            delta = sim - prev_sim
+            delta_str = f'<span style="color: {"#3fb950" if delta >= 0 else "#f85149"};">{delta:+.1f}%</span>'
+        else:
+            delta_str = '<span style="color: var(--text-secondary);">-</span>'
+        prev_sim = sim
+
+        sim_color = '#3fb950' if sim >= 70 else '#d29922' if sim >= 50 else '#f85149'
+        phase_badge = f'<span class="badge {"badge-blue" if phase == "deterministic" else "badge-orange"}">{phase}</span>'
+        best_badge = ' <span class="badge badge-green">best</span>' if was_best else ''
+        reverted_badge = ' <span class="badge" style="background: rgba(248, 81, 73, 0.2); color: #f85149;">reverted</span>' if reverted else ''
+
+        changes_str = html.escape("; ".join(changes[:3])) if changes else "-"
+        if len(changes) > 3:
+            changes_str += f" (+{len(changes) - 3} more)"
+
+        table_rows += f'''
+            <tr style="border-bottom: 1px solid var(--border);">
+                <td style="padding: 0.5rem; font-weight: 500;">v{ver}</td>
+                <td style="padding: 0.5rem; color: {sim_color}; font-weight: 600;">{sim:.1f}%</td>
+                <td style="padding: 0.5rem;">{delta_str}</td>
+                <td style="padding: 0.5rem;">{phase_badge}{best_badge}{reverted_badge}</td>
+                <td style="padding: 0.5rem; font-size: 0.8rem; color: var(--text-secondary);">{changes_str}</td>
+            </tr>
+        '''
+
+    return f'''
+        <div class="card">
+            <div class="card-title">
+                <svg viewBox="0 0 16 16"><path d="M1.5 1.75V13.5h13.75a.75.75 0 0 1 0 1.5H.75a.75.75 0 0 1-.75-.75V1.75a.75.75 0 0 1 1.5 0Zm14.28 2.53-5.25 5.25a.75.75 0 0 1-1.06 0L7 7.06 4.28 9.78a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042l3.25-3.25a.75.75 0 0 1 1.06 0L10 7.94l4.72-4.72a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042Z"/></svg>
+                Iteration History
+                <span style="font-size: 0.8rem; font-weight: 400; color: var(--text-secondary); margin-left: 0.5rem;">
+                    ({len(iterations)} iterations, best: {best_sim:.1f}%)
+                </span>
+            </div>
+
+            <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: 6px; margin-bottom: 1rem;">
+                {chart_svg}
+                {legend}
+            </div>
+
+            <div style="overflow-x: auto;">
+                <table style="width: 100%; border-collapse: collapse; font-size: 0.85rem;">
+                    <tr style="border-bottom: 2px solid var(--border);">
+                        <th style="padding: 0.5rem; text-align: left; color: var(--text-secondary);">Version</th>
+                        <th style="padding: 0.5rem; text-align: left; color: var(--text-secondary);">Similarity</th>
+                        <th style="padding: 0.5rem; text-align: left; color: var(--text-secondary);">Delta</th>
+                        <th style="padding: 0.5rem; text-align: left; color: var(--text-secondary);">Phase</th>
+                        <th style="padding: 0.5rem; text-align: left; color: var(--text-secondary);">Changes</th>
+                    </tr>
+                    {table_rows}
+                </table>
+            </div>
+        </div>
+    '''
+
+
+def generate_iteration_code_accordion_html(iterations_data, version_path):
+    """Generate collapsible code sections for each iteration's Strudel code."""
+    if not iterations_data:
+        return ''
+
+    iterations = iterations_data.get("iterations", [])
+    if not iterations:
+        return ''
+
+    accordion_items = ""
+    for it in iterations:
+        ver = it.get("version", 0)
+        sim = it.get("similarity", 0) * 100
+        was_best = it.get("was_best", False)
+        phase = it.get("phase", "?")
+
+        # Try to load code from the .strudel file (check version dir and parent)
+        strudel_file = version_path / f"output_iter_{ver:03d}.strudel"
+        if not strudel_file.exists():
+            strudel_file = version_path / f"output_v{ver:03d}.strudel"
+        if not strudel_file.exists():
+            strudel_file = version_path.parent / f"output_iter_{ver:03d}.strudel"
+        if not strudel_file.exists():
+            strudel_file = version_path.parent / f"output_v{ver:03d}.strudel"
+        if not strudel_file.exists():
+            continue
+
+        with open(strudel_file) as f:
+            code = f.read()
+
+        sim_color = '#3fb950' if sim >= 70 else '#d29922' if sim >= 50 else '#f85149'
+        best_marker = ' (Best)' if was_best else ''
+        phase_label = 'Det.' if phase == 'deterministic' else 'LLM'
+
+        accordion_items += f'''
+            <details class="iter-code-details" style="margin-bottom: 0.5rem;">
+                <summary style="cursor: pointer; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 6px; display: flex; align-items: center; gap: 0.75rem; list-style: none;">
+                    <span style="color: var(--text-secondary); font-size: 0.85rem;">v{ver}</span>
+                    <span style="color: {sim_color}; font-weight: 600; font-size: 0.85rem;">{sim:.1f}%{best_marker}</span>
+                    <span class="badge {"badge-blue" if phase == "deterministic" else "badge-orange"}" style="font-size: 0.7rem;">{phase_label}</span>
+                    <button class="copy-btn" onclick="event.stopPropagation(); copyIterCode('iter-code-{ver}')" style="margin-left: auto; font-size: 0.7rem;">Copy</button>
+                </summary>
+                <div class="code-block" style="margin-top: 0.25rem;">
+                    <pre id="iter-code-{ver}" style="font-size: 0.75rem;">{html.escape(code)}</pre>
+                </div>
+            </details>
+        '''
+
+    if not accordion_items:
+        return ''
+
+    return f'''
+        <div class="card">
+            <div class="card-title">
+                <svg viewBox="0 0 16 16"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25Zm1.75-.25a.25.25 0 0 0-.25.25v12.5c0 .138.112.25.25.25h12.5a.25.25 0 0 0 .25-.25V1.75a.25.25 0 0 0-.25-.25Zm7.47 3.97a.75.75 0 0 1 1.06 0l2 2a.75.75 0 0 1 0 1.06l-2 2a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042l.94-.94-.94-.94a.75.75 0 0 1 0-1.06Zm-4.44 0a.75.75 0 0 1 1.06 0l.94.94.94-.94a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042l-2 2a.75.75 0 0 1-1.06 0l-2-2a.751.751 0 0 1 .018-1.042.751.751 0 0 1 1.042-.018Z"/></svg>
+                Iteration Code
+                <span style="font-size: 0.8rem; font-weight: 400; color: var(--text-secondary); margin-left: 0.5rem;">
+                    (click to expand)
+                </span>
+            </div>
+            {accordion_items}
+        </div>
+    '''
+
+
+def generate_iteration_analysis_html(iterations_data):
+    """Generate analysis card explaining WHY iterations regressed."""
+    if not iterations_data:
+        return ''
+
+    iterations = iterations_data.get("iterations", [])
+    if len(iterations) < 2:
+        return ''
+
+    # Analyze patterns
+    findings = []
+    phase1_count = sum(1 for it in iterations if it.get("phase") == "deterministic")
+    phase2_count = sum(1 for it in iterations if it.get("phase") == "constrained_llm")
+    revert_count = sum(1 for it in iterations if it.get("reverted"))
+
+    # Find best iteration
+    best_iter = max(iterations, key=lambda it: it.get("similarity", 0))
+    best_idx = iterations.index(best_iter)
+    best_sim = best_iter.get("similarity", 0) * 100
+
+    # Detect Phase 2 regressions (sound change → similarity drop)
+    phase2_regressions = []
+    for i, it in enumerate(iterations):
+        if i == 0:
+            continue
+        prev = iterations[i - 1]
+        if it.get("phase") == "constrained_llm" and it.get("similarity", 0) < prev.get("similarity", 0):
+            delta = (prev.get("similarity", 0) - it.get("similarity", 0)) * 100
+            changes = it.get("changes", [])
+            phase2_regressions.append({
+                "version": it.get("version"),
+                "delta": delta,
+                "change": changes[0] if changes else "unknown",
+            })
+
+    # Detect Phase 1 convergence speed
+    phase1_improvements = []
+    for i, it in enumerate(iterations):
+        if i == 0 or it.get("phase") != "deterministic":
+            continue
+        prev = iterations[i - 1]
+        delta = (it.get("similarity", 0) - prev.get("similarity", 0)) * 100
+        phase1_improvements.append(delta)
+
+    # Build findings
+    findings.append(f'<div style="margin-bottom: 1rem;">'
+                     f'<strong style="color: var(--text-primary);">Phase Distribution:</strong> '
+                     f'<span class="badge badge-blue">Deterministic: {phase1_count}</span> '
+                     f'<span class="badge badge-orange">LLM: {phase2_count}</span> '
+                     f'<span class="badge" style="background: rgba(248,81,73,0.2); color: #f85149;">Reverts: {revert_count}</span>'
+                     f'</div>')
+
+    findings.append(f'<div style="margin-bottom: 1rem;">'
+                     f'<strong style="color: var(--text-primary);">Best Result:</strong> '
+                     f'v{best_iter.get("version")} at {best_sim:.1f}% '
+                     f'(iteration {best_idx + 1} of {len(iterations)})'
+                     f'</div>')
+
+    if phase1_improvements:
+        avg_p1 = sum(phase1_improvements) / len(phase1_improvements)
+        findings.append(f'<div style="margin-bottom: 1rem;">'
+                         f'<strong style="color: var(--text-primary);">Phase 1 (Deterministic):</strong> '
+                         f'Average delta: <span style="color: {"#3fb950" if avg_p1 >= 0 else "#f85149"};">{avg_p1:+.1f}%</span> per iteration. '
+                         f'{"Converges quickly with safe gain/filter tuning." if phase1_count <= 3 else "Took " + str(phase1_count) + " iterations to converge."}'
+                         f'</div>')
+
+    if phase2_regressions:
+        reg_items = ""
+        for reg in phase2_regressions:
+            reg_items += (f'<li style="margin-bottom: 0.25rem;">'
+                          f'v{reg["version"]}: <span style="color: #f85149;">-{reg["delta"]:.1f}%</span> '
+                          f'after "{html.escape(reg["change"])}"</li>')
+
+        findings.append(f'<div style="margin-bottom: 1rem;">'
+                         f'<strong style="color: #f85149;">Phase 2 Regressions ({len(phase2_regressions)}):</strong>'
+                         f'<ul style="margin: 0.5rem 0 0 1.5rem; color: var(--text-secondary);">{reg_items}</ul>'
+                         f'<p style="margin-top: 0.5rem; font-size: 0.8rem; color: var(--text-secondary);">'
+                         f'Sound changes invalidate Phase 1 tuning. The gains/filters optimized for the old sound '
+                         f'are wrong for the new sound, causing immediate regression.</p>'
+                         f'</div>')
+    elif phase2_count > 0:
+        findings.append(f'<div style="margin-bottom: 1rem;">'
+                         f'<strong style="color: #3fb950;">Phase 2:</strong> '
+                         f'No regressions from sound changes.'
+                         f'</div>')
+
+    return f'''
+        <div class="card">
+            <div class="card-title">
+                <svg viewBox="0 0 16 16"><path d="M8 1.5c-2.363 0-4 1.69-4 3.75 0 .984.424 1.625.984 2.304l.214.253c.223.264.47.556.673.848.284.411.537.896.621 1.49a.75.75 0 0 1-1.484.211c-.04-.282-.163-.547-.37-.847a8.456 8.456 0 0 0-.542-.68c-.084-.1-.173-.205-.268-.32C3.201 7.75 2.5 6.766 2.5 5.25 2.5 2.31 4.863 0 8 0s5.5 2.31 5.5 5.25c0 1.516-.701 2.5-1.328 3.259-.095.115-.184.22-.268.319-.207.245-.383.453-.541.681-.208.3-.33.565-.37.847a.751.751 0 0 1-1.485-.212c.084-.593.337-1.078.621-1.489.203-.292.45-.584.673-.848.075-.088.147-.173.213-.253.561-.679.985-1.32.985-2.304 0-2.06-1.637-3.75-4-3.75ZM5.75 12h4.5a.75.75 0 0 1 0 1.5h-4.5a.75.75 0 0 1 0-1.5ZM6 15.25a.75.75 0 0 1 .75-.75h2.5a.75.75 0 0 1 0 1.5h-2.5a.75.75 0 0 1-.75-.75Z"/></svg>
+                Iteration Analysis
+            </div>
+            <div style="padding: 0.5rem;">
+                {"".join(findings)}
+            </div>
+        </div>
+    '''
+
+
+def generate_report(cache_dir, version_dir, output_path=None, iterations_file=None):
     """Generate HTML report for a version."""
 
     cache_path = Path(cache_dir)
@@ -769,6 +1237,19 @@ def generate_report(cache_dir, version_dir, output_path=None):
     if stem_comparison_json_path.exists():
         with open(stem_comparison_json_path) as f:
             stem_comparison_results = json.load(f)
+
+    # Load iteration history
+    iterations_data = None
+    if iterations_file and os.path.exists(iterations_file):
+        with open(iterations_file) as f:
+            iterations_data = json.load(f)
+    else:
+        # Check version dir and cache dir for iterations.json
+        for check_path in [version_path / "iterations.json", cache_path / "iterations.json"]:
+            if check_path.exists():
+                with open(check_path) as f:
+                    iterations_data = json.load(f)
+                break
 
     # Encode stem comparison charts
     stem_charts = {}
@@ -1174,6 +1655,35 @@ def generate_report(cache_dir, version_dir, output_path=None):
             background: linear-gradient(90deg, rgba(63, 185, 80, 0.05) 0%, transparent 120px);
         }}
 
+        .daw-section-iterations {{
+            background: linear-gradient(90deg, rgba(88, 166, 255, 0.05) 0%, transparent 120px);
+        }}
+
+        .daw-section-iterations .track-header {{
+            opacity: 0.85;
+        }}
+
+        .iter-code-details summary {{
+            user-select: none;
+        }}
+
+        .iter-code-details summary::-webkit-details-marker {{
+            display: none;
+        }}
+
+        .iter-code-details summary::before {{
+            content: '\\25B6';
+            font-size: 0.6rem;
+            margin-right: 0.5rem;
+            color: var(--text-secondary);
+            transition: transform 0.2s;
+            display: inline-block;
+        }}
+
+        .iter-code-details[open] summary::before {{
+            transform: rotate(90deg);
+        }}
+
         .section-header {{
             padding: 0.5rem 1rem;
             font-size: 0.7rem;
@@ -1284,6 +1794,20 @@ def generate_report(cache_dir, version_dir, output_path=None):
             width: 100%;
             height: 100%;
             display: block;
+        }}
+
+        /* Shimmer skeleton loading */
+        @keyframes shimmer {{
+            0% {{ background-position: -200% 0; }}
+            100% {{ background-position: 200% 0; }}
+        }}
+        .track-waveform.loading {{
+            background: linear-gradient(90deg, #0d1117 25%, #161b22 37%, #0d1117 63%);
+            background-size: 200% 100%;
+            animation: shimmer 1.5s ease-in-out infinite;
+        }}
+        .track-waveform.loading .track-canvas {{
+            opacity: 0;
         }}
 
         /* Playhead line that spans all tracks */
@@ -1476,7 +2000,8 @@ def generate_report(cache_dir, version_dir, output_path=None):
         </header>
 
         {generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data, render_data,
-                                     render_melodic_data, render_drums_data, render_bass_data)}
+                                     render_melodic_data, render_drums_data, render_bass_data,
+                                     iterations_data)}
 
         <div class="card">
             <div class="card-title">
@@ -1511,6 +2036,12 @@ def generate_report(cache_dir, version_dir, output_path=None):
         {generate_ai_analysis_card(ai_params)}
 
         {generate_stem_comparison_html(stem_comparison_results, stem_charts)}
+
+        {generate_iteration_progression_html(iterations_data) if iterations_data else ''}
+
+        {generate_iteration_analysis_html(iterations_data) if iterations_data else ''}
+
+        {generate_iteration_code_accordion_html(iterations_data, version_path) if iterations_data else ''}
 
         {f"""<div class="card">
             <div class="card-title">
@@ -1556,6 +2087,18 @@ def generate_report(cache_dir, version_dir, output_path=None):
             }});
         }}
 
+        function copyIterCode(elementId) {{
+            const el = document.getElementById(elementId);
+            if (!el) return;
+            navigator.clipboard.writeText(el.textContent).then(() => {{
+                const btn = el.closest('.iter-code-details').querySelector('.copy-btn');
+                if (btn) {{
+                    btn.textContent = 'Copied!';
+                    setTimeout(() => btn.textContent = 'Copy', 2000);
+                }}
+            }});
+        }}
+
         // ========== DAW ENGINE ==========
         const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
         const waveformData = {{}};  // Store decoded audio data for waveform drawing
@@ -1572,6 +2115,11 @@ def generate_report(cache_dir, version_dir, output_path=None):
             'render-stems': ['audio-render-melodic', 'audio-render-drums', 'audio-render-bass']
         }};
 
+        // Merge iteration audio groups (defined in DAW card via iterAudioGroups)
+        if (typeof iterAudioGroups !== 'undefined') {{
+            Object.assign(audioGroups, iterAudioGroups);
+        }}
+
         // Which stems belong to which group (for solo/mute isolation)
         const stemToGroup = {{
             'melodic': 'original-all',
@@ -1583,6 +2131,16 @@ def generate_report(cache_dir, version_dir, output_path=None):
             'render-bass': 'render-stems'
         }};
 
+        // Add iteration stems to stemToGroup
+        if (typeof iterStemToGroup !== 'undefined') {{
+            Object.assign(stemToGroup, iterStemToGroup);
+        }} else if (typeof iterAudioGroups !== 'undefined') {{
+            // Fallback for full-mix iterations
+            for (const [group, ids] of Object.entries(iterAudioGroups)) {{
+                stemToGroup[group] = group;
+            }}
+        }}
+
         // Stem state for solo/mute (per group)
         const stemState = {{
             melodic: {{ muted: false, solo: false }},
@@ -1593,6 +2151,17 @@ def generate_report(cache_dir, version_dir, output_path=None):
             'render-drums': {{ muted: false, solo: false }},
             'render-bass': {{ muted: false, solo: false }}
         }};
+
+        // Add iteration stems to stemState
+        if (typeof iterStemStates !== 'undefined') {{
+            for (const [stem, state] of Object.entries(iterStemStates)) {{
+                stemState[stem] = {{ muted: state.muted || false, solo: state.solo || false }};
+            }}
+        }} else if (typeof iterAudioGroups !== 'undefined') {{
+            for (const group of Object.keys(iterAudioGroups)) {{
+                stemState[group] = {{ muted: false, solo: false }};
+            }}
+        }}
 
         // Initialize audio context and decode audio
         async function initAudio() {{
@@ -1614,6 +2183,8 @@ def generate_report(cache_dir, version_dir, output_path=None):
                 }}
             }}
             drawAllWaveforms();
+            // Remove loading state from any tracks that didn't get a waveform
+            document.querySelectorAll('.track-waveform.loading').forEach(el => el.classList.remove('loading'));
             updateTotalTime();
             generateTimelineMarkers();
         }}
@@ -1681,6 +2252,8 @@ def generate_report(cache_dir, version_dir, output_path=None):
 
                 if (buffer) {{
                     drawTrackWaveform(canvas, buffer, color);
+                    const wrapper = canvas.closest('.track-waveform');
+                    if (wrapper) wrapper.classList.remove('loading');
                 }}
             }});
         }}
@@ -1915,8 +2488,12 @@ def generate_report(cache_dir, version_dir, output_path=None):
 
         // Get audio elements for a group
         function getGroupAudios(group) {{
+            const ids = audioGroups[group];
+            if (ids) {{
+                return ids.map(id => document.getElementById(id)).filter(a => a);
+            }}
             if (group === 'original-all') {{
-                return Array.from(document.querySelectorAll('audio')).filter(a => !a.id.includes('render'));
+                return Array.from(document.querySelectorAll('audio')).filter(a => !a.id.includes('render') && !a.id.includes('iter'));
             }} else if (group === 'render-stems') {{
                 return Array.from(document.querySelectorAll('audio')).filter(a => a.id.includes('render'));
             }}
@@ -1927,13 +2504,20 @@ def generate_report(cache_dir, version_dir, output_path=None):
         function updateNowPlaying(group) {{
             const labels = {{
                 'original-all': 'Playing: Original Stems',
-                'render-stems': 'Playing: Rendered Stems',
+                'render-stems': 'Playing: Rendered Stems (Best)',
                 'compare-ab': 'A/B Comparison Mode',
                 'all': 'Playing: All Stems'
             }};
             const el = document.getElementById('now-playing');
             if (el) {{
-                el.textContent = typeof group === 'string' && group.startsWith('A/B:') ? group : (labels[group] || group || 'Ready to play');
+                if (typeof group === 'string' && group.startsWith('A/B:')) {{
+                    el.textContent = group;
+                }} else if (typeof group === 'string' && group.startsWith('iter-')) {{
+                    const ver = group.replace('iter-', '');
+                    el.textContent = `Playing: Iteration v${{ver}}`;
+                }} else {{
+                    el.textContent = labels[group] || group || 'Ready to play';
+                }}
             }}
         }}
 
@@ -2056,6 +2640,9 @@ def generate_report(cache_dir, version_dir, output_path=None):
 
         // Initialize on load
         document.addEventListener('DOMContentLoaded', () => {{
+            // Add shimmer loading state to all waveforms
+            document.querySelectorAll('.track-waveform').forEach(el => el.classList.add('loading'));
+
             // Wait a bit for audio elements to be ready
             setTimeout(initAudio, 500);
 
@@ -2084,6 +2671,7 @@ def main():
     parser.add_argument('cache_dir', help='Path to cache directory (track folder)')
     parser.add_argument('-v', '--version', type=int, help='Version number (default: latest)')
     parser.add_argument('-o', '--output', help='Output HTML path')
+    parser.add_argument('--iterations-file', help='Path to iterations.json manifest')
     args = parser.parse_args()
 
     cache_dir = args.cache_dir
@@ -2100,7 +2688,7 @@ def main():
                 version_dir = vdir
                 break
 
-    generate_report(cache_dir, version_dir, args.output)
+    generate_report(cache_dir, version_dir, args.output, args.iterations_file)
 
 if __name__ == '__main__':
     main()

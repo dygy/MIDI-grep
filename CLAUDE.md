@@ -127,6 +127,11 @@ All outputs are cached in `.cache/stems/{key}/` by URL or file hash:
     ├── output.strudel     # Strudel code
     ├── metadata.json      # BPM, key, style, notes, etc.
     ├── render.wav         # Rendered audio preview
+    ├── render_v*.wav      # Per-iteration render files
+    ├── render_v*_melodic.mp3  # Per-iteration melodic stem
+    ├── render_v*_drums.mp3    # Per-iteration drums stem
+    ├── render_v*_bass.mp3     # Per-iteration bass stem
+    ├── iterations.json    # Iteration manifest with stem paths
     ├── comparison.json    # Audio comparison data
     ├── comparison.png     # Combined comparison chart
     ├── chart_*.png        # Individual analysis charts
@@ -290,10 +295,16 @@ The `--render` flag synthesizes WAV audio from patterns:
   - **Rendered Stems Section**: render-melodic, render-drums, render-bass
     - Completely isolated from Original (NEVER play together)
     - Same controls: Play/Stop + per-stem mute
+  - **Iteration History Section**: per-iteration stem tracks (melodic, drums, bass)
+    - Sub-headers with version number and similarity score (color-coded)
+    - Mute buttons per iteration stem for isolated A/B comparison
+    - Falls back to single full-mix track when stems unavailable
+    - Playback group isolation: each iteration plays independently
   - Web Audio API for synchronized playback
   - Volume faders per stem
   - Synchronized playback controls
   - A/B comparison mode (toggle between original and rendered)
+  - **Shimmer skeleton loading**: animated placeholder while audio decodes, removed on waveform draw
 - **Per-stem comparison charts** (bass, drums, melodic)
 - Visual comparison charts (spectrograms, chromagrams, frequency bands, similarity)
 - HTML-based data tables (copyable text, not images)
@@ -590,7 +601,8 @@ The following analysis features are **always enabled by default**:
 2. **Per-Stem Comparison**: Generates per-stem comparison charts (`chart_stem_bass.png`, `chart_stem_drums.png`, `chart_stem_melodic.png`)
 3. **Overall Comparison**: Generates combined comparison chart and `comparison.json`
 4. **AI-Driven Improvement**: 20 iterations by default with 99% target (ensures ALL iterations run)
-5. **HTML Report**: Self-contained DAW-style player with isolated Original/Rendered stem groups
+5. **Iteration Stem Separation**: Batch Demucs on each iteration render → per-iteration melodic/drums/bass stems
+6. **HTML Report**: Self-contained DAW-style player with isolated Original/Rendered/Iteration stem groups and shimmer loading
 
 ### AI-Driven Iterative Improvement
 
@@ -610,7 +622,9 @@ The `--iterate` flag enables AI-driven code improvement using Claude:
 3. Send comparison results to LLM (Ollama local or Claude API)
 4. LLM analyzes gaps and generates improved code
 5. Repeat until target similarity or max iterations reached
-6. Store all runs in ClickHouse for incremental learning
+6. Batch stem separation: run Demucs on each iteration render to produce per-iteration stems
+7. Store all runs in ClickHouse for incremental learning
+8. Generate HTML report with per-iteration stem tracks (mute buttons, shimmer loading)
 
 **LLM Options:**
 

@@ -104,11 +104,12 @@ Enable musicians and live coders to instantly extract piano riffs from any audio
   - **BlackHole Recording (RECOMMENDED):** 100% accurate via real Strudel playback recording
   - **Node.js Synthesis (Fallback):** ~72% accuracy offline rendering
 - **Self-contained HTML reports** with audio studio player:
-  - Two-section stem mixer (Original + Rendered stems)
-  - Solo/Mute controls per stem
-  - Waveform visualizations
+  - Three-section stem mixer (Original + Rendered + Iteration History stems)
+  - Solo/Mute controls per stem (including per-iteration stems)
+  - Waveform visualizations with shimmer skeleton loading
   - A/B comparison mode
   - Per-stem comparison charts
+  - Batch stem separation for all iteration renders (melodic/drums/bass per iteration)
 - **AI-driven iterative improvement** with Ollama/Claude (default: 5 iterations, 99% target to ensure all iterations run)
 - **Per-stem comparison** charts and analysis (bass, drums, melodic)
 - **Accurate similarity scoring** using MAE-based frequency balance (not cosine distance)

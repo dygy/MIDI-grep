@@ -566,3 +566,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.63 | 2026-02-09 | **808 Kick Fix:** pitchEnd 80→35Hz for proper sub-bass, removed HPF from kicks |
 | 1.64 | 2026-02-09 | Voice gain rebalancing: bass 0.6x, mids 0.5x, highs 0.4x, drums 0.7x |
 | 1.65 | 2026-02-10 | **BlackHole Recording:** 100% accuracy via real Strudel playback recording (replaces synthesis emulation) |
+| 1.66 | 2026-02-18 | **Iteration Stems + Shimmer Loading:** Batch Demucs on each iteration render → per-iteration melodic/drums/bass stems in report with mute buttons, shimmer skeleton loading animation |

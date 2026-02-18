@@ -263,12 +263,25 @@ Strudel Code
              │
              ▼
 ┌─────────────────────────┐
+│ Batch Stem Separation   │ (ai_improver.py)
+│ - Demucs each iteration │
+│ → render_v*_melodic.mp3 │
+│ → render_v*_drums.mp3   │
+│ → render_v*_bass.mp3    │
+│ → iterations.json       │
+└────────────┬────────────┘
+             │
+             ▼
+┌─────────────────────────┐
 │ HTML Report             │ (generate_report.py)
 │ - Audio Studio Player   │
 │   - Original stems      │
 │   - Rendered stems      │
+│   - Iteration stems     │
+│     (per-iter mute btns)│
 │   - Solo/Mute controls  │
 │   - A/B comparison      │
+│ - Shimmer skeleton load │
 │ - Waveform visualizations
 │ - Per-stem charts       │
 │ - Comparison data       │

@@ -181,9 +181,10 @@ flowchart TB
     Validate -->|Yes| QuickRender
 
     %% ===== OUTPUT =====
-    LoopCheck -->|Done| FinalRender["Full-length BlackHole render<br/>+ Demucs stem separation"]
+    LoopCheck -->|Done| BatchStems["Batch Demucs: separate<br/>each iteration render<br/>into melodic/drums/bass"]
+    BatchStems --> FinalRender["Full-length BlackHole render<br/>+ Demucs stem separation"]
     FinalRender --> Report["generate_report.py"]
-    Report --> Output["vNNN/<br/>├── output.strudel<br/>├── render.wav + stems<br/>├── comparison.json<br/>├── stem_comparison.json<br/>└── report.html"]
+    Report --> Output["vNNN/<br/>├── output.strudel<br/>├── render.wav + stems<br/>├── render_v*_{melodic,drums,bass}.mp3<br/>├── iterations.json (with stem paths)<br/>├── comparison.json<br/>├── stem_comparison.json<br/>└── report.html"]
 
     %% ===== PER-TRACK LEARNING =====
     CH -.->|"Best runs + learned<br/>parameter deltas"| Phase1
@@ -396,7 +397,8 @@ All analysis features are **enabled by default**:
 - **Per-Stem Comparison**: Generates charts comparing each rendered stem vs original
 - **Overall Comparison**: Combined frequency/MFCC/chroma comparison chart
 - **AI Improvement**: 5 iterations targeting 85% similarity
-- **HTML Report**: Audio studio with Solo/Mute controls, A/B comparison, waveforms
+- **Iteration Stem Separation**: Batch Demucs on each iteration render → per-iteration melodic/drums/bass stems
+- **HTML Report**: Audio studio with Solo/Mute controls, per-iteration stem tracks, A/B comparison, shimmer loading, waveforms
 
 ### AI-Driven Code Improvement
 
@@ -419,7 +421,9 @@ MIDI-grep can iteratively improve Strudel code using AI analysis:
 3. Send comparison to LLM to analyze gaps
 4. LLM suggests effect parameter changes
 5. Apply changes and repeat until target reached
-6. Store all runs in ClickHouse for learning
+6. Batch stem separation: Demucs splits each iteration render into melodic/drums/bass
+7. Store all runs in ClickHouse for learning
+8. Generate report with per-iteration stem tracks (mute buttons, shimmer loading)
 
 **Ollama Setup (one-time, free):**
 ```bash
