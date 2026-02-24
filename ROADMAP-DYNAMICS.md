@@ -68,6 +68,13 @@ These Node.js synthesis files were deleted (replaced by BlackHole):
 | Unique AI iterations | 12/12 |
 | Code validation | Active |
 
+### Genre-Aware Sound RAG (Feb 2026)
+
+LLM now receives only ~15 genre-appropriate sounds per call instead of the full 196-sound catalog:
+- `sound_selector.py` → `retrieve_genre_context(genre)` returns compact palette
+- Injected into `ollama_codegen.py` (initial generation) and `ollama_agent.py` (iterations)
+- 760 tokens saved per LLM call, fewer hallucinated sound names
+
 ## Future Ideas
 
 - Section-based automation (intro/verse/chorus dynamics)

@@ -24,6 +24,7 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
   - **Style Detection**: Detects style based on BPM, key (minor/major), and note density
 - **Deep Learning Genre Detection**: CLAP (Contrastive Language-Audio Pretraining) model for zero-shot audio classification (enabled by default)
 - **Manual Genre Override**: `--genre` flag to force specific genre when auto-detection fails
+- **Genre-Aware Sound RAG**: LLM prompts include only ~15 genre-relevant sounds (not all 196), reducing hallucinated sound names and saving ~760 tokens per call
 - **AI-Driven Audio Rendering**: Synthesize WAV previews with AI-suggested mix parameters
   - Spectral/dynamics/timbre analysis of original audio
   - Automatic effect parameter optimization
@@ -149,7 +150,8 @@ flowchart TB
     QueryBest --> CH[("ClickHouse<br/>runs + knowledge")]
 
     CH -->|Found| StartFromBest["Start from best code"]
-    CH -->|Not found| FreshGen["Ollama generates fresh<br/>Strudel code"]
+    CH -->|Not found| GenreRAG["Genre Sound RAG<br/>retrieve_genre_context()<br/>~15 sounds per genre"]
+    GenreRAG --> FreshGen["Ollama generates fresh<br/>Strudel code<br/>(with genre palette)"]
 
     StartFromBest --> InitCode["output.strudel"]
     FreshGen --> InitCode
@@ -166,7 +168,7 @@ flowchart TB
     LoopCheck -->|Yes| Phase1["Phase 1: Deterministic<br/>optimize_parameters()<br/>gain/lpf/hpf/room math"]
     Phase1 --> Phase1Check{"Changes made?"}
     Phase1Check -->|Yes| QuickRender["BlackHole render<br/>(full track)"]
-    Phase1Check -->|No| Phase2["Phase 2: Constrained LLM<br/>sound selection menu<br/>(never writes code directly)"]
+    Phase1Check -->|No| Phase2["Phase 2: Constrained LLM<br/>+ Genre Sound RAG<br/>(~15 valid sounds per genre)"]
     Phase2 --> QuickRender
 
     QuickRender --> Regress{"new > best?"}
@@ -203,6 +205,7 @@ flowchart TB
     style FinalRender fill:#512da8,color:#fff
     style Report fill:#6a1b9a,color:#fff
     style Output fill:#1b5e20,color:#fff
+    style GenreRAG fill:#00897b,color:#fff
     style FreshGen fill:#f9a825,color:#000
 ```
 
@@ -256,8 +259,9 @@ midi-grep/
 │       ├── detect_drums.py  # Drum onset detection & classification
 │       ├── detect_genre_dl.py    # CLAP deep learning genre detection
 │       ├── ai_improver.py   # AI-driven iterative improvement (Ollama/Claude)
-│       ├── ollama_agent.py  # Agentic LLM with ClickHouse memory
-│       ├── sound_selector.py     # Sound catalog (67 drums, 128 GM)
+│       ├── ollama_codegen.py # Ollama LLM code gen with genre sound RAG
+│       ├── ollama_agent.py  # Agentic LLM with ClickHouse memory + genre RAG
+│       ├── sound_selector.py     # Sound catalog (67 drums, 128 GM) + genre RAG retrieval
 │       ├── compare_audio.py      # Rendered vs original comparison (MAE)
 │       ├── generate_report.py    # Self-contained HTML report
 │       ├── analyze_synth_params.py  # AI audio analysis for synthesis
@@ -291,7 +295,7 @@ midi-grep/
    drums.mp3 ──▶ onset detection ──▶ drum_hits.json
 
 6. AI CODE GENERATION (LLM-first)
-   notes + drums + analysis ──▶ Ollama (llama3:8b) ──▶ code.strudel
+   notes + drums + analysis ──▶ Genre Sound RAG (~15 sounds) ──▶ Ollama ──▶ code.strudel
    ClickHouse best runs ──▶ start from best known code
 
 7. RENDER & ITERATE
@@ -418,8 +422,8 @@ MIDI-grep can iteratively improve Strudel code using AI analysis:
 **How it works:**
 1. Render initial Strudel code to WAV
 2. Compare against original audio (MFCC, chroma, frequency bands)
-3. Send comparison to LLM to analyze gaps
-4. LLM suggests effect parameter changes
+3. **Genre Sound RAG**: Inject ~15 genre-appropriate sounds into LLM prompt (not the full 196-sound catalog)
+4. LLM analyzes gaps and suggests changes using only valid genre sounds
 5. Apply changes and repeat until target reached
 6. Batch stem separation: Demucs splits each iteration render into melodic/drums/bass
 7. Store all runs in ClickHouse for learning

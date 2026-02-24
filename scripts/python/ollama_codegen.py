@@ -20,7 +20,7 @@ except ImportError:
     HAS_REQUESTS = False
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "llama3.1:8b")
+DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "midi-grep-strudel")
 
 # Import sound validation from ollama_agent
 try:
@@ -29,6 +29,13 @@ except ImportError:
     VALID_SOUNDS = set()
     VALID_DRUM_BANKS = set()
     INVALID_GM_PATTERNS = []
+
+# Import genre-aware sound retrieval
+try:
+    from sound_selector import retrieve_genre_context, GENRE_PALETTES
+    HAS_SOUND_SELECTOR = True
+except ImportError:
+    HAS_SOUND_SELECTOR = False
 
 # Import ClickHouse best-run lookup
 try:
@@ -57,6 +64,20 @@ def build_prompt(bpm, key, genre, style, drum_kit, sections, duration, notes_jso
     root = key.split()[0].lower() if key else "c"
     kit = drum_kit or 'RolandTR808'
 
+    # Retrieve genre-appropriate sounds
+    genre_context = ""
+    bass_sound = "gm_synth_bass_1"
+    lead_sound = "gm_lead_2_sawtooth"
+    pad_sound = "gm_piano"
+    if HAS_SOUND_SELECTOR:
+        genre_context = retrieve_genre_context(genre or "default")
+        genre_key = (genre or "default").lower().replace(" ", "_").replace("-", "_")
+        palette = GENRE_PALETTES.get(genre_key, GENRE_PALETTES["default"])
+        bass_sound = palette["bass"][0] if palette.get("bass") else bass_sound
+        lead_sound = palette["lead"][0] if palette.get("lead") else lead_sound
+        pad_sound = palette["pad"][0] if palette.get("pad") else pad_sound
+        kit = palette["drums"][0] if palette.get("drums") else kit
+
     # Build section entries for arrange()
     section_entries = []
     if sections:
@@ -81,18 +102,18 @@ def build_prompt(bpm, key, genre, style, drum_kit, sections, duration, notes_jso
         for cycles, level, idx in section_entries:
             if voice_type == "bass":
                 if level == "HIGH":
-                    lines.append(f'  [{cycles}, note("{root}2 {root}2 ~ {root}2").sound("gm_synth_bass_1").gain(0.8).lpf(400)]')
+                    lines.append(f'  [{cycles}, note("{root}2 {root}2 ~ {root}2").sound("{bass_sound}").gain(0.8).lpf(400)]')
                 elif level == "MEDIUM":
-                    lines.append(f'  [{cycles}, note("{root}2 ~ {root}2 ~").sound("gm_synth_bass_1").gain(0.5).lpf(300)]')
+                    lines.append(f'  [{cycles}, note("{root}2 ~ {root}2 ~").sound("{bass_sound}").gain(0.5).lpf(300)]')
                 else:
-                    lines.append(f'  [{cycles}, note("{root}2 ~ ~ ~").sound("gm_acoustic_bass").gain(0.3).lpf(200).room(0.3)]')
+                    lines.append(f'  [{cycles}, note("{root}2 ~ ~ ~").sound("{bass_sound}").gain(0.3).lpf(200).room(0.3)]')
             elif voice_type == "lead":
                 if level == "HIGH":
-                    lines.append(f'  [{cycles}, note("{root}4 {root}4 {root}4 {root}4").sound("gm_lead_2_sawtooth").gain(0.7).lpf(6000)]')
+                    lines.append(f'  [{cycles}, note("{root}4 {root}4 {root}4 {root}4").sound("{lead_sound}").gain(0.7).lpf(6000)]')
                 elif level == "MEDIUM":
-                    lines.append(f'  [{cycles}, note("{root}4 ~ {root}4 ~").sound("gm_piano").gain(0.5).lpf(5000)]')
+                    lines.append(f'  [{cycles}, note("{root}4 ~ {root}4 ~").sound("{pad_sound}").gain(0.5).lpf(5000)]')
                 else:
-                    lines.append(f'  [{cycles}, note("{root}4 ~ ~ ~").sound("gm_piano").gain(0.3).lpf(4000).room(0.3)]')
+                    lines.append(f'  [{cycles}, note("{root}4 ~ ~ ~").sound("{pad_sound}").gain(0.3).lpf(4000).room(0.3)]')
             else:  # drums
                 if level == "HIGH":
                     lines.append(f'  [{cycles}, s("bd sd hh hh bd sd hh oh").bank("{kit}").gain(0.8)]')
@@ -105,6 +126,7 @@ def build_prompt(bpm, key, genre, style, drum_kit, sections, duration, notes_jso
     prompt = f"""Generate Strudel live coding music.
 
 BPM: {bpm}, Key: {key}, Genre: {genre or 'electronic'}{notes_text}
+{genre_context}
 
 The code MUST have EXACTLY this structure — 3 `$:` blocks, one per voice.
 Each voice has ONE arrange() containing ALL {len(section_entries)} sections as [cycles, pattern] pairs.
@@ -138,10 +160,6 @@ CRITICAL RULES:
 6. Drums: s("bd sd hh oh") with .bank("{kit}") — NEVER use note names for drums
 7. LOW energy: sparse (use ~), gain 0.2-0.4, add .room(0.3)
 8. HIGH energy: dense, gain 0.7-0.9, add .distort(0.3) or .crush(4)
-9. NO semicolons, NO .peak(), NO .volume(), NO .eq()
-10. Valid sounds: gm_acoustic_bass, gm_synth_bass_1, gm_piano, gm_epiano1, gm_lead_2_sawtooth, gm_pad_warm, gm_string_ensemble_1
-11. Valid banks: {kit} (use full name, NOT "tr808")
-
 Output ONLY the code in a ```javascript block. No explanation."""
 
     return prompt
@@ -163,6 +181,7 @@ def call_ollama(prompt, model=DEFAULT_MODEL):
                 "options": {
                     "temperature": 0.7,
                     "num_predict": 4096,
+                    "num_ctx": 8192,
                 }
             },
             timeout=300

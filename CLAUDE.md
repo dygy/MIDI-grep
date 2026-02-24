@@ -284,6 +284,12 @@ The `--render` flag synthesizes WAV audio from patterns:
 - **17 genre palettes** (brazilian_funk, electro_swing, house, jpop, trance, lofi, synthwave, etc.)
 - Sound alternation patterns using `<sound1 sound2>` syntax
 - Timbre-based selection (brightness, warmth, attack time, harmonic richness)
+- **Genre-Aware Sound RAG** (`retrieve_genre_context(genre)`):
+  - Returns ~40-token compact string of genre-appropriate sounds for LLM prompts
+  - Replaces sending the full 800-token catalog to the LLM (760 tokens saved per call)
+  - Falls back to "default" palette for unknown genres
+  - Injected into `ollama_codegen.py` `build_prompt()` and `ollama_agent.py` `generate()`/`add_iteration_result()`
+  - Example: `Available sounds for brazilian_funk (aggressive, punchy, 808-heavy) — Bass: sawtooth, gm_synth_bass_1 | Lead: gm_lead_2_sawtooth, supersaw | ...`
 
 **HTML Report (`scripts/python/generate_report.py`):**
 - Self-contained single-file HTML report with embedded audio and charts
@@ -379,6 +385,7 @@ midi-grep/
 │       ├── ai_code_generator.py # AI-driven Strudel code generation
 │       ├── ai_code_improver.py # Gap analysis and Strudel code modification
 │       ├── ai_iterative_codegen.py # Iteration loop with revert-on-regression
+│       ├── ollama_codegen.py   # Ollama LLM code gen with genre sound RAG
 │       ├── ai_learning_optimizer.py # AI learning optimization
 │       ├── spectrogram_analyzer.py # Mel spectrogram deep analysis for AI
 │       ├── sound_selector.py   # Complete sound catalog (67 drums, 128 GM)
@@ -475,6 +482,13 @@ The architecture is:
 - Queries ClickHouse for best previous runs
 - Supports all genres via `sound_selector.py` integration
 - Arguments: `--bpm`, `--key`, `--style`, `--genre`, `--drum-kit`, `--drums-only`
+
+**`scripts/python/ollama_codegen.py`** - Ollama-powered Strudel code generator:
+- Replaces rule-based `ai_code_generator.py` with LLM-based generation
+- `build_prompt()` includes genre-aware sound RAG context (~40 tokens vs 800)
+- Example sounds in the prompt use genre-appropriate palette (not hardcoded)
+- Enforces 3-voice structure (bass, lead, drums) via `enforce_three_voices()`
+- Comprehensive `fix_strudel_syntax()` auto-corrects LLM hallucinations
 
 **Go Pipeline Role** (no code generation):
 - Stem separation via Demucs
@@ -666,9 +680,9 @@ ollama pull llama3:8b
 
 **Why `llama3:8b`?** The LLM needs to understand audio/music concepts ("bass sounds muddy", "mids are harsh", "drums lack punch") not just generate code. General-purpose models with broad knowledge outperform code-only models for this task.
 
-**Strudel Code Validation (`scripts/python/ollama_agent.py`):**
+**Strudel Code Validation & Genre RAG (`scripts/python/ollama_agent.py`):**
 
-LLMs sometimes hallucinate invalid Strudel methods. The agent validates generated code and rejects invalid methods:
+The agent uses **Genre-Aware Sound RAG** to provide only ~15 genre-relevant sounds per Ollama call, reducing hallucinated sound names. It also validates generated code and rejects invalid methods:
 
 ```python
 INVALID_METHODS = [

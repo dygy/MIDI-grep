@@ -60,3 +60,6 @@ scripts/python/models/
 
 # ClickHouse local data
 .clickhouse/
+
+# Training data (generated)
+training_data/

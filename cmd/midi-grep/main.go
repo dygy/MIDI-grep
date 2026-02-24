@@ -320,7 +320,7 @@ func init() {
 	extractCmd.Flags().IntVar(&iterateCount, "iterate", 20, "AI-driven improvement iterations (default: 20)")
 	extractCmd.Flags().Float64Var(&targetSimilarity, "target-similarity", 0.99, "Target similarity for --iterate (0.99 = always run all iterations)")
 	extractCmd.Flags().BoolVar(&useOllama, "ollama", true, "Use Ollama (local LLM) - free, no API key needed")
-	extractCmd.Flags().StringVar(&ollamaModel, "ollama-model", "llama3.1:8b", "Ollama model to use (llama3.1 supports tool calling)")
+	extractCmd.Flags().StringVar(&ollamaModel, "ollama-model", "midi-grep-strudel", "Ollama model to use (run 'ollama create midi-grep-strudel -f Modelfile' first)")
 
 	// Serve command flags
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to listen on")

@@ -24,13 +24,20 @@ try:
 except ImportError:
     HAS_REQUESTS = False
 
+# Import genre-aware sound retrieval
+try:
+    from sound_selector import retrieve_genre_context
+    HAS_SOUND_SELECTOR = True
+except ImportError:
+    HAS_SOUND_SELECTOR = False
+
 # ClickHouse connection
 CLICKHOUSE_BIN = Path(__file__).parent.parent.parent / "bin" / "clickhouse"
 CLICKHOUSE_DB = Path(__file__).parent.parent.parent / ".clickhouse" / "db"
 AGENTS_DIR = Path(__file__).parent.parent.parent / ".cache" / "agents"
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "llama3:8b")
+DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "midi-grep-strudel")
 
 # ============================================================================
 # VALID STRUDEL SOUNDS (from gm.mjs + synth.mjs)
@@ -168,163 +175,24 @@ class OllamaAgent:
             self.messages = [{"role": "system", "content": self._system_prompt()}]
 
     def _system_prompt(self) -> str:
-        return f"""You are an expert Strudel live coding AI with access to a ClickHouse database of previous runs.
+        return f"""You are a Strudel live coding AI with ClickHouse database access.
 
-## THIS TRACK
 Track hash: {self.track_hash}
-Use this track_hash in ALL your SQL queries to get data specific to THIS track.
 
-## YOUR GOAL
-Generate COMPLETE Strudel code that makes rendered audio match the original.
-Each iteration, you receive feedback on what worked and what didn't.
-You must generate the FULL code (setcps, all $: voices), not just effect functions.
+## DATABASE ACCESS
 
-## DATABASE ACCESS (ReAct Pattern)
+Query with: <sql>YOUR QUERY</sql>
 
-To query the database, output SQL in this exact format:
-<sql>YOUR SQL QUERY HERE</sql>
+Tables: midi_grep.runs (track_hash, version, similarity_overall, similarity_mfcc, similarity_chroma, strudel_code, genre, bpm, band_bass, band_mid, band_high), midi_grep.knowledge (track_hash, parameter_name, parameter_old_value, parameter_new_value, similarity_improvement, genre)
 
-I will execute it and show you results. Then continue your analysis.
+## RULES
 
-### Available Tables
+1. NEVER repeat failed values — check what was already tried
+2. Wide gain ranges: 0.2 to 0.8
+3. Beat-synced dynamics: "<0.2 0.5 0.8 0.5>".slow(16)
+4. Query the database first for this track_hash
 
-**midi_grep.runs** - All previous rendering attempts
-```
-track_hash String, version UInt32, similarity_overall Float64,
-similarity_mfcc Float64, similarity_chroma Float64,
-strudel_code String, genre String, bpm Float64,
-band_bass Float64, band_mid Float64, band_high Float64
-```
-
-**midi_grep.knowledge** - Proven parameter improvements per track
-```
-track_hash String, parameter_name String, parameter_old_value String, parameter_new_value String,
-similarity_improvement Float64, genre String, bpm_range_low Float64, bpm_range_high Float64
-```
-
-### Example Queries
-
-Find the BEST previous run for THIS track:
-<sql>SELECT strudel_code, similarity_overall, version FROM midi_grep.runs
-WHERE track_hash = '{self.track_hash}'
-ORDER BY similarity_overall DESC LIMIT 1</sql>
-
-Find what parameter changes improved THIS track:
-<sql>SELECT parameter_name, parameter_old_value, parameter_new_value, similarity_improvement
-FROM midi_grep.knowledge WHERE track_hash = '{self.track_hash}'
-ORDER BY similarity_improvement DESC LIMIT 5</sql>
-
-Compare iterations for THIS track:
-<sql>SELECT version, similarity_overall, band_bass, band_mid, band_high
-FROM midi_grep.runs WHERE track_hash = '{self.track_hash}'
-ORDER BY version DESC LIMIT 10</sql>
-
-## CRITICAL RULES
-
-1. **NEVER REPEAT FAILED VALUES** - I will tell you what you already tried
-2. **WIDE GAIN RANGES** - Use 0.2 to 0.8, not 0.5 to 0.6
-3. **BEAT-SYNCED PATTERNS** - Use `"<v1 v2 v3 v4>".slow(16)` for dynamics
-4. **NO PERLIN FOR GAIN** - perlin ranges are too subtle
-5. **ONLY USE VALID STRUDEL METHODS** - These methods DO NOT exist and will be rejected:
-   - `.peak()` - use `.hpf()` for high-pass filter instead
-   - `.volume()` - use `.gain()` instead
-   - `.eq()`, `.filter()` - use `.lpf()` and `.hpf()` instead
-   - `.bass()`, `.treble()`, `.mid()`, `.high()`, `.low()` - not methods
-   - `.compress()` - use `.compressor()` if available, or skip
-6. **ONLY USE SOUNDS FROM THIS LIST** - These are the ONLY valid sounds in our Strudel instance.
-   Any sound NOT in this list will be SILENT. Do NOT invent sound names.
-
-   **Oscillators:** sine, triangle, square, sawtooth, supersaw
-
-   **GM Instruments (125 total):**
-   Piano: gm_piano, gm_epiano1, gm_epiano2, gm_harpsichord, gm_clavinet
-   Chromatic: gm_celesta, gm_glockenspiel, gm_music_box, gm_vibraphone, gm_marimba, gm_xylophone, gm_tubular_bells, gm_dulcimer
-   Organ: gm_drawbar_organ, gm_percussive_organ, gm_rock_organ, gm_church_organ, gm_reed_organ, gm_accordion, gm_harmonica, gm_bandoneon
-   Guitar: gm_acoustic_guitar_nylon, gm_acoustic_guitar_steel, gm_electric_guitar_jazz, gm_electric_guitar_clean, gm_electric_guitar_muted, gm_overdriven_guitar, gm_distortion_guitar, gm_guitar_harmonics
-   Bass: gm_acoustic_bass, gm_electric_bass_finger, gm_electric_bass_pick, gm_fretless_bass, gm_slap_bass_1, gm_slap_bass_2, gm_synth_bass_1, gm_synth_bass_2
-   Strings: gm_violin, gm_viola, gm_cello, gm_contrabass, gm_tremolo_strings, gm_pizzicato_strings, gm_orchestral_harp, gm_timpani, gm_string_ensemble_1, gm_string_ensemble_2, gm_synth_strings_1, gm_synth_strings_2
-   Choir: gm_choir_aahs, gm_voice_oohs, gm_synth_choir, gm_orchestra_hit
-   Brass: gm_trumpet, gm_trombone, gm_tuba, gm_muted_trumpet, gm_french_horn, gm_brass_section, gm_synth_brass_1, gm_synth_brass_2
-   Sax: gm_soprano_sax, gm_alto_sax, gm_tenor_sax, gm_baritone_sax
-   Wind: gm_oboe, gm_english_horn, gm_bassoon, gm_clarinet, gm_piccolo, gm_flute, gm_recorder, gm_pan_flute, gm_blown_bottle, gm_shakuhachi, gm_whistle, gm_ocarina
-   Leads: gm_lead_1_square, gm_lead_2_sawtooth, gm_lead_3_calliope, gm_lead_4_chiff, gm_lead_5_charang, gm_lead_6_voice, gm_lead_7_fifths, gm_lead_8_bass_lead
-   Pads: gm_pad_new_age, gm_pad_warm, gm_pad_poly, gm_pad_choir, gm_pad_bowed, gm_pad_metallic, gm_pad_halo, gm_pad_sweep
-   FX: gm_fx_rain, gm_fx_soundtrack, gm_fx_crystal, gm_fx_atmosphere, gm_fx_brightness, gm_fx_goblins, gm_fx_echoes, gm_fx_sci_fi
-   Ethnic: gm_sitar, gm_banjo, gm_shamisen, gm_koto, gm_kalimba, gm_bagpipe, gm_fiddle, gm_shanai
-   Percussion: gm_tinkle_bell, gm_agogo, gm_steel_drums, gm_woodblock, gm_taiko_drum, gm_melodic_tom, gm_synth_drum, gm_reverse_cymbal
-
-   **NAMING RULES:**
-   - Pads have NO numbers: gm_pad_choir (NOT gm_pad_4_choir)
-   - FX have NO numbers: gm_fx_rain (NOT gm_fx_1_rain)
-   - Leads DO have numbers: gm_lead_1_square, gm_lead_6_voice (these are correct)
-
-   **Drum banks (71 machines):**
-   Roland: RolandTR808, RolandTR909, RolandTR707, RolandTR606, RolandTR505, RolandTR626, RolandTR727, RolandMC303, RolandJD990, RolandR8, RolandD110, RolandD70, RolandMT32, RolandS50, RolandMC202, RolandCompurhythm1000, RolandCompurhythm78, RolandCompurhythm8000, RolandDDR30, RolandSH09, RolandSystem100
-   Linn: LinnDrum, LinnLM1, LinnLM2, Linn9000
-   Akai: AkaiLinn, AkaiMPC60, AkaiXR10
-   Boss: BossDR110, BossDR220, BossDR55, BossDR550
-   Korg: KorgDDM110, KorgKPR77, KorgKR55, KorgKRZ, KorgM1, KorgMinipops, KorgPoly800, KorgT3
-   Casio: CasioRZ1, CasioSK1, CasioVL1
-   Emu: EmuDrumulator, EmuModular, EmuSP12
-   Alesis: AlesisHR16, AlesisSR16
-   Yamaha: YamahaRM50, YamahaRX21, YamahaRX5, YamahaRY30, YamahaTG33
-   Others: OberheimDMX, SimmonsSDS5, SimmonsSDS400, SequentialCircuitsDrumtracks, SequentialCircuitsTom, MFB512, MPC1000, AJKPercusyn, DoepferMS404, MoogConcertMateMG1, RhodesPolaris, RhythmAce, SakataDPM48, SergeModular, SoundmastersR88, UnivoxMicroRhythmer12, ViscoSpaceDrum, XdrumLM8953
-
-## CODE STRUCTURE (CRITICAL — MUST FOLLOW EXACTLY)
-
-**The code MUST have EXACTLY 3 `$:` blocks — NO MORE, NO LESS:**
-1. `$: arrange(...)` — Bass voice (notes in octave 2)
-2. `$: arrange(...)` — Lead voice (notes in octave 4)
-3. `$: arrange(...)` — Drums voice (bd/sd/hh/oh only)
-
-**Each `$:` has ONE arrange() containing ALL sections as [cycles, pattern] pairs.**
-**DO NOT create separate `$:` blocks per section — all sections go INSIDE one arrange().**
-
-CORRECT (all sections inside one arrange per voice):
-```javascript
-setcps(136/60/4)
-
-// Bass
-$: arrange(
-  [4, note("c2 ~ ~ ~").sound("gm_acoustic_bass").gain(0.3).lpf(300)],
-  [8, note("c2 ~ c2 ~").sound("gm_acoustic_bass").gain(0.6).lpf(400)],
-  [4, note("c2 c2 e2 c2").sound("gm_acoustic_bass").gain(0.8).lpf(500)]
-)
-
-// Lead
-$: arrange(
-  [4, note("c4 ~ ~ ~").sound("gm_piano").gain(0.3).lpf(4000)],
-  [8, note("c4 e4 g4 c4").sound("gm_piano").gain(0.6).lpf(5000)],
-  [4, note("c4 e4 g4 b4").sound("gm_lead_2_sawtooth").gain(0.8).lpf(6000)]
-)
-
-// Drums
-$: arrange(
-  [4, s("bd ~ ~ hh").bank("RolandTR808").gain(0.4)],
-  [8, s("bd ~ sd hh").bank("RolandTR808").gain(0.6)],
-  [4, s("bd sd hh hh bd sd hh oh").bank("RolandTR808").gain(0.8)]
-)
-```
-
-WRONG (separate $: per section — DO NOT DO THIS):
-```javascript
-// SECTION 1
-$: arrange([4, note("c2..."), note("c4..."), s("bd...")])
-// SECTION 2
-$: arrange([8, note("c2..."), note("c4..."), s("bd...")])
-```
-
-**Section rules:**
-- LOW energy: fewer notes (use ~), gain 0.2-0.4, add .room(0.3)
-- MEDIUM energy: regular patterns, gain 0.4-0.6
-- HIGH energy: dense notes, gain 0.6-0.9, add .distort(0.3) or .crush(4)
-
-## OUTPUT FORMAT
-
-Output the COMPLETE improved Strudel code in a ```javascript code block.
-Must include: setcps(), EXACTLY 3 $: voices (bass, lead, drums), using arrange() for sections.
-
-Think step by step. Query the database first to see what worked for similar tracks."""
+Output COMPLETE code in a ```javascript block. Must include setcps(), exactly 3 $: voices (bass, lead, drums), using arrange() for sections."""
 
     def load_history(self):
         """Load conversation history from file."""
@@ -442,7 +310,8 @@ Think step by step. Query the database first to see what worked for similar trac
         similarity: float,
         band_diffs: Dict[str, float],
         code_generated: str,
-        improved: bool
+        improved: bool,
+        genre: str = ""
     ):
         """Add result of an iteration for learning."""
         # Track what was tried
@@ -476,6 +345,10 @@ Think step by step. Query the database first to see what worked for similar trac
 
         # Add feedback message
         status = "IMPROVEMENT!" if improved else "NO IMPROVEMENT"
+        sounds_ctx = ""
+        if HAS_SOUND_SELECTOR and genre:
+            sounds_ctx = f"\n\n{retrieve_genre_context(genre)}\nUse ONLY these sounds in .sound() and .bank() calls."
+
         feedback = f"""## Iteration {iteration} Result: {status}
 
 Similarity: {similarity*100:.1f}% (best: {self.best_similarity*100:.1f}%)
@@ -484,6 +357,7 @@ Mid: {band_diffs.get('mid', 0)*100:+.1f}%
 High: {band_diffs.get('high', 0)*100:+.1f}%
 
 {'The code you generated worked! Build on this approach.' if improved else 'Try something DIFFERENT. Adjust gains to fix the frequency balance.'}
+{sounds_ctx}
 
 Your previous code:
 ```javascript
@@ -535,9 +409,14 @@ DO NOT create separate `$:` blocks per section."""
 
         # Add context if provided
         if context:
+            genre = context.get('genre', 'unknown')
+            sounds_ctx = ""
+            if HAS_SOUND_SELECTOR:
+                sounds_ctx = f"\n\n{retrieve_genre_context(genre)}\nUse ONLY these sounds in .sound() and .bank() calls."
+
             context_msg = f"""## Current Track Context
 
-Genre: {context.get('genre', 'unknown')}
+Genre: {genre}
 BPM: {context.get('bpm', 120)}
 Current similarity: {context.get('similarity', 0)*100:.1f}%
 
@@ -545,6 +424,7 @@ Frequency issues:
 - Bass: {context.get('band_bass', 0)*100:+.1f}%
 - Mid: {context.get('band_mid', 0)*100:+.1f}%
 - High: {context.get('band_high', 0)*100:+.1f}%
+{sounds_ctx}
 
 Query the database using track_hash='{self.track_hash}' to find what worked for THIS track, then generate improved code."""
 
@@ -598,6 +478,7 @@ Query the database using track_hash='{self.track_hash}' to find what worked for 
                     "options": {
                         "temperature": 0.7,
                         "num_predict": 4096,
+                        "num_ctx": 8192,
                     }
                 },
                 timeout=300

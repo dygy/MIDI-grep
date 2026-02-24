@@ -166,6 +166,9 @@ note("c3 e3 g3")
 .sound("gm_brass")
 ```
 
+### Genre-Aware Sound Selection
+MIDI-grep uses `retrieve_genre_context(genre)` from `sound_selector.py` to provide ~15 genre-appropriate sounds per genre palette (17 genres). This is injected into LLM prompts instead of the full 196-sound catalog. Use only sounds from the active genre palette.
+
 ### Drum Patterns
 ```javascript
 s("bd sd ~ sd")             // Kick-snare pattern

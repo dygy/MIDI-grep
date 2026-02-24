@@ -78,10 +78,12 @@
                │
                ▼
       ┌─────────────────┐
-      │ Strudel Gen     │ (Go)
-      │ → bar arrays    │
-      │ → effect funcs  │
-      │ → drums + notes │
+      │ Genre Sound RAG │ (~15 sounds per genre)
+      │       ↓         │
+      │ Ollama LLM Gen  │ (Python)
+      │ → arrange()     │
+      │ → 3 voices      │
+      │ → genre palette │
       └─────────────────┘
                │
                ▼ (optional)
@@ -224,7 +226,8 @@ Original Audio                    Strudel Code
 - `ai_code_improver.py` - Gap analysis and Strudel code modification
 - `ai_iterative_codegen.py` - Iteration loop with automatic revert-on-regression
 - `spectrogram_analyzer.py` - Deep mel spectrogram analysis for AI learning
-- `sound_selector.py` - Complete sound catalog (67 drum machines, 128 GM instruments, 17 genre palettes)
+- `sound_selector.py` - Complete sound catalog (67 drum machines, 128 GM instruments, 17 genre palettes) + **Genre Sound RAG** (`retrieve_genre_context()`)
+- `ollama_codegen.py` - Ollama-powered Strudel code generator with genre sound RAG injection into prompts
 - `generate_report.py` - Self-contained HTML report with DAW-style audio studio
 
 ### Default Analysis Features (All Enabled)
@@ -385,15 +388,6 @@ midi-grep/
 │   │   ├── cleanup.go        # Quantization, filtering
 │   │   └── loop.go           # Loop detection
 │   │
-│   ├── strudel/
-│   │   ├── generator.go      # MIDI → Strudel bar arrays
-│   │   ├── drums.go          # Drum pattern generation
-│   │   ├── effects.go        # Per-voice effect settings
-│   │   ├── sections.go       # Section detection
-│   │   ├── chords.go         # Chord detection/voicings
-│   │   ├── arrangement.go    # Arrangement-based output
-│   │   └── brazilian.go      # Brazilian funk/phonk template generation
-│   │
 │   ├── pipeline/
 │   │   └── orchestrator.go   # End-to-end pipeline coordination
 │   │
@@ -428,7 +422,9 @@ midi-grep/
 │   │   ├── audio_to_strudel_params.py # AI-driven Strudel effect parameter suggestion
 │   │   ├── aggregate_genre_analysis.py # Batch genre analysis aggregation
 │   │   ├── detect_genre_dl.py    # CLAP deep learning genre detection (zero-shot)
-│   │   └── detect_genre_essentia.py # Essentia ML model genre classification
+│   │   ├── detect_genre_essentia.py # Essentia ML model genre classification
+│   │   ├── ollama_codegen.py    # Ollama LLM code gen with genre sound RAG
+│   │   └── ollama_agent.py      # Agentic LLM with ClickHouse + genre RAG
 │   │
 │   └── node/                 # Future: Strudel-native rendering
 │       └── package.json      # @strudel/core, @strudel/webaudio deps

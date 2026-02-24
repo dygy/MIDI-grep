@@ -553,6 +553,28 @@ def get_genre_sounds(genre: str) -> Dict:
     }
 
 
+def retrieve_genre_context(genre: str, bpm: float = 0, key: str = "") -> str:
+    """Return a compact string of genre-appropriate sounds for LLM prompts.
+
+    ~40 tokens instead of 800 for the full catalog. Falls back to "default" palette.
+    """
+    genre_key = genre.lower().replace(" ", "_").replace("-", "_") if genre else "default"
+    palette = GENRE_PALETTES.get(genre_key, GENRE_PALETTES["default"])
+
+    parts = []
+    for role in ("bass", "lead", "pad", "high", "drums"):
+        items = palette.get(role, [])
+        if items:
+            parts.append(f"{role.capitalize()}: {', '.join(items)}")
+
+    character = palette.get("character", "")
+    header = f"Available sounds for {genre or 'default'}"
+    if character:
+        header += f" ({character})"
+
+    return f"{header} — {' | '.join(parts)}"
+
+
 def get_random_sounds(seed: int = None) -> Dict:
     """Get random sounds from the full catalog for maximum variety."""
     if seed is not None:

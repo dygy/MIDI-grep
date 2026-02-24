@@ -266,6 +266,26 @@ def call_ollama(prompt: str, model: str = "llama3:8b") -> str:
 - Use structured formats (JSON) over prose
 - Cache common prompts and responses
 
+### Genre-Aware Sound RAG (Retrieval-Augmented Generation)
+
+Instead of sending the full 196-sound catalog (~800 tokens) to the LLM, retrieve only the ~15 genre-relevant sounds (~40 tokens) at call time:
+
+```python
+from sound_selector import retrieve_genre_context
+
+# Returns compact string: "Available sounds for brazilian_funk (...) — Bass: sawtooth, gm_synth_bass_1 | Lead: ..."
+context = retrieve_genre_context("brazilian_funk")
+
+# Inject into prompt before LLM call
+prompt = f"BPM: 136, Key: C# minor\n{context}\n\nGenerate Strudel code..."
+```
+
+**Benefits:**
+- 760 tokens saved per LLM call
+- LLM only sees valid sounds → fewer hallucinations
+- Falls back to "default" palette for unknown genres
+- Genre character hint guides tonal decisions (e.g., "aggressive, punchy, 808-heavy")
+
 ### Batching and Caching
 ```python
 from functools import lru_cache

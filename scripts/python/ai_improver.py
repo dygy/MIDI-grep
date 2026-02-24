@@ -90,7 +90,7 @@ def _has_invalid_sounds(code: str) -> bool:
 
 # Ollama configuration
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-DEFAULT_OLLAMA_MODEL = "llama3.1:8b"
+DEFAULT_OLLAMA_MODEL = "midi-grep-strudel"
 
 
 def get_audio_duration(audio_path: str) -> float:
@@ -952,6 +952,7 @@ def analyze_with_ollama(
                 "options": {
                     "temperature": 0.7,
                     "num_predict": 4096,
+                    "num_ctx": 8192,
                 }
             },
             timeout=300  # 5 minutes for generation
@@ -1523,6 +1524,167 @@ def _set_fx_numeric_param(fx_text: str, param: str, new_value) -> str:
     return fx_text
 
 
+def _classify_arrange_line(line: str) -> Optional[str]:
+    """Classify an arrange() entry line as 'bass', 'drums', or 'melodic'.
+
+    Returns None if line can't be classified.
+    """
+    stripped = line.strip()
+    # Drums: uses s("...") pattern (not note())
+    if re.search(r'\bs\s*\(', stripped) and not re.search(r'\bnote\s*\(', stripped):
+        return 'drums'
+    # Bass: note patterns with octave 1-2
+    if re.search(r'note\s*\(\s*"[^"]*[a-gA-G]#?[12]\b', stripped):
+        return 'bass'
+    # Melodic: note patterns with octave 3-7
+    if re.search(r'note\s*\(\s*"[^"]*[a-gA-G]#?[3-7]\b', stripped):
+        return 'melodic'
+    return None
+
+
+def _optimize_arrange_parameters(code: str, comparison: dict, stem_comparison: dict = None) -> tuple:
+    """Optimize parameters in arrange() format code (inline .gain/.lpf/.hpf/.room).
+
+    Same 6 optimization rules as optimize_parameters(), but operates on arrange() entries
+    where effects are inline rather than in separate Fx definitions.
+
+    Returns (optimized_code, list_of_change_descriptions).
+    """
+    # Extract metrics from comparison
+    orig = comparison.get("original", {})
+    rend = comparison.get("rendered", {})
+
+    orig_rms = orig.get("spectral", {}).get("rms_mean", 0.1)
+    rend_rms = rend.get("spectral", {}).get("rms_mean", 0.1)
+    energy_ratio = rend_rms / max(orig_rms, 0.001)
+
+    orig_centroid = orig.get("spectral", {}).get("centroid_mean", 1)
+    rend_centroid = rend.get("spectral", {}).get("centroid_mean", 1)
+    brightness_ratio = rend_centroid / max(orig_centroid, 1) if orig_centroid else 1.0
+
+    orig_bands = orig.get("bands", {})
+    rend_bands = rend.get("bands", {})
+
+    changes = []
+    result = code
+
+    # Classify each line in the code by voice type
+    lines = result.split('\n')
+    voice_lines = {}  # {line_index: 'bass'|'drums'|'melodic'}
+    for i, line in enumerate(lines):
+        classification = _classify_arrange_line(line)
+        if classification:
+            voice_lines[i] = classification
+
+    stem_voice_map = {'bass': 'bass', 'drums': 'drums', 'melodic': 'melodic'}
+    modified_voices = set()
+
+    # --- 1. PER-STEM ENERGY FIX ---
+    if stem_comparison:
+        stems_data = stem_comparison.get("stems", {})
+        for stem_name in ['bass', 'drums', 'melodic']:
+            stem_info = stems_data.get(stem_name, {})
+            if not stem_info:
+                continue
+            s_orig_rms = stem_info.get("original", {}).get("spectral", {}).get("rms_mean", 0)
+            s_rend_rms = stem_info.get("rendered", {}).get("spectral", {}).get("rms_mean", 0)
+            if s_orig_rms < 0.005:
+                continue
+            stem_energy = s_rend_rms / s_orig_rms
+            if stem_energy < 0.6 or stem_energy > 1.5:
+                mult = 1 + (1 / stem_energy - 1) * 0.5
+                mult = max(0.5, min(2.0, mult))
+                for line_idx, voice_type in voice_lines.items():
+                    if voice_type == stem_name:
+                        old_line = lines[line_idx]
+                        new_line = _scale_fx_gain(old_line, mult)
+                        if new_line != old_line:
+                            lines[line_idx] = new_line
+                            modified_voices.add(stem_name)
+                            changes.append(f"arrange {stem_name} gain *= {mult:.2f} ({stem_name} energy {stem_energy:.0%})")
+
+    # --- 2. OVERALL ENERGY FIX (for voices not adjusted by stem) ---
+    if energy_ratio < 0.7 or energy_ratio > 1.4:
+        mult = 1 + (1 / energy_ratio - 1) * 0.5
+        mult = max(0.5, min(2.0, mult))
+        for line_idx, voice_type in voice_lines.items():
+            if voice_type not in modified_voices:
+                old_line = lines[line_idx]
+                new_line = _scale_fx_gain(old_line, mult)
+                if new_line != old_line:
+                    lines[line_idx] = new_line
+                    modified_voices.add(voice_type)
+                    changes.append(f"arrange {voice_type} gain *= {mult:.2f} (overall energy {energy_ratio:.0%})")
+
+    # --- 3. BRIGHTNESS FIX (adjust LPF on melodic voices) ---
+    if brightness_ratio > 1.2 or brightness_ratio < 0.8:
+        lpf_factor = orig_centroid / max(rend_centroid, 1)
+        lpf_factor = 1 + (lpf_factor - 1) * 0.5
+        for line_idx, voice_type in voice_lines.items():
+            if voice_type == 'melodic':
+                old_line = lines[line_idx]
+                lpf_m = re.search(r'\.lpf\(([0-9.]+)\)', old_line)
+                if lpf_m:
+                    old_lpf = float(lpf_m.group(1))
+                    new_lpf = round(max(200, min(16000, old_lpf * lpf_factor)))
+                    if abs(new_lpf - old_lpf) > 50:
+                        lines[line_idx] = _set_fx_numeric_param(old_line, 'lpf', new_lpf)
+                        changes.append(f"arrange melodic.lpf {old_lpf:.0f} -> {new_lpf} (brightness {brightness_ratio:.0%})")
+
+    # --- 4. REVERB CUT (if too quiet, reverb eats energy) ---
+    if energy_ratio < 0.7:
+        for line_idx, voice_type in voice_lines.items():
+            old_line = lines[line_idx]
+            room_m = re.search(r'\.room\(([0-9.]+)\)', old_line)
+            if room_m:
+                old_room = float(room_m.group(1))
+                if old_room > 0.05:
+                    new_room = round(max(0.02, old_room * 0.7), 3)
+                    if abs(new_room - old_room) > 0.01:
+                        lines[line_idx] = _set_fx_numeric_param(old_line, 'room', new_room)
+                        changes.append(f"arrange {voice_type}.room {old_room} -> {new_room} (preserve energy)")
+
+    # --- 5. SUB-BASS FIX (adjust bass HPF) ---
+    sub_orig = orig_bands.get("sub_bass", 0)
+    sub_rend = rend_bands.get("sub_bass", 0)
+    sub_diff_pct = (sub_rend - sub_orig) * 100
+    if abs(sub_diff_pct) > 10:
+        for line_idx, voice_type in voice_lines.items():
+            if voice_type == 'bass':
+                old_line = lines[line_idx]
+                hpf_m = re.search(r'\.hpf\(([0-9.]+)\)', old_line)
+                if hpf_m:
+                    old_hpf = float(hpf_m.group(1))
+                    if sub_diff_pct < -10:
+                        new_hpf = round(max(15, old_hpf * 0.7))
+                    else:
+                        new_hpf = round(min(200, old_hpf * 1.3))
+                    if abs(new_hpf - old_hpf) > 3:
+                        lines[line_idx] = _set_fx_numeric_param(old_line, 'hpf', new_hpf)
+                        changes.append(f"arrange bass.hpf {old_hpf:.0f} -> {new_hpf} (sub-bass {sub_diff_pct:+.0f}%)")
+
+    # --- 6. HIGH FREQUENCY FIX (reduce LPF on bright voices) ---
+    high_orig = orig_bands.get("high", 0)
+    high_rend = rend_bands.get("high", 0)
+    high_diff_pct = (high_rend - high_orig) * 100
+    if high_diff_pct > 10:
+        for line_idx, voice_type in voice_lines.items():
+            if voice_type in ('melodic', 'drums'):
+                old_line = lines[line_idx]
+                lpf_m = re.search(r'\.lpf\(([0-9.]+)\)', old_line)
+                if lpf_m:
+                    old_lpf = float(lpf_m.group(1))
+                    new_lpf = round(max(2000, old_lpf * 0.8))
+                    if abs(new_lpf - old_lpf) > 100:
+                        lines[line_idx] = _set_fx_numeric_param(old_line, 'lpf', new_lpf)
+                        changes.append(f"arrange {voice_type}.lpf {old_lpf:.0f} -> {new_lpf} (high freq +{high_diff_pct:.0f}%)")
+
+    if changes:
+        result = '\n'.join(lines)
+
+    return result, changes
+
+
 def optimize_parameters(code: str, comparison: dict, stem_comparison: dict = None) -> tuple:
     """Deterministic parameter optimizer. Adjusts gain/lpf/hpf/room based on comparison data.
 
@@ -1535,6 +1697,9 @@ def optimize_parameters(code: str, comparison: dict, stem_comparison: dict = Non
     fx_matches = list(re.finditer(fx_pattern, code, re.MULTILINE))
 
     if not fx_matches:
+        # Fallback: try arrange() format where effects are inline
+        if 'arrange(' in code:
+            return _optimize_arrange_parameters(code, comparison, stem_comparison)
         return code, []
 
     # Extract metrics from comparison
@@ -1703,13 +1868,28 @@ def build_constrained_llm_prompt(code: str, comparison: dict, stem_comparison: d
     """
     sim = comparison.get("comparison", {}).get("overall_similarity", 0)
 
-    # Extract current sounds/banks
+    # Extract current sounds/banks from Fx definitions
     sounds = {}
     for m in re.finditer(r'let\s+(\w+Fx)\s*=.*?\.sound\("([^"]+)"\)', code, re.DOTALL):
         sounds[m.group(1)] = m.group(2)
     banks = {}
     for m in re.finditer(r'let\s+(\w+Fx)\s*=.*?\.bank\("([^"]+)"\)', code, re.DOTALL):
         banks[m.group(1)] = m.group(2)
+
+    # Fallback: extract sounds from arrange() format (inline .sound/.bank calls)
+    if not sounds and 'arrange(' in code:
+        for line in code.split('\n'):
+            classification = _classify_arrange_line(line)
+            if not classification:
+                continue
+            sound_m = re.search(r'\.sound\("([^"]+)"\)', line)
+            bank_m = re.search(r'\.bank\("([^"]+)"\)', line)
+            if classification == 'bass' and sound_m and 'bassFx' not in sounds:
+                sounds['bassFx'] = sound_m.group(1)
+            elif classification == 'melodic' and sound_m and 'leadFx' not in sounds:
+                sounds['leadFx'] = sound_m.group(1)
+            elif classification == 'drums' and bank_m and 'drumsFx' not in banks:
+                banks['drumsFx'] = bank_m.group(1)
 
     # Per-stem scores
     stem_lines = ""
@@ -1783,32 +1963,71 @@ def _apply_constrained_llm_choice(code: str, choice: int, options: list) -> tupl
         m = re.search(r"to '([^']+)'", option_text)
         if m:
             new_sound = m.group(1)
+            # Try Fx definition format first
             fx_pattern = r'(let\s+bassFx\s*=\s*p\s*=>\s*p.*?\.sound\(")[^"]+(")'
             new_code = re.sub(fx_pattern, rf'\g<1>{new_sound}\g<2>', code, flags=re.DOTALL)
             if new_code != code:
                 return new_code, f"Changed bass sound to {new_sound}"
+            # Fallback: arrange() format - replace .sound() on bass lines (octave 1-2)
+            if 'arrange(' in code:
+                lines = code.split('\n')
+                changed = False
+                for i, line in enumerate(lines):
+                    if _classify_arrange_line(line) == 'bass':
+                        new_line = re.sub(r'(\.sound\(")[^"]+(")', rf'\g<1>{new_sound}\g<2>', line)
+                        if new_line != line:
+                            lines[i] = new_line
+                            changed = True
+                if changed:
+                    return '\n'.join(lines), f"Changed bass sound to {new_sound}"
 
     elif "Change lead sound" in option_text:
         m = re.search(r"to '([^']+)'", option_text)
         if m:
             new_sound = m.group(1)
+            # Try Fx definition format first
             modified = code
             for fx in ['midFx', 'highFx', 'leadFx', 'voxFx', 'stabFx']:
                 fx_pattern = rf'(let\s+{fx}\s*=\s*p\s*=>\s*p.*?\.sound\(")[^"]+(")'
                 modified = re.sub(fx_pattern, rf'\g<1>{new_sound}\g<2>', modified, flags=re.DOTALL)
             if modified != code:
                 return modified, f"Changed lead/melodic sound to {new_sound}"
+            # Fallback: arrange() format - replace .sound() on melodic lines (octave 3+)
+            if 'arrange(' in code:
+                lines = code.split('\n')
+                changed = False
+                for i, line in enumerate(lines):
+                    if _classify_arrange_line(line) == 'melodic':
+                        new_line = re.sub(r'(\.sound\(")[^"]+(")', rf'\g<1>{new_sound}\g<2>', line)
+                        if new_line != line:
+                            lines[i] = new_line
+                            changed = True
+                if changed:
+                    return '\n'.join(lines), f"Changed lead/melodic sound to {new_sound}"
 
     elif "Change drum bank" in option_text:
         m = re.search(r"to '([^']+)'", option_text)
         if m:
             new_bank = m.group(1)
+            # Try Fx definition format first
             modified = code
             for fx in ['drumsFx', 'kickFx', 'snareFx', 'hhFx']:
                 fx_pattern = rf'(let\s+{fx}\s*=\s*p\s*=>\s*p.*?\.bank\(")[^"]+(")'
                 modified = re.sub(fx_pattern, rf'\g<1>{new_bank}\g<2>', modified, flags=re.DOTALL)
             if modified != code:
                 return modified, f"Changed drum bank to {new_bank}"
+            # Fallback: arrange() format - replace .bank() on drum lines
+            if 'arrange(' in code:
+                lines = code.split('\n')
+                changed = False
+                for i, line in enumerate(lines):
+                    if _classify_arrange_line(line) == 'drums':
+                        new_line = re.sub(r'(\.bank\(")[^"]+(")', rf'\g<1>{new_bank}\g<2>', line)
+                        if new_line != line:
+                            lines[i] = new_line
+                            changed = True
+                if changed:
+                    return '\n'.join(lines), f"Changed drum bank to {new_bank}"
 
     elif "No change" in option_text:
         return code, "No structural change needed"
@@ -1828,7 +2047,7 @@ def _call_constrained_llm(prompt: str, use_ollama: bool = False) -> Optional[int
                     "model": ollama_model,
                     "prompt": prompt,
                     "stream": False,
-                    "options": {"temperature": 0.1, "num_predict": 10}
+                    "options": {"temperature": 0.1, "num_predict": 10, "num_ctx": 8192}
                 },
                 timeout=60
             )
@@ -1982,31 +2201,17 @@ def improve_strudel(
         current_version = 1
         print(f"\nNo previous runs found, starting fresh")
 
-    # CRITICAL: Get the BEST run ever (from ClickHouse, survives cache clear)
-    # This ensures v228 knows everything about the best code from all 227 previous versions
+    # Get the BEST run ever from ClickHouse for regression baseline only.
+    # IMPORTANT: Do NOT overwrite current_code with ClickHouse best!
+    # Fresh codegen output (with Genre RAG sounds) must be the starting point.
+    # ClickHouse best is used only to set the regression baseline so that
+    # if fresh code scores worse, regression revert kicks in naturally.
     best_run = get_best_run(track_hash)
     if best_run and best_run.get("strudel_code"):
         best_ever_similarity = best_run.get("similarity_overall", 0)
         best_ever_code = best_run.get("strudel_code", "")
         best_ever_version = best_run.get("version", 0)
-        print(f"📊 Best ever: v{best_ever_version} with {best_ever_similarity*100:.1f}% similarity (from ClickHouse)")
-
-        # Start from best code ONLY if it genuinely beats the fresh code
-        # Node.js renderer gives ~16% while BlackHole gives ~50-65% for the same code
-        # So we need a high threshold to avoid replacing good fresh code with bad stored code
-        if best_ever_code and best_ever_similarity > 0.50:
-            if _has_invalid_sounds(best_ever_code):
-                print(f"   ⚠ Best known code has invalid/hallucinated sounds - using fresh code instead")
-            else:
-                current_code = best_ever_code
-                previous_similarity = best_ever_similarity
-                print(f"   Starting from best known code (not fresh)")
-                # Write best code to strudel_path so renders use it
-                with open(strudel_path, 'w') as f:
-                    f.write(best_ever_code)
-                print(f"   Updated {strudel_path} with best known code")
-        else:
-            print(f"   Best known ({best_ever_similarity*100:.1f}%) below 50% threshold - using fresh code")
+        print(f"  Best ever: v{best_ever_version} with {best_ever_similarity*100:.1f}% similarity (from ClickHouse, baseline only)")
     else:
         best_ever_similarity = 0
         best_ever_code = None
@@ -2249,7 +2454,8 @@ def improve_strudel(
                 similarity=current_similarity,
                 band_diffs=band_diffs,
                 code_generated=current_code,
-                improved=improved
+                improved=improved,
+                genre=genre
             )
 
         if not deterministic_converged:

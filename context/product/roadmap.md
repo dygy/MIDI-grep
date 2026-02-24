@@ -383,6 +383,13 @@ _Fixing the core audio quality issues blocking high similarity scores._
   - [x] **Genre Context Matching:** Query fetches across genres for universal learnings
   - [x] **Auto-Apply Best Configs:** Start from best known code, not defaults
 
+- [x] **Genre-Aware Sound RAG** ✅ (Feb 2026)
+  - [x] **`retrieve_genre_context()`:** Returns ~40-token compact sound palette per genre for LLM prompts
+  - [x] **Prompt Injection:** Genre sounds injected into `ollama_codegen.py` and `ollama_agent.py`
+  - [x] **Token Savings:** 800 → 40 tokens per LLM call (760 saved)
+  - [x] **Reduced Hallucinations:** LLM only sees ~15 valid sounds instead of guessing from 196
+  - [x] **Example Sounds:** Prompt examples use genre-appropriate palette (not hardcoded defaults)
+
 - [ ] **LLM Improvement Effectiveness**
   - [ ] **29 iterations, still 64.6%:** LLM not understanding frequency fixes
   - [ ] **Concrete Parameter Changes:** Give LLM exact gain multipliers to apply
@@ -567,3 +574,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.64 | 2026-02-09 | Voice gain rebalancing: bass 0.6x, mids 0.5x, highs 0.4x, drums 0.7x |
 | 1.65 | 2026-02-10 | **BlackHole Recording:** 100% accuracy via real Strudel playback recording (replaces synthesis emulation) |
 | 1.66 | 2026-02-18 | **Iteration Stems + Shimmer Loading:** Batch Demucs on each iteration render → per-iteration melodic/drums/bass stems in report with mute buttons, shimmer skeleton loading animation |
+| 1.67 | 2026-02-24 | **Genre-Aware Sound RAG:** `retrieve_genre_context()` injects ~15 genre-appropriate sounds into LLM prompts (800→40 tokens), reducing hallucinated sound names. Injected into `ollama_codegen.py` and `ollama_agent.py`. |

@@ -115,6 +115,7 @@ Enable musicians and live coders to instantly extract piano riffs from any audio
 - **Accurate similarity scoring** using MAE-based frequency balance (not cosine distance)
 - **DAW-style audio player** with isolated Original/Rendered stem groups
 - **Sound variety system** with 67 drum machines + 128 GM instruments + 17 genre palettes
+- **Genre-Aware Sound RAG** injecting ~15 genre-relevant sounds into LLM prompts (not all 196)
 - **ClickHouse learning storage** for tracking improvements across tracks
 
 ### 3.2. What's Out-of-Scope (Non-Goals)
