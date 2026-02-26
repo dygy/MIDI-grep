@@ -1946,5 +1946,11 @@ func runAIImprover(
 	cmd := exec.Command(python, args...)
 	cmd.Stdout = os.Stdout
 	cmd.Stderr = os.Stderr
-	return cmd.Run()
+	// Ensure Python output is unbuffered so we see it in real-time
+	cmd.Env = append(os.Environ(), "PYTHONUNBUFFERED=1")
+	err := cmd.Run()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "[Go] AI improver process error: %v\n", err)
+	}
+	return err
 }

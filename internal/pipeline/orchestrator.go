@@ -484,6 +484,11 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 			aiArgs = append(aiArgs, "--notes-json", ws.NotesJSON())
 		}
 
+		// Pass analysis data (time_sig, swing) if available
+		if fileExists(ws.AnalysisJSON()) {
+			aiArgs = append(aiArgs, "--analysis-json", ws.AnalysisJSON())
+		}
+
 		// Call Ollama-powered code generator
 		aiResult, aiErr := o.runner.RunScript(ctx, "ollama_codegen.py", aiArgs...)
 		if aiErr != nil {

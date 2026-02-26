@@ -45,7 +45,22 @@ except ImportError:
     HAS_LEARNING = False
 
 
-def build_prompt(bpm, key, genre, style, drum_kit, sections, duration, notes_json=None):
+def chord_to_note(chord_name):
+    """Convert chord name to Strudel note: 'Am' -> 'a', 'C#' -> 'cs', 'F#m' -> 'fs'."""
+    if not chord_name:
+        return "c"
+    # Strip quality suffixes
+    root = chord_name.replace("m", "").replace("dim", "").replace("aug", "").replace("7", "").replace("maj", "")
+    root = root.strip().lower()
+    # Convert sharps: c# -> cs
+    root = root.replace("#", "s")
+    # Convert flats: bb -> bf (Strudel uses 'f' for flat)
+    root = root.replace("b", "f") if len(root) > 1 and root.endswith("b") else root
+    return root if root else "c"
+
+
+def build_prompt(bpm, key, genre, style, drum_kit, sections, duration,
+                 notes_json=None, time_sig="4/4", swing_ratio=1.0):
     """Build the LLM prompt with all audio context."""
 
     # Load transcribed notes if available
@@ -99,21 +114,25 @@ def build_prompt(bpm, key, genre, style, drum_kit, sections, duration, notes_jso
     # Build the example arrange() with all sections for each voice
     def build_voice_arrange(voice_type):
         lines = []
-        for cycles, level, idx in section_entries:
+        for i, (cycles, level, idx) in enumerate(section_entries):
+            # Use section's dominant chord if available, else fall back to key root
+            sec = sections[i] if sections and i < len(sections) else {}
+            sec_note = chord_to_note(sec.get("dominant_chord")) if sec.get("dominant_chord") else root
+
             if voice_type == "bass":
                 if level == "HIGH":
-                    lines.append(f'  [{cycles}, note("{root}2 {root}2 ~ {root}2").sound("{bass_sound}").gain(0.8).lpf(400)]')
+                    lines.append(f'  [{cycles}, note("{sec_note}2 {sec_note}2 ~ {sec_note}2").sound("{bass_sound}").gain(0.8).lpf(400)]')
                 elif level == "MEDIUM":
-                    lines.append(f'  [{cycles}, note("{root}2 ~ {root}2 ~").sound("{bass_sound}").gain(0.5).lpf(300)]')
+                    lines.append(f'  [{cycles}, note("{sec_note}2 ~ {sec_note}2 ~").sound("{bass_sound}").gain(0.5).lpf(300)]')
                 else:
-                    lines.append(f'  [{cycles}, note("{root}2 ~ ~ ~").sound("{bass_sound}").gain(0.3).lpf(200).room(0.3)]')
+                    lines.append(f'  [{cycles}, note("{sec_note}2 ~ ~ ~").sound("{bass_sound}").gain(0.3).lpf(200).room(0.3)]')
             elif voice_type == "lead":
                 if level == "HIGH":
-                    lines.append(f'  [{cycles}, note("{root}4 {root}4 {root}4 {root}4").sound("{lead_sound}").gain(0.7).lpf(6000)]')
+                    lines.append(f'  [{cycles}, note("{sec_note}4 {sec_note}4 {sec_note}4 {sec_note}4").sound("{lead_sound}").gain(0.7).lpf(6000)]')
                 elif level == "MEDIUM":
-                    lines.append(f'  [{cycles}, note("{root}4 ~ {root}4 ~").sound("{pad_sound}").gain(0.5).lpf(5000)]')
+                    lines.append(f'  [{cycles}, note("{sec_note}4 ~ {sec_note}4 ~").sound("{pad_sound}").gain(0.5).lpf(5000)]')
                 else:
-                    lines.append(f'  [{cycles}, note("{root}4 ~ ~ ~").sound("{pad_sound}").gain(0.3).lpf(4000).room(0.3)]')
+                    lines.append(f'  [{cycles}, note("{sec_note}4 ~ ~ ~").sound("{pad_sound}").gain(0.3).lpf(4000).room(0.3)]')
             else:  # drums
                 if level == "HIGH":
                     lines.append(f'  [{cycles}, s("bd sd hh hh bd sd hh oh").bank("{kit}").gain(0.8)]')
@@ -123,10 +142,37 @@ def build_prompt(bpm, key, genre, style, drum_kit, sections, duration, notes_jso
                     lines.append(f'  [{cycles}, s("bd ~ ~ hh").bank("{kit}").gain(0.4).room(0.3)]')
         return ",\n".join(lines)
 
+    # Build compact section summary with chord/density/brightness
+    section_summary = ""
+    if sections:
+        section_lines = []
+        for i, s in enumerate(sections):
+            chord_info = s.get("dominant_chord", root.upper())
+            prog = s.get("chord_progression", [])
+            chord_str = "→".join(prog) if len(prog) > 1 else chord_info
+            density = s.get("onset_density", 0)
+            brightness = s.get("avg_brightness", 0)
+            dur = s.get("duration", 0)
+            cycles = max(1, round(dur * bpm / 240))
+            energy_label = "HIGH" if s.get("energy", 0) / max(max(ss.get("energy", 0.5) for ss in sections), 0.01) > 0.7 else \
+                          "MEDIUM" if s.get("energy", 0) / max(max(ss.get("energy", 0.5) for ss in sections), 0.01) > 0.4 else "LOW"
+            density_label = f"dense({density:.1f}/beat)" if density > 2 else f"sparse({density:.1f}/beat)"
+            brightness_label = f"bright({brightness:.0f}Hz)" if brightness > 2000 else f"warm({brightness:.0f}Hz)"
+            section_lines.append(f"  S{i+1}: {cycles} cyc, {chord_str}, {energy_label}, {density_label}, {brightness_label}")
+        section_summary = "\nSections (match energy and chords per section):\n" + "\n".join(section_lines) + "\n"
+
+    # Time signature and swing
+    time_info = f"Time signature: {time_sig}"
+    if swing_ratio > 1.1:
+        time_info += f", Swing: {swing_ratio:.2f} (swung feel)"
+    else:
+        time_info += ", Swing: straight"
+
     prompt = f"""Generate Strudel live coding music.
 
 BPM: {bpm}, Key: {key}, Genre: {genre or 'electronic'}{notes_text}
 {genre_context}
+{section_summary}{time_info}
 
 The code MUST have EXACTLY this structure — 3 `$:` blocks, one per voice.
 Each voice has ONE arrange() containing ALL {len(section_entries)} sections as [cycles, pattern] pairs.
@@ -160,6 +206,8 @@ CRITICAL RULES:
 6. Drums: s("bd sd hh oh") with .bank("{kit}") — NEVER use note names for drums
 7. LOW energy: sparse (use ~), gain 0.2-0.4, add .room(0.3)
 8. HIGH energy: dense, gain 0.7-0.9, add .distort(0.3) or .crush(4)
+9. Match chords per section — use the dominant chord shown in the section summary above
+{"10. Apply swing timing: use `.swing()` or offset hi-hat patterns for a swung feel" if swing_ratio > 1.1 else ""}
 Output ONLY the code in a ```javascript block. No explanation."""
 
     return prompt
@@ -181,7 +229,7 @@ def call_ollama(prompt, model=DEFAULT_MODEL):
                 "options": {
                     "temperature": 0.7,
                     "num_predict": 4096,
-                    "num_ctx": 8192,
+                    "num_ctx": 32768,
                 }
             },
             timeout=300
@@ -466,6 +514,7 @@ def main():
     parser.add_argument("--track-hash", default="")
     parser.add_argument("--sections-json", help="Path to smart_analysis.json with section data")
     parser.add_argument("--notes-json", help="Path to transcribed notes JSON")
+    parser.add_argument("--analysis-json", help="Path to analysis.json with time_sig/swing")
     parser.add_argument("--drums-only", action="store_true")
     parser.add_argument("--drums-json", help="Path to drum detection JSON")
     parser.add_argument("--model", default=DEFAULT_MODEL)
@@ -481,6 +530,20 @@ def main():
             print(f"Loaded {len(sections)} sections from analysis", file=sys.stderr)
         except Exception as e:
             print(f"Warning: Could not load sections: {e}", file=sys.stderr)
+
+    # Load analysis data (time_sig, swing)
+    time_sig = "4/4"
+    swing_ratio = 1.0
+    if args.analysis_json and os.path.exists(args.analysis_json):
+        try:
+            with open(args.analysis_json) as f:
+                analysis_data = json.load(f)
+            time_sig = analysis_data.get("time_signature", "4/4")
+            swing_ratio = analysis_data.get("swing_ratio", 1.0)
+            if time_sig != "4/4" or swing_ratio > 1.1:
+                print(f"Analysis: time_sig={time_sig}, swing={swing_ratio:.2f}", file=sys.stderr)
+        except Exception as e:
+            print(f"Warning: Could not load analysis.json: {e}", file=sys.stderr)
 
     # Check ClickHouse for best previous run
     best_previous = None
@@ -543,7 +606,8 @@ Sections:
     # Build prompt and call Ollama
     prompt = build_prompt(
         args.bpm, args.key, args.genre, args.style,
-        args.drum_kit, sections, args.duration, args.notes_json
+        args.drum_kit, sections, args.duration, args.notes_json,
+        time_sig=time_sig, swing_ratio=swing_ratio
     )
 
     print(f"Calling Ollama ({args.model}) for code generation...", file=sys.stderr)

@@ -93,6 +93,39 @@ OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 DEFAULT_OLLAMA_MODEL = "midi-grep-strudel"
 
 
+def map_windows_to_sections(windowed: dict, sections: list) -> list:
+    """Map per-window comparison data to section indices.
+
+    Args:
+        windowed: dict of stem_name -> list of window dicts with time_start, time_end, similarity, issues
+        sections: list of section dicts with start, end
+
+    Returns:
+        list of dicts sorted worst-first: section_idx, stem, similarity, issues
+    """
+    section_scores = []
+    for sec_idx, sec in enumerate(sections):
+        s, e = sec.get("start", 0), sec.get("end", 0)
+        for stem_name, windows in windowed.items():
+            if not isinstance(windows, list):
+                continue
+            overlapping = [w for w in windows if w.get("time_start", 0) < e and w.get("time_end", 0) > s]
+            if overlapping:
+                avg_sim = sum(w.get("similarity", 0) for w in overlapping) / len(overlapping)
+                issues = list(set(
+                    issue for w in overlapping for issue in w.get("issues", [])
+                ))[:3]
+                section_scores.append({
+                    "section_idx": sec_idx,
+                    "stem": stem_name,
+                    "similarity": round(avg_sim, 3),
+                    "issues": issues
+                })
+    # Sort worst first
+    section_scores.sort(key=lambda x: x["similarity"])
+    return section_scores
+
+
 def get_audio_duration(audio_path: str) -> float:
     """Get exact audio duration in seconds using ffprobe."""
     try:
@@ -837,7 +870,8 @@ def build_improvement_prompt(
     per_stem_issues = previous_run.get('per_stem_issues', [])
     stem_issues_str = ""
     if per_stem_issues:
-        stem_issues_str = "\n## WORST SECTIONS\n"
+        stem_issues_str = "\n## WORST TIME RANGES (fix these arrange() sections)\n"
+        stem_issues_str += "Map: Section 1 = first [cycles, pattern] pair in arrange(), Section 2 = second, etc.\n"
         for issue in per_stem_issues[:5]:
             stem_issues_str += f"- {issue}\n"
 
@@ -952,7 +986,7 @@ def analyze_with_ollama(
                 "options": {
                     "temperature": 0.7,
                     "num_predict": 4096,
-                    "num_ctx": 8192,
+                    "num_ctx": 32768,
                 }
             },
             timeout=300  # 5 minutes for generation
@@ -1861,7 +1895,7 @@ def optimize_parameters(code: str, comparison: dict, stem_comparison: dict = Non
     return result, changes
 
 
-def build_constrained_llm_prompt(code: str, comparison: dict, stem_comparison: dict = None, genre: str = "") -> tuple:
+def build_constrained_llm_prompt(code: str, comparison: dict, stem_comparison: dict = None, genre: str = "", sections: list = None) -> tuple:
     """Build constrained prompt for Phase 2 - LLM picks from menu, doesn't write code.
 
     Returns (prompt_text, options_list).
@@ -1934,9 +1968,22 @@ def build_constrained_llm_prompt(code: str, comparison: dict, stem_comparison: d
 
     numbered = "\n".join(f"{i+1}. {opt}" for i, opt in enumerate(options))
 
+    # Add temporal section info if available
+    section_info = ""
+    if sections and stem_comparison:
+        windowed = stem_comparison.get("windowed", {})
+        if windowed:
+            sec_scores = map_windows_to_sections(windowed, sections)
+            if sec_scores:
+                section_info = "\nWorst sections:"
+                for ss in sec_scores[:3]:
+                    issues_str = ", ".join(ss.get("issues", [])[:2]) or "low similarity"
+                    section_info += f"\n- Section {ss['section_idx']+1} ({ss['stem']}): {ss['similarity']*100:.0f}% — {issues_str}"
+
     prompt = f"""Similarity: {sim*100:.1f}% after parameter optimization.
 Per-stem scores:{stem_lines}
 Worst stem: {worst_stem or 'N/A'} ({worst_sim*100:.0f}%)
+{section_info}
 
 Current sounds: bass='{current_bass}', lead='{current_lead}', drums='{current_drums}'
 Genre: {genre or 'auto'}
@@ -2234,19 +2281,14 @@ def improve_strudel(
     exact_duration = get_audio_duration(original_audio)
     print(f"Original audio duration: {exact_duration:.6f}s")
 
-    # CRITICAL: Use initial BlackHole per-stem weighted score as baseline
-    # Node.js renderer gives ~16% for arrange() code while BlackHole gives 50-73%
-    # Using BlackHole score as baseline prevents iterations from replacing better initial code
+    # Load initial stem comparison for per-stem feedback (used in iteration prompts)
+    # NOTE: Do NOT use weighted_overall as best_similarity baseline — it's a different metric
+    # than compare_audio.py overall_similarity. Iteration 0 renders the initial code and
+    # establishes the baseline using the same metric as subsequent iterations.
     stem_comparison_path = Path(output_dir) / "stem_comparison.json"
     if stem_comparison_path.exists():
         with open(stem_comparison_path) as f:
             initial_stem_comparison = json.load(f)
-        blackhole_weighted = initial_stem_comparison.get("aggregate", {}).get("weighted_overall", 0)
-        if blackhole_weighted > best_similarity:
-            print(f"Using initial BlackHole weighted score as baseline: {blackhole_weighted*100:.1f}%")
-            best_similarity = blackhole_weighted
-            best_code = current_code  # Preserve initial code
-            best_render_path = Path(output_dir) / "render.wav"  # Initial render
     else:
         initial_stem_comparison = {}
 
@@ -2256,6 +2298,21 @@ def improve_strudel(
     # Deterministic optimizer state
     deterministic_converged = False
     deterministic_prev_similarity = 0.0
+
+    # Load section boundaries for temporal mapping
+    sections = []
+    smart_analysis_path = Path(output_dir).parent / "smart_analysis.json"
+    if not smart_analysis_path.exists():
+        # Also check inside the output dir
+        smart_analysis_path = Path(output_dir) / "smart_analysis.json"
+    if smart_analysis_path.exists():
+        try:
+            with open(smart_analysis_path) as f:
+                sections = json.load(f).get("sections", [])
+            if sections:
+                print(f"Loaded {len(sections)} sections for temporal mapping")
+        except Exception as e:
+            print(f"Warning: Could not load smart_analysis.json: {e}")
 
     # Iteration manifest for report
     iterations_data = []
@@ -2369,6 +2426,8 @@ def improve_strudel(
 
         # Load per-stem comparison if available (shows real issues even when overall looks good)
         stem_comparison = {}
+        worst = []
+        section_scores = []
         stem_comparison_path = Path(output_dir) / "stem_comparison.json"
         if stem_comparison_path.exists():
             with open(stem_comparison_path) as f:
@@ -2378,6 +2437,13 @@ def improve_strudel(
             print(f"       Per-stem: bass={agg.get('bass', {}).get('overall', 0)*100:.0f}% drums={agg.get('drums', {}).get('overall', 0)*100:.0f}% melodic={agg.get('melodic', {}).get('overall', 0)*100:.0f}%")
             if worst:
                 print(f"       Worst: {worst[0].get('stem', '?')} {worst[0].get('time_range', '?')}: {worst[0].get('issues', '?')}")
+
+            # Map windowed comparison data to section indices
+            windowed = stem_comparison.get("windowed", {})
+            if windowed and sections:
+                section_scores = map_windows_to_sections(windowed, sections)
+                if section_scores:
+                    print(f"       Section scores: worst={section_scores[0]['stem']} S{section_scores[0]['section_idx']+1} ({section_scores[0]['similarity']*100:.0f}%)")
 
         # Learn from improvement (if this iteration improved over previous)
         if iteration > 0 and current_similarity > previous_similarity:
@@ -2445,9 +2511,17 @@ def improve_strudel(
         print(f"       Bands: sub_bass={band_diffs.get('sub_bass',0)*100:+.0f}% bass={band_diffs.get('bass',0)*100:+.0f}% low_mid={band_diffs.get('low_mid',0)*100:+.0f}% mid={band_diffs.get('mid',0)*100:+.0f}% high={band_diffs.get('high',0)*100:+.0f}%")
         print(f"       Brightness: {brightness_ratio:.0%}  Energy: {energy_ratio:.0%}")
 
-        # Update agent learning history (even if not using agent for generation)
+        # Always call the LLM agent to generate improved code
         if agent is not None:
             improved = current_similarity > best_similarity
+
+            # Build per-stem scores dict for the agent
+            per_stem_scores = {}
+            agg = stem_comparison.get("aggregate", {}).get("per_stem", {})
+            for stem_name in ["bass", "drums", "melodic"]:
+                stem_data = agg.get(stem_name, {})
+                per_stem_scores[stem_name] = stem_data.get("overall", 0)
+
             agent.add_iteration_result(
                 iteration=iteration + 1,
                 version=current_version,
@@ -2455,12 +2529,60 @@ def improve_strudel(
                 band_diffs=band_diffs,
                 code_generated=current_code,
                 improved=improved,
-                genre=genre
+                genre=genre,
+                worst_sections=worst[:5] if worst else None,
+                section_scores=section_scores[:8] if section_scores else None,
+                per_stem_scores=per_stem_scores if per_stem_scores else None,
+                orig_bands=orig_bands,
+                rend_bands=rend_bands,
             )
 
-        if not deterministic_converged:
-            # Phase 1: Deterministic parameter optimization (fast, safe, no LLM)
-            print("       Phase 1: Deterministic parameter optimization...")
+            # LLM generates improved code every iteration
+            print("       LLM generating improved code...")
+            iter_data["phase"] = "llm_agent"
+            context = {
+                "genre": genre,
+                "bpm": metadata.get("bpm", 120),
+                "similarity": current_similarity,
+                "band_sub_bass": band_diffs.get("sub_bass", 0),
+                "band_bass": band_diffs.get("bass", 0),
+                "band_low_mid": band_diffs.get("low_mid", 0),
+                "band_mid": band_diffs.get("mid", 0),
+                "band_high_mid": band_diffs.get("high_mid", 0),
+                "band_high": band_diffs.get("high", 0),
+            }
+            response = agent.generate(context)
+            new_code = agent.extract_code(response, previous_code=current_code)
+
+            if new_code and new_code != current_code:
+                # Validate and fix syntax
+                if HAS_SYNTAX_FIXER:
+                    new_code = fix_strudel_syntax(new_code)
+                    new_code = enforce_three_voices(new_code)
+
+                # Check for invalid sounds
+                if not _has_invalid_sounds(new_code):
+                    current_code = new_code
+                    improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
+                    with open(improved_path, 'w') as f:
+                        f.write(new_code)
+                    with open(strudel_path, 'w') as f:
+                        f.write(new_code)
+                    print(f"       LLM generated {len(new_code)} chars of improved code")
+                    iter_data["changes"] = ["LLM rewrote code"]
+                else:
+                    print("       LLM code has invalid sounds, keeping current")
+                    iter_data["changes"] = ["LLM code rejected (invalid sounds)"]
+            elif new_code:
+                print("       LLM returned same code, no change")
+                iter_data["changes"] = ["LLM: no change"]
+            else:
+                validation_err = getattr(agent, 'last_validation_error', None)
+                print(f"       LLM failed to generate code{f': {validation_err}' if validation_err else ''}")
+                iter_data["changes"] = [f"LLM failed{f': {validation_err}' if validation_err else ''}"]
+        else:
+            # Fallback: deterministic optimization when no agent available
+            print("       Deterministic parameter optimization (no agent)...")
             iter_data["phase"] = "deterministic"
             optimized_code, opt_changes = optimize_parameters(current_code, comparison, stem_comparison)
 
@@ -2478,47 +2600,6 @@ def improve_strudel(
             else:
                 print("       No deterministic changes possible")
                 iter_data["changes"] = ["No deterministic changes possible"]
-
-            # Check convergence: no changes, or similarity delta < 1%
-            if not opt_changes or (iteration > 0 and abs(current_similarity - deterministic_prev_similarity) < 0.01):
-                deterministic_converged = True
-                print("       Deterministic optimizer converged, switching to constrained LLM")
-            deterministic_prev_similarity = current_similarity
-        else:
-            # Phase 2: Constrained LLM (structural sound choices only)
-            print("       Phase 2: Constrained LLM (sound selection)...")
-            iter_data["phase"] = "constrained_llm"
-            prompt, options = build_constrained_llm_prompt(
-                current_code, comparison, stem_comparison,
-                metadata.get("genre", "")
-            )
-
-            choice = _call_constrained_llm(prompt, use_ollama=use_ollama)
-            if choice is not None and 0 < choice <= len(options):
-                modified_code, description = _apply_constrained_llm_choice(
-                    current_code, choice, options
-                )
-                if modified_code != current_code:
-                    current_code = modified_code
-                    improved_path = Path(output_dir) / f"output_v{current_version + 1:03d}.strudel"
-                    with open(improved_path, 'w') as f:
-                        f.write(modified_code)
-                    with open(strudel_path, 'w') as f:
-                        f.write(modified_code)
-                    print(f"       LLM chose: {description}")
-                    iter_data["changes"] = [description]
-
-                    # Reset deterministic optimizer after Phase 2 sound change
-                    # New sound needs re-tuned gains/filters before trying another sound change
-                    deterministic_converged = False
-                    deterministic_prev_similarity = 0.0
-                    print("       Reset deterministic optimizer for new sound")
-                else:
-                    print(f"       LLM: {description}")
-                    iter_data["changes"] = [description]
-            else:
-                print("       LLM: no valid choice returned")
-                iter_data["changes"] = ["No valid LLM choice"]
 
         # Record iteration data (without large code field for JSON - code saved in .strudel files)
         iterations_data.append(iter_data)

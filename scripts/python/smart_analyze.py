@@ -182,6 +182,30 @@ def main():
         result["brightness_mean"] = float(np.mean(spectral_centroid))
         result["brightness_std"] = float(np.std(spectral_centroid))
 
+        # 6b. Enrich sections with per-section chord, density, brightness
+        onset_times_list = onset_times.tolist() if len(onset_times) > 0 else []
+        for section in sections:
+            start_t, end_t = section["start"], section["end"]
+
+            # Dominant chord(s) in this section
+            section_chords = [c["chord"] for c in chords if start_t <= c["time"] < end_t]
+            if section_chords:
+                from collections import Counter
+                counts = Counter(section_chords)
+                section["dominant_chord"] = counts.most_common(1)[0][0]
+                section["chord_progression"] = [c[0] for c in counts.most_common(2)]
+
+            # Onset density (onsets per beat)
+            sec_onsets = [o for o in onset_times_list if start_t <= o < end_t]
+            sec_beats = [b for b in beat_times if start_t <= b < end_t]
+            section["onset_density"] = round(len(sec_onsets) / max(len(sec_beats), 1), 2)
+
+            # Average brightness (spectral centroid)
+            start_frame = librosa.time_to_frames(start_t, sr=sr)
+            end_frame = librosa.time_to_frames(end_t, sr=sr)
+            sec_brightness = spectral_centroid[start_frame:end_frame]
+            section["avg_brightness"] = round(float(np.mean(sec_brightness)), 0) if len(sec_brightness) > 0 else 0
+
         # 7. Estimate genre characteristics
         # High tempo + high brightness = electronic/dance
         # Low tempo + low brightness = ambient/chill

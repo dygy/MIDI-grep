@@ -150,6 +150,7 @@ class OllamaAgent:
     - ClickHouse SQL tool via ReAct pattern
     - Iteration memory (what was tried, what failed)
     - Context compression
+    - Voice splicing (only send bad voices to LLM, keep good ones intact)
     """
 
     def __init__(self, track_hash: str, model: str = None):
@@ -162,6 +163,8 @@ class OllamaAgent:
         self.tried_values: Dict[str, List[str]] = {}  # param -> [values tried]
         self.max_context_tokens = 6000  # Conservative limit
         self.last_validation_error: Optional[str] = None  # Track validation failures
+        self._previous_code: str = ""  # For voice splicing
+        self._voices_to_fix: List[str] = []  # Which voices need changes
 
         # Ensure agents directory exists
         AGENTS_DIR.mkdir(parents=True, exist_ok=True)
@@ -175,7 +178,7 @@ class OllamaAgent:
             self.messages = [{"role": "system", "content": self._system_prompt()}]
 
     def _system_prompt(self) -> str:
-        return f"""You are a Strudel live coding AI with ClickHouse database access.
+        return f"""You are a Strudel live coding AI that makes SURGICAL improvements to match a target audio.
 
 Track hash: {self.track_hash}
 
@@ -185,14 +188,28 @@ Query with: <sql>YOUR QUERY</sql>
 
 Tables: midi_grep.runs (track_hash, version, similarity_overall, similarity_mfcc, similarity_chroma, strudel_code, genre, bpm, band_bass, band_mid, band_high), midi_grep.knowledge (track_hash, parameter_name, parameter_old_value, parameter_new_value, similarity_improvement, genre)
 
-## RULES
+## CRITICAL RULES
 
-1. NEVER repeat failed values — check what was already tried
-2. Wide gain ranges: 0.2 to 0.8
-3. Beat-synced dynamics: "<0.2 0.5 0.8 0.5>".slow(16)
-4. Query the database first for this track_hash
+1. You will be told which voice(s) to fix (bass, lead, or drums). Output ONLY those voice blocks.
+2. Each voice block starts with a comment (// Bass) followed by $: arrange(...)
+3. NEVER change the arrange() structure (keep same number of [cycles, pattern] pairs)
+4. Change AT MOST one parameter per iteration (gain OR lpf OR sound, not multiple)
+5. Maximum gain change: 0.2 per step (0.8→0.6, not 0.8→0.3)
+6. NEVER use '...' or 'no changes' — always output the full voice block code
+7. Gain range: 0.05 to 1.0
+8. NEVER repeat failed parameter values — check what was already tried
 
-Output COMPLETE code in a ```javascript block. Must include setcps(), exactly 3 $: voices (bass, lead, drums), using arrange() for sections."""
+## FORMAT
+
+Output in a ```javascript block. Only include the voice blocks you were asked to fix.
+Example for fixing bass only:
+```javascript
+// Bass
+$: arrange(
+  [7, note("cs1 ~ ~ cs1").sound("sawtooth").gain(0.3).lpf(200)],
+  [1, note("cs2 ~ ~ ~").sound("sawtooth").gain(0.2).lpf(150)]
+)
+```"""
 
     def load_history(self):
         """Load conversation history from file."""
@@ -311,7 +328,12 @@ Output COMPLETE code in a ```javascript block. Must include setcps(), exactly 3 
         band_diffs: Dict[str, float],
         code_generated: str,
         improved: bool,
-        genre: str = ""
+        genre: str = "",
+        worst_sections: Optional[List[Dict]] = None,
+        section_scores: Optional[List[Dict]] = None,
+        per_stem_scores: Optional[Dict[str, float]] = None,
+        orig_bands: Optional[Dict[str, float]] = None,
+        rend_bands: Optional[Dict[str, float]] = None
     ):
         """Add result of an iteration for learning."""
         # Track what was tried
@@ -349,25 +371,110 @@ Output COMPLETE code in a ```javascript block. Must include setcps(), exactly 3 
         if HAS_SOUND_SELECTOR and genre:
             sounds_ctx = f"\n\n{retrieve_genre_context(genre)}\nUse ONLY these sounds in .sound() and .bank() calls."
 
+        # Build per-stem feedback — this tells the LLM WHICH voices to fix
+        stem_str = ""
+        if per_stem_scores:
+            stem_str = "\n\n## PER-STEM SIMILARITY (this maps to your 3 $: blocks):"
+            sorted_stems = sorted(per_stem_scores.items(), key=lambda x: x[1])
+            for stem_name, score in sorted_stems:
+                voice_map = {"bass": "Bass ($: arrange #1)", "drums": "Drums ($: arrange #3)", "melodic": "Lead ($: arrange #2)"}
+                voice = voice_map.get(stem_name, stem_name)
+                if score >= 0.80:
+                    stem_str += f"\n- {voice}: {score*100:.0f}% — GOOD, do NOT change this voice"
+                elif score >= 0.60:
+                    stem_str += f"\n- {voice}: {score*100:.0f}% — NEEDS IMPROVEMENT, adjust gain/lpf/sounds"
+                else:
+                    stem_str += f"\n- {voice}: {score*100:.0f}% — BAD, this voice needs major changes"
+
+        # Build actionable per-band advice from actual band values
+        band_advice = self._build_band_advice(band_diffs, orig_bands, rend_bands)
+
+        # Build temporal feedback from worst sections and section scores
+        temporal_str = ""
+        if worst_sections:
+            temporal_str += "\n\nWorst time ranges (fix these in arrange()):"
+            for w in worst_sections[:3]:
+                issues = ", ".join(w.get("issues", [])[:2]) or "low similarity"
+                temporal_str += f"\n- {w.get('stem', '?')} {w.get('time_start', 0):.0f}-{w.get('time_end', 0):.0f}s: {w.get('similarity', 0)*100:.0f}% ({issues})"
+        if section_scores:
+            temporal_str += "\n\nPer-section scores (Section N = Nth [cycles, pattern] pair in arrange()):"
+            for ss in section_scores[:4]:
+                issues_str = ", ".join(ss.get("issues", [])[:2]) or "low similarity"
+                temporal_str += f"\n- Section {ss['section_idx']+1} ({ss['stem']}): {ss['similarity']*100:.0f}% — {issues_str}"
+
+        # Determine which voices need fixing
+        voices_to_fix = []
+        voices_good = []
+        if per_stem_scores:
+            stem_to_voice = {"bass": "bass", "drums": "drums", "melodic": "lead"}
+            for stem_name, score in per_stem_scores.items():
+                voice = stem_to_voice.get(stem_name, stem_name)
+                if score < 0.80:
+                    voices_to_fix.append(voice)
+                else:
+                    voices_good.append(voice)
+
+        if not voices_to_fix:
+            voices_to_fix = ["bass"]  # Default to bass if no per-stem data
+
+        # Store for splice_voices later
+        self._previous_code = code_generated
+        self._voices_to_fix = voices_to_fix
+
+        # Split the code into voices — only show the bad voice(s) to the LLM
+        prev_voices = self._split_voices(code_generated)
+
+        # Build the voice-specific prompt
+        bad_voice_code = ""
+        section_counts = {}
+        for v in voices_to_fix:
+            block = prev_voices.get(v, "")
+            if block:
+                bad_voice_code += f"\n{block}\n"
+                section_counts[v] = self._count_arrange_entries(block)
+
+        good_voice_note = ""
+        if voices_good:
+            good_voice_note = f"\nThe following voices are GOOD (>=80%) and will be kept as-is: {', '.join(voices_good)}. Do NOT output them."
+
+        # Build section count requirement string
+        count_str = ""
+        for v, cnt in section_counts.items():
+            count_str += f"\nThe {v} voice has {cnt} sections — your output MUST also have exactly {cnt} [cycles, pattern] pairs."
+
         feedback = f"""## Iteration {iteration} Result: {status}
 
 Similarity: {similarity*100:.1f}% (best: {self.best_similarity*100:.1f}%)
-Bass: {band_diffs.get('bass', 0)*100:+.1f}%
-Mid: {band_diffs.get('mid', 0)*100:+.1f}%
-High: {band_diffs.get('high', 0)*100:+.1f}%
+{stem_str}
 
-{'The code you generated worked! Build on this approach.' if improved else 'Try something DIFFERENT. Adjust gains to fix the frequency balance.'}
+## FREQUENCY BAND ANALYSIS (from THIS iteration's render vs original):
+{band_advice}
+{temporal_str}
+
+## VOICE TO FIX: {', '.join(voices_to_fix)}
+{good_voice_note}
+{count_str}
+
+## RULES:
+1. Output ONLY the modified voice block(s): {', '.join(voices_to_fix)}
+2. Each voice must start with a comment (// Bass, // Lead, or // Drums) and $: arrange(...)
+3. Your output MUST have the EXACT SAME number of [cycles, pattern] pairs as the input — if it has 7 pairs, output 7 pairs
+4. Only change .gain(), .lpf(), .hpf(), .sound(), or note names within existing pairs — do NOT add or remove pairs
+5. Change AT MOST one parameter per pair per iteration (e.g. only .gain OR only .lpf, not both)
+6. Maximum gain change: 0.2 per iteration (e.g. 0.8→0.6, not 0.8→0.3)
+7. If sub_bass is too quiet, try: lower note octave (2→1), lower .lpf(), or use a deeper bass sound
+8. If low_mid is too loud, try: lower .lpf() on bass voice (400→200), or raise .hpf()
+{'The code you generated worked! Build on this approach.' if improved else ''}
 {sounds_ctx}
 
-Your previous code:
+Current {', '.join(voices_to_fix)} voice code to improve:
 ```javascript
-{code_generated[:1500]}{'...' if len(code_generated) > 1500 else ''}
+{bad_voice_code.strip()}
 ```
 
-Generate the COMPLETE improved Strudel code in a ```javascript block.
-CRITICAL: Exactly 3 `$:` blocks — bass (octave 2), lead (octave 4), drums (bd/sd/hh/oh).
-Each `$:` has ONE arrange() with ALL sections as [cycles, pattern] pairs inside it.
-DO NOT create separate `$:` blocks per section."""
+Output ONLY the modified {', '.join(voices_to_fix)} voice block(s) in a ```javascript block.
+CRITICAL: Must have EXACTLY {', '.join(f'{cnt} pairs' for cnt in section_counts.values())} in arrange().
+Do NOT output the other voices. I will handle splicing them back together."""
 
         self.messages.append({"role": "user", "content": feedback})
 
@@ -376,6 +483,183 @@ DO NOT create separate `$:` blocks per section."""
 
         # Save
         self.save_history()
+
+    def _build_band_advice(self, band_diffs: Dict[str, float],
+                          orig_bands: Optional[Dict[str, float]],
+                          rend_bands: Optional[Dict[str, float]]) -> str:
+        """Build actionable per-band advice from comparison data."""
+        lines = []
+        bands_info = [
+            ("sub_bass", "20-60Hz", "Bass $: voice — affects kick sub and bass fundamental"),
+            ("bass", "60-250Hz", "Bass $: voice — main bass body"),
+            ("low_mid", "250-500Hz", "Bass $: and Lead $: voices — bass harmonics, lead low end"),
+            ("mid", "500-2kHz", "Lead $: voice — main melodic content"),
+            ("high_mid", "2-4kHz", "Lead $: and Drums $: voices — presence, hi-hat detail"),
+            ("high", "4-20kHz", "Drums $: voice — cymbals, brightness"),
+        ]
+
+        for band_key, freq_range, affected_voice in bands_info:
+            diff = band_diffs.get(band_key, 0)
+            orig_val = orig_bands.get(band_key, 0) if orig_bands else 0
+            rend_val = rend_bands.get(band_key, 0) if rend_bands else 0
+
+            if abs(diff) < 0.03:
+                continue  # Skip bands that are close enough
+
+            direction = "TOO LOUD" if diff > 0 else "TOO QUIET"
+            ratio = rend_val / max(orig_val, 0.001)
+
+            line = f"- {band_key} ({freq_range}): {direction} — orig={orig_val*100:.1f}%, yours={rend_val*100:.1f}%"
+
+            # Add specific actionable advice
+            if band_key == "sub_bass" and diff < -0.10:
+                line += f"\n  FIX: Use deeper bass notes (octave 1), lower .lpf() to ~150Hz, or try sound with more sub (sawtooth, gm_synth_bass_2)"
+            elif band_key == "sub_bass" and diff > 0.10:
+                line += f"\n  FIX: Raise bass .hpf() to cut sub-bass, or lower .gain() on bass voice"
+            elif band_key == "low_mid" and diff > 0.10:
+                line += f"\n  FIX: Lower .lpf() on bass voice (e.g. 400→200), this band has too much energy from bass harmonics"
+            elif band_key == "low_mid" and diff < -0.10:
+                line += f"\n  FIX: Raise .lpf() on bass voice, or raise bass .gain() slightly"
+            elif band_key == "bass" and diff > 0.10:
+                line += f"\n  FIX: Lower .gain() on bass voice by 0.1-0.2"
+            elif band_key == "bass" and diff < -0.10:
+                line += f"\n  FIX: Raise .gain() on bass voice by 0.1-0.2"
+            elif band_key == "mid" and abs(diff) > 0.05:
+                line += f"\n  FIX: Adjust .gain() on lead voice by 0.1-0.2"
+            elif band_key in ("high_mid", "high") and abs(diff) > 0.05:
+                line += f"\n  FIX: Adjust .gain() on drums or raise/lower .lpf() on lead"
+
+            lines.append(line)
+
+        if not lines:
+            return "All frequency bands are well-balanced. Focus on timbre/sound choices."
+
+        return "\n".join(lines)
+
+    @staticmethod
+    def _split_voices(code: str) -> Dict[str, str]:
+        """Split Strudel code into named voice blocks.
+
+        Returns {"header": "// comments\\nsetcps(...)\\n",
+                 "bass": "// Bass\\n$: arrange(...)\\n",
+                 "lead": "// Lead\\n$: arrange(...)\\n",
+                 "drums": "// Drums\\n$: arrange(...)\\n"}
+        """
+        result = {"header": "", "bass": "", "lead": "", "drums": ""}
+
+        # Find all $: block start positions
+        lines = code.split('\n')
+        block_starts = []  # (line_index, voice_name)
+        for i, line in enumerate(lines):
+            stripped = line.strip()
+            if stripped.startswith('$:'):
+                # Look for comment line above (skipping blanks)
+                comment = ""
+                for j in range(i - 1, max(i - 3, -1), -1):
+                    if lines[j].strip().startswith('//'):
+                        comment = lines[j].strip().lower()
+                        break
+                    elif lines[j].strip():
+                        break
+
+                if 'bass' in comment:
+                    name = "bass"
+                elif 'lead' in comment or 'mid' in comment or 'melody' in comment:
+                    name = "lead"
+                elif 'drum' in comment:
+                    name = "drums"
+                else:
+                    # Infer from content
+                    rest = '\n'.join(lines[i:i+5]).lower()
+                    if 's(' in rest and ('bd' in rest or 'sd' in rest):
+                        name = "drums"
+                    elif re.search(r'note\(["\'][a-g]s?[12]', rest):
+                        name = "bass"
+                    else:
+                        name = "lead"
+
+                # Include the comment line(s) above as part of this block
+                start_line = i
+                for j in range(i - 1, max(i - 3, -1), -1):
+                    if lines[j].strip().startswith('//') or not lines[j].strip():
+                        start_line = j
+                    else:
+                        break
+
+                block_starts.append((start_line, name))
+
+        if not block_starts:
+            return result
+
+        # Header is everything before first voice block
+        result["header"] = '\n'.join(lines[:block_starts[0][0]]).rstrip()
+
+        # Extract each voice block
+        for idx, (start, name) in enumerate(block_starts):
+            if idx + 1 < len(block_starts):
+                end = block_starts[idx + 1][0]
+            else:
+                end = len(lines)
+            block_code = '\n'.join(lines[start:end]).strip()
+            result[name] = block_code
+
+        return result
+
+    @staticmethod
+    def _count_arrange_entries(voice_code: str) -> int:
+        """Count the number of [cycles, pattern] entries in an arrange() block."""
+        return len(re.findall(r'\[\s*\d+\s*,', voice_code))
+
+    def splice_voices(self, new_code: str, previous_code: str) -> str:
+        """Splice modified voice(s) from new_code into previous_code.
+
+        If new_code has all 3 valid voices with matching section counts, returns new_code.
+        If new_code is incomplete (missing voices, has '...', wrong section count),
+        fills in missing/broken voices from previous_code.
+        """
+        # Parse both into voice blocks
+        prev_voices = self._split_voices(previous_code)
+        new_voices = self._split_voices(new_code)
+
+        # Use header from previous (LLM sometimes drops it)
+        header = prev_voices.get("header") or new_voices.get("header", "")
+
+        # For each voice: use new if valid AND has correct section count, else keep previous
+        parts = [header] if header else []
+        spliced = []
+        for voice_name in ["bass", "lead", "drums"]:
+            new_block = new_voices.get(voice_name, "")
+            prev_block = prev_voices.get(voice_name, "")
+
+            # Count arrange entries in both
+            prev_count = self._count_arrange_entries(prev_block) if prev_block else 0
+            new_count = self._count_arrange_entries(new_block) if new_block else 0
+
+            # New block is valid if it has arrange() with actual content
+            new_valid = (
+                new_block
+                and 'arrange(' in new_block
+                and '...' not in new_block
+                and 'no changes' not in new_block.lower()
+                and len(new_block) > 30  # Not just a stub
+            )
+
+            # Also reject if section count differs (LLM deleted sections)
+            if new_valid and prev_count > 0 and new_count != prev_count:
+                reason = f"section count mismatch: {new_count} vs {prev_count}"
+                print(f"  [Agent] Rejected LLM {voice_name}: {reason}")
+                new_valid = False
+
+            if new_valid:
+                parts.append(new_block)
+            elif prev_block:
+                parts.append(prev_block)
+                spliced.append(voice_name)
+
+        if spliced:
+            print(f"  [Agent] Spliced original voices: {', '.join(spliced)} (LLM output was incomplete)")
+
+        return '\n\n'.join(parts)
 
     def _extract_tried_values(self, code: str):
         """Extract parameter values from code to track what was tried."""
@@ -478,7 +762,7 @@ Query the database using track_hash='{self.track_hash}' to find what worked for 
                     "options": {
                         "temperature": 0.7,
                         "num_predict": 4096,
-                        "num_ctx": 8192,
+                        "num_ctx": 32768,
                     }
                 },
                 timeout=300
@@ -492,17 +776,38 @@ Query the database using track_hash='{self.track_hash}' to find what worked for 
             print(f"  [Agent] Ollama error: {e}")
             return ""
 
-    def extract_code(self, response: str) -> str:
-        """Extract Strudel code from agent response."""
+    def extract_code(self, response: str, previous_code: str = None) -> str:
+        """Extract Strudel code from agent response, splicing with previous code if needed."""
         self.last_validation_error = None  # Reset validation error
 
+        # Use stored previous code if not provided
+        if previous_code is None:
+            previous_code = self._previous_code
+
+        raw_code = self._extract_raw_code(response)
+        if not raw_code:
+            return ""
+
+        # If we have previous code, splice the LLM output back into the full code
+        if previous_code:
+            spliced = self.splice_voices(raw_code, previous_code)
+            if spliced and spliced != raw_code:
+                # Validate the spliced result
+                result = self._validate_code(spliced)
+                if result:
+                    return result
+            # Fall through to validate raw code if splice didn't help
+
+        return self._validate_code(raw_code) or ""
+
+    def _extract_raw_code(self, response: str) -> str:
+        """Extract raw Strudel code from LLM response (before validation/splicing)."""
         # 1. Prefer explicitly tagged javascript/js code blocks
         js_match = re.search(r'```(?:javascript|js)\n?([\s\S]*?)```', response)
         if js_match:
             code = js_match.group(1).strip()
-            result = self._validate_code(code)
-            if result:
-                return result
+            if self._looks_like_strudel(code):
+                return code
 
         # 2. Try all code blocks, pick the one with Strudel patterns
         all_blocks = re.findall(r'```(?:\w*)\n?([\s\S]*?)```', response)
@@ -513,21 +818,16 @@ Query the database using track_hash='{self.track_hash}' to find what worked for 
                 continue
             if len(block) < 20:
                 continue
-            # Check if it looks like Strudel code
-            strudel_indicators = ['setcps(', '$:', '.sound(', '.gain(', '.bank(', 'note(', 's(', '.lpf(', '.hpf(']
-            if any(ind in block for ind in strudel_indicators):
-                result = self._validate_code(block)
-                if result:
-                    return result
+            if self._looks_like_strudel(block):
+                return block
 
         # 3. Look for effect function patterns (let bassFx = p => p...)
         fx_pattern = r'let\s+\w+Fx\s*=\s*p\s*=>\s*p[^\n]*(?:\n\s+\.[^\n]*)*'
         fx_matches = re.findall(fx_pattern, response)
         if fx_matches:
             code = '\n\n'.join(fx_matches)
-            result = self._validate_code(code)
-            if result:
-                return result
+            if self._looks_like_strudel(code):
+                return code
 
         # 4. Look for bare Strudel code (lines starting with $: or setcps)
         strudel_lines = []
@@ -537,22 +837,24 @@ Query the database using track_hash='{self.track_hash}' to find what worked for 
             if stripped.startswith('setcps(') or stripped.startswith('$:') or stripped.startswith('//'):
                 in_strudel = True
             if in_strudel:
-                # Stop at empty lines after content or non-code lines
                 if stripped and not stripped.startswith('#') and not stripped.startswith('*'):
                     strudel_lines.append(line)
                 elif not stripped and strudel_lines:
-                    strudel_lines.append(line)  # Keep blank lines within code
+                    strudel_lines.append(line)
                 elif stripped and strudel_lines:
-                    # Non-code line after code block - stop
                     break
         if strudel_lines:
             code = '\n'.join(strudel_lines).strip()
-            if len(code) > 20:
-                result = self._validate_code(code)
-                if result:
-                    return result
+            if len(code) > 20 and self._looks_like_strudel(code):
+                return code
 
         return ""
+
+    @staticmethod
+    def _looks_like_strudel(code: str) -> bool:
+        """Check if code looks like Strudel (has at least one valid pattern)."""
+        indicators = ['setcps(', '$:', '.sound(', '.gain(', '.bank(', 'note(', 's(', '.lpf(', '.hpf(', 'arrange(']
+        return any(ind in code for ind in indicators)
 
     def _fix_bank_names(self, code: str) -> str:
         """Auto-correct common LLM drum bank name hallucinations."""
