@@ -1206,9 +1206,18 @@ def compare_windowed(original_path, rendered_path, duration=60, window_size=5.0)
         # Compute similarities
         mfcc_sim = 1 - cosine(orig_mfcc, rend_mfcc) if np.sum(orig_mfcc) != 0 else 0
 
+        # Use MAE for frequency bands (not cosine — cosine hides per-band magnitude errors)
         orig_band_arr = np.array(list(orig_bands.values()))
         rend_band_arr = np.array(list(rend_bands.values()))
-        band_sim = 1 - cosine(orig_band_arr, rend_band_arr) if np.sum(orig_band_arr) > 0 else 0
+        if np.sum(orig_band_arr) > 0:
+            band_diffs = np.abs(orig_band_arr - rend_band_arr)
+            band_sim = float(max(0, 1.0 - np.mean(band_diffs) * 5))  # Scale MAE to 0-1
+            # Penalty if any band is off by >15%
+            max_diff = float(np.max(band_diffs))
+            if max_diff > 0.15:
+                band_sim *= max(0.5, 1.0 - (max_diff - 0.15) * 2)
+        else:
+            band_sim = 0
 
         energy_sim = min(orig_rms, rend_rms) / max(orig_rms, rend_rms, 1e-10)
 

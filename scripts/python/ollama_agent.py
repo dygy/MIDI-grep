@@ -24,6 +24,12 @@ try:
 except ImportError:
     HAS_REQUESTS = False
 
+try:
+    from strudel_validation import SOUND_CORRECTIONS, BANK_CORRECTIONS, fix_sound_names, fix_bank_names
+    HAS_SHARED_VALIDATION = True
+except ImportError:
+    HAS_SHARED_VALIDATION = False
+
 # Import genre-aware sound retrieval
 try:
     from sound_selector import retrieve_genre_context
@@ -161,7 +167,7 @@ class OllamaAgent:
         self.best_similarity = 0.0
         self.best_code = ""
         self.tried_values: Dict[str, List[str]] = {}  # param -> [values tried]
-        self.max_context_tokens = 6000  # Conservative limit
+        self.max_context_tokens = 20000  # Use most of the 32K context window
         self.last_validation_error: Optional[str] = None  # Track validation failures
         self._previous_code: str = ""  # For voice splicing
         self._voices_to_fix: List[str] = []  # Which voices need changes
@@ -293,13 +299,16 @@ $: arrange(
         if not sql:
             return "ERROR: Empty query"
 
-        # Security: only allow SELECT
+        # Security: only allow single SELECT statements
         if not sql.upper().startswith("SELECT"):
             return "ERROR: Only SELECT queries allowed"
+        if ";" in sql:
+            return "ERROR: Multiple statements not allowed"
 
         cmd = [
             str(CLICKHOUSE_BIN), "local",
             "--path", str(CLICKHOUSE_DB),
+            "--readonly=1",
             "--query", sql,
             "--format", "PrettyCompact"
         ]
@@ -693,12 +702,33 @@ Do NOT output the other voices. I will handle splicing them back together."""
 
         # Add context if provided
         if context:
-            genre = context.get('genre', 'unknown')
-            sounds_ctx = ""
-            if HAS_SOUND_SELECTOR:
-                sounds_ctx = f"\n\n{retrieve_genre_context(genre)}\nUse ONLY these sounds in .sound() and .bank() calls."
+            # If add_iteration_result() was already called, the conversation already
+            # has detailed per-stem feedback and band advice. Only inject NEW info
+            # (RAG context) to avoid duplicating band diffs and wasting tokens.
+            has_iteration_feedback = len(self.iteration_history) > 0
 
-            context_msg = f"""## Current Track Context
+            rag_ctx = context.get('rag_context', '')
+
+            if has_iteration_feedback and rag_ctx:
+                # Iteration feedback already in messages — only add RAG findings
+                self.messages.append({"role": "user", "content":
+                    f"{rag_ctx}\n\nApply these proven fixes. Generate improved code."
+                })
+            elif has_iteration_feedback:
+                # Feedback already in messages, no RAG — just prompt for code
+                self.messages.append({"role": "user", "content":
+                    "Generate improved code based on the feedback above."
+                })
+            else:
+                # First call (no iteration feedback yet) — send full context
+                genre = context.get('genre', 'unknown')
+                sounds_ctx = ""
+                if HAS_SOUND_SELECTOR:
+                    sounds_ctx = f"\n\n{retrieve_genre_context(genre)}\nUse ONLY these sounds in .sound() and .bank() calls."
+
+                rag_section = f"\n\n{rag_ctx}" if rag_ctx else ""
+
+                context_msg = f"""## Current Track Context
 
 Genre: {genre}
 BPM: {context.get('bpm', 120)}
@@ -708,11 +738,11 @@ Frequency issues:
 - Bass: {context.get('band_bass', 0)*100:+.1f}%
 - Mid: {context.get('band_mid', 0)*100:+.1f}%
 - High: {context.get('band_high', 0)*100:+.1f}%
-{sounds_ctx}
+{sounds_ctx}{rag_section}
 
-Query the database using track_hash='{self.track_hash}' to find what worked for THIS track, then generate improved code."""
+Generate improved code based on the frequency issues above."""
 
-            self.messages.append({"role": "user", "content": context_msg})
+                self.messages.append({"role": "user", "content": context_msg})
 
         # Agentic loop - allow multiple SQL queries
         max_turns = 5
@@ -760,7 +790,7 @@ Query the database using track_hash='{self.track_hash}' to find what worked for 
                     "messages": self.messages,
                     "stream": False,
                     "options": {
-                        "temperature": 0.7,
+                        "temperature": 0.3,  # Low temp for surgical iteration changes
                         "num_predict": 4096,
                         "num_ctx": 32768,
                     }
@@ -858,70 +888,14 @@ Query the database using track_hash='{self.track_hash}' to find what worked for 
 
     def _fix_bank_names(self, code: str) -> str:
         """Auto-correct common LLM drum bank name hallucinations."""
-        BANK_CORRECTIONS = {
-            'tr808': 'RolandTR808',
-            'TR808': 'RolandTR808',
-            'tr909': 'RolandTR909',
-            'TR909': 'RolandTR909',
-            'tr707': 'RolandTR707',
-            'TR707': 'RolandTR707',
-            'tr606': 'RolandTR606',
-            'TR606': 'RolandTR606',
-            'linndrum': 'LinnDrum',
-            'linn': 'LinnDrum',
-            'dr110': 'BossDR110',
-            'mpc60': 'AkaiMPC60',
-        }
-        for wrong, correct in BANK_CORRECTIONS.items():
-            pattern = r'(\.bank\(["\'])' + re.escape(wrong) + r'(["\'])'
-            if re.search(pattern, code):
-                code = re.sub(pattern, r'\g<1>' + correct + r'\2', code)
-                print(f"  [Agent] Auto-corrected bank: {wrong} → {correct}")
+        if HAS_SHARED_VALIDATION:
+            return fix_bank_names(code, verbose=True)
         return code
 
     def _fix_sound_names(self, code: str) -> str:
         """Auto-correct common LLM sound name hallucinations before validation."""
-        # Map of common wrong names → correct Strudel names
-        SOUND_CORRECTIONS = {
-            'gm_electric_guitar': 'gm_electric_guitar_clean',
-            'gm_electric_piano': 'gm_epiano1',
-            'gm_acoustic_guitar': 'gm_acoustic_guitar_nylon',
-            'gm_acoustic_piano': 'gm_piano',
-            'gm_acoustic_grand_piano': 'gm_piano',
-            'gm_grand_piano': 'gm_piano',
-            'gm_electric_bass': 'gm_electric_bass_finger',
-            'gm_electric_lead': 'gm_lead_2_sawtooth',
-            'gm_synth_lead': 'gm_lead_2_sawtooth',
-            'gm_synth_pad': 'gm_pad_warm',
-            'gm_synth_bass': 'gm_synth_bass_1',
-            'gm_organ': 'gm_drawbar_organ',
-            'gm_strings': 'gm_string_ensemble_1',
-            'gm_synth_strings': 'gm_synth_strings_1',
-            'gm_brass': 'gm_brass_section',
-            'gm_synth_brass': 'gm_synth_brass_1',
-            'gm_choir': 'gm_choir_aahs',
-            'gm_flute': 'gm_flute',  # This one is actually correct
-            'gm_slap_bass': 'gm_slap_bass_1',
-            'gm_bass': 'gm_acoustic_bass',
-            'gm_lead': 'gm_lead_2_sawtooth',
-            'gm_pad': 'gm_pad_warm',
-            'gm_fx': 'gm_fx_atmosphere',
-            'gm_drum': 'gm_synth_drum',
-            'gm_acoustic_electric': 'gm_electric_guitar_clean',
-            'gm_electric': 'gm_electric_guitar_clean',
-            'gm_guitar': 'gm_acoustic_guitar_nylon',
-            'gm_piano1': 'gm_piano',
-            'gm_piano2': 'gm_epiano1',
-        }
-        for wrong, correct in SOUND_CORRECTIONS.items():
-            if wrong == correct:
-                continue
-            # Only replace exact matches in .sound("...") calls, not partial matches
-            # e.g., fix gm_electric_guitar but not gm_electric_guitar_clean
-            pattern = r'(\.sound\(["\'])' + re.escape(wrong) + r'(["\'])'
-            if re.search(pattern, code):
-                code = re.sub(pattern, r'\g<1>' + correct + r'\2', code)
-                print(f"  [Agent] Auto-corrected sound: {wrong} → {correct}")
+        if HAS_SHARED_VALIDATION:
+            return fix_sound_names(code, verbose=True)
         return code
 
     def _validate_code(self, code: str) -> str:

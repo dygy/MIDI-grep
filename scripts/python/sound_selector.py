@@ -231,7 +231,7 @@ GENRE_PALETTES = {
         "bass": ["sawtooth", "gm_synth_bass_1", "gm_synth_bass_2", "gm_slap_bass_1"],
         "lead": ["gm_lead_2_sawtooth", "gm_lead_1_square", "supersaw", "gm_synth_brass_1"],
         "pad": ["gm_pad_poly", "gm_synth_brass_1", "gm_pad_metallic"],
-        "high": ["gm_lead_5_charang", "square", "gm_music_box", "gm_synth_voice"],
+        "high": ["gm_lead_5_charang", "square", "gm_music_box", "gm_voice_oohs"],
         "character": "aggressive, punchy, 808-heavy"
     },
     "electro_swing": {
@@ -253,7 +253,7 @@ GENRE_PALETTES = {
     "phonk": {
         "drums": ["RolandTR808", "CasioRZ1", "EmuSP12", "MPC1000"],
         "bass": ["sine", "triangle", "gm_synth_bass_2", "gm_fretless_bass"],
-        "lead": ["gm_fx_echoes", "gm_lead_voice", "gm_pad_choir", "gm_voice_oohs"],
+        "lead": ["gm_fx_echoes", "gm_lead_6_voice", "gm_pad_choir", "gm_voice_oohs"],
         "pad": ["gm_pad_sweep", "gm_fx_atmosphere", "gm_pad_bowed"],
         "high": ["gm_music_box", "gm_celesta", "gm_glockenspiel", "gm_kalimba"],
         "character": "dark, lo-fi, Memphis rap samples"
@@ -269,7 +269,7 @@ GENRE_PALETTES = {
     "jpop": {
         "drums": ["RolandTR909", "RolandTR707", "YamahaRM50", "KorgM1"],
         "bass": ["gm_electric_bass_pick", "gm_synth_bass_1", "sawtooth", "gm_slap_bass_1"],
-        "lead": ["gm_electric_guitar_clean", "gm_lead_2_sawtooth", "supersaw", "gm_bright_acoustic_piano"],
+        "lead": ["gm_electric_guitar_clean", "gm_lead_2_sawtooth", "supersaw", "gm_piano"],
         "pad": ["gm_pad_new_age", "gm_string_ensemble_1", "gm_synth_strings_1", "gm_choir_aahs"],
         "high": ["gm_glockenspiel", "gm_music_box", "gm_epiano1", "gm_celesta"],
         "character": "bright, layered, energetic"
@@ -311,7 +311,7 @@ GENRE_PALETTES = {
         "bass": ["sine", "sawtooth", "gm_synth_bass_1", "triangle"],
         "lead": ["gm_lead_1_square", "gm_lead_2_sawtooth", "gm_fx_sci_fi"],
         "pad": ["gm_pad_metallic", "gm_fx_atmosphere", "gm_pad_sweep"],
-        "high": ["gm_fx_crystal", "gm_percussion", "gm_lead_5_charang"],
+        "high": ["gm_fx_crystal", "gm_woodblock", "gm_lead_5_charang"],
         "character": "minimal, industrial, hypnotic"
     },
     "jazz": {
@@ -319,7 +319,7 @@ GENRE_PALETTES = {
         "bass": ["gm_acoustic_bass", "gm_electric_bass_finger", "gm_fretless_bass"],
         "lead": ["gm_trumpet", "gm_alto_sax", "gm_tenor_sax", "gm_clarinet", "gm_flute"],
         "pad": ["gm_string_ensemble_1", "gm_pad_warm", "gm_choir_aahs"],
-        "high": ["gm_vibraphone", "gm_epiano1", "gm_acoustic_grand_piano"],
+        "high": ["gm_vibraphone", "gm_epiano1", "gm_piano"],
         "character": "acoustic, swing, sophisticated"
     },
     "classical": {

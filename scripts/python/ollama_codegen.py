@@ -22,6 +22,14 @@ except ImportError:
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
 DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "midi-grep-strudel")
 
+# Import shared validation
+try:
+    from strudel_validation import SOUND_CORRECTIONS, fix_sound_names, fix_bank_names
+except ImportError:
+    SOUND_CORRECTIONS = {}
+    fix_sound_names = lambda code, **kw: code
+    fix_bank_names = lambda code, **kw: code
+
 # Import sound validation from ollama_agent
 try:
     from ollama_agent import VALID_SOUNDS, VALID_DRUM_BANKS, INVALID_GM_PATTERNS
@@ -294,36 +302,8 @@ def fix_strudel_syntax(code):
 
     code = re.sub(r's\("([^"]+)"\)(?=\s*\.bank\()', fix_drum_pattern, code)
 
-    # Fix common sound name shortcuts
-    sound_fixes = {
-        'gm_electric_guitar': 'gm_electric_guitar_clean',
-        'gm_electric_piano': 'gm_epiano1',
-        'gm_acoustic_guitar': 'gm_acoustic_guitar_nylon',
-        'gm_acoustic_piano': 'gm_piano',
-        'gm_acoustic_grand_piano': 'gm_piano',
-        'gm_grand_piano': 'gm_piano',
-        'gm_electric_bass': 'gm_electric_bass_finger',
-        'gm_electric_lead': 'gm_lead_2_sawtooth',
-        'gm_synth_lead': 'gm_lead_2_sawtooth',
-        'gm_synth_pad': 'gm_pad_warm',
-        'gm_synth_bass': 'gm_synth_bass_1',
-        'gm_organ': 'gm_drawbar_organ',
-        'gm_strings': 'gm_string_ensemble_1',
-        'gm_synth_strings': 'gm_synth_strings_1',
-        'gm_brass': 'gm_brass_section',
-        'gm_synth_brass': 'gm_synth_brass_1',
-        'gm_choir': 'gm_choir_aahs',
-        'gm_slap_bass': 'gm_slap_bass_1',
-        'gm_bass': 'gm_acoustic_bass',
-        'gm_lead': 'gm_lead_2_sawtooth',
-        'gm_pad': 'gm_pad_warm',
-        'gm_fx': 'gm_fx_atmosphere',
-        'gm_drum': 'gm_synth_drum',
-    }
-    for wrong, correct in sound_fixes.items():
-        # Only replace exact matches (not partial)
-        pattern = r'(\.sound\(["\'])' + re.escape(wrong) + r'(["\'])'
-        code = re.sub(pattern, r'\g<1>' + correct + r'\2', code)
+    # Fix common sound name shortcuts (uses shared corrections from strudel_validation)
+    code = fix_sound_names(code)
 
     return code
 
