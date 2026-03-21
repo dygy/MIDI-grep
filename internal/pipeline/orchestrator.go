@@ -513,14 +513,15 @@ $: note("c4").sound("gm_piano")
 				} `json:"best_previous"`
 			}
 			if json.Unmarshal([]byte(aiResult.Stdout), &aiOutput) == nil {
-				// Use best previous if available and good quality
-				if aiOutput.BestPrevious != nil && aiOutput.BestPrevious.Code != "" && aiOutput.BestPrevious.Similarity > 0.5 {
-					o.progress.StageComplete("Using best previous run (v%d, %.0f%% similarity)",
-						aiOutput.BestPrevious.Version, aiOutput.BestPrevious.Similarity*100)
-					strudelCode = aiOutput.BestPrevious.Code
-				} else if aiOutput.Code != "" {
+				// Always use freshly generated code from Ollama
+				if aiOutput.Code != "" {
 					strudelCode = aiOutput.Code
-					o.progress.StageComplete("AI generated new Strudel code")
+					if aiOutput.BestPrevious != nil {
+						o.progress.StageComplete("AI generated new Strudel code (best previous: v%d, %.0f%%)",
+							aiOutput.BestPrevious.Version, aiOutput.BestPrevious.Similarity*100)
+					} else {
+						o.progress.StageComplete("AI generated new Strudel code")
+					}
 				} else {
 					// Raw output (not JSON)
 					strudelCode = aiResult.Stdout

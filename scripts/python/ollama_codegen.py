@@ -111,41 +111,11 @@ def build_prompt(bpm, key, genre, style, drum_kit, sections, duration,
     else:
         section_entries = [(4, "LOW", 1), (8, "HIGH", 2), (4, "MEDIUM", 3), (2, "LOW", 4)]
 
-    # Build the example arrange() with all sections for each voice
-    def build_voice_arrange(voice_type):
-        lines = []
-        for i, (cycles, level, idx) in enumerate(section_entries):
-            # Use section's dominant chord if available, else fall back to key root
-            sec = sections[i] if sections and i < len(sections) else {}
-            sec_note = chord_to_note(sec.get("dominant_chord")) if sec.get("dominant_chord") else root
-
-            if voice_type == "bass":
-                if level == "HIGH":
-                    lines.append(f'  [{cycles}, note("{sec_note}2 {sec_note}2 ~ {sec_note}2").sound("{bass_sound}").gain(0.8).lpf(400)]')
-                elif level == "MEDIUM":
-                    lines.append(f'  [{cycles}, note("{sec_note}2 ~ {sec_note}2 ~").sound("{bass_sound}").gain(0.5).lpf(300)]')
-                else:
-                    lines.append(f'  [{cycles}, note("{sec_note}2 ~ ~ ~").sound("{bass_sound}").gain(0.3).lpf(200).room(0.3)]')
-            elif voice_type == "lead":
-                if level == "HIGH":
-                    lines.append(f'  [{cycles}, note("{sec_note}4 {sec_note}4 {sec_note}4 {sec_note}4").sound("{lead_sound}").gain(0.7).lpf(6000)]')
-                elif level == "MEDIUM":
-                    lines.append(f'  [{cycles}, note("{sec_note}4 ~ {sec_note}4 ~").sound("{pad_sound}").gain(0.5).lpf(5000)]')
-                else:
-                    lines.append(f'  [{cycles}, note("{sec_note}4 ~ ~ ~").sound("{pad_sound}").gain(0.3).lpf(4000).room(0.3)]')
-            else:  # drums
-                if level == "HIGH":
-                    lines.append(f'  [{cycles}, s("bd sd hh hh bd sd hh oh").bank("{kit}").gain(0.8)]')
-                elif level == "MEDIUM":
-                    lines.append(f'  [{cycles}, s("bd ~ sd hh").bank("{kit}").gain(0.6)]')
-                else:
-                    lines.append(f'  [{cycles}, s("bd ~ ~ hh").bank("{kit}").gain(0.4).room(0.3)]')
-        return ",\n".join(lines)
-
     # Build compact section summary with chord/density/brightness
     section_summary = ""
     if sections:
         section_lines = []
+        max_e = max(s.get("energy", 0.5) for s in sections) or 1.0
         for i, s in enumerate(sections):
             chord_info = s.get("dominant_chord", root.upper())
             prog = s.get("chord_progression", [])
@@ -154,12 +124,12 @@ def build_prompt(bpm, key, genre, style, drum_kit, sections, duration,
             brightness = s.get("avg_brightness", 0)
             dur = s.get("duration", 0)
             cycles = max(1, round(dur * bpm / 240))
-            energy_label = "HIGH" if s.get("energy", 0) / max(max(ss.get("energy", 0.5) for ss in sections), 0.01) > 0.7 else \
-                          "MEDIUM" if s.get("energy", 0) / max(max(ss.get("energy", 0.5) for ss in sections), 0.01) > 0.4 else "LOW"
+            rel = s.get("energy", 0) / max(max_e, 0.01)
+            energy_label = "HIGH" if rel > 0.7 else "MEDIUM" if rel > 0.4 else "LOW"
             density_label = f"dense({density:.1f}/beat)" if density > 2 else f"sparse({density:.1f}/beat)"
             brightness_label = f"bright({brightness:.0f}Hz)" if brightness > 2000 else f"warm({brightness:.0f}Hz)"
-            section_lines.append(f"  S{i+1}: {cycles} cyc, {chord_str}, {energy_label}, {density_label}, {brightness_label}")
-        section_summary = "\nSections (match energy and chords per section):\n" + "\n".join(section_lines) + "\n"
+            section_lines.append(f"  S{i+1}: {cycles} cycles, chord={chord_str}, energy={energy_label}, {density_label}, {brightness_label}")
+        section_summary = "\nSections:\n" + "\n".join(section_lines) + "\n"
 
     # Time signature and swing
     time_info = f"Time signature: {time_sig}"
@@ -168,46 +138,56 @@ def build_prompt(bpm, key, genre, style, drum_kit, sections, duration,
     else:
         time_info += ", Swing: straight"
 
-    prompt = f"""Generate Strudel live coding music.
+    # Build list of available sounds for the prompt
+    sound_choices = f"Bass sounds: {bass_sound}, sawtooth, supersaw\nLead sounds: {lead_sound}, {pad_sound}, supersaw\nDrum bank: {kit}"
+
+    prompt = f"""Generate Strudel live coding music that sounds like a real {genre or 'electronic'} track.
 
 BPM: {bpm}, Key: {key}, Genre: {genre or 'electronic'}{notes_text}
 {genre_context}
 {section_summary}{time_info}
 
-The code MUST have EXACTLY this structure — 3 `$:` blocks, one per voice.
-Each voice has ONE arrange() containing ALL {len(section_entries)} sections as [cycles, pattern] pairs.
+{sound_choices}
 
-EXAMPLE (modify the note patterns, sounds, and gains to match the genre):
+STRUCTURE: Exactly 3 `$:` blocks. Each has ONE arrange() with ALL {len(section_entries)} sections as [cycles, pattern] pairs.
+
 ```javascript
 setcps({bpm}/60/4)
 
-// Bass
+// Bass — octave 2, creative rhythms and note variations in {key}
 $: arrange(
-{build_voice_arrange("bass")}
+  [CYCLES, note("PATTERN").sound("SOUND").gain(G).lpf(F)],
+  ...all {len(section_entries)} sections...
 )
 
-// Lead
+// Lead — octave 4, melodic phrases and chord tones in {key}
 $: arrange(
-{build_voice_arrange("lead")}
+  [CYCLES, note("PATTERN").sound("SOUND").gain(G).lpf(F)],
+  ...all {len(section_entries)} sections...
 )
 
-// Drums
+// Drums — bd/sd/hh/oh/cp, varied patterns per energy level
 $: arrange(
-{build_voice_arrange("drums")}
+  [CYCLES, s("PATTERN").bank("{kit}").gain(G)],
+  ...all {len(section_entries)} sections...
 )
 ```
 
-CRITICAL RULES:
+BE CREATIVE — this is the most important rule:
+- Bass: Use different rhythms per section. Use notes from the key ({key}), not just the root. Syncopation, slides ({root}2 [e2 f2]), rests for groove.
+- Lead: Write actual melodies — arpeggios, runs, call-and-response. Use multiple notes from the scale, not just repeated root notes.
+- Drums: Vary patterns per section — sparse intros, dense drops, fills with cp/oh. Use subdivision like "bd [hh hh] sd hh" for 16th notes.
+- Use effects creatively: .delay(0.2) .room(0.3) .crush(4) .distort(0.2) .phaser(2) .hpf() .lpf()
+- Match each section's energy/density/brightness from the analysis above.
+- LOW energy: sparse, soft (gain 0.2-0.4), reverb
+- HIGH energy: dense, loud (gain 0.7-0.9), distortion/crush
+
+RULES:
 1. EXACTLY 3 `$:` blocks — bass, lead, drums. NO MORE, NO LESS.
-2. Each `$:` has ONE arrange() with ALL sections inside it.
-3. DO NOT create separate `$:` blocks per section — sections go INSIDE arrange().
-4. Bass: note() in octave 2 with .sound()
-5. Lead: note() in octave 4 with .sound()
-6. Drums: s("bd sd hh oh") with .bank("{kit}") — NEVER use note names for drums
-7. LOW energy: sparse (use ~), gain 0.2-0.4, add .room(0.3)
-8. HIGH energy: dense, gain 0.7-0.9, add .distort(0.3) or .crush(4)
-9. Match chords per section — use the dominant chord shown in the section summary above
-{"10. Apply swing timing: use `.swing()` or offset hi-hat patterns for a swung feel" if swing_ratio > 1.1 else ""}
+2. Each `$:` has ONE arrange() with ALL sections.
+3. Bass: note() octave 2. Lead: note() octave 4. Drums: s() with .bank().
+4. Use ONLY valid sounds from the list above.
+{"5. Apply swing timing for the swung feel." if swing_ratio > 1.1 else ""}
 Output ONLY the code in a ```javascript block. No explanation."""
 
     return prompt
