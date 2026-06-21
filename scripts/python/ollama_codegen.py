@@ -1,10 +1,14 @@
 #!/usr/bin/env python3
 """
-Ollama-powered Strudel code generator.
+Ollama-powered Strudel code generator (LEGACY single-shot path).
 
-Replaces the old rule-based ai_code_generator.py.
-Uses Ollama LLM to generate dynamic, section-aware Strudel code
-directly from audio analysis data.
+DEPRECATED as the default: this generates the entire track (3 voices × all sections) in ONE
+prompt, so a single bad token can ruin the whole run. The default is now the job-based
+codegen_orchestrator.py (small validated jobs + deterministic assembler), selected by the Go
+`--codegen orchestrated` flag. This file is kept as the `--codegen single` fallback and still
+shares validation with strudel_validation.py. Prefer the orchestrated path for new work.
+
+Uses Ollama LLM to generate section-aware Strudel code directly from audio analysis data.
 """
 
 import argparse
@@ -20,20 +24,20 @@ except ImportError:
     HAS_REQUESTS = False
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "midi-grep-strudel")
+DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "midi-grep-strudel-mistral")
 
-# Import shared validation
+# Import shared validation — single source of truth (strudel_validation.py)
 try:
-    from strudel_validation import SOUND_CORRECTIONS, fix_sound_names, fix_bank_names
+    from strudel_validation import (
+        SOUND_CORRECTIONS, fix_sound_names, fix_bank_names, fix_names, validate_code,
+        VALID_SOUNDS, VALID_DRUM_BANKS, INVALID_GM_PATTERNS,
+    )
 except ImportError:
     SOUND_CORRECTIONS = {}
     fix_sound_names = lambda code, **kw: code
     fix_bank_names = lambda code, **kw: code
-
-# Import sound validation from ollama_agent
-try:
-    from ollama_agent import VALID_SOUNDS, VALID_DRUM_BANKS, INVALID_GM_PATTERNS
-except ImportError:
+    fix_names = lambda code, **kw: code
+    validate_code = lambda code, **kw: (code, "")
     VALID_SOUNDS = set()
     VALID_DRUM_BANKS = set()
     INVALID_GM_PATTERNS = []
@@ -190,6 +194,13 @@ BE CREATIVE — this is the most important rule:
 - LOW energy: sparse, soft (gain 0.2-0.4), reverb
 - HIGH energy: dense, loud (gain 0.7-0.9), distortion/crush
 
+SECTION ALIGNMENT — the original is NOT static, so your code must NOT be static:
+- The Nth [cycles, pattern] pair in each arrange() MUST correspond to Section N in the analysis above
+- Section N's pattern MUST reflect its analysis: matching chord, energy level, and onset density
+- Adjacent sections MUST sound different — never reuse the same pattern verbatim across sections
+- LOW-energy sections must have FEWER notes/hits than HIGH-energy sections in the same voice
+- All three voices (bass, lead, drums) must have the SAME number of [cycles, pattern] pairs ({len(section_entries)} total)
+
 RULES:
 1. EXACTLY 3 `$:` blocks — bass, lead, drums. NO MORE, NO LESS.
 2. Each `$:` has ONE arrange() with ALL sections.
@@ -202,7 +213,31 @@ Output ONLY the code in a ```javascript block. No explanation."""
 
 
 def call_ollama(prompt, model=DEFAULT_MODEL):
-    """Call Ollama and return the response text."""
+    """Generate Strudel code via the configured LLM backend.
+
+    Backend chosen by LLM_BACKEND env var:
+      "ollama" (default) — Ollama's /api/chat
+      "airllm"           — in-process AirLLM (large model, low VRAM)
+
+    Returns generated text or None on failure (so the caller falls back).
+    """
+    backend = (os.environ.get("LLM_BACKEND") or "ollama").lower()
+
+    if backend == "airllm":
+        try:
+            from airllm_client import dispatch_generate, AirLLMUnavailable
+            result = dispatch_generate(
+                prompt,
+                model=model,
+                options={"temperature": 0.7, "num_predict": 4096, "num_ctx": 32768},
+            )
+            return result.get("response", "")
+        except Exception as e:
+            print(f"ERROR: AirLLM call failed: {e}", file=sys.stderr)
+            print("       Falling back to Ollama. Set LLM_BACKEND=ollama to silence.",
+                  file=sys.stderr)
+            # Fall through to Ollama path below
+
     if not HAS_REQUESTS:
         print("ERROR: requests package not installed", file=sys.stderr)
         return None
@@ -214,6 +249,9 @@ def call_ollama(prompt, model=DEFAULT_MODEL):
                 "model": model,
                 "messages": [{"role": "user", "content": prompt}],
                 "stream": False,
+                # Unload model 30s after generation so the BlackHole render phase
+                # (Chromium) doesn't fight the model for RAM on 24GB.
+                "keep_alive": "30s",
                 "options": {
                     "temperature": 0.7,
                     "num_predict": 4096,
@@ -234,6 +272,10 @@ def call_ollama(prompt, model=DEFAULT_MODEL):
 
 def fix_strudel_syntax(code):
     """Fix common LLM syntax mistakes in Strudel code."""
+    # Apply the shared sound/bank corrections first (single source of truth — keeps
+    # tr808->RolandTR808, sub_bass, gm_* hallucinations consistent across every path).
+    code = fix_names(code)
+
     # Remove semicolons (Strudel is not JS)
     code = code.replace(';', '')
 
@@ -274,6 +316,10 @@ def fix_strudel_syntax(code):
 
     def fix_drum_pattern(match):
         pattern = match.group(1)
+        # Don't tokenise-and-rewrite structured multi-bar patterns like "<[bd ~] [sd hh]>" —
+        # the grouping tokens (<, [, ]) would be mangled into drum hits, flattening the evolution.
+        if "<" in pattern or "[" in pattern:
+            return match.group(0)
         tokens = pattern.split()
         fixed_tokens = []
         changed = False
@@ -306,6 +352,41 @@ def fix_strudel_syntax(code):
     code = fix_sound_names(code)
 
     return code
+
+
+def validate_section_alignment(code, expected_section_count, expected_total_cycles=None, tolerance=0.15):
+    """Validate that each voice's arrange() has the expected number of sections
+    and the total cycle count is within tolerance of the original.
+
+    Returns (ok: bool, issues: list[str]). Used for logging — does not mutate code.
+    Caller can decide to retry generation, splice, or accept.
+    """
+    issues = []
+    if expected_section_count <= 0:
+        return True, issues
+
+    # Pull each $: block
+    blocks = re.split(r'(?=^\$:)', code, flags=re.MULTILINE)
+    voice_blocks = [b for b in blocks[1:] if b.strip()]
+
+    for i, block in enumerate(voice_blocks[:3]):
+        entries = re.findall(r'\[\s*(\d+)\s*,', block)
+        n = len(entries)
+        if n != expected_section_count:
+            issues.append(
+                f"voice {i+1}: arrange() has {n} sections, expected {expected_section_count}"
+            )
+            continue
+        if expected_total_cycles is not None and expected_total_cycles > 0:
+            actual_cycles = sum(int(e) for e in entries)
+            ratio = actual_cycles / expected_total_cycles
+            if abs(ratio - 1.0) > tolerance:
+                issues.append(
+                    f"voice {i+1}: total cycles {actual_cycles} differs from "
+                    f"expected {expected_total_cycles} by {(ratio-1)*100:+.0f}%"
+                )
+
+    return (len(issues) == 0), issues
 
 
 def enforce_three_voices(code):
@@ -578,6 +659,19 @@ Sections:
         code = fix_strudel_syntax(code)
         code = enforce_three_voices(code)
         print(f"Ollama generated {len(code)} chars of Strudel code", file=sys.stderr)
+
+        # Soft validation: warn if arrange() blocks don't match the section count
+        if sections:
+            expected_total = sum(
+                max(1, round(s.get("duration", 30) * args.bpm / 240))
+                for s in sections
+            )
+            ok, issues = validate_section_alignment(code, len(sections), expected_total)
+            if not ok:
+                for issue in issues:
+                    print(f"  [section-align WARN] {issue}", file=sys.stderr)
+            else:
+                print(f"  [section-align OK] {len(sections)} sections, ~{expected_total} cycles per voice", file=sys.stderr)
     else:
         print("Ollama failed or returned no code, using fallback", file=sys.stderr)
         code = generate_fallback(args.bpm, args.key, args.genre, args.drum_kit, sections)

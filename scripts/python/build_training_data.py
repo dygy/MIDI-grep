@@ -25,11 +25,11 @@ from typing import Dict, List, Optional, Tuple
 
 # Import sound validation sets
 try:
-    from ollama_agent import VALID_SOUNDS, VALID_DRUM_BANKS, INVALID_GM_PATTERNS
+    from strudel_validation import VALID_SOUNDS, VALID_DRUM_BANKS, INVALID_GM_PATTERNS
 except ImportError:
     sys.path.insert(0, str(Path(__file__).parent))
     try:
-        from ollama_agent import VALID_SOUNDS, VALID_DRUM_BANKS, INVALID_GM_PATTERNS
+        from strudel_validation import VALID_SOUNDS, VALID_DRUM_BANKS, INVALID_GM_PATTERNS
     except ImportError:
         VALID_SOUNDS = set()
         VALID_DRUM_BANKS = set()

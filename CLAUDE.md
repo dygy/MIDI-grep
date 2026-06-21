@@ -2,6 +2,47 @@
 
 This file provides context for Claude Code when working on this project.
 
+## Working Agreement (governance)
+
+These rules govern *how* to work, independent of the audio domain.
+
+### Clarifying Questions Budget
+Ask at most ONE round of clarifying questions before taking action. If the request is ambiguous, pick the most likely interpretation, state your assumption, and proceed. Do not use `AskUserQuestion` for routine git operations, stash decisions, or small implementation choices.
+
+### Handling Local Changes
+When git operations are blocked by local changes, do NOT prompt for each option. Default: stash with a descriptive name, perform the operation, then inform the user. Only ask if the changes look like intentional uncommitted work that may be lost.
+
+### Environment Preflight
+Before any long-running run (extraction, `--iterate`, rendering, comparison) verify the environment FIRST so it doesn't fail 15 minutes in:
+- Python venv resolves (`scripts/python/.venv`) and key deps import (librosa, demucs, basic-pitch)
+- ML models are present (first run downloads ~1GB)
+- For BlackHole recording: the BlackHole device exists and a Multi-Output Device is selected (`node dist/record-strudel-blackhole.js` will silently produce empty audio otherwise)
+- For Ollama runs: `ollama serve` is up and the model is pulled
+Surface a missing dependency immediately rather than letting the run fail partway through.
+
+### Self-Review After Edits
+After code or doc changes, run a self-review pass before declaring done. Verify: (1) claims in commit messages/docs match the actual diff, (2) no over-engineering beyond the ask, (3) similarity/eval numbers cited are from an actual run, not assumed. For substantive diffs, the `/self-review` skill launches a 4-agent audit.
+
+### No Pre-Existing Issues
+NO ISSUES ARE PRE-EXISTING. If you encounter ANY issue during development/testing — broken script, failing test, wrong similarity metric — it must be fixed, not worked around.
+
+### Delegate to Domain Experts
+Specialist standards live in the domain-expert agents under `.awos/subagents/` (mirrored in `.claude/agents/domain-experts/`). Delegate, don't reinvent:
+- Go implementation → `golang-expert`
+- Python (analysis, codegen, comparison) → `python-expert`
+- Audio synthesis / DSP → `audio-dsp-expert`
+- librosa / spectral / stem ML → `ml-audio-expert`
+- Strudel pattern generation → `strudel-expert`
+- Ollama / Claude / prompt work → `llm-expert` (and the `/prompt-engineering` skill)
+- Music theory (keys, chords, arrangement) → `music-theory-expert`
+
+### Context Document Maintenance
+After meaningful changes to the pipeline (`internal/`, `scripts/python/`, `scripts/node/`), update the docs so they stay accurate:
+1. **`llms.txt`** — concise (~100-line) project overview. Update when pipelines, modes, or key directories change.
+2. **`llms-full.txt`** — comprehensive reference. Update with detailed changes: new scripts, flags, synthesis params, file paths.
+3. **`CLAUDE.md`** — this file, for build/run instructions and architecture-level guidance.
+Update triggers: new modes/genres, synthesis-parameter changes, new scripts, renderer changes, or similarity-metric changes.
+
 ## CRITICAL PRINCIPLES - ZERO HARDCODING
 
 **NEVER hardcode values. The AI must learn and generate everything.**
@@ -606,6 +647,7 @@ go build -o bin/midi-grep ./cmd/midi-grep
 | `--deep-genre` | Use deep learning (CLAP) for genre detection (default: enabled, skipped when `--genre` is specified) |
 | `--iterate N` | AI-driven improvement iterations (default: 20) |
 | `--target-similarity` | Target similarity for --iterate (0.0-1.0, default: 0.85) |
+| `--ignore-gate-stop` | Keep iterating toward `--target-similarity` even after the eval-gate floor is cleared (disables the early-success stop; auto-reject + reporting stay on) |
 
 ### Default Analysis Features (Always Enabled)
 
@@ -635,27 +677,35 @@ The `--iterate` flag enables AI-driven code improvement using Claude:
 2. Compare rendered audio with original (frequency bands, MFCC, chroma)
 3. Send comparison results to LLM (Ollama local or Claude API)
 4. LLM analyzes gaps and generates improved code
-5. Repeat until target similarity or max iterations reached
-6. Batch stem separation: run Demucs on each iteration render to produce per-iteration stems
-7. Store all runs in ClickHouse for incremental learning
-8. Generate HTML report with per-iteration stem tracks (mute buttons, shimmer loading)
+5. **Eval gate** (`eval/thresholds.yaml`): each render is scored against an absolute, genre-aware
+   similarity floor. Once any iteration clears the floor, later below-floor renders are
+   auto-rejected (reverted to best), and the loop **early-success stops** as soon as the floor is
+   cleared (no further iterations spent climbing toward the higher `--target-similarity`; pass
+   `--ignore-gate-stop` to keep climbing). The
+   final result is reported PASSED/FAILED vs the floor and recorded in `iterations.json` (`gate`
+   block) + the `improve_strudel` return dict. The gate is resilient — a missing `eval/`/pyyaml
+   disables it without breaking the run.
+6. Repeat until target similarity or max iterations reached
+7. Batch stem separation: run Demucs on each iteration render to produce per-iteration stems
+8. Store all runs in ClickHouse for incremental learning
+9. Generate HTML report with per-iteration stem tracks (mute buttons, shimmer loading)
 
 **LLM Options:**
 
 | Flag | Description |
 |------|-------------|
 | `--ollama` | Use Ollama (local, free) - **default: enabled** |
-| `--ollama-model` | Model to use (default: `llama3:8b`) |
+| `--ollama-model` | Model to use (default: `midi-grep-strudel-mistral`) |
 
 ```bash
-# Default: uses Ollama (free, local) with llama3:8b
+# Default: uses Ollama (free, local) with midi-grep-strudel-mistral
 ./bin/midi-grep extract --url "..." --iterate 5
 
 # Use Claude API instead (requires ANTHROPIC_API_KEY)
 ./bin/midi-grep extract --url "..." --iterate 5 --ollama=false
 
-# Use specific Ollama model
-./bin/midi-grep extract --url "..." --iterate 5 --ollama-model llama3:8b
+# Use a specific Ollama model (e.g. fast smoke runs)
+./bin/midi-grep extract --url "..." --iterate 5 --ollama-model llama3.1:8b
 ```
 
 **Ollama Setup (one-time):**
@@ -666,19 +716,19 @@ brew install ollama
 # Start service
 ollama serve  # or: brew services start ollama
 
-# Pull recommended model (understands music concepts)
-ollama pull llama3:8b
+# Build the default custom model (constrains hallucinations via Modelfile system prompt)
+ollama pull mistral-small
+ollama create midi-grep-strudel-mistral -f Modelfile.mistral
 ```
 
-**Tested Models:**
-| Model | Size | Speed | Music Understanding | Notes |
-|-------|------|-------|---------------------|-------|
-| `llama3:8b` | 4.7GB | Medium | ⭐⭐⭐⭐⭐ | **Recommended** - best for music + audio concepts |
-| `deepseek-coder:6.7b` | 3.8GB | Fast | ⭐⭐ | Good at JSON but code-focused |
-| `codellama:7b` | 3.8GB | Fast | ⭐⭐ | Code-focused, less musical knowledge |
-| `mistral:7b` | 4.1GB | Fast | ⭐⭐⭐⭐ | Good general model |
+**Tested Models (default chosen for 24GB RAM):**
+| Model | Size | Speed | Quality | Notes |
+|-------|------|-------|---------|-------|
+| `midi-grep-strudel-mistral` | ~13GB | Medium | ⭐⭐⭐⭐ | **Default** — `mistral-small` base + Modelfile system prompt; middle ground, fits 24GB alongside Demucs/BlackHole |
+| `midi-grep-strudel` | 42GB | Slow | ⭐⭐⭐⭐⭐ | `llama3.3:70b` base; best quality but needs ~48GB RAM (unusable on 24GB) |
+| `llama3.1:8b` | 4.9GB | Fast | ⭐⭐ | Fast smoke runs only — hallucinates sound names, weak `arrange()` structure |
 
-**Why `llama3:8b`?** The LLM needs to understand audio/music concepts ("bass sounds muddy", "mids are harsh", "drums lack punch") not just generate code. General-purpose models with broad knowledge outperform code-only models for this task.
+**Why a custom model?** The `Modelfile`/`Modelfile.mistral` SYSTEM prompt enforces the 3-voice `arrange()` structure and the sound-naming rules that stop the LLM inventing sounds like `sub_bass`. Applying it to a `mistral-small` base gives the best quality that fits 24GB RAM. The plain `llama3.1:8b` (no system prompt) hallucinates and produces sparse, low-energy arrangements.
 
 **Strudel Code Validation & Genre RAG (`scripts/python/ollama_agent.py`):**
 
@@ -846,7 +896,10 @@ When working on specific areas, the golang-expert (`.awos/subagents/golang-exper
 
 ## Notes
 
-- Python 3.11+ required for ML dependencies
+- **Python 3.11 is the target** (venv is 3.11.x). The ML stack pins us here: `basic-pitch` needs
+  TensorFlow 2.15 + `keras<3`, which do not support 3.12+. **Do NOT use 3.12-only syntax** — most
+  notably the `type X = ...` alias statement (use plain `X = ...` aliases). `StrEnum`,
+  `dataclass(slots=True)`, `Protocol`, and `X | None` are all fine on 3.11.
 - First run downloads ~1GB of ML models
 - Stem separation is CPU-intensive (1-2 min per track)
 - HTMX used for web UI - no client-side JS frameworks

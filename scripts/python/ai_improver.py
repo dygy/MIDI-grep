@@ -48,6 +48,20 @@ try:
 except ImportError:
     HAS_PARAMS_MODULE = False
 
+# Similarity eval gate (eval/thresholds.yaml). Resilient: a missing eval/ or pyyaml
+# disables gating rather than breaking the run.
+try:
+    _REPO_ROOT = Path(__file__).resolve().parents[2]
+    if str(_REPO_ROOT) not in sys.path:
+        sys.path.insert(0, str(_REPO_ROOT))
+    from eval.gate import load_thresholds, floor_for_genre, section_aware_floor_for_genre
+    _GATE_THRESHOLDS = load_thresholds()
+    HAS_GATE = True
+except Exception as _gate_exc:  # noqa: BLE001 - any failure just disables the gate
+    HAS_GATE = False
+    _GATE_THRESHOLDS = {}
+    print(f"[gate] eval gate disabled: {_gate_exc}")
+
 try:
     from llm_client import (
         build_improvement_prompt, analyze_with_ollama,
@@ -99,6 +113,54 @@ except ImportError:
     INVALID_GM_PATTERNS = []
     VALID_SOUNDS = set()
 
+# Phase 4: targeted job-based iteration (opt-in via MIDIGREP_TARGETED_ITER=1).
+try:
+    from codegen_orchestrator import regenerate_voice, splice_voice, _arrange_blocks
+    HAS_ORCH_ITER = True
+except ImportError:
+    HAS_ORCH_ITER = False
+
+
+def _sections_from_code(code: str) -> list:
+    """Read [cycles, ...] from the first orchestrated arrange() block → [{'cycles': N}, ...]."""
+    spans = _arrange_blocks(code) if HAS_ORCH_ITER else []
+    if not spans:
+        return [{"cycles": 4}]
+    s, e = spans[0]
+    cycles = [int(c) for c in re.findall(r'\[\s*(\d+)\s*,', code[s:e])]
+    return [{"cycles": c} for c in cycles] or [{"cycles": 4}]
+
+
+# Which frequency bands each voice is responsible for (for targeted gap guidance).
+_VOICE_BANDS = {
+    "bass": ["sub_bass", "bass", "low_mid"],
+    "lead": ["mid", "high_mid", "high"],
+    "drums": ["sub_bass", "bass", "high"],
+}
+
+
+def _targeted_gap_hint(voice, band_diffs, comparison, genre, bpm, tried):
+    """Actionable hint for a single-voice regeneration: translate THIS voice's band errors into
+    raise/lower guidance, then fold in proven fixes from the ClickHouse knowledge RAG."""
+    lines = []
+    for band in _VOICE_BANDS.get(voice, []):
+        diff = band_diffs.get(band, 0.0)
+        if diff <= -0.05:
+            lines.append(f"{band} too quiet ({diff*100:.0f}%) → raise gain and/or open the filter")
+        elif diff >= 0.05:
+            lines.append(f"{band} too loud (+{diff*100:.0f}%) → lower gain and/or tighten the filter")
+    hint = "; ".join(lines) if lines else "match the original's level and density more closely"
+    # Knowledge RAG: proven fixes for the current problem (directional guidance even if param
+    # names are legacy effect-function format).
+    if HAS_CH_MODULE:
+        try:
+            proven = retrieve_relevant_knowledge(comparison, genre, bpm, tried)
+            if proven:
+                hint += "\nProven fixes from past runs:\n" + proven
+        except Exception:  # noqa: BLE001
+            pass
+    return hint
+
 # Import genre-aware sound RAG
 try:
     from sound_selector import retrieve_genre_context
@@ -128,7 +190,7 @@ def _has_invalid_sounds(code: str) -> bool:
 
 # Ollama configuration
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-DEFAULT_OLLAMA_MODEL = "midi-grep-strudel"
+DEFAULT_OLLAMA_MODEL = "midi-grep-strudel-mistral"
 
 
 def map_windows_to_sections(windowed: dict, sections: list) -> list:
@@ -162,6 +224,43 @@ def map_windows_to_sections(windowed: dict, sections: list) -> list:
     # Sort worst first
     section_scores.sort(key=lambda x: x["similarity"])
     return section_scores
+
+
+def build_instrumental_reference(original_audio: str, output_dir: str) -> str:
+    """Sum bass+drums+melodic stems (NO vocals) into an instrumental reference.
+
+    The render is instrumental BY DESIGN — we don't generate the singer's voice — so comparing it
+    against the full mix (which includes vocals) unfairly penalises the missing vocal energy/spectrum.
+    Returns the instrumental.wav path, or the original full mix if the stems aren't available.
+    """
+    try:
+        import librosa
+        import soundfile as sf
+        stem_dir = Path(original_audio).parent
+        stems = [stem_dir / f"{s}.wav" for s in ("bass", "drums", "melodic")]
+        if not all(p.exists() for p in stems):
+            return original_audio
+        sr = 44100
+        mix = None
+        for p in stems:
+            y, _ = librosa.load(str(p), sr=sr, mono=True)
+            if mix is None:
+                mix = y
+            else:
+                n = min(len(mix), len(y))
+                mix = mix[:n] + y[:n]
+        if mix is None or len(mix) == 0:
+            return original_audio
+        peak = float(max(abs(mix.min()), abs(mix.max())))
+        if peak > 1.0:
+            mix = mix / peak * 0.99
+        out = Path(output_dir) / "instrumental.wav"
+        sf.write(str(out), mix, sr)
+        print(f"Built instrumental reference (bass+drums+melodic, no vocals): {out.name}")
+        return str(out)
+    except Exception as e:  # noqa: BLE001
+        print(f"Warning: could not build instrumental reference ({e}); comparing vs full mix")
+        return original_audio
 
 
 def get_audio_duration(audio_path: str) -> float:
@@ -231,7 +330,8 @@ def improve_strudel(
     metadata: Dict,
     max_iterations: int = 5,
     target_similarity: float = 0.70,
-    use_ollama: bool = False
+    use_ollama: bool = False,
+    ignore_gate_stop: bool = False
 ) -> Dict:
     """
     Main improvement loop with AI-driven synthesis parameter extraction.
@@ -244,6 +344,8 @@ def improve_strudel(
         max_iterations: Maximum improvement iterations
         target_similarity: Target similarity to reach
         use_ollama: Force using Ollama (local LLM) instead of Claude
+        ignore_gate_stop: Keep iterating toward target_similarity even after the eval-gate
+            floor is cleared (disables the early-success stop; auto-reject + reporting stay on)
 
     Returns:
         Dict with final results
@@ -298,6 +400,19 @@ def improve_strudel(
     if not artist:
         artist = detect_artist_from_path(original_audio)
 
+    # Resolve the eval-gate floor for this genre (eval/thresholds.yaml). This is an ABSOLUTE
+    # quality bar (genre-aware regression floor) on top of the relative best-tracking logic:
+    # once a render clears the floor, any later below-floor render is auto-rejected (reverted),
+    # and the final result is reported gate-passed/failed.
+    gate_floor = floor_for_genre(genre, _GATE_THRESHOLDS) if HAS_GATE else None
+    # Section-aware floor (the honest, primary signal — rewards matching the song's evolution,
+    # not just its whole-track average). When present, the gate requires BOTH floors.
+    sa_floor = section_aware_floor_for_genre(genre, _GATE_THRESHOLDS) if HAS_GATE else None
+    gate_floor_achieved = False  # flips True once any iteration clears the floor(s)
+    if gate_floor is not None:
+        sa_txt = f", section-aware {sa_floor*100:.0f}%" if sa_floor is not None else ""
+        print(f"\n--- Eval gate floor for genre '{genre or 'default'}': overall {gate_floor*100:.0f}%{sa_txt} ---")
+
     if 'arrange(' not in current_code:
         if genre:
             presets = get_genre_presets(genre)
@@ -336,9 +451,15 @@ def improve_strudel(
     previous_code = current_code
     previous_similarity = 0.0
 
-    # Check for previous runs (most recent for version numbering)
-    previous_run = get_previous_run(track_hash)
-    if previous_run:
+    # Version label MUST match the cache version dir (output_dir is e.g. ".../v012") so the report's
+    # iteration labels match the folder it lives in. Previously this used the ClickHouse run-count,
+    # which diverges from the Go cache layer's dir numbering (e.g. v012 dir showing "v9" renders).
+    _dirver = re.match(r'^v(\d+)$', Path(output_dir).name)
+    previous_run = get_previous_run(track_hash)  # still used elsewhere for baselines
+    if _dirver:
+        current_version = int(_dirver.group(1))
+        print(f"\nVersion from output dir: v{current_version}")
+    elif previous_run:
         current_version = previous_run["version"] + 1
         print(f"\nFound previous run: v{previous_run['version']} with {previous_run['similarity_overall']*100:.1f}% similarity")
     else:
@@ -392,6 +513,9 @@ def improve_strudel(
     # Get exact duration from original audio (millisecond precision)
     exact_duration = get_audio_duration(original_audio)
     print(f"Original audio duration: {exact_duration:.6f}s")
+
+    # Compare the render against the INSTRUMENTAL (no vocals) — the render is instrumental by design.
+    compare_target = build_instrumental_reference(original_audio, output_dir)
 
     # Load initial stem comparison for per-stem feedback (used in iteration prompts)
     # NOTE: Do NOT use weighted_overall as best_similarity baseline — it's a different metric
@@ -460,12 +584,29 @@ def improve_strudel(
         else:
             print("       BlackHole recorder not found, skipping render")
 
+        # Silent-render guard: a Strudel runtime error (e.g. a `"...".slow()` method-on-string crash)
+        # records FULL-LENGTH SILENCE — the file exists and has the right duration, so the old
+        # `render_path.exists()` check passed it straight into comparison, where it scored as garbage
+        # and (worse) crashed demucs (zero-std normalisation → NaN). Detect a silent render here and
+        # treat it as a failed iteration so it is rejected, not silently accepted.
+        if render_path.exists():
+            try:
+                import soundfile as _sf
+                _y, _ = _sf.read(str(render_path))
+                _peak = float(abs(_y).max()) if len(_y) else 0.0
+                if _peak < 1e-4:
+                    print(f"       ⚠ SILENT render (peak {_peak:.2e}) — Strudel likely threw at "
+                          f"runtime; rejecting this iteration")
+                    render_path.unlink(missing_ok=True)
+            except Exception as _e:  # noqa: BLE001
+                print(f"       render silence-check skipped: {_e}")
+
         # 2. Compare to original (only if render succeeded)
         if render_path.exists():
             compare_cmd = [
                 sys.executable,
                 str(Path(__file__).parent / "compare_audio.py"),
-                original_audio,
+                compare_target,  # instrumental (no vocals) — fair vs our instrumental render
                 str(render_path),
                 "-j",  # Output JSON to stdout
                 "-d", f"{iter_duration:.2f}"
@@ -495,7 +636,22 @@ def improve_strudel(
         # Extract similarity from comparison
         comp_scores = comparison.get("comparison", {})
         current_similarity = comp_scores.get("overall_similarity", 0)
-        print(f"       Similarity: {current_similarity*100:.1f}%")
+        section_aware = comp_scores.get("section_aware_similarity")  # honest temporal signal (or None)
+        sa_txt = f" | section-aware: {section_aware*100:.1f}%" if section_aware is not None else ""
+        print(f"       Similarity: {current_similarity*100:.1f}%{sa_txt}")
+
+        # Eval-gate verdict: require BOTH the overall floor AND (when available) the section-aware
+        # floor. Section-aware is the primary quality signal — a static loop can clear overall but
+        # not section-aware, so this stops the loop from "passing" on a non-evolving render.
+        overall_ok = (gate_floor is None) or (current_similarity >= gate_floor)
+        sa_ok = (sa_floor is None) or (section_aware is None) or (section_aware >= sa_floor)
+        gate_passed = overall_ok and sa_ok
+        if gate_floor is not None:
+            mark = "✓ PASS" if gate_passed else "✗ FAIL"
+            detail = f"overall {current_similarity*100:.1f}%/{gate_floor*100:.0f}%"
+            if section_aware is not None and sa_floor is not None:
+                detail += f", section-aware {section_aware*100:.1f}%/{sa_floor*100:.0f}%"
+            print(f"       Gate: {mark} ({detail})")
 
         # Track iteration data for manifest
         iter_data = {
@@ -513,6 +669,8 @@ def improve_strudel(
                 "energy": comp_scores.get("energy_similarity", 0),
                 "tempo": comp_scores.get("tempo_similarity", 0),
             },
+            "gate_floor": gate_floor,
+            "gate_passed": gate_passed,
             "phase": None,  # Set below
             "changes": [],  # Set below
             "was_best": False,  # Set below
@@ -530,9 +688,19 @@ def improve_strudel(
                 print(f"       Node.js score too low ({current_similarity*100:.1f}%), using BlackHole comparison ({blackhole_sim*100:.1f}%) for LLM")
                 comparison = blackhole_comparison
 
-        # REGRESSION CHECK: If this iteration is worse than best, revert code
-        if iteration > 0 and current_similarity < best_similarity and best_code:
-            print(f"       ✗ REGRESSION: {best_similarity*100:.1f}% → {current_similarity*100:.1f}% - reverting to best")
+        # Once any render clears the gate floor, the LLM has proven it can produce
+        # acceptable output — from then on, below-floor renders are auto-rejected.
+        if gate_passed and gate_floor is not None:
+            gate_floor_achieved = True
+
+        # REGRESSION / GATE CHECK: revert to best when this iteration is worse than best,
+        # OR when we've already cleared the gate floor and this render dropped back below it.
+        below_floor_after_passing = gate_floor_achieved and not gate_passed
+        if iteration > 0 and best_code and (current_similarity < best_similarity or below_floor_after_passing):
+            if below_floor_after_passing and current_similarity >= best_similarity:
+                print(f"       ✗ GATE REJECT: {current_similarity*100:.1f}% < floor {gate_floor*100:.0f}% (floor already achieved) - reverting to best")
+            else:
+                print(f"       ✗ REGRESSION: {best_similarity*100:.1f}% → {current_similarity*100:.1f}% - reverting to best")
             iter_data["reverted"] = True
             current_code = best_code
             with open(strudel_path, 'w') as f:
@@ -552,12 +720,30 @@ def improve_strudel(
             if worst:
                 print(f"       Worst: {worst[0].get('stem', '?')} {worst[0].get('time_range', '?')}: {worst[0].get('issues', '?')}")
 
-            # Map windowed comparison data to section indices
-            windowed = stem_comparison.get("windowed", {})
-            if windowed and sections:
-                section_scores = map_windows_to_sections(windowed, sections)
+            # Prefer section-aligned comparison (from compare_by_sections) when available;
+            # fall back to mapping fixed-window scores onto sections for older runs.
+            by_section = stem_comparison.get("by_section", {})
+            if by_section:
+                section_scores = []
+                for stem_name, sec_list in by_section.items():
+                    for ss in sec_list or []:
+                        section_scores.append({
+                            "section_idx": ss.get("section_idx", 0),
+                            "stem": stem_name,
+                            "similarity": float(ss.get("similarity", 0.0)),
+                            "time_start": ss.get("time_start"),
+                            "time_end": ss.get("time_end"),
+                            "issues": ss.get("issues", []),
+                        })
+                section_scores.sort(key=lambda x: x["similarity"])
                 if section_scores:
-                    print(f"       Section scores: worst={section_scores[0]['stem']} S{section_scores[0]['section_idx']+1} ({section_scores[0]['similarity']*100:.0f}%)")
+                    print(f"       Section scores (by_section): worst={section_scores[0]['stem']} S{section_scores[0]['section_idx']+1} ({section_scores[0]['similarity']*100:.0f}%)")
+            else:
+                windowed = stem_comparison.get("windowed", {})
+                if windowed and sections:
+                    section_scores = map_windows_to_sections(windowed, sections)
+                    if section_scores:
+                        print(f"       Section scores (windowed): worst={section_scores[0]['stem']} S{section_scores[0]['section_idx']+1} ({section_scores[0]['similarity']*100:.0f}%)")
 
         # Learn from improvement (if this iteration improved over previous)
         if iteration > 0 and current_similarity > previous_similarity:
@@ -625,8 +811,46 @@ def improve_strudel(
         print(f"       Bands: sub_bass={band_diffs.get('sub_bass',0)*100:+.0f}% bass={band_diffs.get('bass',0)*100:+.0f}% low_mid={band_diffs.get('low_mid',0)*100:+.0f}% mid={band_diffs.get('mid',0)*100:+.0f}% high={band_diffs.get('high',0)*100:+.0f}%")
         print(f"       Brightness: {brightness_ratio:.0%}  Energy: {energy_ratio:.0%}")
 
-        # Always call the LLM agent to generate improved code
-        if agent is not None:
+        # Phase 4 (opt-in): targeted job-based iteration — regenerate ONLY the worst voice via a
+        # validated orchestrator job and splice it in, instead of the agent's free-form rewrite.
+        targeted = (
+            os.environ.get("MIDIGREP_TARGETED_ITER") == "1"
+            and HAS_ORCH_ITER
+            and current_code.count("$: arrange(") == 3
+        )
+        if targeted:
+            iter_data["phase"] = "targeted_job"
+            agg = stem_comparison.get("aggregate", {}).get("per_stem", {})
+            scores = {s: agg.get(s, {}).get("overall", 1.0) for s in ["bass", "drums", "melodic"]}
+            worst_stem = min(scores, key=scores.get)
+            voice = {"melodic": "lead", "bass": "bass", "drums": "drums"}[worst_stem]
+            secs = _sections_from_code(current_code)
+            # genre drives per-role sound RAG inside the voice/drums prompts (retrieve_genre_context
+            # is called per-role by codegen_orchestrator), so no separate "rag" string is needed here.
+            octx = {"bpm": metadata.get("bpm", 120), "key": metadata.get("key", "C major"),
+                    "genre": genre, "drum_kit": metadata.get("drum_kit")}
+            tried = getattr(agent, 'tried_values', None) if agent else None
+            gap = (f"{worst_stem} is the weakest voice ({scores[worst_stem]*100:.0f}%). "
+                   + _targeted_gap_hint(voice, band_diffs, comparison, genre,
+                                        metadata.get("bpm", 120), tried))
+            print(f"       Targeted iteration: regenerating {voice} (worst stem: {worst_stem})")
+            try:
+                new_out = regenerate_voice(voice, octx, secs, gap_hint=gap)
+                spliced = splice_voice(current_code, voice, new_out, octx, secs)
+                if spliced and spliced != current_code and not _has_invalid_sounds(spliced):
+                    current_code = spliced
+                    with open(strudel_path, 'w') as f:
+                        f.write(spliced)
+                    iter_data["changes"] = [f"regenerated {voice} voice via job"]
+                    print(f"       Spliced new {voice} voice")
+                else:
+                    iter_data["changes"] = [f"targeted {voice} regen: no usable change"]
+            except Exception as e:  # noqa: BLE001
+                print(f"       Targeted iteration failed: {e} — keeping current code")
+                iter_data["changes"] = [f"targeted regen error: {e}"]
+
+        # Otherwise: call the LLM agent to generate improved code
+        elif agent is not None:
             improved = current_similarity > best_similarity
 
             # Build per-stem scores dict for the agent
@@ -751,6 +975,14 @@ def improve_strudel(
             print(f"\n    Target similarity {target_similarity*100:.0f}% reached ({current_similarity*100:.1f}%). Stopping.")
             break
 
+        # Early success: stop once the gate is cleared — but the gate now requires BOTH the overall
+        # AND the section-aware floor, so a static loop with high overall but poor temporal evolution
+        # will NOT trigger an early stop. Floors live in eval/thresholds.yaml. Disabled by --ignore-gate-stop.
+        if not ignore_gate_stop and gate_floor is not None and gate_passed:
+            sa_note = f", section-aware {section_aware*100:.1f}%" if section_aware is not None else ""
+            print(f"\n    Eval gate cleared (overall {current_similarity*100:.1f}%{sa_note}). Early-success stop.")
+            break
+
         # Detect plateau: std dev < 1% over last 5 iterations
         if len(similarity_history) >= 5:
             recent = similarity_history[-5:]
@@ -776,6 +1008,17 @@ def improve_strudel(
             print(f"\n    No changes for {consecutive_no_change} consecutive iterations. Stopping.")
             break
 
+    # Final eval-gate verdict: did the BEST render clear the genre floor?
+    final_gate_passed = (gate_floor is None) or (best_similarity >= gate_floor)
+    gate_summary = {
+        "genre": genre or "default",
+        "floor": gate_floor,
+        "section_aware_floor": sa_floor,  # primary signal floor (see eval/thresholds.yaml)
+        "best_similarity": best_similarity,
+        "passed": final_gate_passed,
+        "floor_achieved_during_run": gate_floor_achieved,
+    }
+
     # Save iteration manifest (strip code to keep JSON small - it's in .strudel files)
     iterations_manifest = []
     for it in iterations_data:
@@ -783,7 +1026,7 @@ def improve_strudel(
         iterations_manifest.append(manifest_entry)
     iterations_json_path = Path(output_dir) / "iterations.json"
     with open(iterations_json_path, 'w') as f:
-        json.dump({"iterations": iterations_manifest, "best_similarity": best_similarity}, f, indent=2)
+        json.dump({"iterations": iterations_manifest, "best_similarity": best_similarity, "gate": gate_summary}, f, indent=2)
     print(f"Saved iteration manifest: {iterations_json_path}")
 
     # Batch stem separation for all iteration renders
@@ -825,7 +1068,7 @@ def improve_strudel(
                 print(f"  Warning: stem separation failed for v{ver:03d}: {sep_result.stderr[:200]}")
         # Re-save iterations.json with stem paths
         with open(iterations_json_path, 'w') as f:
-            json.dump({"iterations": iterations_manifest, "best_similarity": best_similarity}, f, indent=2)
+            json.dump({"iterations": iterations_manifest, "best_similarity": best_similarity, "gate": gate_summary}, f, indent=2)
         print("Updated iterations.json with stem paths")
 
     # Generate final comparison charts and report
@@ -843,11 +1086,11 @@ def improve_strudel(
     if best_render.exists():
         print(f"Using render: {best_render.name}")
 
-        # Generate charts
+        # Generate charts (against the instrumental reference, consistent with the iteration compare)
         chart_cmd = [
             sys.executable,
             str(Path(__file__).parent / "compare_audio.py"),
-            original_audio,
+            compare_target,
             str(best_render),
             "-c", str(Path(output_dir) / "comparison.png")
         ]
@@ -911,7 +1154,8 @@ def improve_strudel(
         # Report expects: cache_dir/melodic.wav (original stems) + cache_dir/vNNN/ (version outputs)
         # When run standalone, output_dir may be flat (not vNNN pattern).
         # In that case, create a temporary structure for the report.
-        import re
+        # (re is imported at module top — a local import here shadowed it and crashed
+        #  the earlier re.match at function start with UnboundLocalError.)
         dir_name = Path(output_dir).name
         version_match = re.search(r'^v(\d+)$', dir_name)
 
@@ -974,12 +1218,19 @@ def improve_strudel(
     print(f"{'='*60}")
     print(f"Best similarity: {best_similarity*100:.1f}%")
     print(f"Total versions: {current_version}")
+    if gate_floor is not None:
+        verdict = "PASSED" if final_gate_passed else "FAILED"
+        print(f"Eval gate [{genre or 'default'}]: {verdict} "
+              f"(best {best_similarity*100:.1f}% vs floor {gate_floor*100:.0f}%)")
+        if not final_gate_passed:
+            print("  ⚠ Best render is BELOW the genre floor — output did not meet the quality bar.")
 
     return {
         "best_similarity": best_similarity,
         "best_code": best_code,
         "versions": current_version,
-        "track_hash": track_hash
+        "track_hash": track_hash,
+        "gate": gate_summary,
     }
 
 
@@ -997,6 +1248,9 @@ def main():
     parser.add_argument('--artist', default='', help='Artist name (for artist-specific presets)')
     parser.add_argument('--ollama', action='store_true', help='Use Ollama (local LLM) instead of Claude API')
     parser.add_argument('--ollama-model', default=DEFAULT_OLLAMA_MODEL, help=f'Ollama model to use (default: {DEFAULT_OLLAMA_MODEL})')
+    parser.add_argument('--ignore-gate-stop', action='store_true',
+                        help='Keep iterating toward --target even after the eval-gate floor is cleared '
+                             '(disables the early-success stop; auto-reject + reporting stay on)')
 
     args = parser.parse_args()
 
@@ -1019,7 +1273,8 @@ def main():
         metadata,
         max_iterations=args.iterations,
         target_similarity=args.target,
-        use_ollama=args.ollama
+        use_ollama=args.ollama,
+        ignore_gate_stop=args.ignore_gate_stop
     )
 
     print(f"\nResult: {json.dumps(result, indent=2)}")

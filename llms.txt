@@ -1,0 +1,68 @@
+# MIDI-grep
+
+> Go CLI + web app that extracts musical content from audio files / YouTube videos and generates
+> [Strudel](https://strudel.cc) live-coding code. Go orchestrates the pipeline; Python does audio
+> analysis & ML; Node/TypeScript renders Strudel to audio for verification. The system is
+> LLM-first and **never hardcodes** synthesis values — everything is learned from analysis.
+
+## Core idea
+
+Input (WAV/MP3/YouTube) → stem separation (Demucs) → analysis (librosa: BPM, key, chords) →
+LLM generates Strudel code (Ollama/Claude) → render to audio → compare to original → iterate to
+improve similarity. All outputs cached in `.cache/stems/{key}/` with output versioning (v001, …).
+
+## Pipelines (modes)
+
+- **Standard** — note transcription (Basic Pitch); best for piano/melodic.
+- **Chord** (`--chords`) — chord-progression detection; best for electronic/EDM/funk.
+- **Brazilian Funk** (`--brazilian-funk`, auto-detected) — tamborzão + 808 template.
+- **Generative** (`generative` cmd) — trains RAVE/granular neural synths for full note() control.
+
+## Key directories
+
+- `cmd/midi-grep/main.go` — CLI entrypoint (extract, serve, generative).
+- `internal/pipeline/orchestrator.go` — end-to-end pipeline; calls Python AI for codegen.
+- `internal/{audio,analysis,midi,cache,report,drums,generative}/` — Go domain packages.
+- `scripts/python/` — audio analysis, comparison, and LLM codegen (the brains).
+- `scripts/node/src/` — TypeScript Strudel renderers.
+- `eval/` — similarity gate (`thresholds.yaml`) + reference-track datasets.
+- `.awos/`, `.claude/` — agent workflow (commands, skills, domain-expert subagents).
+- `.sisyphus/` — durable plan + evidence orchestration for multi-step runs.
+
+## Code generation is LLM-first (important)
+
+**Go does NOT generate Strudel code.** All Strudel comes from Python LLM codegen:
+- `scripts/python/ollama_codegen.py` — Ollama code gen with genre-aware sound RAG.
+- `scripts/python/ollama_agent.py` — agentic LLM with per-track memory + RAG + code validation.
+- `scripts/python/ai_improver.py` — iteration loop + ClickHouse learning storage.
+Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
+
+## Rendering & comparison
+
+- **BlackHole recorder** (`scripts/node/src/record-strudel-blackhole.ts`) — RECOMMENDED; records
+  real Strudel playback → ~100% accurate audio. Use this for accept/reject decisions.
+- **Node.js synth** (`scripts/node/src/render-strudel-node.ts`) — offline emulation, ~16% similarity
+  vs BlackHole's ~65%; do NOT gate on it.
+- **`scripts/python/compare_audio.py`** — similarity via **MAE** on frequency bands (NOT cosine —
+  cosine hid 20%+ band errors). Weights: Freq 40%, MFCC 20%, Energy 15%, Brightness 15%, Tempo/Chroma 5%.
+
+## Build & run
+
+```bash
+go build -o bin/midi-grep ./cmd/midi-grep
+./bin/midi-grep extract --url "https://youtu.be/..."          # standard
+./bin/midi-grep extract --url "..." --chords --iterate 5      # chord mode, 5 AI iterations
+./bin/midi-grep serve --port 8080                             # web UI (Chi + HTMX)
+```
+
+## Working agreement
+
+- See `CLAUDE.md` → "Working Agreement": one round of clarifying questions max, env preflight before
+  long runs, self-review after edits, delegate to `.awos/subagents/` domain experts.
+- ZERO HARDCODING: gains/filters/effects come from analysis or the AI, never magic numbers.
+
+## Docs map
+
+- `CLAUDE.md` — build/run + governance + full architecture notes (canonical).
+- `llms-full.txt` — comprehensive reference (scripts, flags, params, file paths).
+- `context/product/`, `context/spec/` — AWOS product definition, roadmap, specs.

@@ -1,0 +1,27 @@
+# Reference-track dataset for the similarity eval gate.
+#
+# Each entry pins a known track to its genre and points at a comparison.json produced by a
+# real (BlackHole) render. The gate test (scripts/python/tests/test_similarity_gate.py) loads
+# this list and asserts each track's overall_similarity clears its genre floor in thresholds.yaml.
+#
+# How to add a track:
+#   1. Run an extraction that produces a BlackHole render + comparison:
+#        ./bin/midi-grep extract --url "..." --genre electro_swing
+#   2. Find the resulting comparison.json under .cache/stems/<key>/vNNN/comparison.json
+#   3. Add an entry below. `comparison` may be:
+#        - a path relative to repo root, OR
+#        - `cache_key` + `version` (the test resolves .cache/stems/<cache_key>/<version>/comparison.json)
+#
+# Entries whose comparison.json is missing are SKIPPED (not failed) so a fresh checkout's gate
+# stays green until you've generated renders locally. Commit small/curated comparison.json copies
+# under eval/datasets/fixtures/ if you want the gate to run in CI without the cache.
+
+tracks: []
+  # - name: "Caravan Palace - Lone Digger"
+  #   genre: electro_swing
+  #   cache_key: "Caravan Palace - Lone Digger (Official MV)"
+  #   version: v002
+  #
+  # - name: "Some Funk Track"
+  #   genre: brazilian_funk
+  #   comparison: eval/datasets/fixtures/some-funk-comparison.json

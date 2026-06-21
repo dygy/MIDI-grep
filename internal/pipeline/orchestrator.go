@@ -40,6 +40,7 @@ type Config struct {
 	ChordMode         bool   // Use chord-based generation (better for electronic music)
 	BrazilianFunk     bool   // Use Brazilian funk/phonk mode (tamborzão, 808 bass)
 	GenreOverride     string // Manual genre override (brazilian_funk, brazilian_phonk, retro_wave, etc.)
+	CodegenMode       string // Strudel codegen path: "single" (ollama_codegen.py) or "orchestrated" (codegen_orchestrator.py)
 	UseCache          bool   // Use stem cache (skip separation if cached)
 	StemQuality       string // Stem separation quality (fast, normal, high, best)
 	StemTimeout       time.Duration
@@ -56,6 +57,7 @@ func DefaultConfig() Config {
 		EnableDrums:       true, // Extract drums by default
 		DrumsOnly:         false,
 		DrumKit:           "tr808",
+		CodegenMode:       "orchestrated", // job-based codegen default; "single" = legacy one-shot
 		Arrange:           false,
 		UseCache:          true,     // Use stem cache by default
 		StemQuality:       "normal", // Normal quality by default
@@ -83,6 +85,7 @@ type Result struct {
 	CacheKey        string         // Cache key for this extraction
 	CacheDir        string         // Cache directory path
 	OriginalPath    string         // Path to original input audio (for comparison)
+	SectionsPath    string         // Path to smart_analysis.json (sections), if generated
 	OutputVersion   int            // Version number of this output
 	PreviousOutputs int            // Number of previous outputs in cache
 	Style           string         // Detected or specified style
@@ -397,6 +400,18 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 				o.progress.StageComplete("Using manual genre: Lo-fi")
 				cfg.SoundStyle = "lofi"
 				skipAutoDetection = true
+			case "electro_swing":
+				o.progress.StageComplete("Using manual genre: Electro Swing")
+				cfg.SoundStyle = "electronic"
+				skipAutoDetection = true
+			}
+
+			// Ensure any manual genre override propagates downstream (the eval gate
+			// and AI generator read result.Genre via --genre). Style-specific cases
+			// above may leave it unset; this covers electro_swing, jazz, and any other
+			// genre key the user passes that lacks a dedicated style mapping.
+			if result.Genre == "" {
+				result.Genre = cfg.GenreOverride
 			}
 		}
 
@@ -446,6 +461,20 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 			o.progress.Warning("Section detection failed (non-critical): %v", smartErr)
 		} else {
 			o.progress.StageComplete("Section detection complete")
+			// Persist sections in the cache dir so per-iteration comparisons can align
+			// to musical structure long after ws.Dir is cleaned up.
+			if result.CacheDir != "" {
+				stableSections := filepath.Join(result.CacheDir, "smart_analysis.json")
+				if data, readErr := os.ReadFile(smartAnalysisPath); readErr == nil {
+					if writeErr := os.WriteFile(stableSections, data, 0644); writeErr == nil {
+						result.SectionsPath = stableSections
+					}
+				}
+			}
+			if result.SectionsPath == "" {
+				// Fallback to workspace path; caller should copy if it needs persistence.
+				result.SectionsPath = smartAnalysisPath
+			}
 		}
 
 		o.progress.StageComplete("Generating Strudel code via Ollama...")
@@ -489,8 +518,13 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 			aiArgs = append(aiArgs, "--analysis-json", ws.AnalysisJSON())
 		}
 
-		// Call Ollama-powered code generator
-		aiResult, aiErr := o.runner.RunScript(ctx, "ollama_codegen.py", aiArgs...)
+		// Call Ollama-powered code generator. "orchestrated" uses the job-based
+		// codegen_orchestrator.py (small validated jobs); default "single" uses ollama_codegen.py.
+		codegenScript := "ollama_codegen.py"
+		if cfg.CodegenMode == "orchestrated" {
+			codegenScript = "codegen_orchestrator.py"
+		}
+		aiResult, aiErr := o.runner.RunScript(ctx, codegenScript, aiArgs...)
 		if aiErr != nil {
 			o.progress.Warning("AI code generation failed: %v", aiErr)
 			// Fallback: generate minimal placeholder

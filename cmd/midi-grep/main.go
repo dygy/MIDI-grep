@@ -226,6 +226,7 @@ var (
 	chordMode        bool
 	brazilianFunk    bool
 	genreOverride    string  // Manual genre override (brazilian_funk, brazilian_phonk, retro_wave, etc.)
+	codegenMode      string  // Strudel codegen path: "single" or "orchestrated" (job-based)
 	useDeepGenre     bool    // Use deep learning for genre detection
 	renderAudio      string  // Output path for rendered WAV
 	useBlackHole     bool    // Use BlackHole for 100% accurate recording (requires brew install blackhole-2ch)
@@ -236,6 +237,7 @@ var (
 	targetSimilarity float64 // Target similarity for iteration
 	useOllama        bool    // Use Ollama (local LLM) instead of Claude API
 	ollamaModel      string  // Ollama model to use
+	ignoreGateStop   bool    // Keep iterating past the eval-gate floor (disable early-success stop)
 
 	// serve flags
 	port int
@@ -311,6 +313,7 @@ func init() {
 	extractCmd.Flags().BoolVar(&chordMode, "chords", false, "Use chord-based generation (better for electronic/non-piano music)")
 	extractCmd.Flags().BoolVar(&brazilianFunk, "brazilian-funk", false, "Use Brazilian funk/phonk mode (tamborzão drums, 808 bass)")
 	extractCmd.Flags().StringVar(&genreOverride, "genre", "", "Override genre detection (brazilian_funk, brazilian_phonk, retro_wave, trance, house, lofi)")
+	extractCmd.Flags().StringVar(&codegenMode, "codegen", "orchestrated", "Strudel codegen path: single (one prompt) or orchestrated (small validated jobs)")
 	extractCmd.Flags().BoolVar(&useDeepGenre, "deep-genre", true, "Use deep learning (CLAP) for genre detection")
 	extractCmd.Flags().StringVar(&renderAudio, "render", "auto", "Render output to WAV ('auto' saves in cache dir, 'none' to disable)")
 	extractCmd.Flags().BoolVar(&useBlackHole, "blackhole", false, "Use BlackHole for 100% accurate Strudel recording (requires: brew install blackhole-2ch)")
@@ -320,7 +323,8 @@ func init() {
 	extractCmd.Flags().IntVar(&iterateCount, "iterate", 20, "AI-driven improvement iterations (default: 20)")
 	extractCmd.Flags().Float64Var(&targetSimilarity, "target-similarity", 0.99, "Target similarity for --iterate (0.99 = always run all iterations)")
 	extractCmd.Flags().BoolVar(&useOllama, "ollama", true, "Use Ollama (local LLM) - free, no API key needed")
-	extractCmd.Flags().StringVar(&ollamaModel, "ollama-model", "midi-grep-strudel", "Ollama model to use (run 'ollama create midi-grep-strudel -f Modelfile' first)")
+	extractCmd.Flags().StringVar(&ollamaModel, "ollama-model", "midi-grep-strudel-mistral", "Ollama model to use (e.g. midi-grep-strudel-mistral, llama3.1:8b, midi-grep-strudel)")
+	extractCmd.Flags().BoolVar(&ignoreGateStop, "ignore-gate-stop", false, "Keep iterating toward --target-similarity even after the eval-gate floor is cleared")
 
 	// Serve command flags
 	serveCmd.Flags().IntVarP(&port, "port", "p", 8080, "Port to listen on")
@@ -557,6 +561,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 	cfg.ChordMode = chordMode
 	cfg.BrazilianFunk = brazilianFunk
 	cfg.GenreOverride = genreOverride
+	cfg.CodegenMode = codegenMode
 	cfg.UseCache = !noCache
 	cfg.StemQuality = stemQuality
 
@@ -754,63 +759,88 @@ func runExtract(cmd *cobra.Command, args []string) error {
 			comparisonChartPath = chartPath
 		}
 
-		// Per-stem comparison (ALWAYS run - default behavior for detailed actionable feedback)
-		baseName := strings.TrimSuffix(filepath.Base(renderedPath), ".wav")
-		stems := StemPaths{
-			OriginalBass:    filepath.Join(result.CacheDir, "bass.wav"),
-			RenderedBass:    filepath.Join(outputDir, baseName+"_bass.wav"),
-			OriginalDrums:   filepath.Join(result.CacheDir, "drums.wav"),
-			RenderedDrums:   filepath.Join(outputDir, baseName+"_drums.wav"),
-			OriginalMelodic: filepath.Join(result.CacheDir, "melodic.wav"),
-			RenderedMelodic: filepath.Join(outputDir, baseName+"_melodic.wav"),
-		}
-
-		// Check if rendered stems exist (should exist from main render path)
-		// BlackHole creates MP3 stems, convert to WAV if needed
-		hasRenderedStems := false
-		for _, p := range []string{stems.RenderedBass, stems.RenderedDrums, stems.RenderedMelodic} {
-			if _, err := os.Stat(p); err == nil {
-				hasRenderedStems = true
-				break
+		// Per-stem comparison. SKIP when --iterate runs: ai_improver does the per-stem comparison +
+		// charts on the gate-approved BEST render AFTER iteration. Running it here (before iteration)
+		// is both redundant and premature — the per-stem renders don't exist yet, which used to fall
+		// through to the removed Node renderer and hard-fail ("per-stem comparison requires rendered
+		// stems but none were generated"). When not iterating, run it and separate via demucs.
+		if iterateCount == 0 {
+			baseName := strings.TrimSuffix(filepath.Base(renderedPath), ".wav")
+			stems := StemPaths{
+				OriginalBass:    filepath.Join(result.CacheDir, "bass.wav"),
+				RenderedBass:    filepath.Join(outputDir, baseName+"_bass.wav"),
+				OriginalDrums:   filepath.Join(result.CacheDir, "drums.wav"),
+				RenderedDrums:   filepath.Join(outputDir, baseName+"_drums.wav"),
+				OriginalMelodic: filepath.Join(result.CacheDir, "melodic.wav"),
+				RenderedMelodic: filepath.Join(outputDir, baseName+"_melodic.wav"),
 			}
-			// Check for MP3 version and convert if WAV doesn't exist
-			mp3Path := strings.TrimSuffix(p, ".wav") + ".mp3"
-			if _, err := os.Stat(mp3Path); err == nil {
-				// Convert MP3 to WAV using ffmpeg
-				cmd := exec.Command("ffmpeg", "-y", "-i", mp3Path, p)
-				if err := cmd.Run(); err == nil {
+
+			// Check if rendered stems exist (should exist from main render path)
+			// BlackHole creates MP3 stems, convert to WAV if needed
+			hasRenderedStems := false
+			for _, p := range []string{stems.RenderedBass, stems.RenderedDrums, stems.RenderedMelodic} {
+				if _, err := os.Stat(p); err == nil {
 					hasRenderedStems = true
+					break
+				}
+				// Check for MP3 version and convert if WAV doesn't exist
+				mp3Path := strings.TrimSuffix(p, ".wav") + ".mp3"
+				if _, err := os.Stat(mp3Path); err == nil {
+					// Convert MP3 to WAV using ffmpeg
+					cmd := exec.Command("ffmpeg", "-y", "-i", mp3Path, p)
+					if err := cmd.Run(); err == nil {
+						hasRenderedStems = true
+					}
 				}
 			}
-		}
 
-		// Fallback: Generate stem files if they don't exist
-		if !hasRenderedStems {
-			strudelFile := filepath.Join(outputDir, "output.strudel")
-			if _, err := os.Stat(strudelFile); err == nil {
-				fmt.Println("       Generating stem files for per-stem comparison...")
-				stemOutputPath := filepath.Join(outputDir, baseName+".wav")
-				configPath := filepath.Join(outputDir, "synth_config.json")
-				if err := renderStrudelNodeJS(strudelFile, stemOutputPath, audioDuration, true, configPath); err != nil {
-					// Non-fatal - continue without per-stem comparison
-					fmt.Printf("       Warning: Could not generate stem files: %v\n", err)
+			// Fallback: separate the rendered MIX into stems via demucs (the Node renderer was removed).
+			// The full-mix render exists at <outputDir>/<baseName>.wav; separating it with the "render"
+			// prefix produces render_{bass,drums,melodic}.{mp3,wav} that the loop above then picks up.
+			if !hasRenderedStems {
+				renderMix := filepath.Join(outputDir, baseName+".wav")
+				if _, err := os.Stat(renderMix); err == nil {
+					fmt.Println("       Separating rendered mix into stems (demucs)...")
+					python := findPython(findScriptsDir())
+					sep := filepath.Join(findScriptsDir(), "separate.py")
+					sepCmd := exec.Command(python, sep, renderMix, outputDir, "--mode", "full", "--prefix", "render")
+					sepCmd.Stdout = os.Stdout
+					sepCmd.Stderr = os.Stderr
+					if err := sepCmd.Run(); err != nil {
+						fmt.Printf("       Warning: Could not separate stems: %v\n", err)
+					}
+					// Re-check (demucs writes .mp3; convert to .wav for the comparison if needed)
+					for _, p := range []string{stems.RenderedBass, stems.RenderedDrums, stems.RenderedMelodic} {
+						if _, err := os.Stat(p); err == nil {
+							hasRenderedStems = true
+							break
+						}
+						mp3Path := strings.TrimSuffix(p, ".wav") + ".mp3"
+						if _, err := os.Stat(mp3Path); err == nil {
+							if exec.Command("ffmpeg", "-y", "-i", mp3Path, p).Run() == nil {
+								hasRenderedStems = true
+							}
+						}
+					}
+				}
+			}
+
+			// Per-stem comparison is best-effort (NOT fatal): the overall comparison + report still
+			// provide value, and when --iterate runs ai_improver produces the authoritative per-stem
+			// charts on the final render anyway.
+			if !hasRenderedStems {
+				fmt.Println("       Warning: no rendered stems available — skipping per-stem comparison")
+			} else {
+				fmt.Println("       Running per-stem comparison...")
+				stemConfigPath := filepath.Join(outputDir, "synth_config.json")
+				if err := generateStemComparison(stems, outputDir, findScriptsDir(), audioDuration, stemConfigPath, result.SectionsPath); err != nil {
+					fmt.Printf("       Warning: per-stem comparison failed: %v\n", err)
 				} else {
-					hasRenderedStems = true
+					fmt.Printf("       Per-stem comparison charts: %s/chart_stem_*.png\n", outputDir)
 				}
 			}
-		}
-
-		// Run per-stem comparison (always - MUST succeed)
-		if !hasRenderedStems {
-			return fmt.Errorf("per-stem comparison requires rendered stems but none were generated")
-		}
-		fmt.Println("       Running per-stem comparison...")
-		stemConfigPath := filepath.Join(outputDir, "synth_config.json")
-		if err := generateStemComparison(stems, outputDir, findScriptsDir(), audioDuration, stemConfigPath); err != nil {
-			return fmt.Errorf("per-stem comparison failed: %w", err)
-		}
-		fmt.Printf("       Per-stem comparison charts: %s/chart_stem_*.png\n", outputDir)
-	}
+		} // end if iterateCount == 0
+	} // end if renderedPath != "" && result.CacheDir != ""
 
 	// AI-driven improvement iterations
 	if iterateCount > 0 && renderedPath != "" && result.OriginalPath != "" {
@@ -834,70 +864,20 @@ func runExtract(cmd *cobra.Command, args []string) error {
 			targetSimilarity,
 			useOllama,
 			ollamaModel,
+			ignoreGateStop,
 			findScriptsDir(),
 		); err != nil {
 			fmt.Printf("[AI] Warning: AI improvement failed: %v\n", err)
 		} else {
 			fmt.Println("[AI] Improvement complete")
-			// Re-generate comparison chart with new render
-			newRenderPath := filepath.Join(versionDir, fmt.Sprintf("render_v%03d.wav", result.OutputVersion+iterateCount))
-			if _, err := os.Stat(newRenderPath); err == nil {
-				renderedPath = newRenderPath
-			}
-
-			// Re-render stems with improved code and re-run comparison
-			improvedStrudelPath := filepath.Join(versionDir, "output.strudel")
-			if _, err := os.Stat(improvedStrudelPath); err == nil {
-				fmt.Println("[AI] Re-rendering with BlackHole (real Strudel audio)...")
-				baseName := strings.TrimSuffix(filepath.Base(renderedPath), ".wav")
-				stemOutputPath := filepath.Join(versionDir, baseName+"_final.wav")
-
-				// Try BlackHole first, fall back to Node.js
-				renderErr := renderStrudelBlackHole(improvedStrudelPath, stemOutputPath, audioDuration)
-				if renderErr != nil {
-					fmt.Printf("       BlackHole failed, trying Node.js: %v\n", renderErr)
-					configPath := filepath.Join(versionDir, "synth_config.json")
-					renderErr = renderStrudelNodeJS(improvedStrudelPath, stemOutputPath, audioDuration, true, configPath)
-				}
-				if renderErr != nil {
-					fmt.Printf("       Warning: Could not re-render improved code: %v\n", renderErr)
-				} else if _, err := os.Stat(stemOutputPath); err == nil {
-					// Render succeeded - copy as canonical render.wav so report uses improved audio
-					canonicalRender := filepath.Join(versionDir, "render.wav")
-					if srcData, err := os.ReadFile(stemOutputPath); err == nil {
-						if err := os.WriteFile(canonicalRender, srcData, 0644); err == nil {
-							fmt.Printf("       Updated render.wav with improved code\n")
-							renderedPath = canonicalRender
-						}
-					}
-
-					// Overwrite comparison.png (and comparison.json) with improved render data
-					fmt.Println("[AI] Running comparison on improved render...")
-					chartPath := filepath.Join(versionDir, "comparison.png")
-					configPath := filepath.Join(versionDir, "synth_config.json")
-					if err := generateComparisonChart(result.OriginalPath, stemOutputPath, chartPath, configPath, findScriptsDir()); err != nil {
-						fmt.Printf("       Warning: Final comparison failed: %v\n", err)
-					} else {
-						fmt.Printf("       Updated comparison: %s\n", chartPath)
-					}
-
-					// Re-run per-stem comparison with improved stems
-					// BlackHole render already separated stems with --prefix render
-					finalStems := StemPaths{
-						OriginalBass:    filepath.Join(result.CacheDir, "bass.wav"),
-						RenderedBass:    filepath.Join(versionDir, "render_bass.wav"),
-						OriginalDrums:   filepath.Join(result.CacheDir, "drums.wav"),
-						RenderedDrums:   filepath.Join(versionDir, "render_drums.wav"),
-						OriginalMelodic: filepath.Join(result.CacheDir, "melodic.wav"),
-						RenderedMelodic: filepath.Join(versionDir, "render_melodic.wav"),
-					}
-					fmt.Println("[AI] Re-running per-stem comparison...")
-					if err := generateStemComparison(finalStems, versionDir, findScriptsDir(), audioDuration, configPath); err != nil {
-						fmt.Printf("       Warning: Per-stem comparison failed: %v\n", err)
-					} else {
-						fmt.Printf("       Updated stem comparison charts\n")
-					}
-				}
+			// Canonical artifact: ai_improver already wrote the gate-approved BEST iteration's
+			// render.wav + comparison.json + comparison.png + per-stem charts + stems. Trust those.
+			// Do NOT re-render here — a fresh BlackHole render would differ from the render the gate
+			// judged, making the report disagree with the gate (the old gate/report mismatch). Just
+			// point the report at the canonical render.
+			canonicalRender := filepath.Join(versionDir, "render.wav")
+			if _, err := os.Stat(canonicalRender); err == nil {
+				renderedPath = canonicalRender
 			}
 		}
 	}
@@ -1426,8 +1406,13 @@ type StemPaths struct {
 	RenderedMelodic string
 }
 
-// generateStemComparison runs per-stem comparison with time-windowed analysis
-func generateStemComparison(stems StemPaths, outputDir, scriptsDir string, duration float64, configPath string) error {
+// generateStemComparison runs per-stem comparison with time-windowed analysis.
+//
+// When sectionsPath points at a smart_analysis.json, comparison is also broken
+// down by musical section (intro/verse/drop) so the output reflects how well
+// the rendered code tracks the original's structure, not just full-mix averages.
+// Pass "" for sectionsPath to skip section-aware mode.
+func generateStemComparison(stems StemPaths, outputDir, scriptsDir string, duration float64, configPath, sectionsPath string) error {
 	script := filepath.Join(scriptsDir, "compare_audio.py")
 	if _, err := os.Stat(script); os.IsNotExist(err) {
 		return fmt.Errorf("compare_audio.py not found")
@@ -1440,6 +1425,13 @@ func generateStemComparison(stems StemPaths, outputDir, scriptsDir string, durat
 	if configPath != "" {
 		if _, err := os.Stat(configPath); err == nil {
 			args = append(args, "--config", configPath)
+		}
+	}
+
+	// Pass section boundaries so comparison can align to musical structure
+	if sectionsPath != "" {
+		if _, err := os.Stat(sectionsPath); err == nil {
+			args = append(args, "--sections-json", sectionsPath)
 		}
 	}
 
@@ -1915,6 +1907,7 @@ func runAIImprover(
 	target float64,
 	useOllama bool,
 	ollamaModel string,
+	ignoreGateStop bool,
 	scriptsDir string,
 ) error {
 	script := filepath.Join(scriptsDir, "ai_improver.py")
@@ -1941,6 +1934,10 @@ func runAIImprover(
 		if ollamaModel != "" {
 			args = append(args, "--ollama-model", ollamaModel)
 		}
+	}
+
+	if ignoreGateStop {
+		args = append(args, "--ignore-gate-stop")
 	}
 
 	cmd := exec.Command(python, args...)

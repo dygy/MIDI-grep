@@ -1,0 +1,151 @@
+# MIDI-grep — Comprehensive Reference
+
+Concise overview: see `llms.txt`. Build/run + governance: see `CLAUDE.md`. This file is the
+detailed reference for scripts, flags, synthesis parameters, and file paths. Keep it in sync after
+meaningful changes to `internal/`, `scripts/python/`, or `scripts/node/` (see CLAUDE.md → Context
+Document Maintenance).
+
+## 1. Architecture
+
+- **Language**: Go 1.21+ (CLI/orchestration), Python 3.11+ (audio + ML + LLM), TypeScript/Node (rendering).
+- **CLI**: Cobra. **Web**: Chi + HTMX + Go templates + SSE (no JS frameworks).
+- **Audio**: demucs (stems), basic-pitch (transcription), librosa (analysis).
+- **Rendering**: BlackHole recording of real Strudel (primary) or node-web-audio-api synthesis (fallback).
+- **Learning store**: ClickHouse (`midi_grep.runs`, `midi_grep.knowledge`).
+
+Go orchestrates; Python is the brain (analysis + ALL Strudel codegen). **Go does not generate Strudel.**
+
+## 2. Pipelines
+
+### Standard (note transcription) — piano/melodic
+Input → Demucs stems → librosa BPM/key → Basic Pitch MIDI → cleanup/quantize → Strudel (bar arrays + fx).
+
+### Chord (`--chords`) — electronic/EDM/funk
+Input → melodic stem → smart_analyze (tempo, key, chords, sections) → Strudel (chords + bass + drums).
+
+### Brazilian Funk (`--brazilian-funk`, auto-detected) — funk carioca/phonk
+Detection: BPM 125–155 (or half-time 85–95) + vocal-range notes + short durations + low bass.
+Template: tamborzão drums + 808 bass + synth stabs.
+
+### Generative (`generative`/`gen`/`rave` command) — neural synths
+Stems → timbre embedding (OpenL3/CLAP) → model search (threshold 0.88) → reuse or train
+(granular = minutes, RAVE = hours) → GitHub sync → Strudel note() control with trained models.
+
+## 3. CLI flags (extract)
+
+| Flag | Description |
+|------|-------------|
+| `--chords` | Chord-based generation (electronic/non-piano) |
+| `--no-cache` | Skip stem cache, force fresh extraction |
+| `--drums` / `--drums-only` | Include / only drums |
+| `--style` | auto, piano, synth, electronic, house, … |
+| `--quantize` | 4, 8, 16 |
+| `--simplify` | Simplify notes (default on) |
+| `--drum-kit` | tr808, tr909, linn, acoustic, lofi |
+| `--render` | `auto` (default), custom path, or `none`. Always outputs stems |
+| `--brazilian-funk` | Force Brazilian funk mode |
+| `--genre` | Override: brazilian_funk, brazilian_phonk, retro_wave, synthwave, trance, house, lofi, jazz |
+| `--deep-genre` | CLAP DL genre detection (default on; skipped if `--genre` given) |
+| `--iterate N` | AI improvement iterations (default 20) |
+| `--target-similarity` | Target for `--iterate` (default 0.85) |
+| `--ollama` / `--ollama-model` | Use Ollama (default on) / model (default `midi-grep-strudel-mistral`) |
+| `--ignore-gate-stop` | Keep iterating past the eval-gate floor toward `--target-similarity` (disables early-success stop) |
+| `--codegen` | `orchestrated` (default; job-based, validated) or `single` (legacy one-shot ollama_codegen) |
+
+Generative flags: `--mode granular|rave`, `--models`, `--github`, `--threshold`, `--epochs`, `--grain-ms`.
+
+## 4. Python scripts (`scripts/python/`)
+
+| Script | Role |
+|--------|------|
+| `separate.py` | Demucs stems (melodic/bass/drums/vocals); stem cache invalidates on change |
+| `analyze.py` / `smart_analyze.py` | BPM/key with candidates / chord+section detection |
+| `transcribe.py`, `cleanup.py` | Basic Pitch → MIDI, then quantization |
+| `detect_drums.py` | Drum onset detection/classification |
+| `detect_genre_dl.py` / `detect_genre_essentia.py` | CLAP / Essentia genre detection |
+| `codegen_orchestrator.py` | **DEFAULT codegen** (`--codegen orchestrated`): job-based — structure/bass/lead/drums jobs, each JSON validated + retried, deterministic assembler guarantees 3-voice arrange()+setcps; per-section gains for build/drop dynamics; writes job_run.json |
+| `job_runner.py` | Generic job DAG runner: JobSpec/JobResult, topo order, per-job validate→retry≤2 (error fed back)→logged fallback |
+| `strudel_validation.py` | **Single source of truth** for valid sounds/banks/methods + corrections (tr808→RolandTR808) + `validate_code()`; used by all codegen paths |
+| `ollama_codegen.py` | LEGACY single-shot codegen (`--codegen single`); genre sound RAG in `build_prompt()`; `enforce_three_voices()`; `fix_strudel_syntax()` |
+| `ollama_agent.py` | Agentic LLM (iteration): per-track memory, genre RAG, `_validate_code()` (delegates to strudel_validation), `splice_voices()` |
+| `ai_improver.py` | Iteration loop + ClickHouse learning; skips iteration on validation failure |
+| `ai_code_generator.py` | Rule-based generator (legacy/fallback to Ollama) |
+| `compare_audio.py` | Rendered-vs-original similarity (MAE freq balance — see §6); `--config` for tempo tolerance |
+| `spectrogram_analyzer.py` | Mel-spectrogram deep analysis → actionable dB-diff insights for prompts |
+| `sound_selector.py` | Catalog: 67 drum machines, 128 GM instruments, 17 genre palettes; `retrieve_genre_context(genre)` RAG (~40 tokens) |
+| `thin_patterns.py` | Pattern-density control to match onset density |
+| `generate_report.py` | Self-contained HTML report (DAW player, isolated stem groups, shimmer loading) |
+| `audio_to_strudel_params.py` | AI effect-parameter suggestion from spectral/dynamic analysis |
+| `rave/` | RAVE generative pipeline (cli, pipeline, trainer, repository, timbre_embeddings) |
+
+## 5. Node/TypeScript renderers (`scripts/node/src/`)
+
+- `record-strudel-blackhole.ts` — **primary**. Records real Strudel from `strudel.dygy.app/embed`
+  via BlackHole + ffmpeg, browser hidden offscreen. ~100% accurate. Key gotchas: insert code via
+  CodeMirror `cmView.view.dispatch` (not textContent); call `setSinkId()` on AudioContext AFTER
+  clicking play; `--autoplay-policy=no-user-gesture-required`; default (not incognito) context;
+  `headless:false`. Leading-silence fix: ffmpeg `silenceremove=start_periods=1:...`.
+- `render-strudel-node.ts` — offline synthesis (synthKick/Snare/Hihat/Bass/Lead/High); ~72% max
+  similarity after 808 fix but ~16% vs BlackHole baseline. Build: `cd scripts/node && npm run build`.
+
+Node voice-gain defaults (Brazilian funk tuned): bass {gain 0.6, lpf 400, hpf 30, sub_octave 0.5},
+mid {0.5, lpf 5k, hpf 200}, high {0.4, lpf 8k, hpf 400}, drums {0.7, transient_boost 0.4}, 30Hz master HPF.
+808 kicks: pitch env to 35Hz, no HPF (let sub through). Soft saturation: `tanh(x*3.0)`.
+
+## 6. Similarity calculation (compare_audio.py)
+
+Uses **MAE** (mean absolute error) on frequency bands, NOT cosine — cosine hid 20%+ band errors
+(showed 95% when sub_bass was −25% off). Penalty if any band >15% off. Weights:
+Frequency Balance **40%**, MFCC 20%, Energy 15%, Brightness 15%, Tempo 5%, Chroma 5%.
+Tracks `band_differences`, `worst_band_diff`. Current: Electro Swing ~67%, Russian Hip-Hop ~59%.
+Target: 80%+ across genres via AI learning, not hardcoding.
+
+## 7. Caching & output (`.cache/stems/{key}/`)
+
+Keyed by URL or file hash. Stems: melodic/drums/bass/vocals.wav + `.version`. Per output version
+`v001/`: output.strudel, metadata.json, render.wav, per-iteration render/stem files, iterations.json,
+comparison.json, charts, ai_params.json, synth_config.json, report.html.
+
+## 8. ClickHouse learning
+
+- `midi_grep.runs` — every render attempt (track_hash, version, similarity_*, strudel_code, parameters, genre, bpm, key_type).
+- `midi_grep.knowledge` — learned param deltas (parameter_name, old/new, similarity_improvement, confidence, context).
+Local: `./bin/clickhouse local --path .clickhouse/db --query "..."`. Do NOT clear — it's learning data.
+
+## 9. LLM setup (Ollama)
+
+`brew install ollama` → `ollama serve` → `ollama pull mistral-small` → `ollama create midi-grep-strudel-mistral -f Modelfile.mistral`.
+Default model is **`midi-grep-strudel-mistral`** (mistral-small base + Modelfile system prompt that enforces 3-voice
+`arrange()` structure and sound-naming rules — chosen as the middle ground that fits 24GB RAM; the 70B `midi-grep-strudel`
+needs ~48GB, and plain `llama3.1:8b` hallucinates). Validation rejects invalid methods (`.peak(`, `.volume(`, `.eq(`, …)
+and hallucinated sound names (`gm_pad_N_*` → `gm_pad_*`, `gm_electric_piano_1` → `gm_epiano1`, etc.).
+Genre-aware sound RAG injects ~15 relevant sounds (~40 tokens) instead of the full 800-token catalog.
+
+## 10. Go packages (`internal/`)
+
+`audio/` (input, stems, youtube), `analysis/` (BPM/key), `midi/` (transcribe, cleanup), `pipeline/`
+(orchestrator — calls Python AI), `server/` (Chi + HTMX + jobs + SSE), `exec/` (Python subprocess
+runner; auto-detects `scripts/python/.venv`; set `PYTHONUNBUFFERED=1`), `cache/`, `drums/`,
+`report/` (Go HTML report generator), `generative/` (RAVE Go wrapper).
+
+Genre auto-detection in orchestrator.go: `shouldUseBrazilianFunkMode()`,
+`shouldUseBrazilianPhonkMode()`, `shouldUseRetroWaveMode()`; `--genre` bypasses detection.
+
+## 11. Agent workflow & orchestration
+
+- `.awos/` — AWOS commands (product, roadmap, spec, tech, tasks, implement, architecture, qa,
+  verify) + templates; `subagents/` domain experts (golang, python, audio-dsp, ml-audio, strudel,
+  llm, music-theory, react, kotlin).
+- `.claude/skills/` — skill-creator, self-review, prompt-engineering, sisyphus-plan, docs-that-work,
+  modern-python-development, pytest-best-practices, python-testing-patterns, typescript-development, wt.
+- `.sisyphus/` — durable plan + evidence orchestration (see `.claude/skills/sisyphus-plan/`).
+- `eval/` — `thresholds.yaml` similarity gate (per-genre floors) + `gate.py` + reference-track
+  datasets; gate runs in pytest AND is wired into the `--iterate` loop (`ai_improver.py`): renders
+  below the genre floor are auto-rejected once the floor has been cleared, the loop early-success
+  stops as soon as the floor is cleared, and the run is reported PASSED/FAILED with a `gate` block
+  in `iterations.json`.
+
+## 12. Testing
+
+`go test ./...`; `cd scripts/python && .venv/bin/python -m pytest tests/ -v`;
+eval gate: `pytest scripts/python/tests/test_similarity_gate.py`.

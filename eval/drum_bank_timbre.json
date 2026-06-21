@@ -1,0 +1,42 @@
+{
+  "AkaiLinn": {
+    "attack": 0.1006,
+    "brightness": 0.6697,
+    "warmth": 1.0
+  },
+  "AkaiMPC60": {
+    "attack": 0.0701,
+    "brightness": 0.6808,
+    "warmth": 1.0
+  },
+  "EmuSP12": {
+    "attack": 0.0967,
+    "brightness": 0.6278,
+    "warmth": 1.0
+  },
+  "LinnDrum": {
+    "attack": 0.1114,
+    "brightness": 0.5716,
+    "warmth": 1.0
+  },
+  "OberheimDMX": {
+    "attack": 0.1115,
+    "brightness": 0.604,
+    "warmth": 1.0
+  },
+  "RolandTR707": {
+    "attack": 0.1073,
+    "brightness": 0.5259,
+    "warmth": 1.0
+  },
+  "RolandTR808": {
+    "attack": 0.0997,
+    "brightness": 0.6533,
+    "warmth": 1.0
+  },
+  "RolandTR909": {
+    "attack": 0.1007,
+    "brightness": 0.6879,
+    "warmth": 1.0
+  }
+}
