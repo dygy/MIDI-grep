@@ -49,6 +49,13 @@ try:
 except ImportError:
     HAS_SOUND_SELECTOR = False
 
+# Import genre sidechain (kick-ducks-bass) instruction
+try:
+    from synth_profiles import sidechain_instruction
+except ImportError:
+    def sidechain_instruction(genre):
+        return ""
+
 # Import ClickHouse best-run lookup
 try:
     from ai_improver import get_best_run, get_track_hash
@@ -206,7 +213,7 @@ RULES:
 2. Each `$:` has ONE arrange() with ALL sections.
 3. Bass: note() octave 2. Lead: note() octave 4. Drums: s() with .bank().
 4. Use ONLY valid sounds from the list above.
-{"5. Apply swing timing for the swung feel." if swing_ratio > 1.1 else ""}
+{"5. Apply swing timing for the swung feel." if swing_ratio > 1.1 else ""}{sidechain_instruction(genre)}
 Output ONLY the code in a ```javascript block. No explanation."""
 
     return prompt

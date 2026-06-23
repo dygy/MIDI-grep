@@ -705,7 +705,7 @@ func runExtract(cmd *cobra.Command, args []string) error {
 					// Pass ORIGINAL audio for AI synthesis analysis (proper frequency balance)
 					// Using melodic stem misses bass content - we need full mix for proper gains
 					originalForAnalysis := result.OriginalPath
-					if err := renderWithGranularModels(strudelFile, modelsDir, audioPath, feedbackPath, originalForAnalysis, bpm, duration, findScriptsDir()); err != nil {
+					if err := renderWithGranularModels(strudelFile, modelsDir, audioPath, feedbackPath, originalForAnalysis, bpm, duration, result.Genre, findScriptsDir()); err != nil {
 						fmt.Printf("       Warning: Granular render failed: %v, falling back to iterative...\n", err)
 					} else {
 						fmt.Printf("       Render complete (granular models): %s\n", audioPath)
@@ -1306,7 +1306,7 @@ func trainGranularModels(cacheDir, modelsDir, scriptsDir string) error {
 }
 
 // renderWithGranularModels renders Strudel code using AI-analyzed synthesis parameters via Node.js
-func renderWithGranularModels(strudelFile, modelsDir, outputPath, aiParamsPath, originalAudioPath string, bpm float64, duration float64, scriptsDir string) error {
+func renderWithGranularModels(strudelFile, modelsDir, outputPath, aiParamsPath, originalAudioPath string, bpm float64, duration float64, genre string, scriptsDir string) error {
 	// Resolve all paths to absolute
 	scriptsDir, _ = filepath.Abs(scriptsDir)
 	strudelFile, _ = filepath.Abs(strudelFile)
@@ -1321,8 +1321,11 @@ func renderWithGranularModels(strudelFile, modelsDir, outputPath, aiParamsPath, 
 		if _, err := os.Stat(analyzeScript); err == nil {
 			fmt.Println("       Analyzing audio for AI-driven synthesis parameters...")
 			python := findPython(scriptsDir)
-			analyzeCmd := exec.Command(python, analyzeScript, originalAudioPath,
-				"-o", synthConfigPath, "-d", "60")
+			analyzeArgs := []string{analyzeScript, originalAudioPath, "-o", synthConfigPath, "-d", "60"}
+			if genre != "" {
+				analyzeArgs = append(analyzeArgs, "--genre", genre)
+			}
+			analyzeCmd := exec.Command(python, analyzeArgs...)
 			analyzeCmd.Stderr = os.Stderr
 			if err := analyzeCmd.Run(); err == nil {
 				fmt.Println("       AI synthesis config generated")

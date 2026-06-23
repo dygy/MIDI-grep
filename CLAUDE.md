@@ -430,6 +430,7 @@ midi-grep/
 │       ├── ai_learning_optimizer.py # AI learning optimization
 │       ├── spectrogram_analyzer.py # Mel spectrogram deep analysis for AI
 │       ├── sound_selector.py   # Complete sound catalog (67 drums, 128 GM)
+│       ├── synth_profiles.py   # Per-genre synthesis profiles + sidechain depth/instruction
 │       ├── thin_patterns.py    # Pattern density control
 │       ├── render_with_models.py # Render using trained granular models
 │       ├── iterative_render.py # AI-driven iterative audio refinement

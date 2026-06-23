@@ -73,6 +73,7 @@ Generative flags: `--mode granular|rave`, `--models`, `--github`, `--threshold`,
 | `compare_audio.py` | Rendered-vs-original similarity (MAE freq balance — see §6); `--config` for tempo tolerance |
 | `spectrogram_analyzer.py` | Mel-spectrogram deep analysis → actionable dB-diff insights for prompts |
 | `sound_selector.py` | Catalog: 67 drum machines, 128 GM instruments, 17 genre palettes; `retrieve_genre_context(genre)` RAG (~40 tokens) |
+| `synth_profiles.py` | Per-genre synth character (`apply_genre_profile`): nudges bass gain / sub_octave_gain / master.hpf / drums transient on top of analysis-derived `synth_config.json`. Also `get_sidechain_depth(genre)` + `sidechain_instruction(genre)` (kick-ducks-bass). Applied via `analyze_synth_params.py --genre` (genre passed from Go). |
 | `thin_patterns.py` | Pattern-density control to match onset density |
 | `generate_report.py` | Self-contained HTML report (DAW player, isolated stem groups, shimmer loading) |
 | `audio_to_strudel_params.py` | AI effect-parameter suggestion from spectral/dynamic analysis |

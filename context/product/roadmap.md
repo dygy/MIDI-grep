@@ -367,16 +367,18 @@ _Fixing the core audio quality issues blocking high similarity scores._
 
 ### 🟠 High Priority (Blocking 85%+ Similarity)
 
-- [ ] **Genre-Specific Synthesis Configs**
-  - [ ] **Brazilian Funk:** Heavy 808 bass (gain 1.5), punchy kick, minimal mids
-  - [ ] **Electro Swing:** Brass emphasis, piano mids, swing timing
-  - [ ] **House/Techno:** 4-on-floor kick, sidechain bass, bright leads
-  - [ ] **Lo-Fi:** Vinyl noise, tape saturation, reduced highs
+- [x] **Genre-Specific Synthesis Configs** ✅ (Jun 2026)
+  - [x] **Profile layer:** `scripts/python/synth_profiles.py` applies per-genre character on top of the analysis-derived `synth_config.json` (baseline stays audio-driven — genre only nudges gain/sub/master.hpf/transient). Plumbed via `analyze_synth_params.py --genre`, fed `result.Genre` from Go. Read by the existing `dist/` Node renderer (no TS revive needed).
+  - [x] **Brazilian Funk:** bass gain ×1.25, sub_octave_gain 0.60, drums transient_boost 0.50, master.hpf 20
+  - [x] **Electro Swing:** lighter sub (0.25), brighter highs (×1.10), high_shelf_boost +2dB, master.hpf 40
+  - [x] **House/Techno:** punchy drums, sub_octave 0.40, sidechain depth 0.70-0.75
+  - [x] **Lo-Fi:** highs rolled off (×0.70), modest sub, master.hpf 40
+  - [x] **Phonk/DnB/Trance/Synthwave/Jazz/Classical:** character profiles added
 
-- [ ] **Sub-Bass Synthesis**
-  - [ ] **Lower Frequency Reach:** Current synthesis not reaching 20-60Hz properly
-  - [ ] **Sub-Octave Mix:** sub_bass band chronically 15-17% under target
-  - [ ] **808 Sub Mode:** Add dedicated sub-bass oscillator for bass voice
+- [ ] **Sub-Bass Synthesis** ✅ PARTIAL (Jun 2026)
+  - [x] **Sub-Octave Mix:** genre profiles raise `sub_octave_gain` (0.6-0.65 for funk/phonk/dnb) and drop `master.hpf` to 20Hz — read by the `dist/` renderer
+  - [x] **LLM bias:** iteration prompt rule 7 now steers bass to octave-1 / lower lpf / deeper sound when sub_bass is under target
+  - [ ] **Dedicated 20-60Hz oscillator:** blocked — needs reviving the deleted `render-strudel-node.ts`; sub coverage currently via config + codegen instead
 
 - [x] **ClickHouse Learning Application** ✅ (Feb 2026)
   - [x] **Apply Stored Knowledge:** Best code from ClickHouse now written to strudel_path
@@ -390,9 +392,9 @@ _Fixing the core audio quality issues blocking high similarity scores._
   - [x] **Reduced Hallucinations:** LLM only sees ~15 valid sounds instead of guessing from 196
   - [x] **Example Sounds:** Prompt examples use genre-appropriate palette (not hardcoded defaults)
 
-- [ ] **LLM Improvement Effectiveness**
+- [ ] **LLM Improvement Effectiveness** ✅ PARTIAL (Jun 2026)
   - [ ] **29 iterations, still 64.6%:** LLM not understanding frequency fixes
-  - [ ] **Concrete Parameter Changes:** Give LLM exact gain multipliers to apply
+  - [x] **Concrete Parameter Changes:** `_build_band_advice()` now emits exact per-voice gain multipliers (e.g. "multiply bassFx.gain() by 1.30") derived from `band_differences`; iteration RULE 6 tells the LLM to apply them. (Effectiveness vs the 64.6% plateau still to be measured on a real run.)
   - [x] **Regression Prevention:** Fixed --json --quiet flags for comparison parsing
 
 - [x] **Per-Stem Comparison After AI** ✅ (Feb 2026)
@@ -403,10 +405,10 @@ _Fixing the core audio quality issues blocking high similarity scores._
   - [x] **Filename-based keys:** Changed from hash (file_785c...) to filename
   - [x] **Learning preservation:** Track identity preserved for ClickHouse learning
 
-- [ ] **Sidechain/Ducking for Bass**
-  - [ ] **Kick Ducks Bass:** Essential for Brazilian funk/house punch
-  - [ ] **Configurable Depth:** 50-80% ducking on kick hits
-  - [ ] **Attack/Release Timing:** Fast attack, medium release
+- [x] **Sidechain/Ducking for Bass** ✅ (Jun 2026)
+  - [x] **Kick Ducks Bass:** Generated Strudel now carries the verified idiom — bass on `.orbit(2)`, kick fires `.duckorbit(2)`. Recorded faithfully by BlackHole (vs the deleted Node synth path). Injected into both `ollama_codegen.py` (first gen) and `ollama_agent.py` (iterations) prompts.
+  - [x] **Configurable Depth:** per-genre `sidechain.depth` in `synth_profiles.py` (0.5-0.75 for funk/house/techno/dnb; 0 for jazz/lofi/swing) drives `.duckdepth()`
+  - [x] **Attack/Release Timing:** `.duckattack(0.15)` (medium) emitted; methods confirmed valid and validator-safe
 
 ### ✅ SOLVED: BlackHole Recording (Feb 2026)
 
@@ -575,3 +577,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.65 | 2026-02-10 | **BlackHole Recording:** 100% accuracy via real Strudel playback recording (replaces synthesis emulation) |
 | 1.66 | 2026-02-18 | **Iteration Stems + Shimmer Loading:** Batch Demucs on each iteration render → per-iteration melodic/drums/bass stems in report with mute buttons, shimmer skeleton loading animation |
 | 1.67 | 2026-02-24 | **Genre-Aware Sound RAG:** `retrieve_genre_context()` injects ~15 genre-appropriate sounds into LLM prompts (800→40 tokens), reducing hallucinated sound names. Injected into `ollama_codegen.py` and `ollama_agent.py`. |
+| 1.68 | 2026-06-22 | **Phase 10 batch (4 items):** (1) Concrete gain multipliers in LLM feedback (`_build_band_advice` → "multiply bassFx.gain() by X"); (2) Genre-specific synthesis profiles (`synth_profiles.py`, `analyze_synth_params.py --genre`, plumbed from Go) read by the `dist/` renderer; (3) Sub-bass via profile sub_octave_gain + master.hpf 20Hz + octave-1 prompt bias; (4) Sidechain ducking in generated Strudel (bass `.orbit(2)`, kick `.duckorbit(2).duckdepth().duckattack()`), per-genre depth. |

@@ -50,6 +50,17 @@ try:
 except ImportError:
     HAS_SOUND_SELECTOR = False
 
+# Import genre sidechain depth (kick-ducks-bass)
+try:
+    from synth_profiles import get_sidechain_depth, sidechain_instruction
+    HAS_SYNTH_PROFILES = True
+except ImportError:
+    HAS_SYNTH_PROFILES = False
+    def get_sidechain_depth(genre):
+        return 0.0
+    def sidechain_instruction(genre):
+        return ""
+
 # ClickHouse connection
 CLICKHOUSE_BIN = Path(__file__).parent.parent.parent / "bin" / "clickhouse"
 CLICKHOUSE_DB = Path(__file__).parent.parent.parent / ".clickhouse" / "db"
@@ -387,8 +398,8 @@ Similarity: {similarity*100:.1f}% (best: {self.best_similarity*100:.1f}%)
 3. Your output MUST have the EXACT SAME number of [cycles, pattern] pairs as the input — if it has 7 pairs, output 7 pairs
 4. Only change .gain(), .lpf(), .hpf(), .sound(), or note names within existing pairs — do NOT add or remove pairs
 5. Change AT MOST one parameter per pair per iteration (e.g. only .gain OR only .lpf, not both)
-6. Maximum gain change: 0.2 per iteration (e.g. 0.8→0.6, not 0.8→0.3)
-7. If sub_bass is too quiet, try: lower note octave (2→1), lower .lpf(), or use a deeper bass sound
+6. When a GAIN MULTIPLIER is given above, APPLY IT: multiply that voice's current .gain() by the number (e.g. .gain(0.5) with "×1.30" → .gain(0.65)). Cap any single change at 0.2 (0.8→0.6, not 0.8→0.3); take a smaller step if the multiplier asks for more and let the next iteration finish.
+7. If sub_bass is too quiet AND boosting bassFx.gain isn't enough, drop bass notes to octave 1 (c2→c1), lower bass .lpf() toward ~150Hz, or pick a deeper bass sound (sawtooth, gm_synth_bass_2)
 8. If low_mid is too loud, try: lower .lpf() on bass voice (400→200), or raise .hpf()
 {'The code you generated worked! Build on this approach.' if improved else ''}
 {sounds_ctx}
@@ -436,6 +447,21 @@ Do NOT output the other voices. I will handle splicing them back together."""
             ratio = rend_val / max(orig_val, 0.001)
 
             line = f"- {band_key} ({freq_range}): {direction} — orig={orig_val*100:.1f}%, yours={rend_val*100:.1f}%"
+
+            # Concrete gain multiplier: scale the responsible voice toward the target
+            # energy. mult = target/actual, clamped to a moderate per-iteration step so
+            # the loop converges instead of overshooting (see RULE 6, max 0.2 gain change).
+            band_to_fx = {
+                "sub_bass": "bassFx",
+                "bass": "bassFx",
+                "mid": "leadFx",
+                "high": "drumsFx",
+            }
+            fx_name = band_to_fx.get(band_key)
+            if fx_name and rend_val > 0.001:
+                mult = max(0.75, min(1.35, orig_val / max(rend_val, 0.005)))
+                if abs(mult - 1.0) >= 0.05:
+                    line += f"\n  GAIN MULTIPLIER: multiply {fx_name}.gain() by {mult:.2f}"
 
             # Add specific actionable advice
             if band_key == "sub_bass" and diff < -0.10:
@@ -644,6 +670,7 @@ Do NOT output the other voices. I will handle splicing them back together."""
                     sounds_ctx = f"\n\n{retrieve_genre_context(genre)}\nUse ONLY these sounds in .sound() and .bank() calls."
 
                 rag_section = f"\n\n{rag_ctx}" if rag_ctx else ""
+                sidechain_section = sidechain_instruction(genre)
 
                 context_msg = f"""## Current Track Context
 
@@ -655,7 +682,7 @@ Frequency issues:
 - Bass: {context.get('band_bass', 0)*100:+.1f}%
 - Mid: {context.get('band_mid', 0)*100:+.1f}%
 - High: {context.get('band_high', 0)*100:+.1f}%
-{sounds_ctx}{rag_section}
+{sounds_ctx}{rag_section}{sidechain_section}
 
 Generate improved code based on the frequency issues above."""
 

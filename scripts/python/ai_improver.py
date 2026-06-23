@@ -290,7 +290,7 @@ def get_audio_duration(audio_path: str) -> float:
 # Import them at the top of this file.
 
 
-def analyze_original_audio(audio_path: str, output_dir: str) -> Optional[Dict]:
+def analyze_original_audio(audio_path: str, output_dir: str, genre: str = "") -> Optional[Dict]:
     """Analyze original audio to extract synthesis parameters."""
     config_path = Path(output_dir) / "synth_config.json"
 
@@ -306,6 +306,8 @@ def analyze_original_audio(audio_path: str, output_dir: str) -> Optional[Dict]:
         "-o", str(config_path),
         "-d", "60"  # Analyze first 60 seconds
     ]
+    if genre:
+        cmd += ["--genre", genre]
 
     result = subprocess.run(cmd, capture_output=True, text=True)
     if result.returncode != 0:
@@ -373,7 +375,7 @@ def improve_strudel(
 
     # PHASE 1: Analyze original audio to extract synthesis parameters
     print(f"\n--- Phase 1: Analyzing original audio ---")
-    synth_config = analyze_original_audio(original_audio, output_dir)
+    synth_config = analyze_original_audio(original_audio, output_dir, genre=metadata.get("genre", ""))
     synth_config_path = Path(output_dir) / "synth_config.json"
 
     if synth_config:

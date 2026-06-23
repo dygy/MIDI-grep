@@ -18,6 +18,8 @@ import numpy as np
 import librosa
 import sys
 from pathlib import Path
+
+from synth_profiles import apply_genre_profile
 from scipy import signal
 from scipy.ndimage import maximum_filter1d
 
@@ -630,7 +632,7 @@ def convert_numpy_types(obj):
         return obj
 
 
-def analyze_audio(audio_path, duration=60):
+def analyze_audio(audio_path, duration=60, genre=None):
     """Main analysis function."""
     print(f"Analyzing: {audio_path}", file=sys.stderr)
 
@@ -665,6 +667,13 @@ def analyze_audio(audio_path, duration=60):
     print("Generating synthesis config...", file=sys.stderr)
     results["synth_config"] = generate_synth_config(results)
 
+    # Apply genre-specific character on top of the analysis-derived baseline.
+    if genre:
+        results["synth_config"] = apply_genre_profile(results["synth_config"], genre)
+        applied = results["synth_config"].get("genre_profile")
+        if applied:
+            print(f"Applied genre profile: {applied}", file=sys.stderr)
+
     # Convert numpy types to Python native types for JSON serialization
     return convert_numpy_types(results)
 
@@ -675,10 +684,11 @@ def main():
     parser.add_argument('-o', '--output', help='Output JSON file (default: stdout)')
     parser.add_argument('-d', '--duration', type=float, default=60, help='Duration to analyze (seconds)')
     parser.add_argument('-c', '--config-only', action='store_true', help='Output only synth config')
+    parser.add_argument('--genre', default=None, help='Genre for synthesis character profile (brazilian_funk, house, lofi, ...)')
 
     args = parser.parse_args()
 
-    results = analyze_audio(args.audio, args.duration)
+    results = analyze_audio(args.audio, args.duration, genre=args.genre)
 
     if args.config_only:
         output = results["synth_config"]
