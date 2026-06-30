@@ -20,6 +20,15 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 import uuid
 
+# Deterministic kick-ducks-bass injection (prompt-based sidechain is unreliable)
+try:
+    from synth_profiles import apply_sidechain_to_code, get_sidechain_depth
+except ImportError:
+    def get_sidechain_depth(genre):
+        return 0.0
+    def apply_sidechain_to_code(code, depth, **kw):
+        return code
+
 # ClickHouse connection (kept for backward compat, primary definitions in clickhouse_store.py)
 CLICKHOUSE_BIN = Path(__file__).parent.parent.parent / "bin" / "clickhouse"
 CLICKHOUSE_DB = Path(__file__).parent.parent.parent / ".clickhouse" / "db"
@@ -398,6 +407,9 @@ def improve_strudel(
 
     # Apply genre/artist presets (only for old effect-function format, not arrange())
     genre = metadata.get("genre", "")
+    sidechain_depth = get_sidechain_depth(genre)
+    if sidechain_depth > 0:
+        print(f"  Sidechain enabled for '{genre}': kick ducks bass at depth {sidechain_depth:.2f}")
     artist = metadata.get("artist", "")
     if not artist:
         artist = detect_artist_from_path(original_audio)
@@ -568,6 +580,10 @@ def improve_strudel(
         iter_duration = exact_duration
 
         if blackhole_recorder.exists():
+            # Deterministically wire kick-ducks-bass before rendering (idempotent).
+            # Reassign current_code so the persisted best/output carries the duck too.
+            if sidechain_depth > 0:
+                current_code = apply_sidechain_to_code(current_code, sidechain_depth)
             # Write current code to a temp strudel file for this iteration
             iter_strudel = Path(output_dir) / f"output_iter_{current_version:03d}.strudel"
             with open(iter_strudel, 'w') as f:

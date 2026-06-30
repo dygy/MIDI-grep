@@ -341,6 +341,13 @@ _Fine-tune transcription for specific genres and user samples._
 
 _Fixing the core audio quality issues blocking high similarity scores._
 
+> **Reframed (Jun 2026):** the goal is to raise the **honest similarity of *editable*
+> output**, NOT similarity per se. Audio replay (playing the master/stems back) is
+> **forbidden** as a deliverable — it scores high but fails the product. See
+> `context/product/values.md` (V1–V5, anti-patterns A1–A4) and
+> `context/spec/003-editable-strudel-generation/functional-spec.md` for the contract and
+> acceptance criteria. Any item below that could be "satisfied" by replay is out of spec.
+
 ### 🔴 Critical (Blocking 80%+ Similarity)
 
 - [x] **Fix Drum Synthesis** ✅ (Feb 2026)

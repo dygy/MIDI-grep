@@ -39,11 +39,21 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
   console.log(`Duration: ${duration}s | Output: ${outputPath}`);
   console.log(`Using: ${STRUDEL_URL}`);
 
-  // Start ffmpeg recording from BlackHole
-  console.log('Starting ffmpeg recording from BlackHole...');
+  // Start ffmpeg recording from BlackHole.
+  // CRITICAL TEMPO FIX: avfoundation hands ffmpeg BlackHole's samples with timestamps from the
+  // device clock that don't track real time, so the captured audio came out ~25% FAST (a 136 BPM
+  // track recorded as ~170 BPM / read as 103 by tempo trackers). `-use_wallclock_as_timestamps 1`
+  // (before -i) restamps every incoming buffer by the host wall-clock, and `-af aresample=async=1`
+  // then adds/drops samples to honour those timestamps — restoring real-time duration. Verified on
+  // a setcps(0.25) click train: 48.0s expected -> 48.09s captured (was 38.5s). Without this, EVERY
+  // render is sped up and all similarity/tempo numbers are computed against mis-timed audio.
+  console.log('Starting ffmpeg recording from BlackHole (wall-clock timestamps)...');
   const ffmpeg = spawn('ffmpeg', [
+    '-use_wallclock_as_timestamps', '1',
     '-f', 'avfoundation', '-i', ':BlackHole 2ch',
-    '-t', String(duration + 10), '-ar', '44100', '-ac', '2', '-y', outputPath
+    '-t', String(duration + 10),
+    '-af', 'aresample=async=1',
+    '-ar', '44100', '-ac', '2', '-y', outputPath
   ], { stdio: ['pipe', 'pipe', 'pipe'] });
 
   await new Promise(r => setTimeout(r, 1000));
@@ -189,28 +199,33 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
     throw new Error('ERROR: Play button not found');
   }
 
-  // Wait a moment for superdough to initialize
-  await new Promise(r => setTimeout(r, 500));
-
-  // Now set AudioContext sink to BlackHole (after superdough has initialized)
-  console.log('Setting audio output to BlackHole...');
-  const sinkResult = await page.evaluate(async (deviceId: string) => {
-    try {
-      // @ts-ignore - getAudioContext is Strudel's global function
-      const ctx = (window as any).getAudioContext();
-      if (!ctx) return { error: 'AudioContext not found' };
-      // @ts-ignore - setSinkId exists on AudioContext
-      await ctx.setSinkId(deviceId);
-      return { success: true, sinkId: ctx.sinkId, state: ctx.state };
-    } catch (e: any) {
-      return { error: e.message };
-    }
-  }, blackholeId);
-
-  if ((sinkResult as any).error) {
-    throw new Error(`ERROR: Failed to set audio sink: ${(sinkResult as any).error}`);
+  // Route the AudioContext to BlackHole ASAP. setSinkId only works once superdough has created
+  // the context (right after the play click), so we POLL in a tight loop instead of waiting a
+  // fixed 500ms. That fixed gap let ~0.5s of cycle-0 play to the DEFAULT device (audible on the
+  // speakers — what looked like "plays before recording") and never reach BlackHole, so the
+  // captured audio started mid-cycle-0 and the start point drifted run-to-run → inconsistent
+  // stems. Confirming ctx.sinkId === BlackHole within ~50ms makes the routing tight & repeatable.
+  console.log('Routing audio output to BlackHole (tight retry)...');
+  let sinkOk = false;
+  const sinkDeadline = Date.now() + 8000;
+  while (Date.now() < sinkDeadline) {
+    const res = await page.evaluate(async (deviceId: string) => {
+      try {
+        const ctx = (window as any).getAudioContext?.();
+        if (!ctx) return { pending: true };
+        // @ts-ignore - setSinkId exists on AudioContext
+        if (ctx.sinkId !== deviceId) await ctx.setSinkId(deviceId);
+        return { success: ctx.sinkId === deviceId, sinkId: ctx.sinkId, state: ctx.state };
+      } catch (e: any) {
+        return { error: e.message };
+      }
+    }, blackholeId);
+    if ((res as any).success) { sinkOk = true; console.log('Routed to BlackHole:', JSON.stringify(res)); break; }
+    await new Promise(r => setTimeout(r, 50));
   }
-  console.log('Audio output set to BlackHole:', JSON.stringify(sinkResult));
+  if (!sinkOk) {
+    throw new Error('ERROR: Failed to route audio sink to BlackHole within 8s.');
+  }
 
   // Wait for playback to start (either "stop" button appears OR AudioContext is running)
   console.log('Waiting for playback to start...');

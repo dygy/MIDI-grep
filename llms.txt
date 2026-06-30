@@ -17,6 +17,10 @@ improve similarity. All outputs cached in `.cache/stems/{key}/` with output vers
 - **Chord** (`--chords`) — chord-progression detection; best for electronic/EDM/funk.
 - **Brazilian Funk** (`--brazilian-funk`, auto-detected) — tamborzão + 808 template.
 - **Generative** (`generative` cmd) — trains RAVE/granular neural synths for full note() control.
+- **Sample-pack** (`scripts/sample-pipeline.sh`) — slice the REAL extracted stems into a Strudel
+  sample pack (per-bar loops + drum one-shots + pitched samples), host it (localhost or Cloudflare
+  R2), and play via `await samples(...)`. Reuses the original audio → ~91% rendered similarity
+  (vs ~72% synthesis ceiling). The base URL is the only thing that changes localhost↔R2.
 
 ## Key directories
 
@@ -46,6 +50,29 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   vs BlackHole's ~65%; do NOT gate on it.
 - **`scripts/python/compare_audio.py`** — similarity via **MAE** on frequency bands (NOT cosine —
   cosine hid 20%+ band errors). Weights: Freq 40%, MFCC 20%, Energy 15%, Brightness 15%, Tempo/Chroma 5%.
+- **`scripts/python/calibrate_dynamic.py`** — data-driven mix calibrator: reads a render's
+  `comparison.json` and emits the NEXT `generate_dynamic_strudel.py` knobs (sub-gain, bass-mult,
+  cal-lead, lead-lpf, hat-gain, master-gain). Each knob is a damped proportional correction of a
+  measured band/centroid ratio — no hardcoded per-track values. Brightness lever uses the spectral
+  CENTROID (the 1%-magnitude high bands are too noisy in bass-heavy genres); when lead-lpf maxes
+  out and the mix is still dark, it raises a TR808 hat layer (`--hat-gain`) — the hats carry the
+  brightness the extracted lead can't.
+- **`scripts/auto-calibrate.sh`** — runs the full generate→render(BlackHole)→compare→calibrate
+  loop, keeping the best render. Took Regime CLT 88.7%→92.4% overall (freq 86→95, section-aware
+  82→89) over ~6 iterations from a cold start, fully data-driven.
+
+## Sample-pack → R2 (highest similarity)
+
+- `scripts/python/build_sample_pack.py` — stems → drum one-shots + pitched bass/melodic + raw
+  beat-aligned per-bar **loops** (drums/bass/melodic/vocals). Loops are written RAW (un-normalized)
+  to preserve dynamics + inter-stem balance — normalizing them drops reconstruction 99%→70%.
+- `scripts/python/generate_sample_strudel.py` — writes host-resolved `samples.json` (absolute
+  `_base` ending in `/` — Strudel concats `base+path` with no slash) + `output_<mode>.strudel`
+  (modes: loops/instrument/hybrid). Strudel's loader only accepts ARRAY-valued entries.
+- `scripts/python/upload_r2.py` — uploads pack to R2 via `aws s3 --endpoint-url` (R2 S3 keys) or
+  `wrangler r2 object put` (wrangler login); env: R2_ACCOUNT_ID/R2_BUCKET/R2_PUBLIC_BASE/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY.
+- `scripts/sample-pipeline.sh --url <U>|--stems-dir <D> --prefix <id> [--mode loops] (--local|--r2)`
+  — one-command orchestration: build → (serve+render+score | upload to R2 + retarget code).
 
 ## Build & run
 

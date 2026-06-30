@@ -1,0 +1,2139 @@
+{
+  "name": "regime_bass",
+  "type": "granular",
+  "source_audio": ".cache/stems/Regime CLT (Dj Brunin XM, Aurora Shukita)/bass.wav",
+  "created": "2026-06-29T01:09:56.298549",
+  "sample_rate": 44100,
+  "num_grains": 304,
+  "grain_duration_ms": 150,
+  "grains": [
+    {
+      "index": 0,
+      "file": "g0000.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 0.046439909297052155
+    },
+    {
+      "index": 1,
+      "file": "g0001.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 14.454421768707483
+    },
+    {
+      "index": 2,
+      "file": "g0002.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 14.802721088435375
+    },
+    {
+      "index": 3,
+      "file": "g0003.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 14.872380952380952
+    },
+    {
+      "index": 4,
+      "file": "g0004.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 14.94204081632653
+    },
+    {
+      "index": 5,
+      "file": "g0005.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 15.12780045351474
+    },
+    {
+      "index": 6,
+      "file": "g0006.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 15.220680272108844
+    },
+    {
+      "index": 7,
+      "file": "g0007.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 15.580589569160997
+    },
+    {
+      "index": 8,
+      "file": "g0008.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 15.650249433106575
+    },
+    {
+      "index": 9,
+      "file": "g0009.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 15.801179138321995
+    },
+    {
+      "index": 10,
+      "file": "g0010.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 16.24235827664399
+    },
+    {
+      "index": 11,
+      "file": "g0011.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 16.31201814058957
+    },
+    {
+      "index": 12,
+      "file": "g0012.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 16.579047619047618
+    },
+    {
+      "index": 13,
+      "file": "g0013.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 16.91573696145125
+    },
+    {
+      "index": 14,
+      "file": "g0014.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 16.985396825396826
+    },
+    {
+      "index": 15,
+      "file": "g0015.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 17.356916099773244
+    },
+    {
+      "index": 16,
+      "file": "g0016.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 17.589115646258502
+    },
+    {
+      "index": 17,
+      "file": "g0017.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 18.018684807256236
+    },
+    {
+      "index": 18,
+      "file": "g0018.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 18.355374149659863
+    },
+    {
+      "index": 19,
+      "file": "g0019.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 18.692063492063493
+    },
+    {
+      "index": 20,
+      "file": "g0020.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 18.76172335600907
+    },
+    {
+      "index": 21,
+      "file": "g0021.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 19.13324263038549
+    },
+    {
+      "index": 22,
+      "file": "g0022.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 19.365442176870747
+    },
+    {
+      "index": 23,
+      "file": "g0023.wav",
+      "pitch_hz": 52.73923680169612,
+      "midi_note": 32,
+      "onset_sec": 19.435102040816325
+    },
+    {
+      "index": 24,
+      "file": "g0024.wav",
+      "pitch_hz": 57.10411696553857,
+      "midi_note": 34,
+      "onset_sec": 19.481541950113378
+    },
+    {
+      "index": 25,
+      "file": "g0025.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 19.806621315192743
+    },
+    {
+      "index": 26,
+      "file": "g0026.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 20.143310657596373
+    },
+    {
+      "index": 27,
+      "file": "g0027.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 20.201360544217685
+    },
+    {
+      "index": 28,
+      "file": "g0028.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 20.468390022675738
+    },
+    {
+      "index": 29,
+      "file": "g0029.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 20.921179138321996
+    },
+    {
+      "index": 30,
+      "file": "g0030.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 21.141768707482992
+    },
+    {
+      "index": 31,
+      "file": "g0031.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 21.28108843537415
+    },
+    {
+      "index": 32,
+      "file": "g0032.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 21.571337868480725
+    },
+    {
+      "index": 33,
+      "file": "g0033.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 21.91963718820862
+    },
+    {
+      "index": 34,
+      "file": "g0034.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 22.244716553287983
+    },
+    {
+      "index": 35,
+      "file": "g0035.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 22.69750566893424
+    },
+    {
+      "index": 36,
+      "file": "g0036.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 22.918095238095237
+    },
+    {
+      "index": 37,
+      "file": "g0037.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 22.987755102040815
+    },
+    {
+      "index": 38,
+      "file": "g0038.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 23.359274376417233
+    },
+    {
+      "index": 39,
+      "file": "g0039.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 23.45215419501134
+    },
+    {
+      "index": 40,
+      "file": "g0040.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 23.695963718820863
+    },
+    {
+      "index": 41,
+      "file": "g0041.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 24.021043083900228
+    },
+    {
+      "index": 42,
+      "file": "g0042.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 24.090702947845806
+    },
+    {
+      "index": 43,
+      "file": "g0043.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 24.462222222222223
+    },
+    {
+      "index": 44,
+      "file": "g0044.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 24.694421768707482
+    },
+    {
+      "index": 45,
+      "file": "g0045.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 25.135600907029477
+    },
+    {
+      "index": 46,
+      "file": "g0046.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 25.472290249433108
+    },
+    {
+      "index": 47,
+      "file": "g0047.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 25.797369614512473
+    },
+    {
+      "index": 48,
+      "file": "g0048.wav",
+      "pitch_hz": 52.89992856575559,
+      "midi_note": 32,
+      "onset_sec": 25.878639455782313
+    },
+    {
+      "index": 49,
+      "file": "g0049.wav",
+      "pitch_hz": 57.434917749851756,
+      "midi_note": 34,
+      "onset_sec": 25.925079365079366
+    },
+    {
+      "index": 50,
+      "file": "g0050.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 26.23854875283447
+    },
+    {
+      "index": 51,
+      "file": "g0051.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 26.470748299319727
+    },
+    {
+      "index": 52,
+      "file": "g0052.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 26.540408163265305
+    },
+    {
+      "index": 53,
+      "file": "g0053.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 26.911927437641722
+    },
+    {
+      "index": 54,
+      "file": "g0054.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 27.248616780045353
+    },
+    {
+      "index": 55,
+      "file": "g0055.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 27.58530612244898
+    },
+    {
+      "index": 56,
+      "file": "g0056.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 28.026485260770976
+    },
+    {
+      "index": 57,
+      "file": "g0057.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 28.258684807256238
+    },
+    {
+      "index": 58,
+      "file": "g0058.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 28.688253968253967
+    },
+    {
+      "index": 59,
+      "file": "g0059.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 28.757913832199545
+    },
+    {
+      "index": 60,
+      "file": "g0060.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 29.129433106575963
+    },
+    {
+      "index": 61,
+      "file": "g0061.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 29.57061224489796
+    },
+    {
+      "index": 62,
+      "file": "g0062.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 30.023401360544216
+    },
+    {
+      "index": 63,
+      "file": "g0063.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 30.093061224489794
+    },
+    {
+      "index": 64,
+      "file": "g0064.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 30.464580498866212
+    },
+    {
+      "index": 65,
+      "file": "g0065.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 30.905759637188208
+    },
+    {
+      "index": 66,
+      "file": "g0066.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 31.149569160997732
+    },
+    {
+      "index": 67,
+      "file": "g0067.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 31.358548752834466
+    },
+    {
+      "index": 68,
+      "file": "g0068.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 31.428208616780044
+    },
+    {
+      "index": 69,
+      "file": "g0069.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 31.79972789115646
+    },
+    {
+      "index": 70,
+      "file": "g0070.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 32.24090702947846
+    },
+    {
+      "index": 71,
+      "file": "g0071.wav",
+      "pitch_hz": 56.93966920954122,
+      "midi_note": 34,
+      "onset_sec": 32.3221768707483
+    },
+    {
+      "index": 72,
+      "file": "g0072.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 32.682086167800456
+    },
+    {
+      "index": 73,
+      "file": "g0073.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 32.76335600907029
+    },
+    {
+      "index": 74,
+      "file": "g0074.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 33.13487528344671
+    },
+    {
+      "index": 75,
+      "file": "g0075.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 33.57605442176871
+    },
+    {
+      "index": 76,
+      "file": "g0076.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 34.0172335600907
+    },
+    {
+      "index": 77,
+      "file": "g0077.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 34.4584126984127
+    },
+    {
+      "index": 78,
+      "file": "g0078.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 34.911201814058956
+    },
+    {
+      "index": 79,
+      "file": "g0079.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 35.352380952380955
+    },
+    {
+      "index": 80,
+      "file": "g0080.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 35.42204081632653
+    },
+    {
+      "index": 81,
+      "file": "g0081.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 35.79356009070295
+    },
+    {
+      "index": 82,
+      "file": "g0082.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 36.13024943310658
+    },
+    {
+      "index": 83,
+      "file": "g0083.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 36.4669387755102
+    },
+    {
+      "index": 84,
+      "file": "g0084.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 36.9081179138322
+    },
+    {
+      "index": 85,
+      "file": "g0085.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 37.14031746031746
+    },
+    {
+      "index": 86,
+      "file": "g0086.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 37.581496598639454
+    },
+    {
+      "index": 87,
+      "file": "g0087.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 37.72081632653061
+    },
+    {
+      "index": 88,
+      "file": "g0088.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 37.918185941043085
+    },
+    {
+      "index": 89,
+      "file": "g0089.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 38.243265306122446
+    },
+    {
+      "index": 90,
+      "file": "g0090.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 38.684444444444445
+    },
+    {
+      "index": 91,
+      "file": "g0091.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 38.91664399092971
+    },
+    {
+      "index": 92,
+      "file": "g0092.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 38.98630385487528
+    },
+    {
+      "index": 93,
+      "file": "g0093.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 39.3578231292517
+    },
+    {
+      "index": 94,
+      "file": "g0094.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 39.69451247165533
+    },
+    {
+      "index": 95,
+      "file": "g0095.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 40.01959183673469
+    },
+    {
+      "index": 96,
+      "file": "g0096.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 40.100861678004534
+    },
+    {
+      "index": 97,
+      "file": "g0097.wav",
+      "pitch_hz": 57.434917749851756,
+      "midi_note": 34,
+      "onset_sec": 40.147301587301584
+    },
+    {
+      "index": 98,
+      "file": "g0098.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 40.46077097505669
+    },
+    {
+      "index": 99,
+      "file": "g0099.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 40.69297052154195
+    },
+    {
+      "index": 100,
+      "file": "g0100.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 40.739410430839
+    },
+    {
+      "index": 101,
+      "file": "g0101.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 41.134149659863944
+    },
+    {
+      "index": 102,
+      "file": "g0102.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 41.470839002267574
+    },
+    {
+      "index": 103,
+      "file": "g0103.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 41.807528344671205
+    },
+    {
+      "index": 104,
+      "file": "g0104.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 42.2487074829932
+    },
+    {
+      "index": 105,
+      "file": "g0105.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 42.4692970521542
+    },
+    {
+      "index": 106,
+      "file": "g0106.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 42.91047619047619
+    },
+    {
+      "index": 107,
+      "file": "g0107.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 46.46312925170068
+    },
+    {
+      "index": 108,
+      "file": "g0108.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 50.01578231292517
+    },
+    {
+      "index": 109,
+      "file": "g0109.wav",
+      "pitch_hz": 620.4579047334938,
+      "midi_note": 75,
+      "onset_sec": 51.36253968253968
+    },
+    {
+      "index": 110,
+      "file": "g0110.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 53.56843537414966
+    },
+    {
+      "index": 111,
+      "file": "g0111.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 57.12108843537415
+    },
+    {
+      "index": 112,
+      "file": "g0112.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 57.46938775510204
+    },
+    {
+      "index": 113,
+      "file": "g0113.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 57.53904761904762
+    },
+    {
+      "index": 114,
+      "file": "g0114.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 57.7015873015873
+    },
+    {
+      "index": 115,
+      "file": "g0115.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 57.80607709750567
+    },
+    {
+      "index": 116,
+      "file": "g0116.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 58.24725623582766
+    },
+    {
+      "index": 117,
+      "file": "g0117.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 58.46784580498866
+    },
+    {
+      "index": 118,
+      "file": "g0118.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 58.909024943310655
+    },
+    {
+      "index": 119,
+      "file": "g0119.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 58.978684807256236
+    },
+    {
+      "index": 120,
+      "file": "g0120.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 59.245714285714286
+    },
+    {
+      "index": 121,
+      "file": "g0121.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 59.31537414965987
+    },
+    {
+      "index": 122,
+      "file": "g0122.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 59.582403628117916
+    },
+    {
+      "index": 123,
+      "file": "g0123.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 59.64045351473923
+    },
+    {
+      "index": 124,
+      "file": "g0124.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 60.04680272108843
+    },
+    {
+      "index": 125,
+      "file": "g0125.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 60.08163265306123
+    },
+    {
+      "index": 126,
+      "file": "g0126.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 60.31383219954648
+    },
+    {
+      "index": 127,
+      "file": "g0127.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 60.69696145124716
+    },
+    {
+      "index": 128,
+      "file": "g0128.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 60.75501133786848
+    },
+    {
+      "index": 129,
+      "file": "g0129.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 61.045260770975055
+    },
+    {
+      "index": 130,
+      "file": "g0130.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 61.08009070294784
+    },
+    {
+      "index": 131,
+      "file": "g0131.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 61.41678004535147
+    },
+    {
+      "index": 132,
+      "file": "g0132.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 61.811519274376415
+    },
+    {
+      "index": 133,
+      "file": "g0133.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 61.85795918367347
+    },
+    {
+      "index": 134,
+      "file": "g0134.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 62.0669387755102
+    },
+    {
+      "index": 135,
+      "file": "g0135.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 62.47328798185941
+    },
+    {
+      "index": 136,
+      "file": "g0136.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 62.5081179138322
+    },
+    {
+      "index": 137,
+      "file": "g0137.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 62.8215873015873
+    },
+    {
+      "index": 138,
+      "file": "g0138.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 62.85641723356009
+    },
+    {
+      "index": 139,
+      "file": "g0139.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 63.15827664399093
+    },
+    {
+      "index": 140,
+      "file": "g0140.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 63.19310657596372
+    },
+    {
+      "index": 141,
+      "file": "g0141.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 63.58784580498866
+    },
+    {
+      "index": 142,
+      "file": "g0142.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 63.64589569160998
+    },
+    {
+      "index": 143,
+      "file": "g0143.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 63.84326530612245
+    },
+    {
+      "index": 144,
+      "file": "g0144.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 64.2380045351474
+    },
+    {
+      "index": 145,
+      "file": "g0145.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 67.36108843537414
+    },
+    {
+      "index": 146,
+      "file": "g0146.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 71.34331065759638
+    },
+    {
+      "index": 147,
+      "file": "g0147.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 73.14285714285714
+    },
+    {
+      "index": 148,
+      "file": "g0148.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 78.50666666666666
+    },
+    {
+      "index": 149,
+      "file": "g0149.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 78.80852607709751
+    },
+    {
+      "index": 150,
+      "file": "g0150.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 78.86657596371882
+    },
+    {
+      "index": 151,
+      "file": "g0151.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 79.16843537414967
+    },
+    {
+      "index": 152,
+      "file": "g0152.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 79.5980045351474
+    },
+    {
+      "index": 153,
+      "file": "g0153.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 79.64444444444445
+    },
+    {
+      "index": 154,
+      "file": "g0154.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 79.87664399092971
+    },
+    {
+      "index": 155,
+      "file": "g0155.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 80.24816326530612
+    },
+    {
+      "index": 156,
+      "file": "g0156.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 80.30621315192744
+    },
+    {
+      "index": 157,
+      "file": "g0157.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 80.6312925170068
+    },
+    {
+      "index": 158,
+      "file": "g0158.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 80.81705215419501
+    },
+    {
+      "index": 159,
+      "file": "g0159.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 80.92154195011338
+    },
+    {
+      "index": 160,
+      "file": "g0160.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 80.95637188208617
+    },
+    {
+      "index": 161,
+      "file": "g0161.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 81.36272108843538
+    },
+    {
+      "index": 162,
+      "file": "g0162.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 81.39755102040816
+    },
+    {
+      "index": 163,
+      "file": "g0163.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 81.61814058956917
+    },
+    {
+      "index": 164,
+      "file": "g0164.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 82.03609977324263
+    },
+    {
+      "index": 165,
+      "file": "g0165.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 82.08253968253969
+    },
+    {
+      "index": 166,
+      "file": "g0166.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 82.361179138322
+    },
+    {
+      "index": 167,
+      "file": "g0167.wav",
+      "pitch_hz": 56.775221453543864,
+      "midi_note": 34,
+      "onset_sec": 82.43083900226758
+    },
+    {
+      "index": 168,
+      "file": "g0168.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 82.68625850340136
+    },
+    {
+      "index": 169,
+      "file": "g0169.wav",
+      "pitch_hz": 57.434917749851756,
+      "midi_note": 34,
+      "onset_sec": 82.79074829931973
+    },
+    {
+      "index": 170,
+      "file": "g0170.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 83.12743764172336
+    },
+    {
+      "index": 171,
+      "file": "g0171.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 83.20870748299319
+    },
+    {
+      "index": 172,
+      "file": "g0172.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 83.35963718820862
+    },
+    {
+      "index": 173,
+      "file": "g0173.wav",
+      "pitch_hz": 56.12310241546865,
+      "midi_note": 33,
+      "onset_sec": 83.47573696145125
+    },
+    {
+      "index": 174,
+      "file": "g0174.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 83.80081632653061
+    },
+    {
+      "index": 175,
+      "file": "g0175.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 84.13750566893424
+    },
+    {
+      "index": 176,
+      "file": "g0176.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 84.47419501133787
+    },
+    {
+      "index": 177,
+      "file": "g0177.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 84.91537414965987
+    },
+    {
+      "index": 178,
+      "file": "g0178.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 84.98503401360544
+    },
+    {
+      "index": 179,
+      "file": "g0179.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 85.13596371882086
+    },
+    {
+      "index": 180,
+      "file": "g0180.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 85.57714285714286
+    },
+    {
+      "index": 181,
+      "file": "g0181.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 85.91383219954649
+    },
+    {
+      "index": 182,
+      "file": "g0182.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 85.98349206349206
+    },
+    {
+      "index": 183,
+      "file": "g0183.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 86.2505215419501
+    },
+    {
+      "index": 184,
+      "file": "g0184.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 86.6917006802721
+    },
+    {
+      "index": 185,
+      "file": "g0185.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 87.02839002267574
+    },
+    {
+      "index": 186,
+      "file": "g0186.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 87.3534693877551
+    },
+    {
+      "index": 187,
+      "file": "g0187.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 87.69015873015873
+    },
+    {
+      "index": 188,
+      "file": "g0188.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 87.7598185941043
+    },
+    {
+      "index": 189,
+      "file": "g0189.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 88.02684807256236
+    },
+    {
+      "index": 190,
+      "file": "g0190.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 88.09650793650793
+    },
+    {
+      "index": 191,
+      "file": "g0191.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 88.46802721088436
+    },
+    {
+      "index": 192,
+      "file": "g0192.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 88.70022675736962
+    },
+    {
+      "index": 193,
+      "file": "g0193.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 89.12979591836735
+    },
+    {
+      "index": 194,
+      "file": "g0194.wav",
+      "pitch_hz": 56.12310241546865,
+      "midi_note": 33,
+      "onset_sec": 89.23428571428572
+    },
+    {
+      "index": 195,
+      "file": "g0195.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 89.46648526077098
+    },
+    {
+      "index": 196,
+      "file": "g0196.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 89.8031746031746
+    },
+    {
+      "index": 197,
+      "file": "g0197.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 89.87283446712019
+    },
+    {
+      "index": 198,
+      "file": "g0198.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 90.2443537414966
+    },
+    {
+      "index": 199,
+      "file": "g0199.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 90.47655328798186
+    },
+    {
+      "index": 200,
+      "file": "g0200.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 90.90612244897959
+    },
+    {
+      "index": 201,
+      "file": "g0201.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 91.25442176870749
+    },
+    {
+      "index": 202,
+      "file": "g0202.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 91.31247165532879
+    },
+    {
+      "index": 203,
+      "file": "g0203.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 91.5911111111111
+    },
+    {
+      "index": 204,
+      "file": "g0204.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 92.0322902494331
+    },
+    {
+      "index": 205,
+      "file": "g0205.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 92.25287981859411
+    },
+    {
+      "index": 206,
+      "file": "g0206.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 92.6940589569161
+    },
+    {
+      "index": 207,
+      "file": "g0207.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 93.1352380952381
+    },
+    {
+      "index": 208,
+      "file": "g0208.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 93.5764172335601
+    },
+    {
+      "index": 209,
+      "file": "g0209.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 94.01759637188209
+    },
+    {
+      "index": 210,
+      "file": "g0210.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 94.47038548752835
+    },
+    {
+      "index": 211,
+      "file": "g0211.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 94.91156462585035
+    },
+    {
+      "index": 212,
+      "file": "g0212.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 95.35274376417233
+    },
+    {
+      "index": 213,
+      "file": "g0213.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 95.79392290249433
+    },
+    {
+      "index": 214,
+      "file": "g0214.wav",
+      "pitch_hz": 59.46035575013605,
+      "midi_note": 34,
+      "onset_sec": 95.9332426303855
+    },
+    {
+      "index": 215,
+      "file": "g0215.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 96.24671201814058
+    },
+    {
+      "index": 216,
+      "file": "g0216.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 96.68789115646258
+    },
+    {
+      "index": 217,
+      "file": "g0217.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 97.12907029478458
+    },
+    {
+      "index": 218,
+      "file": "g0218.wav",
+      "pitch_hz": 57.10411696553857,
+      "midi_note": 34,
+      "onset_sec": 97.25678004535148
+    },
+    {
+      "index": 219,
+      "file": "g0219.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 97.57024943310658
+    },
+    {
+      "index": 220,
+      "file": "g0220.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 97.65151927437641
+    },
+    {
+      "index": 221,
+      "file": "g0221.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 98.02303854875284
+    },
+    {
+      "index": 222,
+      "file": "g0222.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 98.46421768707484
+    },
+    {
+      "index": 223,
+      "file": "g0223.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 98.58031746031746
+    },
+    {
+      "index": 224,
+      "file": "g0224.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 98.90539682539682
+    },
+    {
+      "index": 225,
+      "file": "g0225.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 99.34657596371882
+    },
+    {
+      "index": 226,
+      "file": "g0226.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 99.79936507936507
+    },
+    {
+      "index": 227,
+      "file": "g0227.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 100.1360544217687
+    },
+    {
+      "index": 228,
+      "file": "g0228.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 100.47274376417234
+    },
+    {
+      "index": 229,
+      "file": "g0229.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 100.90231292517007
+    },
+    {
+      "index": 230,
+      "file": "g0230.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 101.13451247165533
+    },
+    {
+      "index": 231,
+      "file": "g0231.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 101.2041723356009
+    },
+    {
+      "index": 232,
+      "file": "g0232.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 101.57569160997733
+    },
+    {
+      "index": 233,
+      "file": "g0233.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 101.91238095238096
+    },
+    {
+      "index": 234,
+      "file": "g0234.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 101.98204081632653
+    },
+    {
+      "index": 235,
+      "file": "g0235.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 102.24907029478459
+    },
+    {
+      "index": 236,
+      "file": "g0236.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 102.69024943310657
+    },
+    {
+      "index": 237,
+      "file": "g0237.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 102.91083900226758
+    },
+    {
+      "index": 238,
+      "file": "g0238.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 103.2475283446712
+    },
+    {
+      "index": 239,
+      "file": "g0239.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 103.35201814058956
+    },
+    {
+      "index": 240,
+      "file": "g0240.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 103.6887074829932
+    },
+    {
+      "index": 241,
+      "file": "g0241.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 104.01378684807256
+    },
+    {
+      "index": 242,
+      "file": "g0242.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 104.46657596371882
+    },
+    {
+      "index": 243,
+      "file": "g0243.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 104.69877551020409
+    },
+    {
+      "index": 244,
+      "file": "g0244.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 105.12834467120182
+    },
+    {
+      "index": 245,
+      "file": "g0245.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 105.46503401360545
+    },
+    {
+      "index": 246,
+      "file": "g0246.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 105.53469387755102
+    },
+    {
+      "index": 247,
+      "file": "g0247.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 105.80172335600908
+    },
+    {
+      "index": 248,
+      "file": "g0248.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 106.24290249433106
+    },
+    {
+      "index": 249,
+      "file": "g0249.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 106.47510204081632
+    },
+    {
+      "index": 250,
+      "file": "g0250.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 106.90467120181405
+    },
+    {
+      "index": 251,
+      "file": "g0251.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 110.45732426303854
+    },
+    {
+      "index": 252,
+      "file": "g0252.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 114.0215873015873
+    },
+    {
+      "index": 253,
+      "file": "g0253.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 114.0564172335601
+    },
+    {
+      "index": 254,
+      "file": "g0254.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 114.10285714285715
+    },
+    {
+      "index": 255,
+      "file": "g0255.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 117.57424036281179
+    },
+    {
+      "index": 256,
+      "file": "g0256.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 121.12689342403628
+    },
+    {
+      "index": 257,
+      "file": "g0257.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 121.46358276643991
+    },
+    {
+      "index": 258,
+      "file": "g0258.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 121.80027210884354
+    },
+    {
+      "index": 259,
+      "file": "g0259.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 122.24145124716553
+    },
+    {
+      "index": 260,
+      "file": "g0260.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 122.47365079365079
+    },
+    {
+      "index": 261,
+      "file": "g0261.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 122.77551020408163
+    },
+    {
+      "index": 262,
+      "file": "g0262.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 122.90321995464852
+    },
+    {
+      "index": 263,
+      "file": "g0263.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 122.99609977324263
+    },
+    {
+      "index": 264,
+      "file": "g0264.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 123.23990929705215
+    },
+    {
+      "index": 265,
+      "file": "g0265.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 123.57659863945578
+    },
+    {
+      "index": 266,
+      "file": "g0266.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 124.01777777777778
+    },
+    {
+      "index": 267,
+      "file": "g0267.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 124.09904761904762
+    },
+    {
+      "index": 268,
+      "file": "g0268.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 124.24997732426304
+    },
+    {
+      "index": 269,
+      "file": "g0269.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 124.31963718820862
+    },
+    {
+      "index": 270,
+      "file": "g0270.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 124.69115646258503
+    },
+    {
+      "index": 271,
+      "file": "g0271.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 125.02784580498866
+    },
+    {
+      "index": 272,
+      "file": "g0272.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 125.09750566893425
+    },
+    {
+      "index": 273,
+      "file": "g0273.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 125.35292517006803
+    },
+    {
+      "index": 274,
+      "file": "g0274.wav",
+      "pitch_hz": 57.10411696553857,
+      "midi_note": 34,
+      "onset_sec": 125.45741496598639
+    },
+    {
+      "index": 275,
+      "file": "g0275.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 125.79410430839002
+    },
+    {
+      "index": 276,
+      "file": "g0276.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 125.87537414965986
+    },
+    {
+      "index": 277,
+      "file": "g0277.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 126.02630385487528
+    },
+    {
+      "index": 278,
+      "file": "g0278.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 126.46748299319728
+    },
+    {
+      "index": 279,
+      "file": "g0279.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 126.79256235827664
+    },
+    {
+      "index": 280,
+      "file": "g0280.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 127.12925170068027
+    },
+    {
+      "index": 281,
+      "file": "g0281.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 127.58204081632653
+    },
+    {
+      "index": 282,
+      "file": "g0282.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 128.24380952380952
+    },
+    {
+      "index": 283,
+      "file": "g0283.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 128.5688888888889
+    },
+    {
+      "index": 284,
+      "file": "g0284.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 128.9055782312925
+    },
+    {
+      "index": 285,
+      "file": "g0285.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 129.34675736961452
+    },
+    {
+      "index": 286,
+      "file": "g0286.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 129.57895691609977
+    },
+    {
+      "index": 287,
+      "file": "g0287.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 130.02013605442176
+    },
+    {
+      "index": 288,
+      "file": "g0288.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 130.3568253968254
+    },
+    {
+      "index": 289,
+      "file": "g0289.wav",
+      "pitch_hz": 440,
+      "midi_note": 69,
+      "onset_sec": 130.47292517006804
+    },
+    {
+      "index": 290,
+      "file": "g0290.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 130.68190476190478
+    },
+    {
+      "index": 291,
+      "file": "g0291.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 131.13469387755103
+    },
+    {
+      "index": 292,
+      "file": "g0292.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 131.36689342403628
+    },
+    {
+      "index": 293,
+      "file": "g0293.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 131.79646258503402
+    },
+    {
+      "index": 294,
+      "file": "g0294.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 132.13315192743764
+    },
+    {
+      "index": 295,
+      "file": "g0295.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 132.458231292517
+    },
+    {
+      "index": 296,
+      "file": "g0296.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 132.91102040816327
+    },
+    {
+      "index": 297,
+      "file": "g0297.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 133.13160997732427
+    },
+    {
+      "index": 298,
+      "file": "g0298.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 133.57278911564626
+    },
+    {
+      "index": 299,
+      "file": "g0299.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 133.90947845804988
+    },
+    {
+      "index": 300,
+      "file": "g0300.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 134.24616780045352
+    },
+    {
+      "index": 301,
+      "file": "g0301.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 134.6873469387755
+    },
+    {
+      "index": 302,
+      "file": "g0302.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 134.91954648526078
+    },
+    {
+      "index": 303,
+      "file": "g0303.wav",
+      "pitch_hz": 50.0,
+      "midi_note": 31,
+      "onset_sec": 135.3491156462585
+    }
+  ]
+}

@@ -69,8 +69,24 @@ Update triggers: new modes/genres, synthesis-parameter changes, new scripts, ren
    - AI analyzes differences and generates new parameters
    - Store learnings in ClickHouse for future tracks
 
-**Current achievement:** ~60-70% similarity with honest calculation (previous 90%+ was inflated by cosine bug)
+**Current achievement:** editable dynamic-Strudel (transcribed notes on trained instruments, all
+voices present incl. the real vocal) at **93.6% overall / 95.6% section-aware / 96.2% freq balance,
+tempo_sim 1.000** on Regime CLT (brazilian_funk), driven by the data-driven `calibrate_dynamic.py`
+loop (no hardcoded mix values). NOTE: numbers measured BEFORE the Jun-2026 recorder tempo fix (the
+72% / 88.7% / 92.4% / 94.6% history) were on ~25%-sped-up audio and are invalid — see the recorder
+fix below. Earlier honest baselines were ~60-70% (the old 90%+ was inflated by a cosine bug).
 **Target:** 80%+ similarity across all genres through AI learning, not hardcoding
+
+**Data-driven mix calibration (Jun 2026):** `scripts/python/calibrate_dynamic.py` +
+`scripts/auto-calibrate.sh` close the generate→render→compare→calibrate loop that was previously
+hand-tuned. The calibrator maps a render's measured `comparison.json` to the generator's tuning
+knobs (sub-gain/bass-mult/cal-lead/lead-lpf/hat-gain/master-gain), each a damped (sqrt) clamped
+proportional correction of an observed band/centroid ratio. Two non-obvious lessons baked in:
+(1) drive the brightness lever off the spectral CENTROID, not the high bands — at ~1% magnitude
+those bands are swamped by demucs bleed/noise and pinned lead-lpf while the mix was clearly dull;
+(2) when lead-lpf maxes out and the mix is still dark, the missing brightness is in the DRUMS —
+raise a steady TR808 hat layer (`--hat-gain`), which lifted brightness 70%→91% and overall
+89.8%→92.6% in one step (the extracted lead sample is inherently darker than the original).
 
 **CRITICAL: Similarity Calculation Fix (Feb 2026)**
 The old cosine-based frequency balance was HIDING massive errors (25% sub_bass, 20% mid differences showed as 95%!).
@@ -152,6 +168,31 @@ Strudel Generation → note() control with trained models
 This mode trains neural synthesizers that learn the "sound" of your track material,
 enabling full note() control - edit any pitch, create new melodies, all sounding
 like the original. Models are stored in a repository and reused across tracks.
+
+**Sample-Pack Mode** (R2/localhost-hosted real-stem samples - HIGHEST similarity):
+```
+Input (URL) → Stems (Demucs)
+    ↓
+build_sample_pack.py → drum one-shots + pitched bass/melodic + RAW per-bar loops
+                       (drums/bass/melodic/vocals) + strudel.json
+    ↓
+Host pack: localhost (proof) or Cloudflare R2 (upload_r2.py → public r2.dev/custom domain)
+    ↓
+generate_sample_strudel.py → samples.json (_base = host) + output_<mode>.strudel
+    ↓
+Strudel: await samples("<base>/samples.json"); plays the REAL audio → ~91% similar
+```
+Instead of synthesizing (≤72% ceiling), this reuses the original's actual audio as
+Strudel samples, so the output is genuinely "quite similar". One command:
+`scripts/sample-pipeline.sh --url <U> --prefix <id> --local` (or `--r2`).
+**Two non-obvious rules:** (1) loops must be written RAW/un-normalized — per-bar
+normalization flattens dynamics + inter-stem balance (reconstruction 99%→70%);
+one-shots/pitched stay normalized. (2) Strudel's `samples(jsonUrl)` resolves
+`_base` by raw `base+path` concat with NO trailing slash, and only accepts
+array-valued entries — so the generated `samples.json` bakes an absolute `_base`
+ending in `/` and emits every value (incl. one-shots) as single-element arrays.
+R2 hosting needs `npx wrangler login` (or R2 S3 keys via env) — see
+`scripts/python/upload_r2.py`.
 
 ### Caching
 
@@ -247,6 +288,15 @@ The `--render` flag synthesizes WAV audio from patterns:
 - `headless: false` required (Web Audio quirks in headless mode)
 - **Code insertion:** Use `cmContent.cmView.view.dispatch({changes: {...}})` not textContent
 - **setSinkId timing:** Must be AFTER clicking play (after superdough initializes)
+- **TEMPO FIX (Jun 2026, CRITICAL):** avfoundation captures BlackHole's 48kHz stream with
+  device-clock timestamps that don't track real time, so the recording came out ~25% FAST (136 BPM
+  read as ~103). The ffmpeg capture MUST use `-use_wallclock_as_timestamps 1` (before `-i`) +
+  `-af aresample=async=1` (before output) to restamp/resample to real time. Strudel itself is fine
+  (AudioContext clock is real-time). All similarity numbers recorded before this fix were on
+  sped-up audio. Output `-ar` does NOT fix it; input `-ar` before `-i` breaks avfoundation.
+- **No programmatic stop/restart in the embed:** `window.stop()` doesn't stop, the play button
+  loses its text after starting, and `ctx.state` is always 'running' — so a warm-up→restart pass
+  is impossible. The recorder is single-pass (record, trim leading silence to anchor ~bar-0).
 
 **Hidden window configuration:**
 - Position: `--window-position=-32000,-32000` (far offscreen)

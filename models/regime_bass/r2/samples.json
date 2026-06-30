@@ -1,0 +1,10 @@
+{
+  "_base": "https://pub-56831423fee34641805da07cfdaf6812.r2.dev/midi-grep/regime-clt/models/regime_bass/",
+  "regime_bass": {
+    "a1": "a.wav",
+    "a#1": "as.wav",
+    "d#1": "ds.wav",
+    "g1": "g.wav",
+    "g#1": "gs.wav"
+  }
+}

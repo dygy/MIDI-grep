@@ -171,6 +171,73 @@ def get_sidechain_depth(genre: str) -> float:
     return float(profile.get("sidechain", {}).get("depth", 0.0))
 
 
+def apply_sidechain_to_code(code: str, depth: float, orbit: int = 2,
+                            attack: float = 0.15) -> str:
+    """Deterministically wire kick-ducks-bass into generated Strudel code.
+
+    The prompt-based sidechain instruction is unreliable — the LLM drops it,
+    and on tracks with prior agent history the instruction branch is skipped
+    entirely. This post-processor guarantees the duck regardless: it appends
+    ``.orbit(N)`` to the bass voice and ``.duckorbit(N).duckdepth(d).duckattack(a)``
+    to the drums voice, operating on the assembled code right before render.
+
+    Idempotent (no-op if ``.duckorbit(`` is already present) and conservative:
+    only fires when depth > 0 AND both a bass and a drums voice are identified,
+    so it never half-wires (which would silently not duck) or corrupt structure.
+    The methods are appended after each ``$:`` block's outermost close paren, so
+    they don't change ``arrange()`` entry counts that the splice/validation logic
+    depends on. Returns the code unchanged on any non-matching shape.
+    """
+    if not depth or depth <= 0:
+        return code
+    if '.duckorbit(' in code:
+        return code  # already wired (e.g. re-render of the same code)
+
+    lines = code.split('\n')
+    block_starts = [i for i, ln in enumerate(lines) if ln.strip().startswith('$:')]
+    if not block_starts:
+        return code
+
+    bounds = block_starts + [len(lines)]
+    import re as _re
+    drums = None
+    note_blocks = []  # (start, end, mean_octave)
+    for k, start in enumerate(block_starts):
+        end = bounds[k + 1]
+        text = '\n'.join(lines[start:end]).lower()
+        if 's(' in text and ('bd' in text or 'sd' in text or '.bank(' in text):
+            if drums is None:
+                drums = (start, end)
+            continue
+        # Note voice — record its mean octave so we can tell bass from lead.
+        octaves = [int(d) for d in _re.findall(r'[a-g][#s]?(\d)', text)]
+        mean_oct = sum(octaves) / len(octaves) if octaves else 99
+        note_blocks.append((start, end, mean_oct))
+
+    if drums is None or not note_blocks:
+        return code  # need both a drums voice and a bass voice to wire the duck
+
+    # Bass = the lowest-octave note voice.
+    bass = min(note_blocks, key=lambda b: b[2])
+
+    def _last_content_line(start, end):
+        for li in range(end - 1, start - 1, -1):
+            if lines[li].strip():
+                return li
+        return -1
+
+    # Append to the bass last so earlier block indices stay valid (we mutate in place).
+    duck = f'.duckorbit({orbit}).duckdepth({depth:.2f}).duckattack({attack:.2f})'
+    drums_li = _last_content_line(*drums[:2])
+    if drums_li >= 0 and '.duckorbit(' not in lines[drums_li]:
+        lines[drums_li] = lines[drums_li].rstrip() + duck
+    bass_li = _last_content_line(*bass[:2])
+    if bass_li >= 0 and f'.orbit({orbit})' not in lines[bass_li]:
+        lines[bass_li] = lines[bass_li].rstrip() + f'.orbit({orbit})'
+
+    return '\n'.join(lines)
+
+
 def sidechain_instruction(genre: str) -> str:
     """Return a copy-pasteable kick-ducks-bass instruction for genres that want it.
 
