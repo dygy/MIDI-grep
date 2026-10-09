@@ -35,7 +35,7 @@ orchestrator's copy of the AWOS registry agent, with this project's pytest skill
 | Ollama / Claude prompts, iterative improvement loop (`ai_improver.py`, `codegen_orchestrator.py`) | `llm-expert` | ✅ Covered | llm-expert |
 | Music theory (key, chords, arrangement, genre conventions) | `music-theory-expert` | ✅ Covered | music-theory-expert |
 | TypeScript / Puppeteer BlackHole recorder (`scripts/node/src/record-strudel-blackhole.ts`) | `node-recorder` | ⚠️ Partial — `typescript-development` skill present, no agent owns the recorder | — |
-| Cloudflare R2 sample hosting (`upload_r2.py`, wrangler) | `python-expert` | ⚠️ Partial — `cloudflare`/`wrangler` plugin skills exist at user level only | python-expert |
+| Cloudflare R2 sample hosting (`upload_r2.py`, wrangler; bucket `4cast`, account 503e92d7…) | `python-expert` | ✅ Covered — pack incl. vocal samples uploaded 2026-10-09; `wrangler` needs `--remote` + `CLOUDFLARE_ACCOUNT_ID` | python-expert |
 | ClickHouse learning store (`ai_improver.py`, `.clickhouse/`) | `python-expert` | ✅ Covered | python-expert |
 | pytest acceptance tests (`scripts/python/tests/`) | `testing-expert` | ✅ Covered | testing-expert |
 | Playwright MCP browser checks for `serve` | `testing-expert` | ✅ Covered — `verify-ui` 1.0.0 installed from the registry and bound | testing-expert |

@@ -232,7 +232,9 @@ one-shots/pitched stay normalized. (2) Strudel's `samples(jsonUrl)` resolves
 array-valued entries — so the generated `samples.json` bakes an absolute `_base`
 ending in `/` and emits every value (incl. one-shots) as single-element arrays.
 R2 hosting needs `npx wrangler login` (or R2 S3 keys via env) — see
-`scripts/python/upload_r2.py`.
+`scripts/python/upload_r2.py`. The Regime CLT pack lives in bucket `4cast` (account `503e92d7…`, prefix
+`midi-grep/regime-clt`, public `pub-56831423….r2.dev`); set `CLOUDFLARE_ACCOUNT_ID` and pass `--remote` to
+`wrangler r2 object …` — without `--remote` wrangler reads its LOCAL dev store and the bucket looks empty.
 
 ### Caching
 
