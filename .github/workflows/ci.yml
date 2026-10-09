@@ -27,6 +27,7 @@ concurrency:
 jobs:
   go:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
@@ -40,6 +41,7 @@ jobs:
 
   node:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     defaults:
       run:
         working-directory: scripts/node
@@ -58,6 +60,7 @@ jobs:
 
   python:
     runs-on: ubuntu-latest
+    timeout-minutes: 20
     defaults:
       run:
         working-directory: scripts/python
@@ -68,7 +71,8 @@ jobs:
           python-version: "3.11"
           cache: pip
           cache-dependency-path: scripts/python/requirements.txt
-      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libsndfile1 ffmpeg
+      # No apt step: the soundfile wheel bundles libsndfile and the tests only read WAVs. An apt
+      # mirror stall froze a run for 12+ minutes on 2026-10-09, hence the job timeout below.
       # The analysis subset only — the full requirements.txt pulls TensorFlow 2.15,
       # Demucs and CLAP, which the unit tests do not import; matplotlib is needed because
       # compare_audio.py (run as a subprocess by the stamping tests) imports librosa.display (reproduced locally on
@@ -82,6 +86,7 @@ jobs:
 
   hooks:
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
       - run: bash -n .claude/hooks/*.sh
