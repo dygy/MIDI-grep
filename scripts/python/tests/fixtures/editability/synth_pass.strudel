@@ -1,0 +1,18 @@
+// MIDI-grep dynamic — pure synthesis (hand-written fixture, spec 003 R6 → synth)
+// genre=brazilian_funk
+// generation_mode: synth
+const cps = 0.566667   // 136 BPM
+setcps(cps)
+
+let bass = [
+  "~ ~ e2 c2 ~ ~ e2 ds2 ds2 e2 ~ ~ ~ ~ ~ ~",
+  "~ e2 ~ b2 g2 ~ c3 ~ ds2 ~ ~ b2 ~ b2 ~ cs2"
+]
+let lead = [
+  "e4 ~ gs4 ~ b4 ~ e5 ~ ~ ~ ~ ~ ~ ~ ~ ~",
+  "cs5 ~ b4 ~ gs4 ~ e4 ~ ~ ~ ~ ~ ~ ~ ~ ~"
+]
+
+$: note(cat(...bass.slice(0, 2))).s("sawtooth").lpf(400).gain(0.6)  // BASS — bass.slice() on an ARRAY must not trip R1
+$: note(cat(...lead)).s("supersaw").lpf(3000).room(0.2).gain(0.4)  // LEAD
+$: s("bd*2 sd hh*4").bank("RolandTR808").gain(0.7)  // DRUMS

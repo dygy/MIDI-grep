@@ -348,6 +348,14 @@ below is the only render path. Dead references to `render-strudel-node.js` still
 - Loads pitched samples from model directories
 - Fallback when Node.js renderer unavailable
 
+**Editability / Replay Detector (`scripts/python/editability_check.py`, spec 003 Slice 1):**
+- Static analysis of a `.strudel` file against `values.md`: R1 `slice(N,run(N)).slow(N)`/`loopAt`
+  reconstruction, R2 full-stem or per-bar-loop sounds (`originalfull`, `vocalsfull`, `drumsloop`…),
+  R3 ≥1 editable voice, R4 texture allowance (`// texture` marker + ≥2 editable voices), R5 loop-only,
+  R6 `generation_mode` header/inference. Exit 0 pass / 1 fail / 2 parse error; `--json` for tooling.
+- Current state: v012 and v023 FAIL (v023 only on the `vocalsfull` line); v023 minus that voice PASSES as
+  `sample-instrument`. Slice 2 wires it ahead of compare/gate so replay is never scored.
+
 **Audio Comparison (`scripts/python/compare_audio.py`):**
 - Compares rendered output vs original stems
 - **CRITICAL: Uses MAE for frequency balance, NOT cosine similarity!**

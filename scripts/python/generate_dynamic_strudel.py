@@ -618,11 +618,26 @@ def main() -> int:
     voices = channels  # for the summary count below
 
     out = args.out or (args.pack_dir / "output_dynamic.strudel")
-    out.write_text("\n".join(L) + "\n")
+    code = "\n".join(L) + "\n"
+    out.write_text(code)
+
+    # Spec 003 Slice 1: the same validator the LLM codegen path uses now also sees this
+    # generator's output, so a replay voice (values.md A1 — e.g. the `vocalsfull` loop) is
+    # reported at generation time instead of being discovered after a render. Warn-only until
+    # Slice 3 makes the vocal voice editable; Slice 2 makes compare/gate refuse to score it.
+    try:
+        from strudel_validation import validate_code
+        _, validation_error = validate_code(code, autocorrect=False)
+    except Exception as exc:  # pragma: no cover - validator unavailable must not block output
+        validation_error = f"validator unavailable: {exc}"
+    if validation_error:
+        print(f"WARNING editability: {validation_error}", file=sys.stderr)
+
     print(json.dumps({"out": str(out), "bass_bars": len(bass_bars or []),
                       "lead_bars": len(lead_bars or []), "drums": bool(detected),
                       "bass_sound": args.bass_sound, "lead_sound": args.lead_sound,
-                      "uses_custom_samples": needs_samples}, indent=2))
+                      "uses_custom_samples": needs_samples,
+                      "validation": validation_error or "ok"}, indent=2))
     return 0
 
 

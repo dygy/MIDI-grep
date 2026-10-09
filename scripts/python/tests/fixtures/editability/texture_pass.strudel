@@ -1,0 +1,19 @@
+// MIDI-grep dynamic — 2 editable voices + a `// texture` vocal loop (spec 003 R4 → pass)
+// genre=brazilian_funk
+setcps(0.566667)
+await samples("https://example.invalid/midi-grep/regime-clt/instruments/samples.json")
+await samples("https://example.invalid/midi-grep/regime-clt/samples.json")
+const vocalBars = 16
+
+let bass = [
+  "~ ~ e2 c2 ~ ~ e2 ds2 ds2 e2 ~ ~ ~ ~ ~ ~",
+  "~ e2 ~ b2 g2 ~ c3 ~ ds2 ~ ~ b2 ~ b2 ~ cs2"
+]
+let lead = [
+  "e4 ~ gs4 ~ b4 ~ e5 ~ ~ ~ ~ ~ ~ ~ ~ ~",
+  "cs5 ~ b4 ~ gs4 ~ e4 ~ ~ ~ ~ ~ ~ ~ ~ ~"
+]
+
+$: note(cat(...bass)).s("regime_bass").lpf(517).gain(0.6)  // BASS
+$: note(cat(...lead)).s("regime_lead").lpf(9000).room(0.18).gain(0.5)  // LEAD
+$: s("vocalsfull").slice(vocalBars, run(vocalBars)).slow(vocalBars).clip(1).gain(0.4)  // texture

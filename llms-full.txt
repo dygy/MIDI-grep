@@ -71,6 +71,7 @@ Generative flags: `--mode granular|rave`, `--models`, `--github`, `--threshold`,
 | `ai_improver.py` | Iteration loop + ClickHouse learning; skips iteration on validation failure |
 | `ai_code_generator.py` | Rule-based generator (legacy/fallback to Ollama) |
 | `compare_audio.py` | Rendered-vs-original similarity (MAE freq balance — see §6); `--config` for tempo tolerance |
+| `editability_check.py` | Replay/editability detector (spec 003 §2.2-A rules R1–R6): `check_editability(code)` → `EditabilityResult`, CLI exit 0/1/2, `--json`; `strudel_validation.validate_code` also rejects `.loopAt(` and `<stem>full`/`<stem>loop` sounds |
 | `spectrogram_analyzer.py` | Mel-spectrogram deep analysis → actionable dB-diff insights for prompts |
 | `sound_selector.py` | Catalog: 67 drum machines, 128 GM instruments, 17 genre palettes; `retrieve_genre_context(genre)` RAG (~40 tokens) |
 | `synth_profiles.py` | Per-genre synth character (`apply_genre_profile`): nudges bass gain / sub_octave_gain / master.hpf / drums transient on top of analysis-derived `synth_config.json`. Also `get_sidechain_depth(genre)` + `sidechain_instruction(genre)` (kick-ducks-bass). Applied via `analyze_synth_params.py --genre` (genre passed from Go). |

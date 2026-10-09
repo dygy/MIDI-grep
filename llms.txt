@@ -30,6 +30,9 @@ improve similarity. All outputs cached in `.cache/stems/{key}/` with output vers
 - `scripts/python/` — audio analysis, comparison, and LLM codegen (the brains).
 - `scripts/node/src/` — TypeScript Strudel renderers.
 - `eval/` — similarity gate (`thresholds.yaml`) + reference-track datasets.
+- `scripts/python/editability_check.py` — the editability/replay detector (spec 003 Slice 1): static
+  rules R1–R6 over a `.strudel` file; exit 0 pass / 1 fail / 2 parse error; `--json` emits
+  `editability`, `generation_mode`, voice counts. v023's `vocalsfull` voice FAILS it (replay, values.md A1).
 - `.awos/`, `.claude/` — agent workflow (commands, skills, domain-expert subagents).
 - `.sisyphus/` — durable plan + evidence orchestration for multi-step runs.
 

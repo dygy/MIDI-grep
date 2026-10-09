@@ -198,6 +198,20 @@ INVALID_METHODS = [
     '.limit(', '.normalize(',
 ]
 
+# Replay / reconstruction-by-playback — FORBIDDEN as a deliverable (context/product/values.md A1,
+# spec 003 §2.2-A R1/R2). These are real Strudel features, not hallucinations, so they live in
+# their own lists with their own error message. The full structural check (texture allowance,
+# voice counting, mode) is editability_check.py; this is the cheap generation-time reject that
+# the LLM codegen path (ollama_agent._validate_code) gets for free via validate_code().
+REPLAY_METHODS = [
+    '.loopAt(',
+]
+
+# s("originalfull") / s("<stem>full") / s("origseg<N>") / s("<stem>loop") — also .s( / sound(.
+REPLAY_SOUND_PATTERN = re.compile(
+    r'(?<![\w$])(?:\.\s*)?(?:s|sound)\(\s*["\'`]\s*(originalfull|[a-z]+full|origseg\d+|[a-z]+loop)\b'
+)
+
 _VALID_STRUDEL_PATTERNS = [
     '.sound(', '.gain(', '.lpf(', '.hpf(', '.room(', '.delay(', '.bank(',
     '.attack(', '.release(', '.decay(', '.sustain(',
@@ -219,6 +233,14 @@ def validate_code(code: str, autocorrect: bool = True):
     for invalid in INVALID_METHODS:
         if invalid in code:
             return code, f"invalid method {invalid} (non-existent Strudel method)"
+
+    for replay in REPLAY_METHODS:
+        if replay in code:
+            return code, f"replay method {replay} (audio replay is forbidden — values.md A1; use note()/s() patterns)"
+
+    rm = REPLAY_SOUND_PATTERN.search(code)
+    if rm:
+        return code, f"replay sound '{rm.group(1)}' (full-stem replay is forbidden — values.md A1; use a sample-instrument or synth)"
 
     for pattern in INVALID_GM_PATTERNS:
         m = re.findall(pattern, code)

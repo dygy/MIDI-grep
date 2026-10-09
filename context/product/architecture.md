@@ -612,7 +612,7 @@ midi-grep serve --port 8080
 ## 9. Testing Stack
 
 Declared per layer; the AWOS `testing-expert` agent treats this section as the single source of
-truth and blocks if it is missing. **There is no CI** — every layer runs locally on the macOS
+truth and blocks if it is missing. **CI (`.github/workflows/ci.yml`, added 2026-10-09)** runs the Go build/vet/gofmt/test, the Node `tsc` build, pytest on the lightweight analysis subset and the hook/JSON sanity checks on every PR and feature-branch push (first run: 1 m 14 s, all green). Everything that needs audio hardware or ML models still runs locally on the macOS
 workstation.
 
 ### Unit
