@@ -102,15 +102,16 @@ The `docs-freshness` hook reminds you once per session when a pipeline file chan
 
 **Current achievement (honest, contract-passing):** editable dynamic-Strudel with ALL voices as
 editable data — transcribed bass/lead/VOCAL notes on stem-derived sample-instruments + extracted drum
-patterns — at **87.4% overall / 91.9% section-aware / 88.5% freq balance** on Regime CLT
-(brazilian_funk; `v024/comparison.json`, 2026-10-09, `editability: pass`, `generation_mode:
-sample-instrument`). This is the measured `sample_instrument` floor source in `eval/thresholds.yaml`
-(floor = measured − 0.02). `--mode synth` (palette sounds, no samples) measured **75.9% / 84.1%**
-(`v025`), also detector-passing. Its `tempo_similarity` reads 0.365 because the beat tracker locks onto
-123 BPM on this content; a 136-BPM click rendered through the same chain measures 136.0, so playback
-speed is correct (open task: robust tempo estimate). HISTORY: v023 (2026-06-30) scored 93.8% / 95.9%
-but its vocal voice was a full-stem replay (`s("vocalsfull")…slow(N)`, `values.md` A1) — the
-`editability_check.py` detector now FAILS it and `compare_audio.py --strudel` refuses to score it.
+patterns — at **90.1% overall / 92.1% section-aware / 91.6% freq balance,
+tempo_sim 1.000** on Regime CLT (brazilian_funk; `v026/comparison.json`, 2026-10-09, `editability: pass`,
+`generation_mode: sample-instrument`, raw-capture recorder). `--mode synth` (palette sounds, no samples)
+measured **78.8% / 83.2%** (`v027`), also detector-passing; its tempo sub-score (0.46) is a
+beat-tracker reading on the 808-bank synth drums, playback is at 136. These are the measured
+`modes.*` floor sources in `eval/thresholds.yaml` (floor = measured − 0.02). HISTORY: v024/v025 (same
+day, wall-clock capture) read 87.4% / 75.9% with tempo_sim 0.365 — the recorder's async resampling
+jittered beat timing (fixed, see CAPTURE MODE below). v023 (2026-06-30) scored 93.8% / 95.9% but its
+vocal voice was a full-stem replay (`s("vocalsfull")…slow(N)`, `values.md` A1) — `editability_check.py`
+now FAILS it and `compare_audio.py --strudel` refuses to score it.
 NOTE: numbers measured BEFORE the Jun-2026 recorder tempo fix (the 72% / 88.7% / 92.4% / 94.6%
 history) were on ~25%-sped-up audio and are invalid — see the recorder fix below. Earlier honest
 baselines were ~60-70% (the old 90%+ was inflated by a cosine bug).
@@ -319,6 +320,15 @@ below is the only render path. Dead references to `render-strudel-node.js` still
   `-af aresample=async=1` (before output) to restamp/resample to real time. Strudel itself is fine
   (AudioContext clock is real-time). All similarity numbers recorded before this fix were on
   sped-up audio. Output `-ar` does NOT fix it; input `-ar` before `-i` breaks avfoundation.
+- **CAPTURE MODE (Oct 2026):** the recorder now captures the BlackHole stream RAW and corrects its
+  speed ONCE by the measured samples/wall-clock ratio (`asetrate=<real rate>,aresample=44100`), because
+  the Jun wall-clock+`aresample=async=1` path, while right long-term, inserted/dropped chunks whenever a
+  buffer's stamp disagreed with its sample count: on a 170 s click train it left 61 inter-click gaps
+  > 50 ms (IOI std 38 ms) vs 0 gaps (std 12 ms) raw. That jitter is why every beat tracker read the
+  music renders at ~123 BPM although playback was at 136. The device's effective rate is run-dependent
+  (0.80–0.89 × 48 kHz measured), hence per-run measurement. `MIDIGREP_CAPTURE=wallclock` restores the
+  old path. Verify a capture chain change with a 170 s `s("bd*4")` click render: fitted period must be
+  0.4412 s ± 0.3% and IOI std < 15 ms.
 - **No programmatic stop/restart in the embed:** `window.stop()` doesn't stop, the play button
   loses its text after starting, and `ctx.state` is always 'running' — so a warm-up→restart pass
   is impossible. The recorder is single-pass (record, trim leading silence to anchor ~bar-0).

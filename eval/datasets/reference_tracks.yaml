@@ -21,14 +21,14 @@ tracks:
     genre: brazilian_funk
     mode: sample-instrument
     cache_key: "Regime CLT (Dj Brunin XM, Aurora Shukita)"
-    version: v024
-    # First detector-passing render (editable vocal, Slice 3). overall 0.8743 / section-aware 0.9194.
+    version: v026
+    # Detector-passing render (editable vocal), raw-capture recorder. overall 0.9009 / section-aware 0.9205, tempo 1.000.
   - name: "Regime CLT (Dj Brunin XM, Aurora Shukita) — synth mode"
     genre: brazilian_funk
     mode: synth
     cache_key: "Regime CLT (Dj Brunin XM, Aurora Shukita)"
-    version: v025
-    # Pure-synth render (palette sounds, no samples()). overall 0.7589 / section-aware 0.8406.
+    version: v027
+    # Pure-synth render (palette sounds, no samples()), raw-capture recorder. overall 0.7879 / section-aware 0.8319.
   # - name: "Caravan Palace - Lone Digger"
   #   genre: electro_swing
   #   cache_key: "Caravan Palace - Lone Digger (Official MV)"

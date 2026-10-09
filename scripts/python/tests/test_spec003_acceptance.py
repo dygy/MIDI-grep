@@ -7,13 +7,13 @@ The per-slice suites (test_editability_check, test_similarity_gate, test_generat
 test_vocal_modes, test_compare_audio_stamping, test_report_editability) prove each component.
 This file proves the contract holds ACROSS components, on whole deliverables:
 
-  deliverable (committed fixture or cached v024/v025 render output)
+  deliverable (committed fixture or cached v026/v027 render output)
       -> editability_check -> strudel_validation -> compare_audio --strudel
       -> eval/gate -> loop MCP -> ai_improver -> generate_report
 
 Every positive case has a negative counterpart (see the comment above each test). Cases that need
 a live BlackHole render are out of CI scope: they read the CACHED renders under
-`.cache/stems/Regime CLT (Dj Brunin XM, Aurora Shukita)/v024|v025` and SKIP when absent.
+`.cache/stems/Regime CLT (Dj Brunin XM, Aurora Shukita)/v026|v027` and SKIP when absent.
 
 Criterion -> test map
   2.1 editable data per voice     test_21_every_voice_is_its_own_block_of_editable_data
@@ -93,7 +93,7 @@ DELIVERABLES = [
     pytest.param(("fixture-sample-instrument", FIX / "v023_minus_vocal.strudel", "sample-instrument"),
                  id="fixture-sample-instrument"),
     pytest.param(("fixture-synth", FIX / "synth_pass.strudel", "synth"), id="fixture-synth"),
-    pytest.param(("cache-v024", CACHE / "v024" / "output.strudel", "sample-instrument"), id="cache-v024"),
+    pytest.param(("cache-v026", CACHE / "v026" / "output.strudel", "sample-instrument"), id="cache-v026"),
     pytest.param(("cache-v025", CACHE / "v025" / "output.strudel", "synth"), id="cache-v025"),
 ]
 
@@ -756,16 +756,16 @@ def test_24_mode_floors_are_reproducible_from_a_real_run():
             assert evaluate_comparison(comp_path, genre=genre, thresholds=THRESHOLDS).passed
             checked += 1
     if checked == 0:
-        pytest.skip("cached v024/v025 renders absent — static linkage verified only")
+        pytest.skip("cached measured renders absent — static linkage verified only")
 
 
 # negative: a figure that no run supports, or a run of another mode, does not reproduce
 def test_24_a_tampered_measurement_does_not_reproduce():
-    run = _resolve_run("Regime CLT (Dj Brunin XM, Aurora Shukita)/v024/comparison.json")
-    if not run.exists():
-        pytest.skip("cached v024 absent")
-    comp = json.loads(run.read_text())
     m = dict(THRESHOLDS["modes"]["sample_instrument"]["measured"]["brazilian_funk"])
+    run = _resolve_run(m["run"] + "/comparison.json")   # whatever run thresholds.yaml currently cites
+    if not run.exists():
+        pytest.skip(f"cached {m['run']} absent")
+    comp = json.loads(run.read_text())
     assert _reproduces(m, comp, "sample_instrument", None) == []
     inflated = {**m, "overall": m["overall"] + 0.05}   # an aspirational number
     assert any("overall" in p for p in _reproduces(inflated, comp, "sample_instrument", None))
@@ -790,7 +790,7 @@ def _headline(html: str) -> str | None:
 # AC: headline from a generated render, naming the mode
 @pytest.mark.parametrize(
     "run,mode",
-    [("v024", "sample-instrument"), ("v025", "synth")],
+    [("v026", "sample-instrument"), ("v027", "synth")],
 )
 def test_25_headline_states_the_generating_mode(run, mode):
     gr = _report_module()

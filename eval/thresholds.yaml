@@ -91,35 +91,35 @@ section_aware:
 modes:
   sample_instrument:
     # Floors = measured − margin (margin 0.02 ≈ the run-to-run noise of a BlackHole render).
-    # Measured 2026-10-09 on the first contract-passing (editable-vocal) render; see `measured`.
+    # Measured 2026-10-09 after the raw-capture recorder fix, on a contract-passing (editable-vocal)
+    # render; see `measured`.
     genres:
-      brazilian_funk: 0.85
+      brazilian_funk: 0.88
     section_aware:
       brazilian_funk: 0.90
     measured:
       brazilian_funk:
-        overall: 0.8743
-        section_aware: 0.9194
-        frequency_balance: 0.8851
-        tempo_similarity: 0.3651   # beat tracker reads 123 BPM on this content; a 136-BPM click
-                                   # track through the same chain measured 136.0 → playback is correct
-        run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v024"
+        overall: 0.9009
+        section_aware: 0.9205
+        frequency_balance: 0.9163
+        tempo_similarity: 1.0000   # rendered tempo 136.0 (v024's 0.365 was recorder capture jitter, fixed)
+        run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v026"
         margin: 0.02
         editability: pass
         vocal_mode: instrument
   synth:
     # Pure palette synthesis (no stem samples) — inherently further from the master; floor = measured − 0.02.
     genres:
-      brazilian_funk: 0.74
+      brazilian_funk: 0.77
     section_aware:
-      brazilian_funk: 0.82
+      brazilian_funk: 0.81
     measured:
       brazilian_funk:
-        overall: 0.7589
-        section_aware: 0.8406
-        frequency_balance: 0.6144
-        tempo_similarity: 0.3651   # same beat-tracker behaviour as sample_instrument (see above)
-        run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v025"
+        overall: 0.7879
+        section_aware: 0.8319
+        frequency_balance: 0.6424
+        tempo_similarity: 0.4624   # beat tracker reads ~125 on the 808-bank synth drums (content-level); playback verified at 136
+        run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v027"
         margin: 0.02
         editability: pass
         vocal_mode: instrument

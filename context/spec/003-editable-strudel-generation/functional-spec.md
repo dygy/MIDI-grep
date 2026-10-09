@@ -140,7 +140,7 @@ recognizable — while staying fully mine to edit.
       95.2%, timbre 98%, harmony 99%, tempo 100%, energy 76%) — a fully editable,
       live-codeable render, NOT replay. This is the `sample-instrument` floor to hold/beat.
       No target is ever set by replay.
-      — verified 2026-10-09: measured 2026-10-09 on BlackHole renders: sample-instrument v024 0.8743/0.9194 (floor 0.85/0.90), synth v025 0.7589/0.8406 (floor 0.74/0.82); the 91.4%/59% figures quoted in this bullet were pre-contract (vocal replay) and are superseded
+      — verified 2026-10-09: measured on BlackHole renders (raw-capture recorder): sample-instrument v026 0.9009/0.9205 (floor 0.88/0.9, tempo 1.000), synth v027 0.7879/0.8319 (floor 0.77/0.81); the 91.4%/59% figures quoted in this bullet were pre-contract (vocal replay) and are superseded
 
 ### 2.5 Reporting reflects the values
 

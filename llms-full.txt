@@ -91,6 +91,9 @@ Generative flags: `--mode granular|rave`, `--models`, `--github`, `--threshold`,
   `headless:false`. Leading-silence fix: ffmpeg `silenceremove=start_periods=1:...`.
 - `render-strudel-node.ts` — REMOVED (Jun 2026); only `record-strudel-blackhole.ts` remains.
   Build: `cd scripts/node && npm install && npm run build` (puppeteer + tsc are required).
+- Recorder capture (Oct 2026): RAW device stream + one uniform speed correction from the samples/
+  wall-clock ratio (default); `MIDIGREP_CAPTURE=wallclock` = the Jun 2026 wall-clock+async path, which
+  jitters beat timing (±35 ms gaps) and made renders read ~123 BPM.
 
 Node voice-gain defaults (Brazilian funk tuned): bass {gain 0.6, lpf 400, hpf 30, sub_octave 0.5},
 mid {0.5, lpf 5k, hpf 200}, high {0.4, lpf 8k, hpf 400}, drums {0.7, transient_boost 0.4}, 30Hz master HPF.
