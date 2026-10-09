@@ -94,7 +94,7 @@ DELIVERABLES = [
                  id="fixture-sample-instrument"),
     pytest.param(("fixture-synth", FIX / "synth_pass.strudel", "synth"), id="fixture-synth"),
     pytest.param(("cache-v026", CACHE / "v026" / "output.strudel", "sample-instrument"), id="cache-v026"),
-    pytest.param(("cache-v025", CACHE / "v025" / "output.strudel", "synth"), id="cache-v025"),
+    pytest.param(("cache-v027", CACHE / "v027" / "output.strudel", "synth"), id="cache-v027"),
 ]
 
 
