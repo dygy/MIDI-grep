@@ -36,12 +36,12 @@ type ReportData struct {
 	RenderPath  string
 
 	// Chart image paths
-	ChartFrequencyPath     string
-	ChartSimilarityPath    string
-	ChartSpecOrigPath      string
-	ChartSpecRendPath      string
-	ChartChromaOrigPath    string
-	ChartChromaRendPath    string
+	ChartFrequencyPath  string
+	ChartSimilarityPath string
+	ChartSpecOrigPath   string
+	ChartSpecRendPath   string
+	ChartChromaOrigPath string
+	ChartChromaRendPath string
 
 	// Comparison results (from JSON)
 	Comparison *ComparisonResult
@@ -776,26 +776,26 @@ func generateHTML(data *ReportData) string {
     </script>
 </body>
 </html>`,
-		trackName,                                    // title
-		trackName,                                    // h1
-		data.Version,                                 // version badge
-		bpm,                                          // bpm badge
-		html.EscapeString(key),                       // key badge
-		html.EscapeString(style),                     // style badge
+		trackName,                // title
+		trackName,                // h1
+		data.Version,             // version badge
+		bpm,                      // bpm badge
+		html.EscapeString(key),   // key badge
+		html.EscapeString(style), // style badge
 		audioPlayer("Melodic", melodicData, "audio-melodic"),
 		audioPlayer("Drums", drumsData, "audio-drums"),
 		audioPlayer("Vocals", vocalsData, "audio-vocals"),
 		audioPlayer("Bass", bassData, "audio-bass"),
 		audioPlayer("Strudel Render", renderData, "audio-render"),
-		bpm,                                          // stat
-		html.EscapeString(key),                       // stat
-		notes,                                        // stat
-		drumHits,                                     // stat
-		html.EscapeString(style),                     // stat
-		generateChartsHTML(data.Comparison),          // charts HTML
-		generateAIAnalysisCard(data.AIParams),        // AI analysis card
-		chartsSection,                                // visual charts
-		html.EscapeString(data.StrudelCode),          // code block
-		time.Now().Format("2006-01-02 15:04"),        // footer time
+		bpm,                                   // stat
+		html.EscapeString(key),                // stat
+		notes,                                 // stat
+		drumHits,                              // stat
+		html.EscapeString(style),              // stat
+		generateChartsHTML(data.Comparison),   // charts HTML
+		generateAIAnalysisCard(data.AIParams), // AI analysis card
+		chartsSection,                         // visual charts
+		html.EscapeString(data.StrudelCode),   // code block
+		time.Now().Format("2006-01-02 15:04"), // footer time
 	)
 }

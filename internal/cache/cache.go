@@ -54,10 +54,10 @@ type CachedOutput struct {
 
 // TrackMetadata stores track info for folder naming
 type TrackMetadata struct {
-	Title     string    `json:"title"`
-	URL       string    `json:"url"`
-	VideoID   string    `json:"video_id"`
-	CachedAt  time.Time `json:"cached_at"`
+	Title    string    `json:"title"`
+	URL      string    `json:"url"`
+	VideoID  string    `json:"video_id"`
+	CachedAt time.Time `json:"cached_at"`
 }
 
 // NewStemCache creates a new stem cache in the repository's .cache directory
