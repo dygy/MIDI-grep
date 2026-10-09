@@ -1,0 +1,11 @@
+{
+  "generation_mode": "loops",
+  "editability": "fail",
+  "editability_violations": [
+    "R1: voice 'vocals' plays a raw stem loop (s(\"vocalsfull\")) — replay, not an instrument",
+    "R2: fewer than 2 editable note() voices"
+  ],
+  "editable_voice_count": 0,
+  "texture_voice_count": 1,
+  "comparison": null
+}

@@ -126,7 +126,7 @@ DRUM_KITS = """DRUM KITS (pick one):
 """
 
 
-def call_ollama(prompt: str, model: str = "llama3:8b") -> str:
+def call_ollama(prompt: str, model: str = "midi-grep-strudel-mistral") -> str:
     """Call Ollama API with a prompt."""
     try:
         response = requests.post(

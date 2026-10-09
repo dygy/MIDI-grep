@@ -59,7 +59,7 @@ except ImportError:
 
 # Ollama configuration
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-DEFAULT_OLLAMA_MODEL = "midi-grep-strudel"
+DEFAULT_OLLAMA_MODEL = "midi-grep-strudel-mistral"
 
 
 def map_windows_to_sections(windowed: dict, sections: list) -> list:
@@ -343,6 +343,8 @@ def analyze_with_ollama(
                 "model": ollama_model,
                 "prompt": prompt,
                 "stream": False,
+                # Unload model 30s after generation to free RAM for the render phase (24GB).
+                "keep_alive": "30s",
                 "options": {
                     "temperature": 0.7,
                     "num_predict": 4096,
@@ -803,6 +805,7 @@ def _call_constrained_llm(prompt: str, use_ollama: bool = False) -> Optional[int
                     "model": ollama_model,
                     "prompt": prompt,
                     "stream": False,
+                    "keep_alive": "30s",
                     "options": {"temperature": 0.1, "num_predict": 10, "num_ctx": 8192}
                 },
                 timeout=60

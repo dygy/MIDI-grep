@@ -14,6 +14,7 @@ Contains:
 
 import json
 import random
+import re
 from typing import Dict, List, Optional, Tuple
 from dataclasses import dataclass
 
@@ -553,25 +554,89 @@ def get_genre_sounds(genre: str) -> Dict:
     }
 
 
-def retrieve_genre_context(genre: str, bpm: float = 0, key: str = "") -> str:
+# Map a codegen voice to the palette role(s) it should draw from.
+_VOICE_ROLES = {
+    "bass": ("bass",),
+    "lead": ("lead", "high"),   # lead voice can use lead or bright/high timbres
+    "mid": ("pad", "lead"),
+    "vocal": ("pad", "high", "lead"),  # a sung line: sustained / voice-like timbres first
+    "drums": ("drums",),
+}
+
+# Timbre-class hint for the vocal role: a palette entry whose name says it is a voice is the
+# natural carrier for a transcribed vocal line. This is a class rule, not a sound name.
+_VOICE_LIKE = re.compile(r"voice|choir|vox|ooh|aah", re.I)
+
+
+def _palette_for(genre: str) -> Dict:
+    genre_key = genre.lower().replace(" ", "_").replace("-", "_") if genre else "default"
+    return GENRE_PALETTES.get(genre_key, GENRE_PALETTES["default"])
+
+
+def palette_sounds(genre: str, role: str) -> List[str]:
+    """Ordered, de-duplicated sound names the genre palette offers for a codegen voice role
+    (bass/lead/mid/vocal/drums, or a raw palette key). Falls back to the default palette when
+    the genre (or the role within it) is unknown. The structured twin of
+    ``retrieve_genre_context(genre, role)`` — generators pick from this, prompts read that."""
+    palette = _palette_for(genre)
+    wanted = _VOICE_ROLES.get(role.lower(), (role.lower(),))
+    items: List[str] = []
+    for r in wanted:
+        for s in palette.get(r, []):
+            if s not in items:
+                items.append(s)
+    if not items:
+        for r in wanted:
+            for s in GENRE_PALETTES["default"].get(r, []):
+                if s not in items:
+                    items.append(s)
+    return items
+
+
+def pick_palette_sound(genre: str, role: str) -> str:
+    """The generator's default instrument for a voice role: the palette's first-ranked sound
+    for that role (palettes are ordered most-characteristic first). For ``vocal`` a voice-like
+    entry (choir/voice/oohs) is preferred over the role order when the palette has one."""
+    items = palette_sounds(genre, role)
+    if not items:  # pragma: no cover - default palette always has every role
+        raise KeyError(f"no palette sounds for role {role!r} (genre {genre!r})")
+    if role.lower() == "vocal":
+        for s in items:
+            if _VOICE_LIKE.search(s):
+                return s
+    return items[0]
+
+
+def retrieve_genre_context(genre: str, role: str = None, bpm: float = 0, key: str = "") -> str:
     """Return a compact string of genre-appropriate sounds for LLM prompts.
 
-    ~40 tokens instead of 800 for the full catalog. Falls back to "default" palette.
+    Token-efficient catalog RAG (~40 tokens vs 800 for the full catalog). Falls back to the
+    "default" palette for unknown genres.
+
+    role: when given (bass/lead/mid/drums), retrieve ONLY that voice's relevant sounds — far more
+    targeted for a per-voice codegen job (a bass job shouldn't see lead/pad/drum options). When
+    omitted, returns all roles (legacy single-shot behaviour).
     """
-    genre_key = genre.lower().replace(" ", "_").replace("-", "_") if genre else "default"
-    palette = GENRE_PALETTES.get(genre_key, GENRE_PALETTES["default"])
+    palette = _palette_for(genre)
+    character = palette.get("character", "")
+
+    if role:
+        items = palette_sounds(genre, role)
+        label = "drum banks" if role.lower() == "drums" else f"{role} sounds"
+        ctx = ", ".join(items) if items else "sawtooth, gm_synth_bass_1"
+        head = f"Good {genre or 'default'} {label}"
+        if character:
+            head += f" ({character})"
+        return f"{head}: {ctx}"
 
     parts = []
-    for role in ("bass", "lead", "pad", "high", "drums"):
-        items = palette.get(role, [])
-        if items:
-            parts.append(f"{role.capitalize()}: {', '.join(items)}")
-
-    character = palette.get("character", "")
+    for r in ("bass", "lead", "pad", "high", "drums"):
+        its = palette.get(r, [])
+        if its:
+            parts.append(f"{r.capitalize()}: {', '.join(its)}")
     header = f"Available sounds for {genre or 'default'}"
     if character:
         header += f" ({character})"
-
     return f"{header} — {' | '.join(parts)}"
 
 

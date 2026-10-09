@@ -17,6 +17,66 @@ from scipy.spatial.distance import cosine
 # Global flag for quiet mode (suppress status messages to stdout)
 _QUIET_MODE = False
 
+# ── Spec 003 editability stamping ─────────────────────────────────────────────────────────
+# When `--strudel PATH` is given, the replay detector (editability_check.py) runs BEFORE any
+# audio is loaded. A failing deliverable is never scored: a short-circuit JSON is written and
+# the process exits 3. A passing one gets `to_json_fields()` merged into the top level of the
+# results dict at every write site (stdout JSON, comparison.json, stem_comparison.json, -o).
+# Without `--strudel` nothing changes (no new keys). Metric math is untouched.
+EXIT_EDITABILITY_FAIL = 3
+_EDITABILITY_STAMP = None  # dict from editability_check.to_json_fields(), or None
+
+
+def run_editability_check(strudel_path):
+    """Run the spec-003 replay detector on a Strudel file and return its JSON fields.
+
+    Returns the five `to_json_fields()` keys (editability / generation_mode /
+    editability_violations / editable_voice_count / texture_voice_count). A parse error or an
+    unreadable file is reported fail-closed as `editability: "fail"` with the reason in
+    `editability_violations` — an unverifiable deliverable must not be scored either.
+    """
+    from editability_check import check_editability, to_json_fields, ParseError
+    try:
+        with open(strudel_path, encoding='utf-8') as f:
+            code = f.read()
+    except OSError as e:
+        return {
+            "editability": "fail",
+            "generation_mode": None,
+            "editability_violations": [f"cannot read strudel file {strudel_path}: {e}"],
+            "editable_voice_count": 0,
+            "texture_voice_count": 0,
+        }
+    try:
+        return to_json_fields(check_editability(code))
+    except ParseError as e:
+        return {
+            "editability": "fail",
+            "generation_mode": None,
+            "editability_violations": [f"parse error: {e}"],
+            "editable_voice_count": 0,
+            "texture_voice_count": 0,
+        }
+
+
+def stamp_editability(results):
+    """Merge the editability fields (if a --strudel check ran) into a results dict (in place)."""
+    if results is not None and _EDITABILITY_STAMP:
+        results.update(_EDITABILITY_STAMP)
+    return results
+
+
+def editability_fail_payload(fields):
+    """The short-circuit JSON written when the detector fails: no `comparison`, no score."""
+    return {
+        "editability": "fail",
+        "generation_mode": fields.get("generation_mode"),
+        "editability_violations": list(fields.get("editability_violations", [])),
+        "editable_voice_count": fields.get("editable_voice_count", 0),
+        "texture_voice_count": fields.get("texture_voice_count", 0),
+        "comparison": None,
+    }
+
 def log(msg):
     """Print message to stderr in quiet mode, stdout otherwise."""
     if _QUIET_MODE:
@@ -32,6 +92,23 @@ def load_audio(path, sr=22050, duration=None):
     except Exception as e:
         print(f"Error loading {path}: {e}", file=sys.stderr)
         return None
+
+def rms_normalize(y, target_rms=0.1):
+    """Scale a signal to a target global RMS.
+
+    A mastered commercial track sits far louder (RMS ~0.22) than raw Strudel/BlackHole
+    output (RMS ~0.07). Comparing absolute levels unfairly penalises the render for
+    mastering loudness rather than musical content. Normalising both signals to a common
+    loudness makes the spectral/timbre/energy comparison level-independent; the energy
+    metric then measures the *dynamic envelope* (where the track gets louder/quieter),
+    which still honestly reflects real differences like sparse, gappy arrangements.
+    """
+    if y is None or len(y) == 0:
+        return y
+    rms = float(np.sqrt(np.mean(y ** 2)))
+    if rms < 1e-9:
+        return y
+    return y * (target_rms / rms)
 
 def correct_octave_error(tempo, prior_center=120, prior_range=40):
     """
@@ -100,19 +177,97 @@ def compute_chroma_features(y, sr=22050):
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
     return np.mean(chroma, axis=1)
 
-def compute_rhythm_features(y, sr=22050):
-    """Compute rhythm/tempo features."""
+def _ac_support(onset_env, bpm, sr, hop_length=512):
+    """Normalized autocorrelation support of an onset envelope for a candidate tempo.
+
+    Mean of the (zero-lag-normalized) autocorrelation at the first four multiples of the beat
+    period, each taken as the max within +-3% of the lag. Higher = the envelope really repeats
+    at that tempo. Comparable across envelopes because of the zero-lag normalization.
+    """
+    if bpm <= 0 or onset_env is None or len(onset_env) < 8:
+        return 0.0
+    env = onset_env - np.mean(onset_env)
+    denom = float(np.sum(env ** 2))
+    if denom < 1e-12:
+        return 0.0
+    ac = np.correlate(env, env, mode='full')[len(env) - 1:] / denom
+    period = 60.0 / bpm * sr / hop_length  # frames per beat
+    vals = []
+    for k in range(1, 5):
+        lo = int(np.floor(period * k * 0.97))
+        hi = int(np.ceil(period * k * 1.03))
+        if hi >= len(ac):
+            break
+        vals.append(float(np.max(ac[max(lo, 1):hi + 1])))
+    return float(np.mean(vals)) if vals else 0.0
+
+
+def _low_band_onset_env(y, sr, lo=30.0, hi=200.0, hop_length=256, n_fft=4096):
+    """Kick-region onset envelope: positive log-magnitude flux summed over STFT bins in lo-hi Hz.
+
+    Deliberately NOT onset_strength on a band-passed signal: that runs through a 128-bin mel
+    filterbank where most bins are empty below 200 Hz, and the default mean aggregation is
+    dominated by filter leakage from dense mid/high content.
+    """
+    S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop_length))
+    f = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    m = (f >= lo) & (f <= hi)
+    L = np.log1p(100.0 * S[m])
+    return np.maximum(0.0, np.diff(L, axis=1, prepend=L[:, :1])).sum(axis=0)
+
+
+def estimate_tempo(y, sr=22050, prior_bpm=None, hop_length=512):
+    """Robust tempo estimate with two candidates and a support-based pick.
+
+    A: full-band `librosa.beat.beat_track` (the original estimator, octave-corrected).
+    B: low-band (30-200 Hz) onset envelope + `librosa.feature.tempo`, with `prior_bpm` used ONLY
+       as librosa's `start_bpm` prior (a weak log-normal prior, never an override).
+    The candidate whose own onset envelope has the stronger autocorrelation support wins; on a
+    near-tie (<0.02) the full-band candidate is kept so previously-correct reads don't change.
+    Returns (tempo, info) where info = {candidates, tempo_method}.
+    """
+    # Candidate A (existing estimator)
+    tempo_a, beats = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop_length)
+    if hasattr(tempo_a, '__len__'):
+        tempo_a = tempo_a[0] if len(tempo_a) > 0 else 120.0
+    tempo_a = correct_octave_error(float(tempo_a))
+    env_a = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+    cands = [{'method': 'full_band_beat_track', 'bpm': float(tempo_a),
+              'support': _ac_support(env_a, tempo_a, sr, hop_length)}]
+
+    # Candidate B (low-band kick envelope)
+    try:
+        hop_b = hop_length // 2  # finer lag resolution for the kick candidate
+        env_b = _low_band_onset_env(y, sr, hop_length=hop_b)
+        start = float(prior_bpm) if prior_bpm and prior_bpm > 0 else 120.0
+        tb = librosa.feature.tempo(onset_envelope=env_b, sr=sr, hop_length=hop_b,
+                                   start_bpm=start, max_tempo=200)
+        tempo_b = correct_octave_error(float(np.atleast_1d(tb)[0]))
+        cands.append({'method': 'low_band_tempo', 'bpm': float(tempo_b),
+                      'support': _ac_support(env_b, tempo_b, sr, hop_b)})
+    except Exception as e:  # never let the tempo metric crash a comparison
+        log(f"Warning: low-band tempo candidate failed: {e}")
+
+    chosen = cands[0]
+    if len(cands) > 1 and cands[1]['support'] > cands[0]['support'] + 0.02:
+        chosen = cands[1]
+    return float(chosen['bpm']), {'tempo_candidates': cands, 'tempo_method': chosen['method'],
+                                  'beat_count': len(beats)}
+
+
+def compute_rhythm_features(y, sr=22050, prior_bpm=None):
+    """Compute rhythm/tempo features.
+
+    `prior_bpm` (the other file's tempo) is only a weak start_bpm prior for the low-band
+    candidate; see estimate_tempo().
+    """
     features = {}
 
-    # Tempo
-    tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
-    # Handle both old and new librosa versions
-    if hasattr(tempo, '__len__'):
-        tempo = tempo[0] if len(tempo) > 0 else 120.0
-    # Correct octave errors (synthesized audio often confuses beat trackers)
-    tempo = correct_octave_error(float(tempo))
+    tempo, info = estimate_tempo(y, sr=sr, prior_bpm=prior_bpm)
     features['tempo'] = float(tempo)
-    features['beat_count'] = len(beats)
+    features['beat_count'] = info['beat_count']
+    features['tempo_candidates'] = info['tempo_candidates']
+    features['tempo_method'] = info['tempo_method']
 
     # Onset strength
     onset_env = librosa.onset.onset_strength(y=y, sr=sr)
@@ -184,10 +339,39 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     if original is None or rendered is None:
         return None
 
+    # Guard against an empty/near-silent render (e.g. a Strudel parse error produced 0-length
+    # audio). Without this, downstream feature extraction crashes ('can't extend empty axis 0')
+    # and takes the whole extract down. Report a zero-similarity result instead so the run
+    # continues and the failure is visible.
+    MIN_SAMPLES = 22050  # ~1 second at 22.05kHz
+    if len(rendered) < MIN_SAMPLES or len(original) < MIN_SAMPLES:
+        log(f"Render too short/empty (orig={len(original)}, rend={len(rendered)} samples) — "
+            f"reporting zero similarity")
+        return {
+            'duration_analyzed': len(rendered) / 22050,
+            'original': {}, 'rendered': {},
+            'comparison': {
+                'overall_similarity': 0.0, 'mfcc_similarity': 0.0, 'chroma_similarity': 0.0,
+                'energy_similarity': 0.0, 'brightness_similarity': 0.0,
+                'frequency_balance_similarity': 0.0, 'tempo_similarity': 0.0,
+                'section_aware_similarity': 0.0, 'section_aware_window_count': 0,
+                'render_empty': True,
+            },
+            'insights': ['Rendered audio is empty/too short — likely a Strudel parse or render error.'],
+        }
+
     # Normalize lengths
     min_len = min(len(original), len(rendered))
     original = original[:min_len]
     rendered = rendered[:min_len]
+
+    # Keep raw RMS (for reporting how quiet the render actually is) before loudness-matching.
+    raw_orig_rms = float(np.sqrt(np.mean(original ** 2))) if min_len else 0.0
+    raw_rend_rms = float(np.sqrt(np.mean(rendered ** 2))) if min_len else 0.0
+
+    # Loudness-normalize both so absolute mastering level doesn't bias the comparison.
+    original = rms_normalize(original)
+    rendered = rms_normalize(rendered)
 
     log(f"Analyzing {min_len / 22050:.1f} seconds of audio...")
 
@@ -213,7 +397,9 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
 
     log("Computing rhythm features...")
     results['original']['rhythm'] = compute_rhythm_features(original)
-    results['rendered']['rhythm'] = compute_rhythm_features(rendered)
+    # Rendered: the original's tempo is only a weak start_bpm prior (never an override).
+    results['rendered']['rhythm'] = compute_rhythm_features(
+        rendered, prior_bpm=results['original']['rhythm']['tempo'])
 
     # Use expected BPM for rendered audio if available
     # Synthesized audio confuses beat trackers with dense transients
@@ -285,6 +471,8 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     # Store the best match info
     results['comparison']['tempo_ratio_used'] = best_ratio
     results['comparison']['tempo_diff_bpm'] = best_tempo_diff
+    results['comparison']['tempo_candidates'] = results['rendered']['rhythm'].get('tempo_candidates', [])
+    results['comparison']['tempo_method'] = results['rendered']['rhythm'].get('tempo_method')
 
     # Calculate similarity using AI-derived or default tolerance
     # AI-derived tolerance accounts for beat regularity and tempo estimate variance
@@ -328,12 +516,23 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
 
     results['comparison']['frequency_balance_similarity'] = float(band_sim)
 
-    # RMS energy ratio
-    rms_ratio = min(results['original']['spectral']['rms_mean'],
-                   results['rendered']['spectral']['rms_mean']) / \
-               max(results['original']['spectral']['rms_mean'],
-                   results['rendered']['spectral']['rms_mean'], 1e-10)
-    results['comparison']['energy_similarity'] = float(rms_ratio)
+    # Energy = dynamic-envelope match on the loudness-normalized signals.
+    # (Both signals are RMS-matched, so this measures HOW energy moves over time —
+    # density, gaps, swells — not absolute loudness, which is a mastering artifact.)
+    orig_env = librosa.feature.rms(y=original)[0]
+    rend_env = librosa.feature.rms(y=rendered)[0]
+    n = min(len(orig_env), len(rend_env))
+    orig_env, rend_env = orig_env[:n], rend_env[:n]
+    # Normalize each envelope to unit mean so we compare shape, then MAE-based similarity.
+    oe = orig_env / (orig_env.mean() + 1e-10)
+    re = rend_env / (rend_env.mean() + 1e-10)
+    env_mae = float(np.mean(np.abs(oe - re)))
+    energy_sim = max(0.0, min(1.0, 1.0 - env_mae / 2.0))
+    results['comparison']['energy_similarity'] = energy_sim
+    # Preserve the raw loudness gap as diagnostic info (not scored).
+    results['comparison']['raw_rms_ratio'] = float(
+        min(raw_orig_rms, raw_rend_rms) / max(raw_orig_rms, raw_rend_rms, 1e-10)
+    )
 
     # Overall similarity (weighted average)
     # FREQUENCY BALANCE is #1 priority - if bands are off, the audio sounds wrong
@@ -359,6 +558,64 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
                 safe_weight += w
         overall = safe_sum / safe_weight if safe_weight > 0 else 0.0
     results['comparison']['overall_similarity'] = float(overall)
+
+    # Section-aware similarity: mean per-window score using fixed 10s windows.
+    # A static loop produces windows that all score at ~overall_similarity, so this
+    # won't reward it. A track that evolves (louder drop, different chord) will score
+    # LOWER here than a well-adapted render, making this an honest evolution signal.
+    # Falls back to overall_similarity if windowing fails (guard: short audio, errors).
+    try:
+        _window_size = 10.0  # seconds — long enough for stable MFCC, short enough for structure
+        _window_samples = int(_window_size * 22050)
+        if min_len >= _window_samples * 2:
+            # Compute per-window similarity directly from loaded (normalized) arrays
+            _windows = min_len // _window_samples
+            _win_sims = []
+            for _wi in range(_windows):
+                _ws = _wi * _window_samples
+                _we = _ws + _window_samples
+                _ow = original[_ws:_we]
+                _rw = rendered[_ws:_we]
+                # MFCC + band + energy (same proportions as compare_windowed)
+                _omfcc = compute_mfcc_features(_ow)
+                _rmfcc = compute_mfcc_features(_rw)
+                _omfcc_sum = np.sum(_omfcc)
+                _rmfcc_sum = np.sum(_rmfcc)
+                if _omfcc_sum == 0 or _rmfcc_sum == 0:
+                    _mfcc_w = 0.0
+                else:
+                    _mfcc_w = float(1 - cosine(_omfcc, _rmfcc))
+                    if np.isnan(_mfcc_w):
+                        _mfcc_w = 0.0
+                _ob = np.array(list(compute_frequency_bands(_ow).values()))
+                _rb = np.array(list(compute_frequency_bands(_rw).values()))
+                if np.sum(_ob) > 0:
+                    _bd = np.abs(_ob - _rb)
+                    _band_w = float(max(0.0, 1.0 - np.mean(_bd) * 2))
+                    _mx = float(np.max(_bd))
+                    if _mx > 0.15:
+                        _band_w = max(0.0, _band_w - (_mx - 0.15) * 2)
+                else:
+                    _band_w = 0.0
+                _o_rms = float(np.sqrt(np.mean(_ow ** 2)))
+                _r_rms = float(np.sqrt(np.mean(_rw ** 2)))
+                _energy_w = float(min(_o_rms, _r_rms) / max(_o_rms, _r_rms, 1e-10))
+                _win_sim = 0.40 * _mfcc_w + 0.35 * _band_w + 0.25 * _energy_w
+                _win_sims.append(float(_win_sim))
+            if _win_sims:
+                results['comparison']['section_aware_similarity'] = float(np.mean(_win_sims))
+                results['comparison']['section_aware_window_count'] = len(_win_sims)
+            else:
+                results['comparison']['section_aware_similarity'] = float(overall)
+                results['comparison']['section_aware_window_count'] = 0
+        else:
+            # Audio too short for multiple windows — fall back to overall
+            results['comparison']['section_aware_similarity'] = float(overall)
+            results['comparison']['section_aware_window_count'] = 0
+    except Exception as _e:
+        log(f"  WARNING: section_aware_similarity computation failed ({_e}), falling back to overall")
+        results['comparison']['section_aware_similarity'] = float(overall)
+        results['comparison']['section_aware_window_count'] = 0
 
     # Generate insights
     results['insights'] = generate_insights(results)
@@ -923,9 +1180,10 @@ def generate_comparison_charts(results, original_path, rendered_path, output_dir
 
 def save_comparison_json(results, output_path):
     """Save comparison results as JSON for HTML report generation."""
+    stamp_editability(results)  # spec 003: generation_mode + editability at the top level
     with open(output_path, 'w') as f:
         json.dump(results, f, indent=2)
-    print(f"Comparison JSON saved: {output_path}")
+    log(f"Comparison JSON saved: {output_path}")
 
 def generate_comparison_chart(results, original_path, rendered_path, output_path):
     """Generate a comprehensive comparison chart as PNG (legacy single-image mode)."""
@@ -1067,7 +1325,7 @@ def generate_comparison_chart(results, original_path, rendered_path, output_path
     plt.close()
     print(f"Chart saved: {output_path}")
 
-def compare_stems(stem_pairs, duration=60, window_size=5.0, synth_config_path=None):
+def compare_stems(stem_pairs, duration=60, window_size=5.0, synth_config_path=None, sections=None):
     """Compare multiple stem pairs and generate per-stem analysis.
 
     Args:
@@ -1075,6 +1333,9 @@ def compare_stems(stem_pairs, duration=60, window_size=5.0, synth_config_path=No
         duration: Max duration to analyze
         window_size: Time window size in seconds for temporal analysis
         synth_config_path: Path to synth_config.json for known BPM (avoids re-detection errors)
+        sections: Optional list of section dicts (start/end seconds) from
+                  smart_analysis.json. When provided, populates by_section per stem
+                  so comparison aligns to musical structure rather than fixed windows.
 
     Returns:
         Dict with per-stem results and aggregated metrics
@@ -1082,6 +1343,7 @@ def compare_stems(stem_pairs, duration=60, window_size=5.0, synth_config_path=No
     results = {
         'stems': {},
         'windowed': {},
+        'by_section': {},
         'aggregate': {}
     }
 
@@ -1119,6 +1381,11 @@ def compare_stems(stem_pairs, duration=60, window_size=5.0, synth_config_path=No
         windows = compare_windowed(orig_path, rend_path, duration, window_size)
         results['windowed'][stem_name] = windows
 
+        # Section-aligned comparison (only if sections provided)
+        if sections:
+            section_results = compare_by_sections(orig_path, rend_path, sections, duration)
+            results['by_section'][stem_name] = section_results
+
         # Aggregate weighted similarity
         weight = stem_weights.get(stem_name, 0.33)
         total_weight += weight
@@ -1127,6 +1394,25 @@ def compare_stems(stem_pairs, duration=60, window_size=5.0, synth_config_path=No
     # Calculate aggregate metrics
     if total_weight > 0:
         results['aggregate']['weighted_overall'] = weighted_similarity / total_weight
+
+        # Section-aware aggregate: weighted mean of per-stem section_aware_similarity.
+        # Each compare_audio() call already computed this via fixed 10s windows.
+        # Falls back to weighted_overall when unavailable.
+        try:
+            _sec_weighted = 0.0
+            _sec_total_w = 0.0
+            for _sn, _sr in results['stems'].items():
+                _sas = _sr.get('comparison', {}).get('section_aware_similarity')
+                if _sas is not None:
+                    _w = stem_weights.get(_sn, 0.33)
+                    _sec_weighted += float(_sas) * _w
+                    _sec_total_w += _w
+            if _sec_total_w > 0:
+                results['aggregate']['section_aware_similarity'] = _sec_weighted / _sec_total_w
+            else:
+                results['aggregate']['section_aware_similarity'] = results['aggregate']['weighted_overall']
+        except Exception:
+            results['aggregate']['section_aware_similarity'] = results['aggregate']['weighted_overall']
 
         # Find worst performing sections across all stems
         worst_sections = []
@@ -1154,6 +1440,44 @@ def compare_stems(stem_pairs, duration=60, window_size=5.0, synth_config_path=No
                 'freq_balance': stem_result['comparison']['frequency_balance_similarity'],
                 'energy': stem_result['comparison']['energy_similarity'],
             }
+
+        # Section-aligned worst list (preferred over fixed windows when sections present)
+        if results.get('by_section'):
+            worst_by_section = []
+            for stem_name, sec_list in results['by_section'].items():
+                for ss in sec_list or []:
+                    if ss['similarity'] < 0.7:
+                        worst_by_section.append({
+                            'stem': stem_name,
+                            'section_idx': ss['section_idx'],
+                            'time_start': ss['time_start'],
+                            'time_end': ss['time_end'],
+                            'similarity': ss['similarity'],
+                            'issues': ss.get('issues', []),
+                            'dominant_chord': ss.get('dominant_chord'),
+                            'energy_label': ss.get('energy_label'),
+                        })
+            worst_by_section.sort(key=lambda x: x['similarity'])
+            results['aggregate']['worst_by_section'] = worst_by_section[:10]
+
+            # Per-section aggregate across stems (mean similarity per section)
+            per_section_mean = {}
+            for stem_name, sec_list in results['by_section'].items():
+                for ss in sec_list or []:
+                    idx = ss['section_idx']
+                    per_section_mean.setdefault(idx, {
+                        'section_idx': idx,
+                        'time_start': ss['time_start'],
+                        'time_end': ss['time_end'],
+                        'per_stem': {},
+                    })
+                    per_section_mean[idx]['per_stem'][stem_name] = ss['similarity']
+            for entry in per_section_mean.values():
+                vals = list(entry['per_stem'].values())
+                entry['mean_similarity'] = float(sum(vals) / len(vals)) if vals else 0.0
+            results['aggregate']['per_section'] = sorted(
+                per_section_mean.values(), key=lambda e: e['section_idx']
+            )
 
     return results
 
@@ -1255,6 +1579,153 @@ def compare_windowed(original_path, rendered_path, duration=60, window_size=5.0)
         })
 
     return windows
+
+
+def compare_by_sections(original_path, rendered_path, sections, duration=60):
+    """Compare audio segment-by-segment using section boundaries from smart_analyze.
+
+    Unlike compare_windowed (fixed 5s grid), this aligns to musical structure:
+    each section in the original (intro/verse/drop/etc.) is scored against the
+    same time range in the rendered audio, so a static loop is correctly
+    penalised against a dynamic original.
+
+    Args:
+        original_path, rendered_path: audio file paths
+        sections: list of dicts with 'start', 'end' (seconds), as produced by
+                  smart_analyze.py
+        duration: max duration to load
+
+    Returns:
+        list of per-section dicts: section_idx, time_start, time_end, similarity,
+        mfcc_similarity, band_similarity, energy_similarity, bands_original,
+        bands_rendered, issues, plus any pass-through fields (dominant_chord,
+        energy_label, onset_density). Empty list if inputs missing.
+    """
+    if not sections:
+        return []
+
+    sr = 22050
+    orig_y = load_audio(original_path, sr=sr, duration=duration)
+    rend_y = load_audio(rendered_path, sr=sr, duration=duration)
+    if orig_y is None or rend_y is None:
+        return []
+
+    min_len = min(len(orig_y), len(rend_y))
+    orig_y = orig_y[:min_len]
+    rend_y = rend_y[:min_len]
+    audio_dur = min_len / sr
+
+    out = []
+    for idx, sec in enumerate(sections):
+        s = float(sec.get("start", 0.0))
+        e = float(sec.get("end", s))
+        # Clip to available audio
+        s = max(0.0, min(s, audio_dur))
+        e = max(0.0, min(e, audio_dur))
+        if e - s < 0.5:  # too short to score reliably
+            continue
+
+        s_idx = int(s * sr)
+        e_idx = int(e * sr)
+        ow = orig_y[s_idx:e_idx]
+        rw = rend_y[s_idx:e_idx]
+        if len(ow) == 0 or len(rw) == 0:
+            continue
+
+        # Features
+        try:
+            o_mfcc = compute_mfcc_features(ow, sr)
+            r_mfcc = compute_mfcc_features(rw, sr)
+        except Exception:
+            continue
+        o_bands = compute_frequency_bands(ow, sr)
+        r_bands = compute_frequency_bands(rw, sr)
+        o_rms = float(np.sqrt(np.mean(ow ** 2)))
+        r_rms = float(np.sqrt(np.mean(rw ** 2)))
+
+        # MFCC sim (NaN-safe)
+        if np.sum(o_mfcc) == 0 or np.sum(r_mfcc) == 0:
+            mfcc_sim = 0.0
+        else:
+            mfcc_sim = 1 - cosine(o_mfcc, r_mfcc)
+            if np.isnan(mfcc_sim):
+                mfcc_sim = 0.0
+
+        # Band sim (MAE + per-band penalty, same approach as compare_audio)
+        o_arr = np.array(list(o_bands.values()))
+        r_arr = np.array(list(r_bands.values()))
+        if np.sum(o_arr) > 0:
+            diffs = np.abs(o_arr - r_arr)
+            band_sim = float(max(0.0, 1.0 - np.mean(diffs) * 2))
+            max_diff = float(np.max(diffs))
+            if max_diff > 0.15:
+                band_sim = max(0.0, band_sim - (max_diff - 0.15) * 2)
+        else:
+            band_sim = 0.0
+            diffs = np.zeros_like(o_arr)
+
+        energy_sim = min(o_rms, r_rms) / max(o_rms, r_rms, 1e-10)
+
+        # Same weights as the master compare to keep section/overall comparable
+        section_sim = (
+            0.40 * band_sim +
+            0.20 * mfcc_sim +
+            0.15 * energy_sim +
+            # brightness/tempo/chroma collapsed into MFCC for short windows
+            0.25 * mfcc_sim
+        )
+
+        # Issues (which bands are off)
+        issues = []
+        for band_name, ov in o_bands.items():
+            rv = r_bands.get(band_name, 0.0)
+            if ov > 0.01:
+                ratio = rv / ov
+                if ratio < 0.5:
+                    issues.append(f"{band_name} too quiet ({ratio:.0%})")
+                elif ratio > 2.0:
+                    issues.append(f"{band_name} too loud ({ratio:.0%})")
+        if energy_sim < 0.5:
+            if r_rms < o_rms:
+                issues.append(f"overall too quiet ({energy_sim:.0%})")
+            else:
+                issues.append(f"overall too loud ({energy_sim:.0%})")
+
+        out.append({
+            "section_idx": idx,
+            "time_start": float(s),
+            "time_end": float(e),
+            "duration": float(e - s),
+            "similarity": float(section_sim),
+            "mfcc_similarity": float(mfcc_sim),
+            "band_similarity": float(band_sim),
+            "energy_similarity": float(energy_sim),
+            "bands_original": {k: float(v) for k, v in o_bands.items()},
+            "bands_rendered": {k: float(v) for k, v in r_bands.items()},
+            "rms_original": o_rms,
+            "rms_rendered": r_rms,
+            "issues": issues,
+            # Pass-through context from smart_analyze (handy for the LLM prompt)
+            "dominant_chord": sec.get("dominant_chord"),
+            "chord_progression": sec.get("chord_progression"),
+            "energy_label": sec.get("energy_label"),
+            "onset_density": sec.get("onset_density"),
+        })
+
+    return out
+
+
+def load_sections_json(sections_json_path):
+    """Load sections array from a smart_analysis.json. Returns [] on failure."""
+    if not sections_json_path:
+        return []
+    try:
+        with open(sections_json_path) as f:
+            data = json.load(f)
+        return data.get("sections", []) or []
+    except Exception as e:
+        log(f"Warning: could not load sections from {sections_json_path}: {e}")
+        return []
 
 
 def generate_stem_comparison_charts(stem_results, output_dir):
@@ -1396,8 +1867,19 @@ def main():
     parser.add_argument('--output-dir', help='Output directory for stem comparison charts')
     parser.add_argument('--window-size', type=float, default=5.0,
                        help='Time window size for temporal analysis (seconds)')
+    parser.add_argument('--sections-json',
+                       help='Path to smart_analysis.json. When provided, populates by_section '
+                            'so comparison aligns to musical structure (intro/verse/drop) '
+                            'instead of fixed time windows.')
     parser.add_argument('-q', '--quiet', action='store_true',
                        help='Suppress progress messages (only output JSON)')
+    parser.add_argument('--strudel', default=None, metavar='PATH',
+                       help='Strudel source that produced the render. Runs the spec-003 editability '
+                            '(replay) detector FIRST: on fail writes {"editability":"fail", '
+                            '"comparison":null,...} and exits 3 without scoring; on pass stamps '
+                            'generation_mode/editability into the results JSON.')
+    parser.add_argument('-o', '--output', default=None, metavar='PATH',
+                       help='Write the results JSON (or the editability-fail payload) to this path')
 
     args = parser.parse_args()
 
@@ -1407,6 +1889,35 @@ def main():
     # Enable quiet mode for JSON output (status to stderr, JSON to stdout)
     if args.json:
         _QUIET_MODE = True
+
+    # Spec 003: the replay detector gates scoring. Runs before any audio is touched.
+    global _EDITABILITY_STAMP
+    if args.strudel:
+        fields = run_editability_check(args.strudel)
+        if fields["editability"] != "pass":
+            payload = editability_fail_payload(fields)
+            fail_path = args.output
+            if fail_path is None and args.stems and args.output_dir:
+                fail_path = os.path.join(args.output_dir, "stem_comparison.json")
+            if fail_path is None and args.chart and not args.stems:
+                _chart_dir = args.chart if (args.chart.endswith('/') or os.path.isdir(args.chart)) \
+                    else os.path.dirname(args.chart)
+                if _chart_dir and _chart_dir not in ('.', './', '/'):
+                    fail_path = os.path.join(_chart_dir, "comparison.json")
+            if fail_path:
+                os.makedirs(os.path.dirname(os.path.abspath(fail_path)), exist_ok=True)
+                with open(fail_path, 'w') as f:
+                    json.dump(payload, f, indent=2)
+            if args.json or not fail_path:
+                print(json.dumps(payload, indent=2))
+            for v in payload["editability_violations"]:
+                print(f"editability: {v}", file=sys.stderr)
+            print(f"editability: FAIL — {args.strudel} is a replay / not editable; "
+                  f"no similarity computed (exit {EXIT_EDITABILITY_FAIL})", file=sys.stderr)
+            sys.exit(EXIT_EDITABILITY_FAIL)
+        _EDITABILITY_STAMP = fields
+        log(f"editability: PASS (mode={fields.get('generation_mode')}, "
+            f"{fields.get('editable_voice_count', 0)} editable voice(s))")
 
     # Per-stem comparison mode
     if args.stems:
@@ -1425,10 +1936,19 @@ def main():
             print("  or --original-melodic/--rendered-melodic", file=sys.stderr)
             sys.exit(1)
 
-        results = compare_stems(stem_pairs, args.duration, args.window_size, synth_config_path=args.config)
+        sections = load_sections_json(args.sections_json) if args.sections_json else []
+        if sections:
+            log(f"Loaded {len(sections)} sections from {args.sections_json}")
+        results = compare_stems(
+            stem_pairs, args.duration, args.window_size,
+            synth_config_path=args.config, sections=sections,
+        )
 
         if results is None:
             sys.exit(1)
+        stamp_editability(results)  # spec 003 keys ride along on every write/print below
+        if args.output:
+            save_comparison_json(results, args.output)
 
         # Generate stem charts if output dir specified
         if args.output_dir:
@@ -1439,6 +1959,7 @@ def main():
 
             # Save JSON results
             json_path = output_dir / "stem_comparison.json"
+            stamp_editability(results)  # spec 003: generation_mode + editability at the top level
             with open(json_path, 'w') as f:
                 json.dump(results, f, indent=2)
             log(f"Saved stem comparison results: {json_path}")
@@ -1470,6 +1991,16 @@ def main():
                     issues_str = ', '.join(w.get('issues', [])[:2]) if w.get('issues') else 'low similarity'
                     print(f"  {w['stem']:8} {w['time_start']:4.0f}-{w['time_end']:4.0f}s: {w['similarity']*100:4.0f}% - {issues_str}")
 
+            # Show section-aligned worst (when sections were provided)
+            worst_sec = results.get('aggregate', {}).get('worst_by_section', [])
+            if worst_sec:
+                print(f"\nWORST SONG SECTIONS (musical structure):")
+                for w in worst_sec[:5]:
+                    issues_str = ', '.join(w.get('issues', [])[:2]) if w.get('issues') else 'low similarity'
+                    chord = w.get('dominant_chord') or '?'
+                    print(f"  S{w['section_idx']+1} {w['stem']:8} {w['time_start']:4.0f}-{w['time_end']:4.0f}s [{chord}]: "
+                          f"{w['similarity']*100:4.0f}% - {issues_str}")
+
         sys.exit(0)
 
     # Single file comparison mode (original behavior)
@@ -1481,6 +2012,9 @@ def main():
 
     if results is None:
         sys.exit(1)
+    stamp_editability(results)  # spec 003 keys ride along on every write/print below
+    if args.output:
+        save_comparison_json(results, args.output)
 
     # Generate chart if requested
     if args.chart:

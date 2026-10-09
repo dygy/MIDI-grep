@@ -3,8 +3,7 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "tsc",
-    "render": "node dist/render-strudel-node.js"
+    "build": "tsc"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

@@ -1,0 +1,211 @@
+{
+  "per_track": {
+    "#ElectroSwing - Jamie Berry ft. Octavia Rose -": {
+      "bass": {
+        "corr": 0.281,
+        "pitch": 0.763,
+        "rhythm": 0.131,
+        "timbre": 0.07
+      },
+      "drums": {
+        "corr": 0.061,
+        "pitch": null,
+        "rhythm": 0.148,
+        "timbre": 0.046
+      },
+      "melodic": {
+        "corr": 0.595,
+        "pitch": 0.767,
+        "rhythm": 0.139,
+        "timbre": 0.069
+      }
+    },
+    "AUTOMOTIVO XM, TAKA TAKA TAKA T\u00c1 - MC Lullu, M": {
+      "bass": {
+        "corr": 0.053,
+        "pitch": 0.636,
+        "rhythm": 0.08,
+        "timbre": 0.025
+      },
+      "drums": {
+        "corr": 0.101,
+        "pitch": null,
+        "rhythm": 0.129,
+        "timbre": 0.091
+      },
+      "melodic": {
+        "corr": 0.103,
+        "pitch": 0.646,
+        "rhythm": 0.11,
+        "timbre": 0.072
+      }
+    },
+    "Automotivo XM, Taka Taka Taka T\u00e1 (Dj Brunin XM": {
+      "bass": {
+        "corr": 0.063,
+        "pitch": 0.555,
+        "rhythm": 0.091,
+        "timbre": -0.019
+      },
+      "drums": {
+        "corr": 0.311,
+        "pitch": null,
+        "rhythm": 0.111,
+        "timbre": 0.142
+      },
+      "melodic": {
+        "corr": 0.108,
+        "pitch": 0.602,
+        "rhythm": 0.09,
+        "timbre": 0.074
+      }
+    },
+    "Bibi Babydoll & Dj Brunin XM - Automotivo Bibi": {
+      "bass": {
+        "corr": 0.069,
+        "pitch": 0.558,
+        "rhythm": 0.132,
+        "timbre": 0.047
+      },
+      "drums": {
+        "corr": 0.067,
+        "pitch": null,
+        "rhythm": 0.094,
+        "timbre": 0.072
+      },
+      "melodic": {
+        "corr": 0.15,
+        "pitch": 0.676,
+        "rhythm": 0.1,
+        "timbre": 0.076
+      }
+    },
+    "Bibi Babydoll e DJ Brunin XM - Automotivo Bibi": {
+      "bass": {
+        "corr": 0.068,
+        "pitch": 0.486,
+        "rhythm": 0.138,
+        "timbre": 0.014
+      },
+      "drums": {
+        "corr": 0.24,
+        "pitch": null,
+        "rhythm": 0.133,
+        "timbre": 0.155
+      },
+      "melodic": {
+        "corr": 0.127,
+        "pitch": 0.734,
+        "rhythm": 0.109,
+        "timbre": 0.068
+      }
+    },
+    "Caravan Palace - Lone Digger (Official MV)": {
+      "bass": {
+        "corr": 0.636,
+        "pitch": 0.818,
+        "rhythm": 0.189,
+        "timbre": 0.059
+      },
+      "drums": {
+        "corr": 0.345,
+        "pitch": null,
+        "rhythm": 0.159,
+        "timbre": 0.155
+      },
+      "melodic": {
+        "corr": 0.635,
+        "pitch": 0.79,
+        "rhythm": 0.118,
+        "timbre": 0.048
+      }
+    },
+    "Dennis e Kevin O Chris - T\u00c1 OK (Clipe Oficial)": {
+      "bass": {
+        "corr": 0.253,
+        "pitch": 0.571,
+        "rhythm": 0.102,
+        "timbre": 0.013
+      },
+      "drums": {
+        "corr": 0.074,
+        "pitch": null,
+        "rhythm": 0.1,
+        "timbre": -0.04
+      },
+      "melodic": {
+        "corr": 0.267,
+        "pitch": 0.462,
+        "rhythm": 0.176,
+        "timbre": 0.042
+      }
+    },
+    "Enter - Instrybutor (prod. Enter) (2021)": {
+      "bass": {
+        "corr": 0.314,
+        "pitch": 0.817,
+        "rhythm": 0.215,
+        "timbre": 0.029
+      },
+      "drums": {
+        "corr": 0.238,
+        "pitch": null,
+        "rhythm": 0.133,
+        "timbre": 0.04
+      },
+      "melodic": {
+        "corr": 0.185,
+        "pitch": 0.784,
+        "rhythm": 0.128,
+        "timbre": 0.092
+      }
+    }
+  },
+  "calibration": {
+    "corr": {
+      "matched_mean": 0.223,
+      "matched_std": 0.177,
+      "mismatched_mean": 0.162,
+      "mismatched_std": 0.08,
+      "separation": 0.06,
+      "chance_plus_2std_bar": 0.323,
+      "midpoint_bar": 0.193,
+      "recommended_bar": 0.323,
+      "discriminating": true
+    },
+    "pitch": {
+      "matched_mean": 0.667,
+      "matched_std": 0.115,
+      "mismatched_mean": 0.576,
+      "mismatched_std": 0.113,
+      "separation": 0.091,
+      "chance_plus_2std_bar": 0.802,
+      "midpoint_bar": 0.621,
+      "recommended_bar": 0.802,
+      "discriminating": true
+    },
+    "rhythm": {
+      "matched_mean": 0.127,
+      "matched_std": 0.032,
+      "mismatched_mean": 0.123,
+      "mismatched_std": 0.041,
+      "separation": 0.004,
+      "chance_plus_2std_bar": 0.205,
+      "midpoint_bar": null,
+      "recommended_bar": 0.205,
+      "discriminating": false
+    },
+    "timbre": {
+      "matched_mean": 0.06,
+      "matched_std": 0.046,
+      "mismatched_mean": 0.062,
+      "mismatched_std": 0.045,
+      "separation": -0.002,
+      "chance_plus_2std_bar": 0.153,
+      "midpoint_bar": null,
+      "recommended_bar": 0.153,
+      "discriminating": false
+    }
+  },
+  "n_tracks": 8
+}

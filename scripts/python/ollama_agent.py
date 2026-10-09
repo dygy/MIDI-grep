@@ -25,10 +25,23 @@ except ImportError:
     HAS_REQUESTS = False
 
 try:
-    from strudel_validation import SOUND_CORRECTIONS, BANK_CORRECTIONS, fix_sound_names, fix_bank_names
+    from strudel_validation import (
+        SOUND_CORRECTIONS, BANK_CORRECTIONS, fix_sound_names, fix_bank_names,
+        fix_names, validate_code as shared_validate_code,
+        VALID_SYNTHS, VALID_GM_SOUNDS, VALID_DRUM_BANKS, VALID_SOUNDS,
+        INVALID_GM_PATTERNS, INVALID_METHODS,
+    )
     HAS_SHARED_VALIDATION = True
 except ImportError:
     HAS_SHARED_VALIDATION = False
+    # Fallback so references don't NameError if the shared module is missing.
+    VALID_SYNTHS = VALID_GM_SOUNDS = VALID_DRUM_BANKS = VALID_SOUNDS = set()
+    INVALID_GM_PATTERNS = []
+    INVALID_METHODS = []
+    def fix_names(code, verbose=False):
+        return code
+    def shared_validate_code(code, autocorrect=True):
+        return code, ""
 
 # Import genre-aware sound retrieval
 try:
@@ -37,116 +50,31 @@ try:
 except ImportError:
     HAS_SOUND_SELECTOR = False
 
+# Import genre sidechain depth (kick-ducks-bass)
+try:
+    from synth_profiles import get_sidechain_depth, sidechain_instruction
+    HAS_SYNTH_PROFILES = True
+except ImportError:
+    HAS_SYNTH_PROFILES = False
+    def get_sidechain_depth(genre):
+        return 0.0
+    def sidechain_instruction(genre):
+        return ""
+
 # ClickHouse connection
 CLICKHOUSE_BIN = Path(__file__).parent.parent.parent / "bin" / "clickhouse"
 CLICKHOUSE_DB = Path(__file__).parent.parent.parent / ".clickhouse" / "db"
 AGENTS_DIR = Path(__file__).parent.parent.parent / ".cache" / "agents"
 
 OLLAMA_URL = os.environ.get("OLLAMA_URL", "http://localhost:11434")
-DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "midi-grep-strudel")
+DEFAULT_MODEL = os.environ.get("OLLAMA_MODEL", "midi-grep-strudel-mistral")
 
 # ============================================================================
 # VALID STRUDEL SOUNDS (from gm.mjs + synth.mjs)
 # ============================================================================
 
-# Basic waveforms and synths
-VALID_SYNTHS = {
-    "sine", "sin", "triangle", "tri", "square", "sqr", "sawtooth", "saw",
-    "supersaw", "pulse", "sbd", "bytebeat",
-    "pink", "white", "brown", "crackle",
-    "zzfx", "z_sine", "z_sawtooth", "z_triangle", "z_square", "z_tan", "z_noise"
-}
-
-# Valid GM instrument names (from Strudel's gm.mjs)
-VALID_GM_SOUNDS = {
-    "gm_piano", "gm_epiano1", "gm_epiano2", "gm_harpsichord", "gm_clavinet",
-    "gm_celesta", "gm_glockenspiel", "gm_music_box", "gm_vibraphone",
-    "gm_marimba", "gm_xylophone", "gm_tubular_bells", "gm_dulcimer",
-    "gm_drawbar_organ", "gm_percussive_organ", "gm_rock_organ", "gm_church_organ",
-    "gm_reed_organ", "gm_accordion", "gm_harmonica", "gm_bandoneon",
-    "gm_acoustic_guitar_nylon", "gm_acoustic_guitar_steel",
-    "gm_electric_guitar_jazz", "gm_electric_guitar_clean",
-    "gm_electric_guitar_muted", "gm_overdriven_guitar",
-    "gm_distortion_guitar", "gm_guitar_harmonics",
-    "gm_acoustic_bass", "gm_electric_bass_finger", "gm_electric_bass_pick",
-    "gm_fretless_bass", "gm_slap_bass_1", "gm_slap_bass_2",
-    "gm_synth_bass_1", "gm_synth_bass_2",
-    "gm_violin", "gm_viola", "gm_cello", "gm_contrabass",
-    "gm_tremolo_strings", "gm_pizzicato_strings", "gm_orchestral_harp", "gm_timpani",
-    "gm_string_ensemble_1", "gm_string_ensemble_2",
-    "gm_synth_strings_1", "gm_synth_strings_2",
-    "gm_choir_aahs", "gm_voice_oohs", "gm_synth_choir", "gm_orchestra_hit",
-    "gm_trumpet", "gm_trombone", "gm_tuba", "gm_muted_trumpet",
-    "gm_french_horn", "gm_brass_section", "gm_synth_brass_1", "gm_synth_brass_2",
-    "gm_soprano_sax", "gm_alto_sax", "gm_tenor_sax", "gm_baritone_sax",
-    "gm_oboe", "gm_english_horn", "gm_bassoon", "gm_clarinet",
-    "gm_piccolo", "gm_flute", "gm_recorder", "gm_pan_flute",
-    "gm_blown_bottle", "gm_shakuhachi", "gm_whistle", "gm_ocarina",
-    "gm_lead_1_square", "gm_lead_2_sawtooth", "gm_lead_3_calliope",
-    "gm_lead_4_chiff", "gm_lead_5_charang", "gm_lead_6_voice",
-    "gm_lead_7_fifths", "gm_lead_8_bass_lead",
-    "gm_pad_new_age", "gm_pad_warm", "gm_pad_poly", "gm_pad_choir",
-    "gm_pad_bowed", "gm_pad_metallic", "gm_pad_halo", "gm_pad_sweep",
-    "gm_fx_rain", "gm_fx_soundtrack", "gm_fx_crystal", "gm_fx_atmosphere",
-    "gm_fx_brightness", "gm_fx_goblins", "gm_fx_echoes", "gm_fx_sci_fi",
-    "gm_sitar", "gm_banjo", "gm_shamisen", "gm_koto",
-    "gm_kalimba", "gm_bagpipe", "gm_fiddle", "gm_shanai",
-    "gm_tinkle_bell", "gm_agogo", "gm_steel_drums", "gm_woodblock",
-    "gm_taiko_drum", "gm_melodic_tom", "gm_synth_drum",
-    "gm_reverse_cymbal", "gm_guitar_fret_noise", "gm_breath_noise",
-    "gm_seashore", "gm_bird_tweet", "gm_telephone",
-    "gm_helicopter", "gm_applause", "gm_gunshot"
-}
-
-# Valid drum banks (from strudel-client/website/.vercel/output/static/tidal-drum-machines.json)
-VALID_DRUM_BANKS = {
-    # Roland
-    "RolandTR505", "RolandTR606", "RolandTR626", "RolandTR707", "RolandTR727",
-    "RolandTR808", "RolandTR909",
-    "RolandCompurhythm78", "RolandCompurhythm1000", "RolandCompurhythm8000",
-    "RolandD110", "RolandD70", "RolandDDR30", "RolandJD990",
-    "RolandMC202", "RolandMC303", "RolandMT32", "RolandR8",
-    "RolandS50", "RolandSH09", "RolandSystem100",
-    # Linn
-    "LinnDrum", "Linn9000", "LinnLM1", "LinnLM2",
-    # Akai
-    "AkaiLinn", "AkaiMPC60", "AkaiXR10",
-    # Boss
-    "BossDR55", "BossDR110", "BossDR220", "BossDR550",
-    # Korg
-    "KorgDDM110", "KorgKPR77", "KorgKR55", "KorgKRZ",
-    "KorgM1", "KorgMinipops", "KorgPoly800", "KorgT3",
-    # Casio
-    "CasioRZ1", "CasioSK1", "CasioVL1",
-    # Emu
-    "EmuDrumulator", "EmuModular", "EmuSP12",
-    # Alesis / Oberheim
-    "AlesisHR16", "AlesisSR16", "OberheimDMX",
-    # Sequential Circuits
-    "SequentialCircuitsDrumtracks", "SequentialCircuitsTom",
-    # Yamaha
-    "YamahaRM50", "YamahaRX21", "YamahaRX5", "YamahaRY30", "YamahaTG33",
-    # Simmons
-    "SimmonsSDS400", "SimmonsSDS5",
-    # Others
-    "AJKPercusyn", "DoepferMS404", "MFB512", "MPC1000",
-    "MoogConcertMateMG1", "RhodesPolaris", "RhythmAce",
-    "SakataDPM48", "SergeModular", "SoundmastersR88",
-    "UnivoxMicroRhythmer12", "ViscoSpaceDrum", "XdrumLM8953",
-}
-
-# All valid sounds combined
-VALID_SOUNDS = VALID_SYNTHS | VALID_GM_SOUNDS | VALID_DRUM_BANKS
-
-# Invalid GM sound patterns that LLMs hallucinate (with numbers that don't exist)
-INVALID_GM_PATTERNS = [
-    r'gm_pad_\d+_',      # e.g., gm_pad_4_choir (should be gm_pad_choir)
-    r'gm_fx_\d+_',       # e.g., gm_fx_1_rain (should be gm_fx_rain)
-    r'gm_electric_piano_\d+',  # e.g., gm_electric_piano_1 (should be gm_epiano1)
-    r'gm_acoustic_grand',      # Not in Strudel (use gm_piano)
-    r'gm_bright_acoustic',     # Not in Strudel
-    r'gm_honkytonk',           # Not in Strudel
-]
+# VALID_SYNTHS / VALID_GM_SOUNDS / VALID_DRUM_BANKS / VALID_SOUNDS / INVALID_GM_PATTERNS /
+# INVALID_METHODS now come from strudel_validation (imported above) — single source of truth.
 
 
 class OllamaAgent:
@@ -470,8 +398,8 @@ Similarity: {similarity*100:.1f}% (best: {self.best_similarity*100:.1f}%)
 3. Your output MUST have the EXACT SAME number of [cycles, pattern] pairs as the input — if it has 7 pairs, output 7 pairs
 4. Only change .gain(), .lpf(), .hpf(), .sound(), or note names within existing pairs — do NOT add or remove pairs
 5. Change AT MOST one parameter per pair per iteration (e.g. only .gain OR only .lpf, not both)
-6. Maximum gain change: 0.2 per iteration (e.g. 0.8→0.6, not 0.8→0.3)
-7. If sub_bass is too quiet, try: lower note octave (2→1), lower .lpf(), or use a deeper bass sound
+6. When a GAIN MULTIPLIER is given above, APPLY IT: multiply that voice's current .gain() by the number (e.g. .gain(0.5) with "×1.30" → .gain(0.65)). Cap any single change at 0.2 (0.8→0.6, not 0.8→0.3); take a smaller step if the multiplier asks for more and let the next iteration finish.
+7. If sub_bass is too quiet AND boosting bassFx.gain isn't enough, drop bass notes to octave 1 (c2→c1), lower bass .lpf() toward ~150Hz, or pick a deeper bass sound (sawtooth, gm_synth_bass_2)
 8. If low_mid is too loud, try: lower .lpf() on bass voice (400→200), or raise .hpf()
 {'The code you generated worked! Build on this approach.' if improved else ''}
 {sounds_ctx}
@@ -519,6 +447,21 @@ Do NOT output the other voices. I will handle splicing them back together."""
             ratio = rend_val / max(orig_val, 0.001)
 
             line = f"- {band_key} ({freq_range}): {direction} — orig={orig_val*100:.1f}%, yours={rend_val*100:.1f}%"
+
+            # Concrete gain multiplier: scale the responsible voice toward the target
+            # energy. mult = target/actual, clamped to a moderate per-iteration step so
+            # the loop converges instead of overshooting (see RULE 6, max 0.2 gain change).
+            band_to_fx = {
+                "sub_bass": "bassFx",
+                "bass": "bassFx",
+                "mid": "leadFx",
+                "high": "drumsFx",
+            }
+            fx_name = band_to_fx.get(band_key)
+            if fx_name and rend_val > 0.001:
+                mult = max(0.75, min(1.35, orig_val / max(rend_val, 0.005)))
+                if abs(mult - 1.0) >= 0.05:
+                    line += f"\n  GAIN MULTIPLIER: multiply {fx_name}.gain() by {mult:.2f}"
 
             # Add specific actionable advice
             if band_key == "sub_bass" and diff < -0.10:
@@ -727,6 +670,7 @@ Do NOT output the other voices. I will handle splicing them back together."""
                     sounds_ctx = f"\n\n{retrieve_genre_context(genre)}\nUse ONLY these sounds in .sound() and .bank() calls."
 
                 rag_section = f"\n\n{rag_ctx}" if rag_ctx else ""
+                sidechain_section = sidechain_instruction(genre)
 
                 context_msg = f"""## Current Track Context
 
@@ -738,7 +682,7 @@ Frequency issues:
 - Bass: {context.get('band_bass', 0)*100:+.1f}%
 - Mid: {context.get('band_mid', 0)*100:+.1f}%
 - High: {context.get('band_high', 0)*100:+.1f}%
-{sounds_ctx}{rag_section}
+{sounds_ctx}{rag_section}{sidechain_section}
 
 Generate improved code based on the frequency issues above."""
 
@@ -781,7 +725,27 @@ Generate improved code based on the frequency issues above."""
         return self.messages[-1].get("content", "") if self.messages else ""
 
     def _call_ollama(self) -> str:
-        """Make a single call to Ollama."""
+        """Make a single call to the configured LLM backend (Ollama or AirLLM)."""
+        backend = (os.environ.get("LLM_BACKEND") or "ollama").lower()
+
+        if backend == "airllm":
+            # AirLLM doesn't have a chat API; flatten messages into a single prompt
+            # using a generic role-prefixed format. This works fine for instruct
+            # models since the actual chat template is applied internally on
+            # tokenizer.encode for most models we care about.
+            try:
+                from airllm_client import dispatch_generate
+                flat_prompt = self._messages_to_prompt(self.messages)
+                result = dispatch_generate(
+                    flat_prompt,
+                    model=self.model,
+                    options={"temperature": 0.3, "num_predict": 4096, "num_ctx": 32768},
+                )
+                return result.get("response", "") or ""
+            except Exception as e:
+                print(f"  [Agent] AirLLM error: {e}; falling back to Ollama")
+                # fall through to Ollama path below
+
         try:
             response = requests.post(
                 f"{OLLAMA_URL}/api/chat",
@@ -789,6 +753,8 @@ Generate improved code based on the frequency issues above."""
                     "model": self.model,
                     "messages": self.messages,
                     "stream": False,
+                    # Unload model 30s after generation to free RAM for the render phase (24GB).
+                    "keep_alive": "30s",
                     "options": {
                         "temperature": 0.3,  # Low temp for surgical iteration changes
                         "num_predict": 4096,
@@ -805,6 +771,17 @@ Generate improved code based on the frequency issues above."""
         except Exception as e:
             print(f"  [Agent] Ollama error: {e}")
             return ""
+
+    @staticmethod
+    def _messages_to_prompt(messages: List[Dict[str, str]]) -> str:
+        """Flatten chat-style messages into a single prompt for backends without chat API."""
+        parts: List[str] = []
+        for msg in messages:
+            role = msg.get("role", "user").upper()
+            content = msg.get("content", "")
+            parts.append(f"### {role}\n{content}")
+        parts.append("### ASSISTANT\n")
+        return "\n\n".join(parts)
 
     def extract_code(self, response: str, previous_code: str = None) -> str:
         """Extract Strudel code from agent response, splicing with previous code if needed."""
@@ -899,88 +876,20 @@ Generate improved code based on the frequency issues above."""
         return code
 
     def _validate_code(self, code: str) -> str:
+        """Validate Strudel code via the shared single-source-of-truth validator.
+
+        Auto-corrects sound/bank hallucinations (e.g. tr808 -> RolandTR808) then rejects
+        on any remaining invalid method/sound/bank. Returns "" on rejection (sets
+        last_validation_error), else the corrected code.
         """
-        Validate Strudel code and reject if it contains invalid methods or sounds.
-
-        Returns empty string if code is invalid, otherwise returns the code.
-        """
-        # Auto-correct common sound/bank name mistakes before validation
-        code = self._fix_sound_names(code)
-        code = self._fix_bank_names(code)
-
-        # Known invalid methods that LLMs sometimes hallucinate
-        INVALID_METHODS = [
-            '.peak(',      # Doesn't exist - maybe confused with .hpf or EQ peak
-            '.eq(',        # Not a Strudel method (use .lpf/.hpf)
-            '.volume(',    # Should be .gain()
-            '.filter(',    # Too generic, use specific filters
-            '.bass(',      # Not a method
-            '.treble(',    # Not a method
-            '.mid(',       # Not a method
-            '.high(',      # Not a method (voice selector, not effect)
-            '.low(',       # Not a method (voice selector, not effect)
-            '.boost(',     # Not a method
-            '.cut(',       # Not a method (use .lpf/.hpf)
-            '.compress(',  # Not a method (use .compressor)
-            '.limit(',     # Not a method
-            '.normalize(', # Not a method
-        ]
-
-        for invalid in INVALID_METHODS:
-            if invalid in code:
-                msg = f"REJECTED: Code contains invalid method {invalid} - LLM hallucinated a non-existent Strudel method"
-                print(f"  [Agent] {msg}")
-                self.last_validation_error = msg
-                return ""
-
-        # Check for invalid GM sound patterns (LLM often hallucinates numbered names)
-        for pattern in INVALID_GM_PATTERNS:
-            matches = re.findall(pattern, code)
-            if matches:
-                msg = f"REJECTED: Code contains invalid sound pattern {matches[0]} - use correct Strudel GM names (e.g., gm_pad_choir not gm_pad_4_choir)"
-                print(f"  [Agent] {msg}")
-                self.last_validation_error = msg
-                return ""
-
-        # Extract and validate all sounds in .sound("...") calls
-        sound_matches = re.findall(r'\.sound\(["\']([^"\']+)["\']', code)
-        for sound in sound_matches:
-            # Handle alternation patterns like "<sound1 sound2>"
-            sound_names = sound.strip('<>').split()
-            for s in sound_names:
-                s = s.strip()
-                if s and s not in VALID_SOUNDS:
-                    msg = f"REJECTED: Unknown sound '{s}' - not in Strudel's sound library"
-                    print(f"  [Agent] {msg}")
-                    self.last_validation_error = msg
-                    return ""
-
-        # Extract and validate all banks in .bank("...") calls
-        bank_matches = re.findall(r'\.bank\(["\']([^"\']+)["\']', code)
-        for bank in bank_matches:
-            bank = bank.strip()
-            if bank and bank not in VALID_DRUM_BANKS:
-                msg = f"REJECTED: Unknown drum bank '{bank}' - not in Strudel's drum library"
-                print(f"  [Agent] {msg}")
-                self.last_validation_error = msg
-                return ""
-
-        # Additional check: ensure at least one valid Strudel pattern
-        valid_patterns = [
-            '.sound(', '.gain(', '.lpf(', '.hpf(', '.room(', '.delay(', '.bank(',
-            '.attack(', '.release(', '.decay(', '.sustain(',
-            '.crush(', '.distort(', '.phaser(', '.vibrato(',
-            'note(', 's(', 'setcps(', '$:',
-        ]
-        has_valid = any(p in code for p in valid_patterns)
-
-        if not has_valid:
-            msg = "REJECTED: Code has no recognizable Strudel patterns"
+        corrected, error = shared_validate_code(code, autocorrect=True)
+        if error:
+            msg = f"REJECTED: {error}"
             print(f"  [Agent] {msg}")
             self.last_validation_error = msg
             return ""
+        return corrected
 
-        return code
 
     def reset(self):
         """Reset agent state for fresh start."""

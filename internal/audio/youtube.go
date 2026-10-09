@@ -46,14 +46,14 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url, outputDir string)
 
 	// Download best audio and convert to wav
 	cmd := exec.CommandContext(ctx, "yt-dlp",
-		"--no-playlist",           // Only download single video
-		"--extract-audio",         // Extract audio only
-		"--audio-format", "wav",   // Convert to WAV
-		"--audio-quality", "0",    // Best quality
-		"--output", outputPath,    // Output path template
-		"--no-warnings",           // Suppress warnings
-		"--quiet",                 // Quiet mode
-		"--progress",              // But show progress
+		"--no-playlist",         // Only download single video
+		"--extract-audio",       // Extract audio only
+		"--audio-format", "wav", // Convert to WAV
+		"--audio-quality", "0", // Best quality
+		"--output", outputPath, // Output path template
+		"--no-warnings", // Suppress warnings
+		"--quiet",       // Quiet mode
+		"--progress",    // But show progress
 		url,
 	)
 

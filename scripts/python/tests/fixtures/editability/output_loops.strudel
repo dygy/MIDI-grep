@@ -1,0 +1,16 @@
+// MIDI-grep sample-pack playback
+// Samples hosted at: https://pub-56831423fee34641805da07cfdaf6812.r2.dev/midi-grep/regime-clt/
+// BPM 91
+// Retarget by re-running codegen with a different --base-url (localhost <-> R2).
+
+setcps(0.377792)
+await samples("https://pub-56831423fee34641805da07cfdaf6812.r2.dev/midi-grep/regime-clt/samples.json")
+
+// --- LOOPS: real stem audio, one bar per cycle (max similarity) ---
+$: stack(
+  s("drumsloop").n("<0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15>").clip(1),
+  s("bassloop").n("<0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15>").clip(1),
+  s("melodicloop").n("<0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15>").clip(1),
+  s("vocalsloop").n("<0 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15>").clip(1)
+)
+

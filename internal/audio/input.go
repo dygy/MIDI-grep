@@ -88,7 +88,7 @@ func detectFormat(path string) (Format, error) {
 
 	// Check MP3 frame sync
 	if len(header) >= 2 {
-		if (header[0] == 0xFF && (header[1]&0xE0) == 0xE0) {
+		if header[0] == 0xFF && (header[1]&0xE0) == 0xE0 {
 			return FormatMP3, nil
 		}
 	}

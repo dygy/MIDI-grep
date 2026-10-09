@@ -103,7 +103,7 @@ Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
 ────────────────────────────────────────────────────────────────────────────────
                               Tech Stack
 
-  Go 1.21+                              Python 3.11+
+  Go 1.25+                              Python 3.11+
   ├── CLI (Cobra)                       ├── demucs      - stem separation
   ├── HTTP (Chi)                        ├── basic-pitch - audio to MIDI
   └── Pipeline orchestration            ├── librosa     - audio analysis
@@ -219,7 +219,7 @@ flowchart TB
 | **Basic Pitch** | TensorFlow | Audio → MIDI transcription |
 | **librosa** | Python | BPM, key, onset detection |
 | **CLAP** | PyTorch | Zero-shot genre classification |
-| **Ollama** | Go binary | Local LLM (llama3:8b) for code gen + iteration |
+| **Ollama** | Go binary | Local LLM (default model `midi-grep-strudel-mistral`; see CLAUDE.md "Ollama Setup") for code gen + iteration |
 | **ClickHouse** | C++ binary | Learning database (runs + knowledge) |
 | **Puppeteer** | Node.js | Browser automation for BlackHole recording |
 | **BlackHole** | macOS driver | Virtual audio device for recording |
@@ -324,7 +324,7 @@ midi-grep/
 
 ### Prerequisites
 
-- **Go 1.21+**: `brew install go`
+- **Go 1.25+**: `brew install go`
 - **Python 3.11+**: `brew install python@3.11`
 - **yt-dlp** (for YouTube): `brew install yt-dlp`
 - **ffmpeg** (for audio processing): `brew install ffmpeg`
@@ -388,10 +388,22 @@ This installs:
 | `--brazilian-funk` | - | Force Brazilian funk mode (auto-detected normally) |
 | `--genre` | - | Manual genre override: `brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz` |
 | `--deep-genre` | `true` | Use deep learning (CLAP) for genre detection (skipped when `--genre` is specified) |
-| `--iterate` | `5` | AI-driven improvement iterations (default: 5, always enabled) |
-| `--target-similarity` | `0.85` | Target similarity score to stop iteration (default: 0.85) |
+| `--iterate` | `20` | AI-driven improvement iterations (default: 20; the eval gate may stop early once the genre floor is cleared) |
+| `--target-similarity` | `0.99` | Target similarity score to stop iteration (default: 0.99, i.e. run all iterations unless the eval gate stops early) |
 | `--ollama` | `true` | Use Ollama (free local LLM) for AI improvement |
-| `--ollama-model` | - | Ollama model to use (default: `llama3:8b`) |
+| `--ollama-model` | `midi-grep-strudel-mistral` | Ollama model to use (see Ollama Setup in CLAUDE.md for building it) |
+
+### Generator flags (Python, spec 003)
+
+The editable generator `scripts/python/generate_dynamic_strudel.py` (driven by `scripts/auto-calibrate.sh`) takes:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mode` | `sample-instrument` | `sample-instrument` plays your note arrays on stem-derived multisamples; `synth` uses genre-palette synth sounds and no `samples()` |
+| `--vocal-mode` | `instrument` | `instrument` = transcribed `let vocal` on the `<prefix>_vocal` multisample, `chops` = onset chops `let vox`, `texture` = the old full-stem loop (allowed only under ≥2 editable voices, tagged `// texture`), `none` |
+| `--cal-vocal` | `1.0` | Vocal level knob set by `calibrate_dynamic.py` from the measured render |
+
+Every output carries a `// generation_mode:` header and is checked by `scripts/python/editability_check.py`; replayed audio is rejected before any similarity is computed.
 
 ### Default Analysis Features
 
@@ -400,7 +412,7 @@ All analysis features are **enabled by default**:
 - **Stem Rendering**: Outputs 3 separate stems (`render_bass.wav`, `render_drums.wav`, `render_melodic.wav`)
 - **Per-Stem Comparison**: Generates charts comparing each rendered stem vs original
 - **Overall Comparison**: Combined frequency/MFCC/chroma comparison chart
-- **AI Improvement**: 5 iterations targeting 85% similarity
+- **AI Improvement**: 20 iterations by default, gated by the genre-aware eval floor in `eval/thresholds.yaml`
 - **Iteration Stem Separation**: Batch Demucs on each iteration render → per-iteration melodic/drums/bass stems
 - **HTML Report**: Audio studio with Solo/Mute controls, per-iteration stem tracks, A/B comparison, shimmer loading, waveforms
 
@@ -416,7 +428,7 @@ MIDI-grep can iteratively improve Strudel code using AI analysis:
 ./bin/midi-grep extract --url "..." --iterate 10 --target-similarity 0.75
 
 # Use a different Ollama model
-./bin/midi-grep extract --url "..." --iterate 5 --ollama-model llama3:8b
+./bin/midi-grep extract --url "..." --iterate 5 --ollama-model llama3.1:8b   # fast smoke run; default is midi-grep-strudel-mistral
 ```
 
 **How it works:**
@@ -433,7 +445,8 @@ MIDI-grep can iteratively improve Strudel code using AI analysis:
 ```bash
 brew install ollama
 ollama serve
-ollama pull llama3:8b  # 3.8GB download
+ollama pull mistral-small && ollama create midi-grep-strudel-mistral -f Modelfile.mistral   # default model (~13GB)
+ollama pull llama3.1:8b   # optional fast smoke-run model (4.9GB)
 ```
 
 **ClickHouse Learning Storage:**
@@ -848,28 +861,12 @@ This approach:
 - AppleScript hides Chromium process
 - Background throttling disabled
 
-### Node.js Synthesis Engine (`render-strudel-node.ts`)
+### Node.js Synthesis Engine — removed (Jun 2026)
 
-The primary renderer uses TypeScript with proper Strudel pattern parsing:
-
-**Pattern Parsing:**
-- Uses `@strudel/mini` v1.1.0 for accurate mini-notation parsing
-- Handles rests (`~*N`), chords (`[a,b,c]`), and sequences
-
-**Synthesis:**
-- **Kick drums**: 808-style with pitch envelope (150→40Hz), amp decay, click transient
-- **Snare**: Dual-sine body (180Hz + 330Hz) + high-passed noise
-- **Hi-hats**: Metallic multi-frequency noise (open/closed variants)
-- **Bass**: Sawtooth + sub-octave sine, low-pass filtered
-- **Lead (mids)**: Detuned saws + triangle with filter envelope
-- **High**: Odd-harmonic square wave + saw for brightness
-
-**Mix Balance:**
-- Tuned for melodic content (mids 3x, highs 2.5x, bass 0.08x, drums 0.15x)
-- 80Hz high-pass filter on master to reduce mud
-- Achieves ~79% similarity against melodic stems
-
-Output: Mono 44.1kHz 16-bit WAV.
+The offline TypeScript synthesizer (`render-strudel-node.ts`) was deleted. It emulated Strudel
+sounds and scored ~16% against the real engine, so it could never be trusted as a gate. The
+BlackHole recorder above is now the only render path. `scripts/node` still needs
+`npm install && npm run build` (puppeteer + tsc) before the recorder can run.
 
 ### Python Synthesis Engine (`render_audio.py`)
 
@@ -968,7 +965,7 @@ midi-grep/
 │   └── python/             # AI + ML scripts (code gen, comparison, LLM)
 ├── context/                # AWOS product docs
 ├── Makefile
-├── Dockerfile
+├── docker-compose.clickhouse.yml   # optional ClickHouse store (app Dockerfile retired Oct 2026)
 └── README.md
 ```
 
@@ -989,16 +986,11 @@ Controls note timing precision:
 
 ## Docker
 
-```bash
-# Build image
-docker build -t midi-grep .
-
-# Run extraction
-docker run -v $(pwd):/data midi-grep extract --input /data/track.wav
-
-# Run server
-docker run -p 8080:8080 midi-grep serve
-```
+**Retired (Oct 2026).** The app `Dockerfile` was removed: it had been broken since Feb 2026
+(Go 1.21 base vs Go 1.25 in `go.mod`, no yt-dlp, Node or Demucs in the image) and a container can
+never run the only render path, which needs the macOS BlackHole virtual audio device. Linux
+buildability is proven by CI (`.github/workflows/ci.yml`) instead. `docker-compose.clickhouse.yml`
+(the optional ClickHouse learning store) still works and is unrelated to the app image.
 
 ## Development
 
@@ -1018,7 +1010,7 @@ make serve
 
 ## Tech Stack
 
-- **Backend**: Go 1.21+, Chi router
+- **Backend**: Go 1.25+, Chi router
 - **Frontend**: HTMX, PicoCSS (no JavaScript frameworks)
 - **Audio Processing**:
   - Demucs (stem separation)

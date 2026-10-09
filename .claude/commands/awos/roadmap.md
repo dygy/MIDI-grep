@@ -1,5 +1,5 @@
 ---
-description: Builds the Product Roadmap — features and their order.
+description: Removed from AWOS — explains what replaced the roadmap.
 ---
 
-Refer to the instructions located in this file: .awos/commands/roadmap.md
+@.awos/commands/roadmap.md

@@ -1,0 +1,12 @@
+{
+  "aggregate": {
+    "weighted_overall": 0.6566,
+    "per_stem": {
+      "bass": {"overall": 0.62, "mfcc": 0.70, "freq_balance": 0.55, "energy": 0.60},
+      "drums": {"overall": 0.71, "mfcc": 0.80, "freq_balance": 0.65, "energy": 0.70},
+      "melodic": {"overall": 0.64, "mfcc": 0.75, "freq_balance": 0.58, "energy": 0.62}
+    },
+    "worst_sections": []
+  },
+  "windowed": {}
+}

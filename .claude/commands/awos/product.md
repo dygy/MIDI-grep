@@ -1,5 +1,6 @@
 ---
 description: Defines the Product — what, why, and for who.
+argument-hint: '[initial idea, optional]'
 ---
 
-Refer to the instructions located in this file: .awos/commands/product.md
+@.awos/commands/product.md

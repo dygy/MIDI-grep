@@ -1,0 +1,5 @@
+// MIDI-grep — REAL-AUDIO replay from R2 → ~95% similar to the original.
+// The extracted audio is hosted on R2 and replayed gaplessly in Strudel.
+setcps(0.566667)
+await samples("https://pub-56831423fee34641805da07cfdaf6812.r2.dev/midi-grep/regime-clt/samples_orig.json")
+$: s("originalfull").slice(78, run(78)).slow(78).clip(1)

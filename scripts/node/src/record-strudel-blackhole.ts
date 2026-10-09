@@ -17,7 +17,7 @@
  */
 
 import puppeteer from 'puppeteer';
-import { spawn } from 'child_process';
+import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
 
 interface RecordOptions {
@@ -39,12 +39,39 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
   console.log(`Duration: ${duration}s | Output: ${outputPath}`);
   console.log(`Using: ${STRUDEL_URL}`);
 
-  // Start ffmpeg recording from BlackHole
-  console.log('Starting ffmpeg recording from BlackHole...');
-  const ffmpeg = spawn('ffmpeg', [
-    '-f', 'avfoundation', '-i', ':BlackHole 2ch',
-    '-t', String(duration + 10), '-ar', '44100', '-ac', '2', '-y', outputPath
-  ], { stdio: ['pipe', 'pipe', 'pipe'] });
+  // Start ffmpeg recording from BlackHole.
+  // CRITICAL TEMPO FIX: avfoundation hands ffmpeg BlackHole's samples with timestamps from the
+  // device clock that don't track real time, so the captured audio came out ~25% FAST (a 136 BPM
+  // track recorded as ~170 BPM / read as 103 by tempo trackers). `-use_wallclock_as_timestamps 1`
+  // (before -i) restamps every incoming buffer by the host wall-clock, and `-af aresample=async=1`
+  // then adds/drops samples to honour those timestamps — restoring real-time duration. Verified on
+  // a setcps(0.25) click train: 48.0s expected -> 48.09s captured (was 38.5s). Without this, EVERY
+  // render is sped up and all similarity/tempo numbers are computed against mis-timed audio.
+  // Oct 2026 finding: the wall-clock + async path is right LONG-TERM (a 170 s click train fits
+  // 135.993 BPM) but adds ±35 ms local timing jitter (15 s windows read 132–148 BPM), because
+  // aresample=async=1 inserts/drops chunks whenever a buffer's wall-clock stamp disagrees with the
+  // sample count. That jitter destroys beat-period coherence on syncopated music (renders read
+  // ~123 BPM by every tracker while a sparse click survives). MIDIGREP_CAPTURE=raw captures the
+  // device stream untouched (continuous samples, no restamping); its speed is then corrected ONCE,
+  // uniformly, by the measured wall-clock/sample ratio in the trim step below.
+  // Default is RAW since 2026-10-09 (measured on a 170 s click train: raw+uniform correction →
+  // inter-click std 12 ms, 0 gaps > 50 ms; wall-clock+async → std 38 ms, 61 gaps > 50 ms).
+  // MIDIGREP_CAPTURE=wallclock restores the Jun 2026 behaviour.
+  const captureMode = process.env.MIDIGREP_CAPTURE === 'wallclock' ? 'wallclock' : 'raw';
+  console.log(`Starting ffmpeg recording from BlackHole (${captureMode} capture)...`);
+  // -thread_queue_size: avfoundation delivers buffers on a real-time thread; when ffmpeg's input
+  // queue (default 8 packets) is full under load, buffers are DROPPED — measured as 10–20% of the
+  // stream missing in raw mode and as ±35 ms gaps after async repair. A deep queue prevents that.
+  const ffmpegArgs = captureMode === 'raw'
+    ? ['-thread_queue_size', '16384', '-f', 'avfoundation', '-i', ':BlackHole 2ch',
+       '-t', String(duration + 10), '-ac', '2', '-y', outputPath]
+    : ['-thread_queue_size', '16384', '-use_wallclock_as_timestamps', '1',
+       '-f', 'avfoundation', '-i', ':BlackHole 2ch',
+       '-t', String(duration + 10),
+       '-af', 'aresample=async=1',
+       '-ar', '44100', '-ac', '2', '-y', outputPath];
+  const captureStartMs = Date.now();
+  const ffmpeg = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
 
   await new Promise(r => setTimeout(r, 1000));
 
@@ -189,28 +216,33 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
     throw new Error('ERROR: Play button not found');
   }
 
-  // Wait a moment for superdough to initialize
-  await new Promise(r => setTimeout(r, 500));
-
-  // Now set AudioContext sink to BlackHole (after superdough has initialized)
-  console.log('Setting audio output to BlackHole...');
-  const sinkResult = await page.evaluate(async (deviceId: string) => {
-    try {
-      // @ts-ignore - getAudioContext is Strudel's global function
-      const ctx = (window as any).getAudioContext();
-      if (!ctx) return { error: 'AudioContext not found' };
-      // @ts-ignore - setSinkId exists on AudioContext
-      await ctx.setSinkId(deviceId);
-      return { success: true, sinkId: ctx.sinkId, state: ctx.state };
-    } catch (e: any) {
-      return { error: e.message };
-    }
-  }, blackholeId);
-
-  if ((sinkResult as any).error) {
-    throw new Error(`ERROR: Failed to set audio sink: ${(sinkResult as any).error}`);
+  // Route the AudioContext to BlackHole ASAP. setSinkId only works once superdough has created
+  // the context (right after the play click), so we POLL in a tight loop instead of waiting a
+  // fixed 500ms. That fixed gap let ~0.5s of cycle-0 play to the DEFAULT device (audible on the
+  // speakers — what looked like "plays before recording") and never reach BlackHole, so the
+  // captured audio started mid-cycle-0 and the start point drifted run-to-run → inconsistent
+  // stems. Confirming ctx.sinkId === BlackHole within ~50ms makes the routing tight & repeatable.
+  console.log('Routing audio output to BlackHole (tight retry)...');
+  let sinkOk = false;
+  const sinkDeadline = Date.now() + 8000;
+  while (Date.now() < sinkDeadline) {
+    const res = await page.evaluate(async (deviceId: string) => {
+      try {
+        const ctx = (window as any).getAudioContext?.();
+        if (!ctx) return { pending: true };
+        // @ts-ignore - setSinkId exists on AudioContext
+        if (ctx.sinkId !== deviceId) await ctx.setSinkId(deviceId);
+        return { success: ctx.sinkId === deviceId, sinkId: ctx.sinkId, state: ctx.state };
+      } catch (e: any) {
+        return { error: e.message };
+      }
+    }, blackholeId);
+    if ((res as any).success) { sinkOk = true; console.log('Routed to BlackHole:', JSON.stringify(res)); break; }
+    await new Promise(r => setTimeout(r, 50));
   }
-  console.log('Audio output set to BlackHole:', JSON.stringify(sinkResult));
+  if (!sinkOk) {
+    throw new Error('ERROR: Failed to route audio sink to BlackHole within 8s.');
+  }
 
   // Wait for playback to start (either "stop" button appears OR AudioContext is running)
   console.log('Waiting for playback to start...');
@@ -263,6 +295,8 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
   });
 
   await browser.close();
+  const captureWallSeconds = (Date.now() - captureStartMs) / 1000;
+  console.log(`Capture wall-clock span: ${captureWallSeconds.toFixed(3)} s (mode ${captureMode})`);
   ffmpeg.stdin?.write('q');
   await new Promise<void>(resolve => {
     ffmpeg.on('close', resolve);
@@ -277,9 +311,27 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
   // Trim leading silence (Strudel takes a few seconds to load before audio starts)
   console.log('Trimming leading silence...');
   const trimmedPath = outputPath.replace('.wav', '_trimmed.wav');
+  // Raw mode: the device stream is labelled 48 kHz but BlackHole delivers it at a different, run-
+  // dependent real rate (measured 11.9% fast on 2026-10-09; 25% in Jun 2026). Relabel the sample
+  // rate ONCE by the measured samples/wall-clock ratio, then resample to 44.1 kHz — a uniform
+  // correction, no per-chunk insert/drop, so beat timing inside the file stays intact.
+  let speedFilter = '';
+  if (captureMode === 'raw') {
+    const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration',
+      '-of', 'csv=p=0', outputPath], { encoding: 'utf8' });
+    const rawSeconds = parseFloat((probe.stdout || '').trim());
+    if (Number.isFinite(rawSeconds) && rawSeconds > 1 && captureWallSeconds > 1) {
+      const realRate = Math.round(48000 * rawSeconds / captureWallSeconds);
+      console.log(`Raw capture: ${rawSeconds.toFixed(3)} s of audio over ${captureWallSeconds.toFixed(3)} s wall-clock ` +
+        `-> real device rate ${realRate} Hz (ratio ${(rawSeconds / captureWallSeconds).toFixed(4)}); correcting uniformly`);
+      speedFilter = `asetrate=${realRate},aresample=44100,`;
+    } else {
+      console.log('Raw capture: could not measure the speed ratio, leaving speed uncorrected');
+    }
+  }
   const trimProcess = spawn('ffmpeg', [
     '-i', outputPath,
-    '-af', 'silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB',
+    '-af', speedFilter + 'silenceremove=start_periods=1:start_duration=0.1:start_threshold=-50dB',
     '-y', trimmedPath
   ], { stdio: ['pipe', 'pipe', 'pipe'] });
 

@@ -1,0 +1,105 @@
+# MIDI-grep
+
+> Go CLI + web app that extracts musical content from audio files / YouTube videos and generates
+> [Strudel](https://strudel.cc) live-coding code. Go orchestrates the pipeline; Python does audio
+> analysis & ML; Node/TypeScript renders Strudel to audio for verification. The system is
+> LLM-first and **never hardcodes** synthesis values — everything is learned from analysis.
+
+## Core idea
+
+Input (WAV/MP3/YouTube) → stem separation (Demucs) → analysis (librosa: BPM, key, chords) →
+LLM generates Strudel code (Ollama/Claude) → render to audio → compare to original → iterate to
+improve similarity. All outputs cached in `.cache/stems/{key}/` with output versioning (v001, …).
+
+## Pipelines (modes)
+
+- **Standard** — note transcription (Basic Pitch); best for piano/melodic.
+- **Chord** (`--chords`) — chord-progression detection; best for electronic/EDM/funk.
+- **Brazilian Funk** (`--brazilian-funk`, auto-detected) — tamborzão + 808 template.
+- **Generative** (`generative` cmd) — trains RAVE/granular neural synths for full note() control.
+- **Sample-pack** (`scripts/sample-pipeline.sh`) — slice the REAL extracted stems into a Strudel
+  sample pack (per-bar loops + drum one-shots + pitched samples), host it (localhost or Cloudflare
+  R2), and play via `await samples(...)`. Reuses the original audio → ~91% rendered similarity
+  (vs ~72% synthesis ceiling). The base URL is the only thing that changes localhost↔R2.
+
+## Key directories
+
+- `cmd/midi-grep/main.go` — CLI entrypoint (extract, serve, generative).
+- `internal/pipeline/orchestrator.go` — end-to-end pipeline; calls Python AI for codegen.
+- `internal/{audio,analysis,midi,cache,report,drums,generative}/` — Go domain packages.
+- `scripts/python/` — audio analysis, comparison, and LLM codegen (the brains).
+- `scripts/node/src/` — TypeScript Strudel renderers.
+- `eval/` — similarity gate (`thresholds.yaml`) + reference-track datasets.
+- `scripts/python/editability_check.py` — the editability/replay detector (spec 003 Slice 1): static
+  rules R1–R6 over a `.strudel` file; exit 0 pass / 1 fail / 2 parse error; `--json` emits
+  `editability`, `generation_mode`, voice counts. v023's `vocalsfull` voice FAILS it (replay, values.md A1).
+- `.awos/`, `.claude/` — agent workflow (commands, skills, domain-expert subagents).
+- `.sisyphus/` — durable plan + evidence orchestration for multi-step runs.
+
+## Code generation is LLM-first (important)
+
+**Go does NOT generate Strudel code.** All Strudel comes from Python LLM codegen:
+- `scripts/python/ollama_codegen.py` — Ollama code gen with genre-aware sound RAG + per-genre sidechain instruction.
+- `scripts/python/ollama_agent.py` — agentic LLM with per-track memory + RAG + code validation; feedback gives concrete per-voice gain multipliers from band diffs.
+- `scripts/python/ai_improver.py` — iteration loop + ClickHouse learning storage.
+- `scripts/python/synth_profiles.py` — per-genre synthesis profiles (bass/sub/master.hpf/transient) + sidechain depth, applied to `synth_config.json` via `analyze_synth_params.py --genre`.
+Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
+
+## Rendering & comparison
+
+- **BlackHole recorder** (`scripts/node/src/record-strudel-blackhole.ts`) — RECOMMENDED; records
+  real Strudel playback → ~100% accurate audio. Use this for accept/reject decisions.
+- **Node.js synth** — REMOVED (Jun 2026). `render-strudel-node.ts` no longer exists; the BlackHole
+  recorder is the only render path and the only one that may gate.
+- **`scripts/python/compare_audio.py`** — similarity via **MAE** on frequency bands (NOT cosine —
+  cosine hid 20%+ band errors). Weights: Freq 40%, MFCC 20%, Energy 15%, Brightness 15%, Tempo/Chroma 5%.
+- **`scripts/python/generate_dynamic_strudel.py`** — the editable generator (spec 003). `--mode
+  {sample-instrument,synth}` (default sample-instrument; synth = palette sounds, no `samples()`),
+  `--vocal-mode {instrument,chops,texture,none}` (default instrument = transcribed `let vocal` on the
+  `<prefix>_vocal` multisample; `texture` is the old full-stem loop, allowed only under ≥2 editable
+  voices and tagged `// texture`). Header lines `// generation_mode:` / `// vocal_mode:`; runs
+  `strudel_validation.validate_code` on its own output.
+- **`scripts/python/calibrate_dynamic.py`** — data-driven mix calibrator: reads a render's
+  `comparison.json` and emits the NEXT `generate_dynamic_strudel.py` knobs (sub-gain, bass-mult,
+  cal-lead, lead-lpf, hat-gain, master-gain). Each knob is a damped proportional correction of a
+  measured band/centroid ratio — no hardcoded per-track values. Brightness lever uses the spectral
+  CENTROID (the 1%-magnitude high bands are too noisy in bass-heavy genres); when lead-lpf maxes
+  out and the mix is still dark, it raises a TR808 hat layer (`--hat-gain`) — the hats carry the
+  brightness the extracted lead can't.
+- **`scripts/auto-calibrate.sh`** — runs the full generate→render(BlackHole)→compare→calibrate
+  loop, keeping the best render. Took Regime CLT 88.7%→92.4% overall (freq 86→95, section-aware
+  82→89) over ~6 iterations from a cold start, fully data-driven.
+
+## Sample-pack → R2 (highest similarity)
+
+- `scripts/python/build_sample_pack.py` — stems → drum one-shots + pitched bass/melodic + raw
+  beat-aligned per-bar **loops** (drums/bass/melodic/vocals). Loops are written RAW (un-normalized)
+  to preserve dynamics + inter-stem balance — normalizing them drops reconstruction 99%→70%.
+- `scripts/python/generate_sample_strudel.py` — writes host-resolved `samples.json` (absolute
+  `_base` ending in `/` — Strudel concats `base+path` with no slash) + `output_<mode>.strudel`
+  (modes: loops/instrument/hybrid). Strudel's loader only accepts ARRAY-valued entries.
+- `scripts/python/upload_r2.py` — uploads pack to R2 via `aws s3 --endpoint-url` (R2 S3 keys) or
+  `wrangler r2 object put` (wrangler login); env: R2_ACCOUNT_ID/R2_BUCKET/R2_PUBLIC_BASE/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY.
+- `scripts/sample-pipeline.sh --url <U>|--stems-dir <D> --prefix <id> [--mode loops] (--local|--r2)`
+  — one-command orchestration: build → (serve+render+score | upload to R2 + retarget code).
+
+## Build & run
+
+```bash
+go build -o bin/midi-grep ./cmd/midi-grep
+./bin/midi-grep extract --url "https://youtu.be/..."          # standard
+./bin/midi-grep extract --url "..." --chords --iterate 5      # chord mode, 5 AI iterations
+./bin/midi-grep serve --port 8080                             # web UI (Chi + HTMX)
+```
+
+## Working agreement
+
+- See `CLAUDE.md` → "Working Agreement": one round of clarifying questions max, env preflight before
+  long runs, self-review after edits, delegate to `.claude/agents/` domain experts.
+- ZERO HARDCODING: gains/filters/effects come from analysis or the AI, never magic numbers.
+
+## Docs map
+
+- `CLAUDE.md` — build/run + governance + full architecture notes (canonical).
+- `llms-full.txt` — comprehensive reference (scripts, flags, params, file paths).
+- `context/product/`, `context/spec/` — AWOS product definition, roadmap, specs.

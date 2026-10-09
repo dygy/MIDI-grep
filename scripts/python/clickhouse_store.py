@@ -313,6 +313,42 @@ def get_learned_knowledge(genre: str, bpm: float, key_type: str) -> List[Dict]:
     return results
 
 
+# ---------------------------------------------------------------------------
+# Band → voice mapping (shared by retrieve_relevant_knowledge and
+# extract_voice_params_from_orchestrated_code).
+# ---------------------------------------------------------------------------
+
+# Legacy effect-function prefixes (old format: bassFx.gain, midFx.lpf, …)
+_BAND_TO_FX = {
+    "sub_bass": "bassFx",
+    "bass": "bassFx",
+    "low_mid": "bassFx",
+    "mid": "midFx",
+    "high_mid": "highFx",
+    "high": "highFx",
+}
+
+# New orchestrated voice prefixes (voice.bass.gain, voice.lead.lpf, …)
+_BAND_TO_VOICE = {
+    "sub_bass": "voice.bass",
+    "bass": "voice.bass",
+    "low_mid": "voice.bass",
+    "mid": "voice.lead",
+    "high_mid": "voice.lead",
+    "high": "voice.lead",
+}
+
+
+def band_to_voice(band: str) -> str:
+    """Map a frequency band name to the responsible orchestrated voice prefix.
+
+    Returns one of: 'voice.bass', 'voice.lead', 'voice.drums'.
+    Falls back to 'voice.bass' for unknown bands (low frequencies are the
+    safest default when the band is unrecognised).
+    """
+    return _BAND_TO_VOICE.get(band, "voice.bass")
+
+
 def retrieve_relevant_knowledge(
     comparison: Dict,
     genre: str,
@@ -327,6 +363,10 @@ def retrieve_relevant_knowledge(
 
     This is the real RAG function — retrieval is driven by the current query,
     not just a static category.
+
+    The query matches BOTH the legacy effect-function prefix (e.g. 'bassFx')
+    AND the new orchestrated voice prefix (e.g. 'voice.bass') so that knowledge
+    stored by either codegen path is surfaced together.
 
     Args:
         comparison: Current comparison.json dict with band differences
@@ -357,56 +397,47 @@ def retrieve_relevant_knowledge(
     if not worst_bands or abs(worst_bands[0][1]) < 0.03:
         return ""  # Bands are close enough, no retrieval needed
 
-    # Map worst band to likely parameter prefix
-    band_to_fx = {
-        "sub_bass": "bassFx",
-        "bass": "bassFx",
-        "low_mid": "bassFx",
-        "mid": "midFx",
-        "high_mid": "highFx",
-        "high": "highFx",
-    }
-
-    # Build query: prioritize fixes for the worst bands, prefer same genre + similar BPM
-    worst_fx = band_to_fx.get(worst_bands[0][0], "bassFx")
     direction = "too quiet" if worst_bands[0][1] < 0 else "too loud"
-
     safe_genre = sanitize_sql_value(genre)
-    query = f"""
-        SELECT
-            parameter_name, parameter_new_value, similarity_improvement,
-            genre, bpm_range_low, bpm_range_high
-        FROM midi_grep.knowledge
-        WHERE parameter_name LIKE '{worst_fx}%'
-          AND similarity_improvement > 0.03
-        ORDER BY
-            -- Prefer same genre (10x boost)
-            multiIf(genre = '{safe_genre}', 10, genre = '', 2, 1) *
-            -- Prefer similar BPM
-            (1.0 / (1 + abs(bpm_range_low + bpm_range_high - {bpm * 2}) / 2)) *
-            -- Prefer higher improvement
-            similarity_improvement
-        DESC
-        LIMIT 5
-    """
 
-    results = clickhouse_query(query)
+    def _query_for_band(band: str, limit: int, order_by_genre: bool) -> List[Dict]:
+        """Build and run a knowledge query for both legacy and voice-level prefixes."""
+        legacy_fx = _BAND_TO_FX.get(band, "bassFx")
+        voice_prefix = _BAND_TO_VOICE.get(band, "voice.bass")
+        # Match both naming schemes in a single WHERE clause to keep the result
+        # list ordered by the same ranking function.
+        order_clause = (
+            f"""multiIf(genre = '{safe_genre}', 10, genre = '', 2, 1) *
+            (1.0 / (1 + abs(bpm_range_low + bpm_range_high - {bpm * 2}) / 2)) *
+            similarity_improvement DESC"""
+            if order_by_genre
+            else "similarity_improvement DESC"
+        )
+        q = f"""
+            SELECT
+                parameter_name, parameter_new_value, similarity_improvement,
+                genre, bpm_range_low, bpm_range_high
+            FROM midi_grep.knowledge
+            WHERE (
+                parameter_name LIKE '{sanitize_sql_value(legacy_fx)}%'
+                OR parameter_name LIKE '{sanitize_sql_value(voice_prefix)}%'
+            )
+              AND similarity_improvement > 0.03
+            ORDER BY {order_clause}
+            LIMIT {limit}
+        """
+        return clickhouse_query(q)
+
+    results = _query_for_band(worst_bands[0][0], limit=5, order_by_genre=True)
 
     # Also query for the second-worst band if it's significantly off
     if len(worst_bands) > 1 and abs(worst_bands[1][1]) > 0.08:
-        second_fx = band_to_fx.get(worst_bands[1][0], "midFx")
-        if second_fx != worst_fx:
-            query2 = f"""
-                SELECT
-                    parameter_name, parameter_new_value, similarity_improvement,
-                    genre, bpm_range_low, bpm_range_high
-                FROM midi_grep.knowledge
-                WHERE parameter_name LIKE '{second_fx}%'
-                  AND similarity_improvement > 0.03
-                ORDER BY similarity_improvement DESC
-                LIMIT 3
-            """
-            results.extend(clickhouse_query(query2))
+        second_band = worst_bands[1][0]
+        # Only fetch if the voice/fx bucket differs from the first band
+        if _BAND_TO_FX.get(second_band) != _BAND_TO_FX.get(worst_bands[0][0]):
+            results.extend(
+                _query_for_band(second_band, limit=3, order_by_genre=False)
+            )
 
     if not results:
         return ""
@@ -579,6 +610,80 @@ if not _STRUDEL_PARAMS_IMPORTED:
 
 
 # ---------------------------------------------------------------------------
+# Orchestrated code parameter extraction (voice-level format)
+# ---------------------------------------------------------------------------
+
+def extract_voice_params_from_orchestrated_code(code: str) -> Dict[str, Dict[str, Any]]:
+    """Extract per-voice parameters from orchestrated arrange() Strudel code.
+
+    The orchestrated format stores parameters inline in arrange() entries:
+        note("c2 ~ ~ ~").sound("gm_synth_bass_1").gain(0.6).lpf(sine.range(440, 1080).slow(16))
+
+    We scan each $: arrange(...) block and extract the FIRST numeric gain/lpf per block,
+    keyed as voice.bass / voice.lead / voice.drums (block order is 0=bass, 1=lead, 2=drums
+    by the assembler contract).
+
+    Returns a dict like:
+        {
+            "voice.bass":  {"gain": 0.6, "lpf": 800},
+            "voice.lead":  {"gain": 0.5, "lpf": 4000},
+            "voice.drums": {"gain": 0.7},
+        }
+
+    This is sufficient for learn_from_improvement() to detect meaningful changes
+    between two iterations of orchestrated code.  The lpf from a _lpf_mod sweep is
+    extracted as the centre (base) value from the sine.range() bounds when present,
+    falling back to a bare .lpf(N) value.
+    """
+    params: Dict[str, Dict[str, Any]] = {}
+
+    # Find all $: arrange(...) blocks in order — assembler guarantees bass, lead, drums.
+    voice_order = ["voice.bass", "voice.lead", "voice.drums"]
+    arrange_pattern = re.compile(r'\$:\s*arrange\(', re.MULTILINE)
+    starts = [m.start() for m in arrange_pattern.finditer(code)]
+
+    for block_idx, start in enumerate(starts):
+        if block_idx >= len(voice_order):
+            break
+        voice_key = voice_order[block_idx]
+        # Extract the block text (we only need the first entry for param sniffing)
+        paren_start = code.index('(', start)
+        depth, j = 0, paren_start
+        while j < len(code):
+            if code[j] == '(':
+                depth += 1
+            elif code[j] == ')':
+                depth -= 1
+                if depth == 0:
+                    break
+            j += 1
+        block_text = code[paren_start:j + 1]
+
+        voice_params: Dict[str, Any] = {}
+
+        # Extract first .gain(N) — literal numeric only (not a pattern string)
+        gain_m = re.search(r'\.gain\(([0-9]+(?:\.[0-9]+)?)\)', block_text)
+        if gain_m:
+            voice_params["gain"] = float(gain_m.group(1))
+
+        # Extract LPF: prefer sine.range(lo, hi) → derive centre as (lo+hi)/2
+        # Falls back to bare .lpf(N).
+        range_m = re.search(r'sine\.range\(\s*([0-9]+)\s*,\s*([0-9]+)\s*\)', block_text)
+        if range_m:
+            lo, hi = int(range_m.group(1)), int(range_m.group(2))
+            voice_params["lpf"] = (lo + hi) // 2
+        else:
+            lpf_m = re.search(r'\.lpf\(([0-9]+(?:\.[0-9]+)?)\)', block_text)
+            if lpf_m:
+                voice_params["lpf"] = float(lpf_m.group(1))
+
+        if voice_params:
+            params[voice_key] = voice_params
+
+    return params
+
+
+# ---------------------------------------------------------------------------
 # Learning
 # ---------------------------------------------------------------------------
 
@@ -595,6 +700,11 @@ def learn_from_improvement(
     """
     Compare before/after code and store successful parameter changes as knowledge.
     Returns number of knowledge entries stored.
+
+    Supports BOTH the legacy effect-function format (bassFx.gain, midFx.lpf, …)
+    AND the new orchestrated voice format (voice.bass.gain, voice.lead.lpf, …).
+    Detection is automatic: orchestrated code contains 'arrange(' while legacy
+    code uses 'let bassFx = p => p…' patterns.
     """
     if new_similarity <= old_similarity:
         return 0  # No improvement, nothing to learn
@@ -603,8 +713,14 @@ def learn_from_improvement(
     if improvement < 0.01:  # Less than 1% improvement, skip
         return 0
 
-    old_params = extract_parameters_from_code(old_code)
-    new_params = extract_parameters_from_code(new_code)
+    # Detect code format and extract params accordingly.
+    is_orchestrated = "arrange(" in new_code
+    if is_orchestrated:
+        old_params = extract_voice_params_from_orchestrated_code(old_code)
+        new_params = extract_voice_params_from_orchestrated_code(new_code)
+    else:
+        old_params = extract_parameters_from_code(old_code)
+        new_params = extract_parameters_from_code(new_code)
 
     entries_stored = 0
 

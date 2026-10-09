@@ -1,3 +1,5 @@
+# Target: Python 3.11 (basic-pitch needs TF 2.15 + keras<3; 3.12 not supported).
+# Do not use 3.12-only syntax (e.g. the `type X = ...` statement).
 spleeter>=2.4.0
 basic-pitch>=0.3.0
 librosa>=0.10.0
@@ -14,6 +16,10 @@ laion-clap>=1.1.4
 
 # RAVE generative pipeline
 openl3>=0.4.1
+
+# Verification loop MCP server (mcp_servers/loop) + eval gate (eval/gate.py)
+fastmcp>=2.0.0
+pyyaml>=6.0
 
 # Optional: Full RAVE neural network training (for --mode rave)
 # Uncomment if you want to train full neural synthesizers (takes hours)

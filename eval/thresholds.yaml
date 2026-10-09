@@ -1,0 +1,125 @@
+# MIDI-grep similarity eval gate.
+#
+# These are REGRESSION FLOORS: a render for a given genre must not score below its floor.
+# They are code-authoritative — `scripts/python/tests/test_similarity_gate.py` asserts against
+# them and fails pytest on a breach.
+#
+# Numbers are the HONEST MAE-based `overall_similarity` from compare_audio.py (0.0–1.0),
+# measured against a BlackHole render (NOT the Node.js synth — it reads ~16% and must not gate).
+#
+# Floors start at the current measured baselines (see CLAUDE.md / MEMORY) and are meant to
+# ratchet UP toward the 0.80 target as AI learning improves — never down.
+
+# Minimum a render must hit when the genre is unknown / unlisted.
+default: 0.55
+
+# Per-genre floors. Raise a floor only after a change reliably clears it.
+genres:
+  brazilian_funk:   0.62   # BlackHole baseline ~72%; floor below it to allow noise
+  brazilian_phonk:  0.55
+  electro_swing:    0.60   # measured ~67%
+  russian_hip_hop:  0.52   # measured ~59%
+  retro_wave:       0.55
+  synthwave:        0.55
+  trance:           0.55
+  house:            0.55
+  lofi:             0.55
+  jazz:             0.50
+
+# Long-term target (informational; not enforced per-run).
+target: 0.80
+
+# Hard guardrail: any single frequency band off by more than this fraction fails the gate
+# regardless of overall score (mirrors compare_audio.py's per-band penalty).
+max_worst_band_diff: 0.30
+
+# Section-aware floors (OPTIONAL — only checked when compare_audio.py produces
+# section_aware_similarity in the comparison dict, i.e. >= Task C version).
+#
+# WHY SECTION-AWARE IS STRICTER THAN OVERALL:
+#   overall_similarity averages all windows including the best-matching ones, so a
+#   static loop that sounds identical to the original's chorus will score high overall
+#   while badly failing the quiet intro or the breakdown.  section_aware_similarity
+#   also averages windows but uses a tighter per-window formula (MFCC 40%, bands 35%,
+#   energy 25%) with no partial credit from tempo/chroma inflation — so a render that
+#   only matches one section will score noticeably lower here.
+#
+# WHY FLOORS ARE CONSERVATIVE (below overall floors):
+#   The scale is different — section_aware uses a simpler per-window formula that
+#   produces scores roughly 10-15% lower than overall_similarity on well-matched
+#   renders.  Start low and ratchet up as the AI learns to cover all sections.
+#
+# Overall % will look higher than section_aware %; section_aware is the honest signal
+# for temporal evolution coverage.
+section_aware:
+  default: 0.45  # Conservative global floor (~10% below default overall floor of 0.55)
+  genres:
+    brazilian_funk:   0.50  # Overall floor 0.62; section_aware ~10% below
+    brazilian_phonk:  0.45
+    electro_swing:    0.48  # Overall floor 0.60; measured section_aware ~55%
+    russian_hip_hop:  0.42
+    retro_wave:       0.45
+    synthwave:        0.45
+    trance:           0.45
+    house:            0.45
+    lofi:             0.45
+    jazz:             0.40
+
+# Per-MODE floors (spec 003 §2.2-E). `eval/gate.py` resolves `modes.<mode>.genres.<genre>`
+# (and `modes.<mode>.section_aware.<genre>`) BEFORE the genre-wide `genres:` /
+# `section_aware:` tables above; a genre/mode with no entry here falls back to those.
+#
+# Mode keys are normalised the same way as genres (`sample-instrument` → `sample_instrument`).
+#
+# RULE: every value here is a REGRESSION FLOOR taken from a real, detector-PASSING
+# (editability: pass) BlackHole render of that mode: floor = measured − a stated margin, and
+# the raw measurement + the run it came from is recorded under `measured:` so the number is
+# reproducible. NEVER type a guessed value — leave the entry absent until it is measured
+# (Slice 4 of context/spec/003-editable-strudel-generation/tasks.md fills it in).
+#
+# Shape (values intentionally absent until measured):
+#   modes:
+#     sample_instrument:
+#       genres:        { <genre>: <measured − margin> }
+#       section_aware: { <genre>: <measured − margin> }
+#       measured:      { <genre>: { overall: <x>, section_aware: <y>, run: "<cache_key>/vNNN",
+#                                   margin: <m> } }
+#     synth:
+#       genres:        { ... }
+#       section_aware: { ... }
+#       measured:      { ... }
+modes:
+  sample_instrument:
+    # Floors = measured − margin (margin 0.02 ≈ the run-to-run noise of a BlackHole render).
+    # Measured 2026-10-09 after the raw-capture recorder fix, on a contract-passing (editable-vocal)
+    # render; see `measured`.
+    genres:
+      brazilian_funk: 0.88
+    section_aware:
+      brazilian_funk: 0.90
+    measured:
+      brazilian_funk:
+        overall: 0.9009
+        section_aware: 0.9205
+        frequency_balance: 0.9163
+        tempo_similarity: 1.0000   # rendered tempo 136.0 (v024's 0.365 was recorder capture jitter, fixed)
+        run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v026"
+        margin: 0.02
+        editability: pass
+        vocal_mode: instrument
+  synth:
+    # Pure palette synthesis (no stem samples) — inherently further from the master; floor = measured − 0.02.
+    genres:
+      brazilian_funk: 0.77
+    section_aware:
+      brazilian_funk: 0.81
+    measured:
+      brazilian_funk:
+        overall: 0.7879
+        section_aware: 0.8319
+        frequency_balance: 0.6424
+        tempo_similarity: 0.4624   # beat tracker reads ~125 on the 808-bank synth drums (content-level); playback verified at 136
+        run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v027"
+        margin: 0.02
+        editability: pass
+        vocal_mode: instrument

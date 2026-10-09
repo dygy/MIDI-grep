@@ -1,0 +1,42 @@
+{
+  "_base": "https://pub-56831423fee34641805da07cfdaf6812.r2.dev/midi-grep/regime-clt/instruments/",
+  "regime_bass": {
+    "d#1": "regime_bass/d_sharp_1.wav",
+    "e1": "regime_bass/e1.wav",
+    "f1": "regime_bass/f1.wav",
+    "f#1": "regime_bass/f_sharp_1.wav",
+    "g1": "regime_bass/g1.wav"
+  },
+  "regime_lead": {
+    "d#3": "regime_lead/d_sharp_3.wav",
+    "c#4": "regime_lead/c_sharp_4.wav",
+    "c#3": "regime_lead/c_sharp_3.wav",
+    "a2": "regime_lead/a2.wav",
+    "d#4": "regime_lead/d_sharp_4.wav",
+    "e4": "regime_lead/e4.wav",
+    "e3": "regime_lead/e3.wav",
+    "g#3": "regime_lead/g_sharp_3.wav",
+    "f#3": "regime_lead/f_sharp_3.wav",
+    "a#4": "regime_lead/a_sharp_4.wav",
+    "d3": "regime_lead/d3.wav",
+    "c#5": "regime_lead/c_sharp_5.wav",
+    "b4": "regime_lead/b4.wav",
+    "g#4": "regime_lead/g_sharp_4.wav",
+    "f#4": "regime_lead/f_sharp_4.wav",
+    "b2": "regime_lead/b2.wav",
+    "c5": "regime_lead/c5.wav",
+    "a4": "regime_lead/a4.wav"
+  },
+  "bd": [
+    "kit/bd.wav"
+  ],
+  "sd": [
+    "kit/sd.wav"
+  ],
+  "hh": [
+    "kit/hh.wav"
+  ],
+  "oh": [
+    "kit/oh.wav"
+  ]
+}

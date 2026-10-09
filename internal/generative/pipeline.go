@@ -117,14 +117,14 @@ func (p *Pipeline) TrainModel(ctx context.Context, audioPath, modelName string) 
 
 // ModelMetadata contains trained model info.
 type ModelMetadata struct {
-	Name        string  `json:"name"`
-	Type        string  `json:"type"`
-	SourceAudio string  `json:"source_audio"`
-	SampleRate  int     `json:"sample_rate"`
-	NumGrains   int     `json:"num_grains,omitempty"`
-	GrainDurMS  int     `json:"grain_duration_ms,omitempty"`
-	LatentDim   int     `json:"latent_dim,omitempty"`
-	Created     string  `json:"created"`
+	Name        string `json:"name"`
+	Type        string `json:"type"`
+	SourceAudio string `json:"source_audio"`
+	SampleRate  int    `json:"sample_rate"`
+	NumGrains   int    `json:"num_grains,omitempty"`
+	GrainDurMS  int    `json:"grain_duration_ms,omitempty"`
+	LatentDim   int    `json:"latent_dim,omitempty"`
+	Created     string `json:"created"`
 }
 
 // SearchResult contains model similarity search results.

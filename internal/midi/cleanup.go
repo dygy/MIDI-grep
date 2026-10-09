@@ -69,12 +69,12 @@ func DefaultCleanupOptions() CleanupOptions {
 	return CleanupOptions{
 		Quantize:        16,
 		Simplify:        false,
-		MaxChordSize:    2,              // Keep chords simple (2 notes max)
-		MaxNotesPerBeat: 1,              // Only 1 note per beat for clear patterns
+		MaxChordSize:    2, // Keep chords simple (2 notes max)
+		MaxNotesPerBeat: 1, // Only 1 note per beat for clear patterns
 		PreferredOctave: 4,
-		MergeThreshold:  0.1,            // Merge notes within 100ms
-		TimeSignature:   "4/4",          // Default 4/4 time
-		SwingRatio:      1.0,            // Straight timing by default
+		MergeThreshold:  0.1,   // Merge notes within 100ms
+		TimeSignature:   "4/4", // Default 4/4 time
+		SwingRatio:      1.0,   // Straight timing by default
 		SwingConfidence: 0.0,
 		MultiVoiceLoops: false,
 	}

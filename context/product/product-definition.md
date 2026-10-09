@@ -11,6 +11,11 @@
 
 Enable musicians and live coders to instantly extract piano riffs from any audio source (including YouTube) and transform them into playable Strudel patterns, bridging the gap between recorded music and algorithmic composition. Delivered as a Go-powered CLI and web application with a reactive HTMX interface - no JavaScript frameworks required.
 
+> **Core values & anti-patterns:** see [`values.md`](./values.md). The product is
+> **editable, live-codeable Strudel** — resemblance comes from re-performance, not from
+> replaying the master. Audio replay is forbidden as a deliverable; similarity is only
+> ever measured on genuinely generated output.
+
 ### 1.2. Target Audience
 
 - **Live coders** using Strudel/TidalCycles who want to sample melodic ideas from existing tracks

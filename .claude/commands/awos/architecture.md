@@ -1,5 +1,6 @@
 ---
 description: Defines the System Architecture — stack, DBs, infra.
+argument-hint: '[change request, optional]'
 ---
 
-Refer to the instructions located in this file: .awos/commands/architecture.md
+@.awos/commands/architecture.md

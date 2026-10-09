@@ -2,6 +2,78 @@
 
 This file provides context for Claude Code when working on this project.
 
+## AWOS baseline
+
+This repo runs the AWOS spec-driven workflow at **npm `@provectusinc/awos@1.5.0`** (migration
+version 3, upgraded 2026-10-09). Update with `npx @provectusinc/awos@latest --overwrite` from the
+repo root — the wrappers in `.claude/commands/awos/` are stock indirection, not customizations, so
+overwriting is correct; never hand-edit `.awos/`. Layout:
+
+- `.awos/` — framework internals (commands, templates, scripts). Overwritten on update.
+- `.claude/commands/awos/` — `/awos:product|architecture|hire|spec|tech|tasks|implement|verify`
+  wrappers. `/awos:roadmap` is retired upstream; `context/product/roadmap.md` is ours to keep by hand.
+- `.claude/commands/{implement-feature,fix-bug,session-init}.md` — the project's delivery flow,
+  generated from the (now upstream-removed) `/awos:flow` templates. Decisions live in
+  `context/product/delivery-flow.md`; edit these files directly to change the flow.
+- `.claude/agents/` — hired specialist roster (`context/product/hired-agents.md` is the coverage
+  record); `.claude/skills/` — project skills they bind to.
+- `.claude/hooks/` + `.claude/settings.json` — `branch-current.sh` (blocking: no PR/branch from a
+  stale base), `docs-freshness.sh` (advisory), SessionStart pointer to `/session-init`.
+- `.mcp.json` — `loop` (render/compare/eval gate), `playwright`, `awos-recruitment`.
+- `context/product/` — product-definition, values, architecture, delivery-flow, hired-agents;
+  `context/spec/NNN-<slug>/` — functional-spec, technical-considerations, tasks (+ flow-log).
+
+Reference install at the same level: the Citation orchestrator repo
+(`~/PycharmProjects/proj-citation-audit-context`).
+
+## Working Agreement (governance)
+
+These rules govern *how* to work, independent of the audio domain.
+
+### Clarifying Questions Budget
+Ask at most ONE round of clarifying questions before taking action. If the request is ambiguous, pick the most likely interpretation, state your assumption, and proceed. Do not use `AskUserQuestion` for routine git operations, stash decisions, or small implementation choices.
+
+### Handling Local Changes
+When git operations are blocked by local changes, do NOT prompt for each option. Default: stash with a descriptive name, perform the operation, then inform the user. Only ask if the changes look like intentional uncommitted work that may be lost.
+
+### Environment Preflight
+Before any long-running run (extraction, `--iterate`, rendering, comparison) verify the environment FIRST so it doesn't fail 15 minutes in:
+- Python venv resolves (`scripts/python/.venv`) and key deps import (librosa, demucs, basic-pitch)
+- Node recorder built: `scripts/node/node_modules` present (`cd scripts/node && npm install`) and
+  `scripts/node/dist/record-strudel-blackhole.js` exists (`npm run build`) — without them every render fails
+- ML models are present (first run downloads ~1GB)
+- For BlackHole recording: the BlackHole device exists and a Multi-Output Device is selected (`node dist/record-strudel-blackhole.js` will silently produce empty audio otherwise)
+- For Ollama runs: `ollama serve` is up and the model is pulled
+Surface a missing dependency immediately rather than letting the run fail partway through.
+
+### Self-Review After Edits
+After code or doc changes, run a self-review pass before declaring done. Verify: (1) claims in commit messages/docs match the actual diff, (2) no over-engineering beyond the ask, (3) similarity/eval numbers cited are from an actual run, not assumed. For substantive diffs, the `/self-review` skill launches a 4-agent audit.
+
+### No Pre-Existing Issues
+NO ISSUES ARE PRE-EXISTING. If you encounter ANY issue during development/testing — broken script, failing test, wrong similarity metric — it must be fixed, not worked around.
+
+### Delegate to Domain Experts
+Specialist standards live in the project agents under `.claude/agents/` (AWOS 1.5 no longer bundles domain experts; `/awos:hire` manages the roster). Delegate, don't reinvent:
+- Go implementation → `golang-expert`
+- Python (analysis, codegen, comparison) → `python-expert`
+- Audio synthesis / DSP → `audio-dsp-expert`
+- librosa / spectral / stem ML → `ml-audio-expert`
+- Strudel pattern generation → `strudel-expert`
+- Ollama / Claude / prompt work → `llm-expert` (and the `/prompt-engineering` skill)
+- Music theory (keys, chords, arrangement) → `music-theory-expert`
+
+### Context Document Maintenance
+After meaningful changes to the pipeline (`internal/`, `scripts/python/`, `scripts/node/`), update the docs so they stay accurate:
+1. **`llms.txt`** — concise (~100-line) project overview. Update when pipelines, modes, or key directories change.
+2. **`llms-full.txt`** — comprehensive reference. Update with detailed changes: new scripts, flags, synthesis params, file paths.
+3. **`CLAUDE.md`** — this file, for build/run instructions and architecture-level guidance.
+4. **`context/product/architecture.md`** — when the stack, a pipeline stage, the render path or the
+   testing stack changes (the `testing-expert` agent reads its Testing Stack section).
+5. **The owning spec** under `context/spec/` — tick acceptance criteria only via `/awos:verify`;
+   a behavior change that contradicts a spec is a *divergence* and amends the spec (`/fix-bug`).
+Update triggers: new modes/genres, synthesis-parameter changes, new scripts, renderer changes, or similarity-metric changes.
+The `docs-freshness` hook reminds you once per session when a pipeline file changes.
+
 ## CRITICAL PRINCIPLES - ZERO HARDCODING
 
 **NEVER hardcode values. The AI must learn and generate everything.**
@@ -28,8 +100,33 @@ This file provides context for Claude Code when working on this project.
    - AI analyzes differences and generates new parameters
    - Store learnings in ClickHouse for future tracks
 
-**Current achievement:** ~60-70% similarity with honest calculation (previous 90%+ was inflated by cosine bug)
+**Current achievement (honest, contract-passing):** editable dynamic-Strudel with ALL voices as
+editable data — transcribed bass/lead/VOCAL notes on stem-derived sample-instruments + extracted drum
+patterns — at **90.1% overall / 92.1% section-aware / 91.6% freq balance,
+tempo_sim 1.000** on Regime CLT (brazilian_funk; `v026/comparison.json`, 2026-10-09, `editability: pass`,
+`generation_mode: sample-instrument`, raw-capture recorder). `--mode synth` (palette sounds, no samples)
+measured **78.8% / 83.2%** (`v027`), also detector-passing; its tempo sub-score (0.46) is a
+beat-tracker reading on the 808-bank synth drums, playback is at 136. These are the measured
+`modes.*` floor sources in `eval/thresholds.yaml` (floor = measured − 0.02). HISTORY: v024/v025 (same
+day, wall-clock capture) read 87.4% / 75.9% with tempo_sim 0.365 — the recorder's async resampling
+jittered beat timing (fixed, see CAPTURE MODE below). v023 (2026-06-30) scored 93.8% / 95.9% but its
+vocal voice was a full-stem replay (`s("vocalsfull")…slow(N)`, `values.md` A1) — `editability_check.py`
+now FAILS it and `compare_audio.py --strudel` refuses to score it.
+NOTE: numbers measured BEFORE the Jun-2026 recorder tempo fix (the 72% / 88.7% / 92.4% / 94.6%
+history) were on ~25%-sped-up audio and are invalid — see the recorder fix below. Earlier honest
+baselines were ~60-70% (the old 90%+ was inflated by a cosine bug).
 **Target:** 80%+ similarity across all genres through AI learning, not hardcoding
+
+**Data-driven mix calibration (Jun 2026):** `scripts/python/calibrate_dynamic.py` +
+`scripts/auto-calibrate.sh` close the generate→render→compare→calibrate loop that was previously
+hand-tuned. The calibrator maps a render's measured `comparison.json` to the generator's tuning
+knobs (sub-gain/bass-mult/cal-lead/lead-lpf/hat-gain/master-gain), each a damped (sqrt) clamped
+proportional correction of an observed band/centroid ratio. Two non-obvious lessons baked in:
+(1) drive the brightness lever off the spectral CENTROID, not the high bands — at ~1% magnitude
+those bands are swamped by demucs bleed/noise and pinned lead-lpf while the mix was clearly dull;
+(2) when lead-lpf maxes out and the mix is still dark, the missing brightness is in the DRUMS —
+raise a steady TR808 hat layer (`--hat-gain`), which lifted brightness 70%→91% and overall
+89.8%→92.6% in one step (the extracted lead sample is inherently darker than the original).
 
 **CRITICAL: Similarity Calculation Fix (Feb 2026)**
 The old cosine-based frequency balance was HIDING massive errors (25% sub_bass, 20% mid differences showed as 95%!).
@@ -112,6 +209,31 @@ This mode trains neural synthesizers that learn the "sound" of your track materi
 enabling full note() control - edit any pitch, create new melodies, all sounding
 like the original. Models are stored in a repository and reused across tracks.
 
+**Sample-Pack Mode** (R2/localhost-hosted real-stem samples - HIGHEST similarity):
+```
+Input (URL) → Stems (Demucs)
+    ↓
+build_sample_pack.py → drum one-shots + pitched bass/melodic + RAW per-bar loops
+                       (drums/bass/melodic/vocals) + strudel.json
+    ↓
+Host pack: localhost (proof) or Cloudflare R2 (upload_r2.py → public r2.dev/custom domain)
+    ↓
+generate_sample_strudel.py → samples.json (_base = host) + output_<mode>.strudel
+    ↓
+Strudel: await samples("<base>/samples.json"); plays the REAL audio → ~91% similar
+```
+Instead of synthesizing (≤72% ceiling), this reuses the original's actual audio as
+Strudel samples, so the output is genuinely "quite similar". One command:
+`scripts/sample-pipeline.sh --url <U> --prefix <id> --local` (or `--r2`).
+**Two non-obvious rules:** (1) loops must be written RAW/un-normalized — per-bar
+normalization flattens dynamics + inter-stem balance (reconstruction 99%→70%);
+one-shots/pitched stay normalized. (2) Strudel's `samples(jsonUrl)` resolves
+`_base` by raw `base+path` concat with NO trailing slash, and only accepts
+array-valued entries — so the generated `samples.json` bakes an absolute `_base`
+ending in `/` and emits every value (incl. one-shots) as single-element arrays.
+R2 hosting needs `npx wrangler login` (or R2 S3 keys via env) — see
+`scripts/python/upload_r2.py`.
+
 ### Caching
 
 All outputs are cached in `.cache/stems/{key}/` by URL or file hash:
@@ -162,26 +284,11 @@ The `--render` flag synthesizes WAV audio from patterns:
 - Chord stabs: Filtered sawtooth
 - Lead: Triangle wave with vibrato
 
-**Node.js Strudel Renderer (`scripts/node/src/render-strudel-node.ts`):**
-- TypeScript-based offline audio rendering with Strudel pattern parsing
-- Uses `@strudel/mini` v1.1.0 for accurate mini-notation parsing
-- **Synthesis engine with frequency-balanced mix:**
-  - `synthKick()` - 808-style kick with pitch envelope (150→35Hz for sub-bass), amp decay, click transient
-  - `synthSnare()` - Dual-sine body (180Hz + 330Hz) + high-passed noise for wires
-  - `synthHihat()` - Metallic multi-frequency noise with envelope (open/closed variants)
-  - `synthBass()` - Sawtooth + sub-octave sine (0.5x), low-pass filtered for warmth
-  - `synthLead()` - Detuned saws + triangle, filter envelope for movement
-  - `synthHigh()` - Odd-harmonic square wave + saw for brightness
-- **Voice gain defaults (Feb 2026 - tuned for Brazilian funk):**
-  - Bass: 0.6x gain, sub_octave 0.5x, lpf 400Hz, hpf 30Hz
-  - Mids: 0.5x gain, lpf 5kHz, hpf 200Hz
-  - Highs: 0.4x gain, lpf 8kHz, hpf 400Hz
-  - Drums: 0.7x gain with transient boost 0.4x
-- 30Hz high-pass filter on master
-- Achieves ~72% similarity on Brazilian funk (up from 32% after 808 fix)
-- Outputs 16-bit 44.1kHz mono WAV files
-- Build: `cd scripts/node && npm run build`
-- Usage: `node dist/render-strudel-node.js input.strudel -o output.wav -d 30`
+**Node.js Strudel Renderer — REMOVED (Jun 2026):** `render-strudel-node.ts` (offline synthesis
+emulating Strudel sounds, ~16% similarity vs the real engine) was deleted. The BlackHole recorder
+below is the only render path. Dead references to `render-strudel-node.js` still exist in
+`cmd/midi-grep/main.go`, `mcp_servers/loop/server.py` (recorder='node'), `synth_profiles.py` and
+`ai_learning_optimizer.py` — tracked in spec 003 tasks.
 
 **Puppeteer BlackHole Recorder (`scripts/node/src/record-strudel-blackhole.ts`):** *(RECOMMENDED)*
 - Records REAL Strudel playback using BlackHole virtual audio device
@@ -195,8 +302,9 @@ The `--render` flag synthesizes WAV audio from patterns:
   ```bash
   node dist/record-strudel-blackhole.js input.strudel -o output.wav -d 30
   ```
-- Produces 100% accurate Strudel audio (uses real Strudel engine, not emulation)
-- Uses self-hosted Strudel at `strudel.dygy.app` (spec: `.kiro/specs/midi-grep-embed-integration/`)
+- Records the real Strudel engine (not an emulation); timing is exact only with the Jun 2026 ffmpeg
+  wallclock/aresample fix below
+- Uses self-hosted Strudel at `strudel.dygy.app`
 
 **Key implementation details:**
 - `--autoplay-policy=no-user-gesture-required` bypasses gesture requirement
@@ -206,6 +314,24 @@ The `--render` flag synthesizes WAV audio from patterns:
 - `headless: false` required (Web Audio quirks in headless mode)
 - **Code insertion:** Use `cmContent.cmView.view.dispatch({changes: {...}})` not textContent
 - **setSinkId timing:** Must be AFTER clicking play (after superdough initializes)
+- **TEMPO FIX (Jun 2026, CRITICAL):** avfoundation captures BlackHole's 48kHz stream with
+  device-clock timestamps that don't track real time, so the recording came out ~25% FAST (136 BPM
+  read as ~103). The ffmpeg capture MUST use `-use_wallclock_as_timestamps 1` (before `-i`) +
+  `-af aresample=async=1` (before output) to restamp/resample to real time. Strudel itself is fine
+  (AudioContext clock is real-time). All similarity numbers recorded before this fix were on
+  sped-up audio. Output `-ar` does NOT fix it; input `-ar` before `-i` breaks avfoundation.
+- **CAPTURE MODE (Oct 2026):** the recorder now captures the BlackHole stream RAW and corrects its
+  speed ONCE by the measured samples/wall-clock ratio (`asetrate=<real rate>,aresample=44100`), because
+  the Jun wall-clock+`aresample=async=1` path, while right long-term, inserted/dropped chunks whenever a
+  buffer's stamp disagreed with its sample count: on a 170 s click train it left 61 inter-click gaps
+  > 50 ms (IOI std 38 ms) vs 0 gaps (std 12 ms) raw. That jitter is why every beat tracker read the
+  music renders at ~123 BPM although playback was at 136. The device's effective rate is run-dependent
+  (0.80–0.89 × 48 kHz measured), hence per-run measurement. `MIDIGREP_CAPTURE=wallclock` restores the
+  old path. Verify a capture chain change with a 170 s `s("bd*4")` click render: fitted period must be
+  0.4412 s ± 0.3% and IOI std < 15 ms.
+- **No programmatic stop/restart in the embed:** `window.stop()` doesn't stop, the play button
+  loses its text after starting, and `ctx.state` is always 'running' — so a warm-up→restart pass
+  is impossible. The recorder is single-pass (record, trim leading silence to anchor ~bar-0).
 
 **Hidden window configuration:**
 - Position: `--window-position=-32000,-32000` (far offscreen)
@@ -237,6 +363,14 @@ The `--render` flag synthesizes WAV audio from patterns:
 - Audio rendering using trained granular models
 - Loads pitched samples from model directories
 - Fallback when Node.js renderer unavailable
+
+**Editability / Replay Detector (`scripts/python/editability_check.py`, spec 003 Slice 1):**
+- Static analysis of a `.strudel` file against `values.md`: R1 `slice(N,run(N)).slow(N)`/`loopAt`
+  reconstruction, R2 full-stem or per-bar-loop sounds (`originalfull`, `vocalsfull`, `drumsloop`…),
+  R3 ≥1 editable voice, R4 texture allowance (`// texture` marker + ≥2 editable voices), R5 loop-only,
+  R6 `generation_mode` header/inference. Exit 0 pass / 1 fail / 2 parse error; `--json` for tooling.
+- Current state: v012 and v023 FAIL (v023 only on the `vocalsfull` line); v023 minus that voice PASSES as
+  `sample-instrument`. Slice 2 wires it ahead of compare/gate so replay is never scored.
 
 **Audio Comparison (`scripts/python/compare_audio.py`):**
 - Compares rendered output vs original stems
@@ -325,7 +459,7 @@ The `--render` flag synthesizes WAV audio from patterns:
 
 ## Tech Stack
 
-- **Language**: Go 1.21+
+- **Language**: Go 1.25+
 - **CLI Framework**: Cobra
 - **Web Framework**: Chi + HTMX + Go templates
 - **Audio Processing**: Python scripts (demucs, basic-pitch, librosa)
@@ -364,7 +498,7 @@ midi-grep/
 │   ├── extract-youtube.sh      # Quick YouTube extraction
 │   ├── node/                   # TypeScript audio rendering
 │   │   ├── src/
-│   │   │   └── render-strudel-node.ts  # Offline Strudel renderer
+│   │   │   └── record-strudel-blackhole.ts  # Puppeteer + BlackHole recorder (only render path)
 │   │   ├── dist/               # Compiled JavaScript output
 │   │   ├── package.json        # Node.js dependencies
 │   │   └── tsconfig.json       # TypeScript configuration
@@ -389,6 +523,7 @@ midi-grep/
 │       ├── ai_learning_optimizer.py # AI learning optimization
 │       ├── spectrogram_analyzer.py # Mel spectrogram deep analysis for AI
 │       ├── sound_selector.py   # Complete sound catalog (67 drums, 128 GM)
+│       ├── synth_profiles.py   # Per-genre synthesis profiles + sidechain depth/instruction
 │       ├── thin_patterns.py    # Pattern density control
 │       ├── render_with_models.py # Render using trained granular models
 │       ├── iterative_render.py # AI-driven iterative audio refinement
@@ -409,12 +544,20 @@ midi-grep/
 ├── context/                    # AWOS product documentation
 │   ├── product/
 │   │   ├── product-definition.md
-│   │   ├── roadmap.md
-│   │   └── architecture.md
+│   │   ├── values.md           # editability contract (replay forbidden)
+│   │   ├── roadmap.md          # hand-maintained (AWOS retired /awos:roadmap)
+│   │   ├── architecture.md
+│   │   ├── delivery-flow.md    # decisions behind /implement-feature and /fix-bug
+│   │   └── hired-agents.md     # specialist roster + hooks + gaps
 │   └── spec/
-│       └── 001-core-pipeline/
+│       ├── 001-core-pipeline/
+│       ├── 002-ml-customization/
+│       └── 003-editable-strudel-generation/   # functional + technical + tasks
+├── eval/                       # similarity gate: gate.py, thresholds.yaml, datasets/
+├── mcp_servers/loop/           # FastMCP: render_strudel, compare_render, verify_strudel, eval_gate
+├── .sisyphus/                  # plan + evidence trail for multi-iteration runs
 ├── Makefile
-├── Dockerfile
+├── docker-compose.clickhouse.yml   # optional ClickHouse store (app Dockerfile retired Oct 2026)
 └── go.mod
 ```
 
@@ -606,6 +749,7 @@ go build -o bin/midi-grep ./cmd/midi-grep
 | `--deep-genre` | Use deep learning (CLAP) for genre detection (default: enabled, skipped when `--genre` is specified) |
 | `--iterate N` | AI-driven improvement iterations (default: 20) |
 | `--target-similarity` | Target similarity for --iterate (0.0-1.0, default: 0.85) |
+| `--ignore-gate-stop` | Keep iterating toward `--target-similarity` even after the eval-gate floor is cleared (disables the early-success stop; auto-reject + reporting stay on) |
 
 ### Default Analysis Features (Always Enabled)
 
@@ -635,27 +779,35 @@ The `--iterate` flag enables AI-driven code improvement using Claude:
 2. Compare rendered audio with original (frequency bands, MFCC, chroma)
 3. Send comparison results to LLM (Ollama local or Claude API)
 4. LLM analyzes gaps and generates improved code
-5. Repeat until target similarity or max iterations reached
-6. Batch stem separation: run Demucs on each iteration render to produce per-iteration stems
-7. Store all runs in ClickHouse for incremental learning
-8. Generate HTML report with per-iteration stem tracks (mute buttons, shimmer loading)
+5. **Eval gate** (`eval/thresholds.yaml`): each render is scored against an absolute, genre-aware
+   similarity floor. Once any iteration clears the floor, later below-floor renders are
+   auto-rejected (reverted to best), and the loop **early-success stops** as soon as the floor is
+   cleared (no further iterations spent climbing toward the higher `--target-similarity`; pass
+   `--ignore-gate-stop` to keep climbing). The
+   final result is reported PASSED/FAILED vs the floor and recorded in `iterations.json` (`gate`
+   block) + the `improve_strudel` return dict. The gate is resilient — a missing `eval/`/pyyaml
+   disables it without breaking the run.
+6. Repeat until target similarity or max iterations reached
+7. Batch stem separation: run Demucs on each iteration render to produce per-iteration stems
+8. Store all runs in ClickHouse for incremental learning
+9. Generate HTML report with per-iteration stem tracks (mute buttons, shimmer loading)
 
 **LLM Options:**
 
 | Flag | Description |
 |------|-------------|
 | `--ollama` | Use Ollama (local, free) - **default: enabled** |
-| `--ollama-model` | Model to use (default: `llama3:8b`) |
+| `--ollama-model` | Model to use (default: `midi-grep-strudel-mistral`) |
 
 ```bash
-# Default: uses Ollama (free, local) with llama3:8b
+# Default: uses Ollama (free, local) with midi-grep-strudel-mistral
 ./bin/midi-grep extract --url "..." --iterate 5
 
 # Use Claude API instead (requires ANTHROPIC_API_KEY)
 ./bin/midi-grep extract --url "..." --iterate 5 --ollama=false
 
-# Use specific Ollama model
-./bin/midi-grep extract --url "..." --iterate 5 --ollama-model llama3:8b
+# Use a specific Ollama model (e.g. fast smoke runs)
+./bin/midi-grep extract --url "..." --iterate 5 --ollama-model llama3.1:8b
 ```
 
 **Ollama Setup (one-time):**
@@ -666,19 +818,19 @@ brew install ollama
 # Start service
 ollama serve  # or: brew services start ollama
 
-# Pull recommended model (understands music concepts)
-ollama pull llama3:8b
+# Build the default custom model (constrains hallucinations via Modelfile system prompt)
+ollama pull mistral-small
+ollama create midi-grep-strudel-mistral -f Modelfile.mistral
 ```
 
-**Tested Models:**
-| Model | Size | Speed | Music Understanding | Notes |
-|-------|------|-------|---------------------|-------|
-| `llama3:8b` | 4.7GB | Medium | ⭐⭐⭐⭐⭐ | **Recommended** - best for music + audio concepts |
-| `deepseek-coder:6.7b` | 3.8GB | Fast | ⭐⭐ | Good at JSON but code-focused |
-| `codellama:7b` | 3.8GB | Fast | ⭐⭐ | Code-focused, less musical knowledge |
-| `mistral:7b` | 4.1GB | Fast | ⭐⭐⭐⭐ | Good general model |
+**Tested Models (default chosen for 24GB RAM):**
+| Model | Size | Speed | Quality | Notes |
+|-------|------|-------|---------|-------|
+| `midi-grep-strudel-mistral` | ~13GB | Medium | ⭐⭐⭐⭐ | **Default** — `mistral-small` base + Modelfile system prompt; middle ground, fits 24GB alongside Demucs/BlackHole |
+| `midi-grep-strudel` | 42GB | Slow | ⭐⭐⭐⭐⭐ | `llama3.3:70b` base; best quality but needs ~48GB RAM (unusable on 24GB) |
+| `llama3.1:8b` | 4.9GB | Fast | ⭐⭐ | Fast smoke runs only — hallucinates sound names, weak `arrange()` structure |
 
-**Why `llama3:8b`?** The LLM needs to understand audio/music concepts ("bass sounds muddy", "mids are harsh", "drums lack punch") not just generate code. General-purpose models with broad knowledge outperform code-only models for this task.
+**Why a custom model?** The `Modelfile`/`Modelfile.mistral` SYSTEM prompt enforces the 3-voice `arrange()` structure and the sound-naming rules that stop the LLM inventing sounds like `sub_bass`. Applying it to a `mistral-small` base gives the best quality that fits 24GB RAM. The plain `llama3.1:8b` (no system prompt) hallucinates and produces sparse, low-energy arrangements.
 
 **Strudel Code Validation & Genre RAG (`scripts/python/ollama_agent.py`):**
 
@@ -838,7 +990,7 @@ go test ./...
 
 ## Domain Experts
 
-When working on specific areas, the golang-expert (`.awos/subagents/golang-expert.md`) provides patterns for:
+When working on specific areas, the golang-expert (`.claude/agents/golang-expert.md`) provides patterns for:
 - Concurrency (errgroup, channels)
 - Error handling (wrapping, sentinel errors)
 - Interface design
@@ -846,7 +998,10 @@ When working on specific areas, the golang-expert (`.awos/subagents/golang-exper
 
 ## Notes
 
-- Python 3.11+ required for ML dependencies
+- **Python 3.11 is the target** (venv is 3.11.x). The ML stack pins us here: `basic-pitch` needs
+  TensorFlow 2.15 + `keras<3`, which do not support 3.12+. **Do NOT use 3.12-only syntax** — most
+  notably the `type X = ...` alias statement (use plain `X = ...` aliases). `StrEnum`,
+  `dataclass(slots=True)`, `Protocol`, and `X | None` are all fine on 3.11.
 - First run downloads ~1GB of ML models
 - Stem separation is CPU-intensive (1-2 min per track)
 - HTMX used for web UI - no client-side JS frameworks
