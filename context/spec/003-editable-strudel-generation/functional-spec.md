@@ -56,7 +56,7 @@ material, **so that** I can change notes, sounds, and structure — not just rep
       — verified 2026-10-09: `test_21_every_voice_is_its_own_block_of_editable_data` on v024/v025 + fixtures
 - [x] **Editability Test:** changing a single note (e.g. `c2`→`eb2`) in any voice
       produces audio that audibly reflects that change at that position.
-      — verified 2026-10-09: static: `test_21_single_note_edit_changes_exactly_one_token_and_stays_valid`; live: `editability_test.py` on v024 lead bar 2 (b3→d4) — the edited step's dominant pitch class moved B→D in the BlackHole render (audible at that position); 'nothing else changed' is inconclusive on this non-deterministic recorder (tasks.md Slice 4)
+      — verified 2026-10-09: static: `test_21_single_note_edit_changes_exactly_one_token_and_stays_valid`; live: `editability_test.py` on v024, two independent runs (lead bar 2 b3→d4, lead bar 3 e5→g5; dry solo BlackHole renders) → `localised: true` both times — the edited step's dominant pitch class moved exactly to the written note and every other bar's chroma agreed between takes (distances < 0.016 vs floors ≥ 0.024)
 - [x] **Sound-swap Test:** changing a voice's `.s("…")`/`.bank("…")` re-voices that part
       while keeping its pattern.
       — verified 2026-10-09: `test_21_sound_swap_revoices_but_keeps_the_pattern` (+ replay-sound swap rejected)

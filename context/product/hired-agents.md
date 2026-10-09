@@ -26,7 +26,7 @@ orchestrator's copy of the AWOS registry agent, with this project's pytest skill
 
 | Technology | Recommended Subagent Role | Status | Agent |
 | ---------- | ------------------------- | ------ | ----- |
-| Go 1.25 CLI (Cobra), pipeline orchestrator, cache, HTML report (`cmd/`, `internal/`) | `golang-expert` | ⚠️ Partial — agent exists, no Go skill in `.claude/skills/`; zero Go tests exist | golang-expert |
+| Go 1.25 CLI (Cobra), pipeline orchestrator, cache, HTML report (`cmd/`, `internal/`) | `golang-expert` | ✅ Covered — local `go-cli-development` skill bound; first Go tests in `internal/cache`, `internal/report` | golang-expert |
 | Chi + HTMX web UI (`internal/server`) | `golang-expert` | ⚠️ Partial — not exercised since Feb 2026 | golang-expert |
 | Python 3.11 ML stack (`scripts/python/`) | `python-expert` | ✅ Covered | python-expert |
 | librosa / Demucs / Basic Pitch / `compare_audio.py` / `eval/` | `ml-audio-expert` | ✅ Covered | ml-audio-expert |
@@ -47,7 +47,7 @@ orchestrator's copy of the AWOS registry agent, with this project's pytest skill
 | Name | Description | Skills |
 | ---- | ----------- | ------ |
 | audio-dsp-expert | Synthesizers, filters, effects, Web Audio API, waveform/buffer work. | — |
-| golang-expert | Go backend: concurrency, error handling, interfaces, subprocess execution for the pipeline. | — |
+| golang-expert | Go backend: concurrency, error handling, interfaces, subprocess execution for the pipeline. | go-cli-development |
 | llm-expert | Prompt design, LLM output parsing/validation, iterative loops, RAG, agentic memory (Ollama/Claude). | prompt-engineering |
 | ml-audio-expert | librosa spectral analysis, MFCC/chroma, Demucs, similarity comparison, mel spectrograms. | — |
 | music-theory-expert | Keys, scales, chord progressions, arrangement, genre conventions → code parameters. | — |
@@ -70,8 +70,8 @@ registry.
 
 ## Gaps
 
-- **Go skill.** No `.claude/skills/` entry encodes Go patterns; the agent body carries them. The
-  registry has none (probed 2026-10-09) — write one with `skill-creator` if the Go surface grows.
+- **Go skill.** The registry has none (probed 2026-10-09), so `.claude/skills/go-cli-development/`
+  was written locally from the golang-expert's patterns and bound to `golang-expert`.
 - **Node recorder owner.** The Puppeteer/ffmpeg recorder is the only render path and has no agent.
   Either extend `audio-dsp-expert` or hire a TypeScript/Node agent bound to
   `typescript-development`.

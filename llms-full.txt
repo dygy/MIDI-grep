@@ -103,6 +103,7 @@ Uses **MAE** (mean absolute error) on frequency bands, NOT cosine — cosine hid
 Frequency Balance **40%**, MFCC 20%, Energy 15%, Brightness 15%, Tempo 5%, Chroma 5%.
 Tracks `band_differences`, `worst_band_diff`. Current: Electro Swing ~67%, Russian Hip-Hop ~59%.
 Target: 80%+ across genres via AI learning, not hardcoding.
+Tempo estimate (Oct 2026): `estimate_tempo()` keeps the full-band `beat_track` read and adds a low-band (30-200 Hz STFT-flux) `librosa.feature.tempo` candidate (original's BPM only as `start_bpm`); the candidate with stronger onset-envelope autocorrelation support wins. Both candidates + `tempo_method` are written to `comparison.json` (`tempo_candidates`, `tempo_method`); weights unchanged.
 
 ## 7. Caching & output (`.cache/stems/{key}/`)
 

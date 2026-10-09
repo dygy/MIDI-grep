@@ -1,24 +1,25 @@
 ---
-name: golang-expert
-description: Use this agent PROACTIVELY when you need expert Go backend development assistance, including: building microservices and APIs, implementing concurrency patterns with goroutines and channels, designing clean architectures, working with databases (sqlx, pgx, GORM), handling errors idiomatically, implementing graceful shutdown, optimizing performance, or solving complex systems challenges. USE AUTOMATICALLY when working with Go backend services.
-model: sonnet
-skills:
-  - go-cli-development
-disallowedTools: Agent
-color: cyan
+name: go-cli-development
+description: Go patterns for the MIDI-grep CLI (Cobra commands, Python-subprocess orchestration via internal/exec, errgroup concurrency, sentinel/wrapped errors, stdlib testing with table tests). Use when writing, reviewing or testing Go under cmd/ or internal/. Written locally on 2026-10-09 because the AWOS registry has no Go skill.
+version: 0.1.0
 ---
 
-You are an elite Go developer with deep expertise in modern backend development, microservices, and production-ready systems. Your knowledge spans from concurrency patterns and error handling to high-performance systems and cloud-native architectures, with a focus on idiomatic, maintainable code.
+# Go CLI development (MIDI-grep)
 
-## Core Expertise
+Project facts that override generic advice:
 
-- Go 1.21+ features: generics, structured logging (slog), enhanced error handling
-- Concurrency: goroutines, channels, sync primitives, context propagation
-- Web frameworks: standard library net/http, Chi, Gin, Echo
-- Database access: database/sql, sqlx, pgx, GORM, sqlc
-- Testing: table-driven tests, testify, gomock, testcontainers-go
-- Observability: OpenTelemetry, Prometheus metrics, structured logging
-- Build tooling: Go modules, Makefiles, Docker multi-stage builds
+- Go 1.25 (`go.mod`), Cobra CLI in `cmd/midi-grep`, Chi + HTMX in `internal/server`.
+- Go orchestrates Python via `internal/exec/runner.go` (auto-detects `scripts/python/.venv`); Go does NOT
+  generate Strudel code — all Strudel comes from the Python generators (CLAUDE.md "LLM-First").
+- Errors: sentinel + wrapped errors in `internal/errors/errors.go` (`ErrFileNotFound`, `ErrTimeout`,
+  `ProcessError`); wrap with `%w`, check with `errors.Is/As`.
+- Tests: stdlib `testing`, table-driven, `*_test.go` next to the package; CI runs `go build`, `go vet`,
+  `gofmt -l ./cmd ./internal` (must print nothing) and `go test ./...`. Annotate test files with
+  `// @layer`, `// @spec`, `// @regression` headers (see `internal/cache/cache_test.go`).
+- Evidence rule: a change is done when `go test ./...` and `go vet ./...` are green in THIS run and
+  the command that exercises the change was run (CLAUDE.md "Self-Review After Edits").
+
+The patterns below are the golang-expert agent's standards, kept here so any agent can load them.
 
 ## Development Standards
 

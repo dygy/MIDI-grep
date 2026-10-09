@@ -177,19 +177,97 @@ def compute_chroma_features(y, sr=22050):
     chroma = librosa.feature.chroma_cqt(y=y, sr=sr)
     return np.mean(chroma, axis=1)
 
-def compute_rhythm_features(y, sr=22050):
-    """Compute rhythm/tempo features."""
+def _ac_support(onset_env, bpm, sr, hop_length=512):
+    """Normalized autocorrelation support of an onset envelope for a candidate tempo.
+
+    Mean of the (zero-lag-normalized) autocorrelation at the first four multiples of the beat
+    period, each taken as the max within +-3% of the lag. Higher = the envelope really repeats
+    at that tempo. Comparable across envelopes because of the zero-lag normalization.
+    """
+    if bpm <= 0 or onset_env is None or len(onset_env) < 8:
+        return 0.0
+    env = onset_env - np.mean(onset_env)
+    denom = float(np.sum(env ** 2))
+    if denom < 1e-12:
+        return 0.0
+    ac = np.correlate(env, env, mode='full')[len(env) - 1:] / denom
+    period = 60.0 / bpm * sr / hop_length  # frames per beat
+    vals = []
+    for k in range(1, 5):
+        lo = int(np.floor(period * k * 0.97))
+        hi = int(np.ceil(period * k * 1.03))
+        if hi >= len(ac):
+            break
+        vals.append(float(np.max(ac[max(lo, 1):hi + 1])))
+    return float(np.mean(vals)) if vals else 0.0
+
+
+def _low_band_onset_env(y, sr, lo=30.0, hi=200.0, hop_length=256, n_fft=4096):
+    """Kick-region onset envelope: positive log-magnitude flux summed over STFT bins in lo-hi Hz.
+
+    Deliberately NOT onset_strength on a band-passed signal: that runs through a 128-bin mel
+    filterbank where most bins are empty below 200 Hz, and the default mean aggregation is
+    dominated by filter leakage from dense mid/high content.
+    """
+    S = np.abs(librosa.stft(y, n_fft=n_fft, hop_length=hop_length))
+    f = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    m = (f >= lo) & (f <= hi)
+    L = np.log1p(100.0 * S[m])
+    return np.maximum(0.0, np.diff(L, axis=1, prepend=L[:, :1])).sum(axis=0)
+
+
+def estimate_tempo(y, sr=22050, prior_bpm=None, hop_length=512):
+    """Robust tempo estimate with two candidates and a support-based pick.
+
+    A: full-band `librosa.beat.beat_track` (the original estimator, octave-corrected).
+    B: low-band (30-200 Hz) onset envelope + `librosa.feature.tempo`, with `prior_bpm` used ONLY
+       as librosa's `start_bpm` prior (a weak log-normal prior, never an override).
+    The candidate whose own onset envelope has the stronger autocorrelation support wins; on a
+    near-tie (<0.02) the full-band candidate is kept so previously-correct reads don't change.
+    Returns (tempo, info) where info = {candidates, tempo_method}.
+    """
+    # Candidate A (existing estimator)
+    tempo_a, beats = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop_length)
+    if hasattr(tempo_a, '__len__'):
+        tempo_a = tempo_a[0] if len(tempo_a) > 0 else 120.0
+    tempo_a = correct_octave_error(float(tempo_a))
+    env_a = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
+    cands = [{'method': 'full_band_beat_track', 'bpm': float(tempo_a),
+              'support': _ac_support(env_a, tempo_a, sr, hop_length)}]
+
+    # Candidate B (low-band kick envelope)
+    try:
+        hop_b = hop_length // 2  # finer lag resolution for the kick candidate
+        env_b = _low_band_onset_env(y, sr, hop_length=hop_b)
+        start = float(prior_bpm) if prior_bpm and prior_bpm > 0 else 120.0
+        tb = librosa.feature.tempo(onset_envelope=env_b, sr=sr, hop_length=hop_b,
+                                   start_bpm=start, max_tempo=200)
+        tempo_b = correct_octave_error(float(np.atleast_1d(tb)[0]))
+        cands.append({'method': 'low_band_tempo', 'bpm': float(tempo_b),
+                      'support': _ac_support(env_b, tempo_b, sr, hop_b)})
+    except Exception as e:  # never let the tempo metric crash a comparison
+        log(f"Warning: low-band tempo candidate failed: {e}")
+
+    chosen = cands[0]
+    if len(cands) > 1 and cands[1]['support'] > cands[0]['support'] + 0.02:
+        chosen = cands[1]
+    return float(chosen['bpm']), {'tempo_candidates': cands, 'tempo_method': chosen['method'],
+                                  'beat_count': len(beats)}
+
+
+def compute_rhythm_features(y, sr=22050, prior_bpm=None):
+    """Compute rhythm/tempo features.
+
+    `prior_bpm` (the other file's tempo) is only a weak start_bpm prior for the low-band
+    candidate; see estimate_tempo().
+    """
     features = {}
 
-    # Tempo
-    tempo, beats = librosa.beat.beat_track(y=y, sr=sr)
-    # Handle both old and new librosa versions
-    if hasattr(tempo, '__len__'):
-        tempo = tempo[0] if len(tempo) > 0 else 120.0
-    # Correct octave errors (synthesized audio often confuses beat trackers)
-    tempo = correct_octave_error(float(tempo))
+    tempo, info = estimate_tempo(y, sr=sr, prior_bpm=prior_bpm)
     features['tempo'] = float(tempo)
-    features['beat_count'] = len(beats)
+    features['beat_count'] = info['beat_count']
+    features['tempo_candidates'] = info['tempo_candidates']
+    features['tempo_method'] = info['tempo_method']
 
     # Onset strength
     onset_env = librosa.onset.onset_strength(y=y, sr=sr)
@@ -319,7 +397,9 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
 
     log("Computing rhythm features...")
     results['original']['rhythm'] = compute_rhythm_features(original)
-    results['rendered']['rhythm'] = compute_rhythm_features(rendered)
+    # Rendered: the original's tempo is only a weak start_bpm prior (never an override).
+    results['rendered']['rhythm'] = compute_rhythm_features(
+        rendered, prior_bpm=results['original']['rhythm']['tempo'])
 
     # Use expected BPM for rendered audio if available
     # Synthesized audio confuses beat trackers with dense transients
@@ -391,6 +471,8 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     # Store the best match info
     results['comparison']['tempo_ratio_used'] = best_ratio
     results['comparison']['tempo_diff_bpm'] = best_tempo_diff
+    results['comparison']['tempo_candidates'] = results['rendered']['rhythm'].get('tempo_candidates', [])
+    results['comparison']['tempo_method'] = results['rendered']['rhythm'].get('tempo_method')
 
     # Calculate similarity using AI-derived or default tolerance
     # AI-derived tolerance accounts for beat regularity and tempo estimate variance

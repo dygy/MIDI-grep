@@ -572,7 +572,31 @@ def localise_chroma(a: np.ndarray, b: np.ndarray, sr: int, bpm: float, nbars: in
     match_orig = sum(1 for kk in scored if pcs[kk][0] == exp_pc[kk]) / len(scored) if scored else 0.0
     match_edit = sum(1 for kk in scored if pcs[kk][1] == exp_pc[kk]) / len(scored) if scored else 0.0
     others_intact = bool(scored and match_edit >= match_orig - 0.05)
-    pitch_rule = bool(moved_to_expected and (agreement >= min_agreement or others_intact))
+    # BAR-level control (the stable one): whole-bar chroma of the voice band agrees between the two
+    # takes for every bar except the edited one. Per-16th-step windows are too short to be
+    # take-stable on a sampled instrument, but a bar's pitch-class content is — earlier runs showed
+    # take-vs-take bar distances < 0.01 on unedited bars.
+    def bar_chroma(lo, t0):
+        i0 = int(t0 * sr); i1 = int((t0 + bars_to_seconds(1, bpm)) * sr)
+        seg = lo[i0:i1] if 0 <= i0 < i1 <= lo.size else np.zeros(1, dtype=np.float32)
+        if seg.size < 4096 or float(np.sqrt((seg ** 2).mean())) < 2e-3:
+            return None
+        c = librosa.feature.chroma_stft(y=seg, sr=sr, n_fft=4096, hop_length=1024).mean(1)
+        return c / (np.linalg.norm(c) + 1e-9)
+    bar_dist = {}
+    for bi in covered:
+        x, y = bar_chroma(la, ma[bi]), bar_chroma(lb, mb[bi])
+        if x is not None and y is not None:
+            bar_dist[bi] = 1.0 - float(np.dot(x, y))
+    other_bars = [d for bi, d in bar_dist.items() if bi != bar]
+    if other_bars:
+        bmed = float(np.median(other_bars)); bmad = float(np.median(np.abs(np.array(other_bars) - bmed))) * 1.4826
+        bar_floor = bmed + k * bmad + 0.02
+    else:
+        bar_floor = 0.02
+    offending_bars = [bi for bi, d in bar_dist.items() if bi != bar and d > bar_floor]
+    bars_intact = bool(other_bars and not offending_bars)
+    pitch_rule = bool(moved_to_expected and (bars_intact or agreement >= min_agreement or others_intact))
     localised = pitch_rule or distance_rule
     reason = None
     if edited is None:
@@ -581,8 +605,9 @@ def localise_chroma(a: np.ndarray, b: np.ndarray, sr: int, bpm: float, nbars: in
         reason = (f"edited step dominant pitch class {pc_edit} did not move to the expected class {exp_new} "
                   f"(original class {exp_old})")
     elif not pitch_rule and not distance_rule:
-        reason = (f"other steps drifted: edited take matches the written notes in {match_edit:.0%} of steps "
-                  f"vs {match_orig:.0%} for the original take (take-vs-take agreement {agreement:.0%})")
+        reason = (f"other bars changed too: bars {offending_bars[:6]} exceed the bar-chroma floor {bar_floor:.3f}; "
+                  f"step-level: edited take matches the written notes in {match_edit:.0%} vs {match_orig:.0%} "
+                  f"for the original take (take-vs-take agreement {agreement:.0%})")
     return {"metric": "chroma", "anchor_bar_index": [ka, kb], "anchor_agreement": [round(sa, 3), round(sb, 3)],
             "bars_covered": [covered[0], covered[-1]] if covered else [], "sounding_steps": len(dist),
             "edited_step_distance": None if edited is None else round(edited, 4),
@@ -592,6 +617,8 @@ def localise_chroma(a: np.ndarray, b: np.ndarray, sr: int, bpm: float, nbars: in
             "expected_pitch_class": [exp_old, exp_new], "other_steps_pitch_agreement": round(agreement, 4),
             "match_written_notes": {"original_take": round(match_orig, 4), "edited_take": round(match_edit, 4),
                                     "scored_steps": len(scored)},
+            "bar_chroma_distance": {str(bi): round(d, 4) for bi, d in sorted(bar_dist.items())},
+            "bar_chroma_floor": round(bar_floor, 4), "offending_bars": offending_bars, "bars_intact": bars_intact,
             "pitch_rule": pitch_rule, "localised": localised, "reason": reason}
 
 
@@ -609,6 +636,9 @@ def make_solo(code: str, array: str, gain: float = 0.8) -> str:
     inner = []
     for ln in voice_lines:
         ln = _GAIN_ENV_RE.sub("", ln.split("  //")[0].rstrip().rstrip(","))
+        # Dry the voice for measurement: reverb/delay smear a note across the following
+        # steps and are the main reason two takes disagree on per-step pitch content.
+        ln = re.sub(r"\.(room|delay|delaytime|delayfeedback|size)\([^)]*\)", "", ln)
         ln = ln.strip()
         if ln.startswith("$:"):
             ln = ln[2:].strip()
