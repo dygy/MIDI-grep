@@ -1,7 +1,7 @@
 # Technical Specification: Editable, Live-Codeable Strudel Generation
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md)
-- **Status:** Approved
+- **Status:** Completed (2026-10-09 — acceptance evidence in functional-spec.md; open hardening tasks in tasks.md Slice 4)
 - **Author(s):** Claude (with user) — written against the repo state audited 2026-10-09 on
   branch `feat/data-driven-stem-matching` (HEAD `dc51d24`).
 
