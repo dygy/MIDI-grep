@@ -2,16 +2,26 @@
   "mcpServers": {
     "playwright": {
       "command": "npx",
-      "args": ["-y", "@playwright/mcp"]
+      "args": [
+        "-y",
+        "@playwright/mcp"
+      ]
     },
     "loop": {
       "type": "stdio",
       "command": "scripts/python/.venv/bin/python",
-      "args": ["-m", "mcp_servers.loop.server"],
+      "args": [
+        "-m",
+        "mcp_servers.loop.server"
+      ],
       "env": {
         "PYTHONPATH": ".",
         "FASTMCP_LOG_LEVEL": "ERROR"
       }
+    },
+    "awos-recruitment": {
+      "type": "http",
+      "url": "https://recruitment.awos.provectus.pro/mcp"
     }
   }
 }

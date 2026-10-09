@@ -34,7 +34,7 @@ For a one-file change, skip this — just do it.
 2. **Plan**: `cp .sisyphus/plans/TEMPLATE.md .sisyphus/plans/NNN-slug.md` (next number) and fill in:
    TL;DR, Deliverables, Definition of Done, **Must NOT Have** guardrails, parallel waves, and a TODO list mapping each task to a domain-expert agent.
 3. **Activate**: set `boulder.json` → `active_plan` to the plan path, `plan_name`, and `started_at` (use a real timestamp — get it via `date` since it's a manual field).
-4. **Execute in waves**: dispatch each wave's tasks to their `Recommended Agent` (the `.awos/subagents/` domain experts) — independent tasks in parallel, dependent waves after. Mirror the plan's TODOs into the harness task list (`TaskCreate`) so progress is visible.
+4. **Execute in waves**: dispatch each wave's tasks to their `Recommended Agent` (the `.claude/agents/` domain experts) — independent tasks in parallel, dependent waves after. Mirror the plan's TODOs into the harness task list (`TaskCreate`) so progress is visible.
 5. **Capture evidence**: after each task, write `.sisyphus/evidence/task-NN-<slug>.txt` (or `.json`/`.png`). For audio changes this MUST include the achieved **similarity %**, the genre, and the render path. Numbers must come from an actual `compare_audio.py` run via the BlackHole render — never the Node.js renderer for accept/reject (see MEMORY: Node.js gives ~16% vs BlackHole ~65%).
 6. **Notepad** (as you go): record cross-task `decisions.md`, `issues.md`, `learnings.md` under `.sisyphus/notepads/<plan>/`.
 7. **Final wave**: run `/self-review` (4-agent audit) and the eval gate (`eval/thresholds.yaml`) before declaring done. Update `llms.txt` / `llms-full.txt` per CLAUDE.md Context Document Maintenance.

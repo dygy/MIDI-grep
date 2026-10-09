@@ -1,5 +1,6 @@
 ---
 description: Creates the Technical Spec — how the feature will be built.
+argument-hint: '[spec name or index]'
 ---
 
-Refer to the instructions located in this file: .awos/commands/tech.md
+@.awos/commands/tech.md

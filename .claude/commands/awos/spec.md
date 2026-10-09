@@ -1,5 +1,6 @@
 ---
 description: Creates the Functional Spec — what the feature does for the user.
+argument-hint: '[topic — the feature or capability to specify, or a spec to amend]'
 ---
 
-Refer to the instructions located in this file: .awos/commands/spec.md
+@.awos/commands/spec.md
