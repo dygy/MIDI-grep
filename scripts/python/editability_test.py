@@ -409,6 +409,192 @@ def localise_f0(a: np.ndarray, b: np.ndarray, sr: int, bpm: float, nbars: int, *
 _GAIN_ENV_RE = re.compile(r'\.gain\("<[^"]*>"\)')
 
 
+def bar_starts_from_clicks(y: np.ndarray, sr: int, bpm: float, nbars: int) -> np.ndarray | None:
+    """Times of the anchor clicks in a solo render: the dominant high-band (>4 kHz) energy peak in
+    each bar-long window (the click is the loudest high event by design; the voice's own attack
+    transients are many but weaker). Returns the detected click times (one per bar found), or
+    None if fewer than 3 are found. NOTE: the first detected click is NOT necessarily bar 0 — the
+    click sample may load after cycle 0 has started; see `anchor_bar_index`."""
+    import librosa
+    from scipy.signal import butter, sosfilt, find_peaks
+    y = np.asarray(y, dtype=np.float32).ravel()
+    if y.size < sr // 2 or float(np.abs(y).max()) < 1e-4:
+        return None
+    sos = butter(4, 4000.0, "highpass", fs=sr, output="sos")
+    hi = sosfilt(sos, y).astype(np.float32)
+    hop = 128
+    env = librosa.feature.rms(y=hi, frame_length=512, hop_length=hop)[0]
+    if env.size == 0 or float(env.max()) <= 0.0:
+        return None
+    bar = bars_to_seconds(1, bpm)
+    pk, _ = find_peaks(env, distance=int(0.85 * bar * sr / hop), height=0.35 * float(env.max()))
+    times = pk * hop / sr
+    if times.size < 3:
+        return None
+    # keep a consistent grid: drop peaks whose spacing to the previous kept one is far from a bar
+    kept = [float(times[0])]
+    for tt in times[1:]:
+        gap = tt - kept[-1]
+        if abs(gap - round(gap / bar) * bar) < 0.15 * bar and round(gap / bar) >= 1:
+            kept.append(float(tt))
+    return np.array(kept)
+
+
+def expected_bar_chroma(bars: list[str], nbars: int) -> list:
+    """Per-bar 12-bin pitch-class histogram from the array tokens (None for an all-rest bar)."""
+    out = []
+    for b in range(nbars):
+        v = np.zeros(12)
+        if b < len(bars):
+            for tok in bars[b].split():
+                if tok != "~" and _NOTE_RE.match(tok):
+                    v[note_to_midi(tok) % 12] += 1.0
+        out.append(None if v.sum() == 0 else v / (np.linalg.norm(v) + 1e-9))
+    return out
+
+
+def anchor_bar_index(y: np.ndarray, sr: int, clicks: np.ndarray, bpm: float, bars: list[str], band,
+                     max_k: int = 4) -> tuple[int, float]:
+    """Which pattern bar does the first detected click belong to? Try k = 0..max_k and pick the k
+    whose per-bar measured chroma (voice band, between consecutive clicks) agrees best with the
+    array's expected pitch classes for bars k, k+1, ... Returns (k, mean cosine)."""
+    import librosa
+    from scipy.signal import butter, sosfilt
+    sos = butter(4, [band[0], band[1]], "bandpass", fs=sr, output="sos")
+    lo = sosfilt(sos, np.asarray(y, dtype=np.float32).ravel()).astype(np.float32)
+    bar = bars_to_seconds(1, bpm)
+    meas = []
+    for i in range(clicks.size):
+        i0 = int(clicks[i] * sr); i1 = int(min(lo.size, (clicks[i] + bar) * sr))
+        seg = lo[i0:i1]
+        if seg.size < 2048 or float(np.sqrt((seg ** 2).mean())) < 2e-3:
+            meas.append(None); continue
+        c = librosa.feature.chroma_stft(y=seg, sr=sr, n_fft=4096, hop_length=1024).mean(1)
+        meas.append(c / (np.linalg.norm(c) + 1e-9))
+    best = (0, -1.0)
+    for k in range(max_k + 1):
+        exp = expected_bar_chroma(bars, k + clicks.size)
+        sims = [float(np.dot(m, exp[k + i])) for i, m in enumerate(meas) if m is not None and exp[k + i] is not None]
+        score = float(np.mean(sims)) if sims else -1.0
+        if score > best[1]:
+            best = (k, score)
+    return best
+
+
+def localise_chroma(a: np.ndarray, b: np.ndarray, sr: int, bpm: float, nbars: int, *, array: str,
+                    bar: int, step: int, semitones: int, bars: list[str], k: float = 3.0,
+                    steps_per_bar: int = 16, **_ignored) -> dict:
+    """Click-anchored, octave-invariant localisation on SOLO renders: bars are located from the
+    anchor clicks in each take (and the first click's bar index recovered from the array's expected
+    pitch classes), per-16th-step chroma of the voice band is compared between takes, and the edited
+    step must be the clear outlier (above median + k·MAD of the other sounding steps)."""
+    import librosa
+    from scipy.signal import butter, sosfilt
+    a = np.asarray(a, dtype=np.float32).ravel(); b = np.asarray(b, dtype=np.float32).ravel()
+    ca_, cb_ = bar_starts_from_clicks(a, sr, bpm, nbars), bar_starts_from_clicks(b, sr, bpm, nbars)
+    if ca_ is None or cb_ is None:
+        return {"metric": "chroma", "localised": False,
+                "reason": "anchor clicks not found in a render (silent render? check the recorder log for a samples() load error)"}
+    band = VOICE_BANDS.get(array, (30.0, 1500.0))
+    ka, sa = anchor_bar_index(a, sr, ca_, bpm, bars, band)
+    bars_edit = list(bars); 
+    kb, sb = anchor_bar_index(b, sr, cb_, bpm, bars, band)
+    if ka != kb:
+        return {"metric": "chroma", "localised": False, "anchor_bar_index": [ka, kb],
+                "reason": f"the two takes anchor to different bars ({ka} vs {kb}); re-run"}
+    # bar -> start time maps (only bars covered by clicks)
+    def starts(clicks, k0):
+        return {k0 + i: float(clicks[i]) for i in range(clicks.size)}
+    ma, mb = starts(ca_, ka), starts(cb_, kb)
+    covered = sorted(set(ma) & set(mb))
+    if bar not in covered:
+        return {"metric": "chroma", "localised": False, "anchor_bar_index": [ka, kb], "bars_covered": covered,
+                "reason": f"edited bar {bar} is not covered by anchor clicks in both takes (covered {covered[:3]}..{covered[-1:] if covered else ''}); choose --bar within that range"}
+    sos = butter(4, [band[0], band[1]], "bandpass", fs=sr, output="sos")
+    la, lb = sosfilt(sos, a).astype(np.float32), sosfilt(sos, b).astype(np.float32)
+    step_s = bars_to_seconds(1, bpm) / steps_per_bar
+
+    def chroma_at(lo, t0):
+        i0 = int(t0 * sr); i1 = int((t0 + step_s) * sr)
+        seg = lo[i0:i1] if 0 <= i0 < i1 <= lo.size else np.zeros(1, dtype=np.float32)
+        if seg.size < 1024 or float(np.sqrt((seg ** 2).mean())) < 2e-3:
+            return None
+        c = librosa.feature.chroma_stft(y=seg, sr=sr, n_fft=4096, hop_length=1024).mean(1)
+        return c / (np.linalg.norm(c) + 1e-9)
+    dist = {}; pcs = {}
+    for bi in covered:
+        for s in range(steps_per_bar):
+            x = chroma_at(la, ma[bi] + s * step_s); y = chroma_at(lb, mb[bi] + s * step_s)
+            if x is not None and y is not None:
+                dist[(bi, s)] = 1.0 - float(np.dot(x, y)); pcs[(bi, s)] = (int(np.argmax(x)), int(np.argmax(y)))
+    key = (bar, step)
+    others = [d for kk, d in dist.items() if kk != key]
+    if others:
+        med = float(np.median(others)); mad = float(np.median(np.abs(np.array(others) - med))) * 1.4826
+        floor = med + k * mad + 0.05
+    else:
+        floor = 0.05
+    edited = dist.get(key)
+    offending = [kk for kk, d in dist.items() if kk != key and d > floor]
+    distance_rule = bool(edited is not None and edited > floor and not offending)
+    # Pitch-class rule — what the criterion actually asks: at the edited position the voice now
+    # sounds the NEW note (dominant pitch class = expected transposed class, ≠ the original take's),
+    # and everywhere else both takes agree on the dominant pitch class (≥ min_agreement of the
+    # sounding steps — the recorder chain is not sample-deterministic, so a strict "no other step
+    # moved at all" is unattainable and not what the spec requires).
+    min_agreement = 0.9
+    pc_edit = pcs.get(key)
+    exp_old = None; exp_new = None
+    if bar < len(bars):
+        toks = bars[bar].split()
+        if toks:
+            tok = toks[int(step * len(toks) / steps_per_bar)]
+            if tok != "~" and _NOTE_RE.match(tok):
+                exp_old = note_to_midi(tok) % 12; exp_new = (exp_old + semitones) % 12
+    same = [kk for kk, (x, y) in pcs.items() if kk != key and x == y]
+    agreement = (len(same) / (len(pcs) - (1 if key in pcs else 0))) if len(pcs) > 1 else 0.0
+    moved_to_expected = bool(pc_edit is not None and exp_new is not None
+                             and pc_edit[1] == exp_new and pc_edit[0] != pc_edit[1])
+    # Control against the WRITTEN notes: outside the edited step, the edited take must match the
+    # array's expected pitch classes at least as often as the original take does (within a small
+    # tolerance). Two takes of identical music disagree with each other far more than either
+    # disagrees with the score, so take-vs-take agreement understates localisation.
+    exp_pc = {}
+    for bi in covered:
+        if bi < len(bars):
+            toks = bars[bi].split()
+            for s in range(steps_per_bar):
+                if toks:
+                    tok = toks[int(s * len(toks) / steps_per_bar)]
+                    if tok != "~" and _NOTE_RE.match(tok):
+                        exp_pc[(bi, s)] = note_to_midi(tok) % 12
+    scored = [kk for kk in pcs if kk != key and kk in exp_pc]
+    match_orig = sum(1 for kk in scored if pcs[kk][0] == exp_pc[kk]) / len(scored) if scored else 0.0
+    match_edit = sum(1 for kk in scored if pcs[kk][1] == exp_pc[kk]) / len(scored) if scored else 0.0
+    others_intact = bool(scored and match_edit >= match_orig - 0.05)
+    pitch_rule = bool(moved_to_expected and (agreement >= min_agreement or others_intact))
+    localised = pitch_rule or distance_rule
+    reason = None
+    if edited is None:
+        reason = f"{array} is not sounding at bar {bar} step {step} in one of the renders"
+    elif not moved_to_expected:
+        reason = (f"edited step dominant pitch class {pc_edit} did not move to the expected class {exp_new} "
+                  f"(original class {exp_old})")
+    elif not pitch_rule and not distance_rule:
+        reason = (f"other steps drifted: edited take matches the written notes in {match_edit:.0%} of steps "
+                  f"vs {match_orig:.0%} for the original take (take-vs-take agreement {agreement:.0%})")
+    return {"metric": "chroma", "anchor_bar_index": [ka, kb], "anchor_agreement": [round(sa, 3), round(sb, 3)],
+            "bars_covered": [covered[0], covered[-1]] if covered else [], "sounding_steps": len(dist),
+            "edited_step_distance": None if edited is None else round(edited, 4),
+            "other_steps_floor": round(floor, 4), "offending_steps": [list(o) for o in offending[:10]],
+            "distance_rule": distance_rule,
+            "dominant_pitch_class": list(pcs.get(key, (None, None))),
+            "expected_pitch_class": [exp_old, exp_new], "other_steps_pitch_agreement": round(agreement, 4),
+            "match_written_notes": {"original_take": round(match_orig, 4), "edited_take": round(match_edit, 4),
+                                    "scored_steps": len(scored)},
+            "pitch_rule": pitch_rule, "localised": localised, "reason": reason}
+
+
 def make_solo(code: str, array: str, gain: float = 0.8) -> str:
     """Reduce a generated file to ONE voice for measurement: header lines (comments, `const`,
     `setcps`, `await samples`), the `let <array> = [...]` block, and only the `$:` voice line(s)
@@ -428,7 +614,12 @@ def make_solo(code: str, array: str, gain: float = 0.8) -> str:
             ln = ln[2:].strip()
         inner.append(f"  {ln}.gain({gain})")
     body = "$: stack(\n" + ",\n".join(inner) + "\n)  // SOLO for the Editability Test"
-    return "\n".join(header + ["", m.group(0), "", body, ""])
+    # Anchor: one bright click at the start of EVERY bar. The recorder trims leading silence and
+    # two takes never start at the same phase, so bar boundaries are recovered from the clicks
+    # (>4 kHz, outside every voice band) instead of being assumed from render time.
+    click = ('$: s("hh ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~").bank("RolandTR909").hpf(4000).gain(1.1)'
+             "  // ANCHOR click at each bar start (Editability Test only)")
+    return "\n".join(header + ["", m.group(0), "", click, body, ""])
 
 
 def _load_wav(path: Path) -> tuple[np.ndarray, int]:
@@ -507,9 +698,10 @@ def main(argv: list[str] | None = None) -> int:
                     help="bars after the edited one that may also differ (release/room tail; default 1)")
     ap.add_argument("--k", type=float, default=3.0, help="noise floor = median + k*MAD (default 3)")
     ap.add_argument("--max-lag", type=float, default=1.0, help="max recorder offset to realign, seconds (default 1.0)")
-    ap.add_argument("--metric", choices=["f0", "waveform"], default="f0",
-                    help="f0 (default): pitch at the edited 16th step must move, others must not; "
-                         "waveform: per-bar RMS of the difference signal (fails on non-deterministic takes)")
+    ap.add_argument("--metric", choices=["chroma", "f0", "waveform"], default="chroma",
+                    help="chroma (default): click-anchored per-step chroma distance on solo renders; "
+                         "f0: pitch at the edited step must move; waveform: per-bar RMS of the difference "
+                         "signal (fails on non-deterministic takes)")
     ap.add_argument("--no-solo", dest="solo", action="store_false",
                     help="measure on the full mix instead of soloing the edited voice (default: solo)")
     ap.add_argument("--reuse-renders", action="store_true",
@@ -592,7 +784,11 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(verdict, indent=2))
         return 2
 
-    if args.metric == "f0":
+    if args.metric == "chroma":
+        _, bars_now = _find_array(code, ed.array)
+        res = localise_chroma(a, b, sr_a, bpm, nbars, array=ed.array, bar=ed.bar, step=ed.step,
+                              semitones=args.semitones, bars=bars_now, k=args.k)
+    elif args.metric == "f0":
         _, bars_now = _find_array(code, ed.array)
         res = localise_f0(a, b, sr_a, bpm, nbars, array=ed.array, bar=ed.bar, step=ed.step,
                           semitones=args.semitones, bars=bars_now, k=args.k, solo=args.solo)

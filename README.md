@@ -219,7 +219,7 @@ flowchart TB
 | **Basic Pitch** | TensorFlow | Audio → MIDI transcription |
 | **librosa** | Python | BPM, key, onset detection |
 | **CLAP** | PyTorch | Zero-shot genre classification |
-| **Ollama** | Go binary | Local LLM (llama3:8b) for code gen + iteration |
+| **Ollama** | Go binary | Local LLM (default model `midi-grep-strudel-mistral`; see CLAUDE.md "Ollama Setup") for code gen + iteration |
 | **ClickHouse** | C++ binary | Learning database (runs + knowledge) |
 | **Puppeteer** | Node.js | Browser automation for BlackHole recording |
 | **BlackHole** | macOS driver | Virtual audio device for recording |
@@ -428,7 +428,7 @@ MIDI-grep can iteratively improve Strudel code using AI analysis:
 ./bin/midi-grep extract --url "..." --iterate 10 --target-similarity 0.75
 
 # Use a different Ollama model
-./bin/midi-grep extract --url "..." --iterate 5 --ollama-model llama3:8b
+./bin/midi-grep extract --url "..." --iterate 5 --ollama-model llama3.1:8b   # fast smoke run; default is midi-grep-strudel-mistral
 ```
 
 **How it works:**
@@ -445,7 +445,8 @@ MIDI-grep can iteratively improve Strudel code using AI analysis:
 ```bash
 brew install ollama
 ollama serve
-ollama pull llama3:8b  # 3.8GB download
+ollama pull mistral-small && ollama create midi-grep-strudel-mistral -f Modelfile.mistral   # default model (~13GB)
+ollama pull llama3.1:8b   # optional fast smoke-run model (4.9GB)
 ```
 
 **ClickHouse Learning Storage:**
