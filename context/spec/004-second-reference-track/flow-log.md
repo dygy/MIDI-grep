@@ -1,0 +1,5 @@
+# Flow log — second-reference-track
+
+- 2026-10-10 — **Step 1 fetch** — TICKET_ID `second-reference-track`; title "Second reference track for the honest eval dataset"; source: prompt (user, `/implement-feature`); track https://youtu.be/SKjOR5EOR8Y "VAGABUNDO NÃO NAMORA" (Christopher Luz, 151 s). Preflight green (gh, venv, node dist, BlackHole ×1, Ollama up). Unreachable sources: none.
+- 2026-10-10 — **Step 2–3** — no delivered signal; new spec `004`; branch `feat/second-reference-track` from `origin/main` (2fc849b lineage, 1dfc558).
+- 2026-10-10 — **Step 4 specs** — functional-spec Approved (user gate), technical-considerations Approved (user gate); tasks.md written and auto-approved per delivery-flow §4 (6 slices, Feature Testing slice present, every task carries an agent). Finding during tech: the editable path has NO end-to-end driver (June chain was manual) → Slice 1 adds `scripts/editable-pipeline.sh` + `build_instruments.py`. Side fix outside the flow: the mandatory Barley block in the user-level `~/.claude/commands/awos/*.md` wrappers made conditional (user: "no barley"). Next: Step 5 commit specs.
