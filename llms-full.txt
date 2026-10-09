@@ -7,7 +7,7 @@ Document Maintenance).
 
 ## 1. Architecture
 
-- **Language**: Go 1.21+ (CLI/orchestration), Python 3.11+ (audio + ML + LLM), TypeScript/Node (rendering).
+- **Language**: Go 1.25+ (CLI/orchestration), Python 3.11+ (audio + ML + LLM), TypeScript/Node (rendering).
 - **CLI**: Cobra. **Web**: Chi + HTMX + Go templates + SSE (no JS frameworks).
 - **Audio**: demucs (stems), basic-pitch (transcription), librosa (analysis).
 - **Rendering**: BlackHole recording of real Strudel (primary) or node-web-audio-api synthesis (fallback).
@@ -86,8 +86,8 @@ Generative flags: `--mode granular|rave`, `--models`, `--github`, `--threshold`,
   CodeMirror `cmView.view.dispatch` (not textContent); call `setSinkId()` on AudioContext AFTER
   clicking play; `--autoplay-policy=no-user-gesture-required`; default (not incognito) context;
   `headless:false`. Leading-silence fix: ffmpeg `silenceremove=start_periods=1:...`.
-- `render-strudel-node.ts` — offline synthesis (synthKick/Snare/Hihat/Bass/Lead/High); ~72% max
-  similarity after 808 fix but ~16% vs BlackHole baseline. Build: `cd scripts/node && npm run build`.
+- `render-strudel-node.ts` — REMOVED (Jun 2026); only `record-strudel-blackhole.ts` remains.
+  Build: `cd scripts/node && npm install && npm run build` (puppeteer + tsc are required).
 
 Node voice-gain defaults (Brazilian funk tuned): bass {gain 0.6, lpf 400, hpf 30, sub_octave 0.5},
 mid {0.5, lpf 5k, hpf 200}, high {0.4, lpf 8k, hpf 400}, drums {0.7, transient_boost 0.4}, 30Hz master HPF.

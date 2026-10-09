@@ -1,0 +1,50 @@
+{
+  "extraKnownMarketplaces": {
+    "awos-marketplace": {
+      "source": {
+        "source": "github",
+        "repo": "provectus/awos"
+      }
+    }
+  },
+  "enabledPlugins": {
+    "awos@awos-marketplace": true
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "startup|clear",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "echo 'MIDI-grep session. If the user message already names the work (a feature, a bug, a spec, a similarity run, a slash command), do not run /session-init: start the work directly. Otherwise follow .claude/commands/session-init.md (one state check, no subagents). Once per session.'"
+          }
+        ]
+      }
+    ],
+    "PreToolUse": [
+      {
+        "matcher": "Bash",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/branch-current.sh",
+            "timeout": 60
+          }
+        ]
+      }
+    ],
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write|MultiEdit",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "\"$CLAUDE_PROJECT_DIR\"/.claude/hooks/docs-freshness.sh",
+            "timeout": 5
+          }
+        ]
+      }
+    ]
+  }
+}

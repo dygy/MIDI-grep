@@ -46,8 +46,8 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
 
 - **BlackHole recorder** (`scripts/node/src/record-strudel-blackhole.ts`) — RECOMMENDED; records
   real Strudel playback → ~100% accurate audio. Use this for accept/reject decisions.
-- **Node.js synth** (`scripts/node/src/render-strudel-node.ts`) — offline emulation, ~16% similarity
-  vs BlackHole's ~65%; do NOT gate on it.
+- **Node.js synth** — REMOVED (Jun 2026). `render-strudel-node.ts` no longer exists; the BlackHole
+  recorder is the only render path and the only one that may gate.
 - **`scripts/python/compare_audio.py`** — similarity via **MAE** on frequency bands (NOT cosine —
   cosine hid 20%+ band errors). Weights: Freq 40%, MFCC 20%, Energy 15%, Brightness 15%, Tempo/Chroma 5%.
 - **`scripts/python/calibrate_dynamic.py`** — data-driven mix calibrator: reads a render's
@@ -86,7 +86,7 @@ go build -o bin/midi-grep ./cmd/midi-grep
 ## Working agreement
 
 - See `CLAUDE.md` → "Working Agreement": one round of clarifying questions max, env preflight before
-  long runs, self-review after edits, delegate to `.awos/subagents/` domain experts.
+  long runs, self-review after edits, delegate to `.claude/agents/` domain experts.
 - ZERO HARDCODING: gains/filters/effects come from analysis or the AI, never magic numbers.
 
 ## Docs map

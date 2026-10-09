@@ -2,6 +2,30 @@
 
 This file provides context for Claude Code when working on this project.
 
+## AWOS baseline
+
+This repo runs the AWOS spec-driven workflow at **npm `@provectusinc/awos@1.5.0`** (migration
+version 3, upgraded 2026-10-09). Update with `npx @provectusinc/awos@latest --overwrite` from the
+repo root — the wrappers in `.claude/commands/awos/` are stock indirection, not customizations, so
+overwriting is correct; never hand-edit `.awos/`. Layout:
+
+- `.awos/` — framework internals (commands, templates, scripts). Overwritten on update.
+- `.claude/commands/awos/` — `/awos:product|architecture|hire|spec|tech|tasks|implement|verify`
+  wrappers. `/awos:roadmap` is retired upstream; `context/product/roadmap.md` is ours to keep by hand.
+- `.claude/commands/{implement-feature,fix-bug,session-init}.md` — the project's delivery flow,
+  generated from the (now upstream-removed) `/awos:flow` templates. Decisions live in
+  `context/product/delivery-flow.md`; edit these files directly to change the flow.
+- `.claude/agents/` — hired specialist roster (`context/product/hired-agents.md` is the coverage
+  record); `.claude/skills/` — project skills they bind to.
+- `.claude/hooks/` + `.claude/settings.json` — `branch-current.sh` (blocking: no PR/branch from a
+  stale base), `docs-freshness.sh` (advisory), SessionStart pointer to `/session-init`.
+- `.mcp.json` — `loop` (render/compare/eval gate), `playwright`, `awos-recruitment`.
+- `context/product/` — product-definition, values, architecture, delivery-flow, hired-agents;
+  `context/spec/NNN-<slug>/` — functional-spec, technical-considerations, tasks (+ flow-log).
+
+Reference install at the same level: the Citation orchestrator repo
+(`~/PycharmProjects/proj-citation-audit-context`).
+
 ## Working Agreement (governance)
 
 These rules govern *how* to work, independent of the audio domain.
@@ -15,6 +39,8 @@ When git operations are blocked by local changes, do NOT prompt for each option.
 ### Environment Preflight
 Before any long-running run (extraction, `--iterate`, rendering, comparison) verify the environment FIRST so it doesn't fail 15 minutes in:
 - Python venv resolves (`scripts/python/.venv`) and key deps import (librosa, demucs, basic-pitch)
+- Node recorder built: `scripts/node/node_modules` present (`cd scripts/node && npm install`) and
+  `scripts/node/dist/record-strudel-blackhole.js` exists (`npm run build`) — without them every render fails
 - ML models are present (first run downloads ~1GB)
 - For BlackHole recording: the BlackHole device exists and a Multi-Output Device is selected (`node dist/record-strudel-blackhole.js` will silently produce empty audio otherwise)
 - For Ollama runs: `ollama serve` is up and the model is pulled
@@ -27,7 +53,7 @@ After code or doc changes, run a self-review pass before declaring done. Verify:
 NO ISSUES ARE PRE-EXISTING. If you encounter ANY issue during development/testing — broken script, failing test, wrong similarity metric — it must be fixed, not worked around.
 
 ### Delegate to Domain Experts
-Specialist standards live in the domain-expert agents under `.awos/subagents/` (mirrored in `.claude/agents/domain-experts/`). Delegate, don't reinvent:
+Specialist standards live in the project agents under `.claude/agents/` (AWOS 1.5 no longer bundles domain experts; `/awos:hire` manages the roster). Delegate, don't reinvent:
 - Go implementation → `golang-expert`
 - Python (analysis, codegen, comparison) → `python-expert`
 - Audio synthesis / DSP → `audio-dsp-expert`
@@ -41,7 +67,12 @@ After meaningful changes to the pipeline (`internal/`, `scripts/python/`, `scrip
 1. **`llms.txt`** — concise (~100-line) project overview. Update when pipelines, modes, or key directories change.
 2. **`llms-full.txt`** — comprehensive reference. Update with detailed changes: new scripts, flags, synthesis params, file paths.
 3. **`CLAUDE.md`** — this file, for build/run instructions and architecture-level guidance.
+4. **`context/product/architecture.md`** — when the stack, a pipeline stage, the render path or the
+   testing stack changes (the `testing-expert` agent reads its Testing Stack section).
+5. **The owning spec** under `context/spec/` — tick acceptance criteria only via `/awos:verify`;
+   a behavior change that contradicts a spec is a *divergence* and amends the spec (`/fix-bug`).
 Update triggers: new modes/genres, synthesis-parameter changes, new scripts, renderer changes, or similarity-metric changes.
+The `docs-freshness` hook reminds you once per session when a pipeline file changes.
 
 ## CRITICAL PRINCIPLES - ZERO HARDCODING
 
@@ -70,9 +101,11 @@ Update triggers: new modes/genres, synthesis-parameter changes, new scripts, ren
    - Store learnings in ClickHouse for future tracks
 
 **Current achievement:** editable dynamic-Strudel (transcribed notes on trained instruments, all
-voices present incl. the real vocal) at **93.6% overall / 95.6% section-aware / 96.2% freq balance,
-tempo_sim 1.000** on Regime CLT (brazilian_funk), driven by the data-driven `calibrate_dynamic.py`
-loop (no hardcoded mix values). NOTE: numbers measured BEFORE the Jun-2026 recorder tempo fix (the
+voices present incl. the real vocal) at **93.8% overall / 95.9% section-aware / 96.7% freq balance,
+tempo_sim 1.000** on Regime CLT (brazilian_funk; `v023/comparison.json`, 2026-06-30), driven by the data-driven `calibrate_dynamic.py`
+loop (no hardcoded mix values). CAVEAT (Oct 2026 audit): v023's vocal voice is a full-stem replay
+(`s("vocalsfull")…slow(N)`), which violates `values.md` A1 — so this is NOT yet a contract-passing
+editable score; spec 003 Slice 3 makes the vocal editable and re-measures the floor. NOTE: numbers measured BEFORE the Jun-2026 recorder tempo fix (the
 72% / 88.7% / 92.4% / 94.6% history) were on ~25%-sped-up audio and are invalid — see the recorder
 fix below. Earlier honest baselines were ~60-70% (the old 90%+ was inflated by a cosine bug).
 **Target:** 80%+ similarity across all genres through AI learning, not hardcoding
@@ -244,26 +277,11 @@ The `--render` flag synthesizes WAV audio from patterns:
 - Chord stabs: Filtered sawtooth
 - Lead: Triangle wave with vibrato
 
-**Node.js Strudel Renderer (`scripts/node/src/render-strudel-node.ts`):**
-- TypeScript-based offline audio rendering with Strudel pattern parsing
-- Uses `@strudel/mini` v1.1.0 for accurate mini-notation parsing
-- **Synthesis engine with frequency-balanced mix:**
-  - `synthKick()` - 808-style kick with pitch envelope (150→35Hz for sub-bass), amp decay, click transient
-  - `synthSnare()` - Dual-sine body (180Hz + 330Hz) + high-passed noise for wires
-  - `synthHihat()` - Metallic multi-frequency noise with envelope (open/closed variants)
-  - `synthBass()` - Sawtooth + sub-octave sine (0.5x), low-pass filtered for warmth
-  - `synthLead()` - Detuned saws + triangle, filter envelope for movement
-  - `synthHigh()` - Odd-harmonic square wave + saw for brightness
-- **Voice gain defaults (Feb 2026 - tuned for Brazilian funk):**
-  - Bass: 0.6x gain, sub_octave 0.5x, lpf 400Hz, hpf 30Hz
-  - Mids: 0.5x gain, lpf 5kHz, hpf 200Hz
-  - Highs: 0.4x gain, lpf 8kHz, hpf 400Hz
-  - Drums: 0.7x gain with transient boost 0.4x
-- 30Hz high-pass filter on master
-- Achieves ~72% similarity on Brazilian funk (up from 32% after 808 fix)
-- Outputs 16-bit 44.1kHz mono WAV files
-- Build: `cd scripts/node && npm run build`
-- Usage: `node dist/render-strudel-node.js input.strudel -o output.wav -d 30`
+**Node.js Strudel Renderer — REMOVED (Jun 2026):** `render-strudel-node.ts` (offline synthesis
+emulating Strudel sounds, ~16% similarity vs the real engine) was deleted. The BlackHole recorder
+below is the only render path. Dead references to `render-strudel-node.js` still exist in
+`cmd/midi-grep/main.go`, `mcp_servers/loop/server.py` (recorder='node'), `synth_profiles.py` and
+`ai_learning_optimizer.py` — tracked in spec 003 tasks.
 
 **Puppeteer BlackHole Recorder (`scripts/node/src/record-strudel-blackhole.ts`):** *(RECOMMENDED)*
 - Records REAL Strudel playback using BlackHole virtual audio device
@@ -277,8 +295,9 @@ The `--render` flag synthesizes WAV audio from patterns:
   ```bash
   node dist/record-strudel-blackhole.js input.strudel -o output.wav -d 30
   ```
-- Produces 100% accurate Strudel audio (uses real Strudel engine, not emulation)
-- Uses self-hosted Strudel at `strudel.dygy.app` (spec: `.kiro/specs/midi-grep-embed-integration/`)
+- Records the real Strudel engine (not an emulation); timing is exact only with the Jun 2026 ffmpeg
+  wallclock/aresample fix below
+- Uses self-hosted Strudel at `strudel.dygy.app`
 
 **Key implementation details:**
 - `--autoplay-policy=no-user-gesture-required` bypasses gesture requirement
@@ -416,7 +435,7 @@ The `--render` flag synthesizes WAV audio from patterns:
 
 ## Tech Stack
 
-- **Language**: Go 1.21+
+- **Language**: Go 1.25+
 - **CLI Framework**: Cobra
 - **Web Framework**: Chi + HTMX + Go templates
 - **Audio Processing**: Python scripts (demucs, basic-pitch, librosa)
@@ -455,7 +474,7 @@ midi-grep/
 │   ├── extract-youtube.sh      # Quick YouTube extraction
 │   ├── node/                   # TypeScript audio rendering
 │   │   ├── src/
-│   │   │   └── render-strudel-node.ts  # Offline Strudel renderer
+│   │   │   └── record-strudel-blackhole.ts  # Puppeteer + BlackHole recorder (only render path)
 │   │   ├── dist/               # Compiled JavaScript output
 │   │   ├── package.json        # Node.js dependencies
 │   │   └── tsconfig.json       # TypeScript configuration
@@ -501,10 +520,18 @@ midi-grep/
 ├── context/                    # AWOS product documentation
 │   ├── product/
 │   │   ├── product-definition.md
-│   │   ├── roadmap.md
-│   │   └── architecture.md
+│   │   ├── values.md           # editability contract (replay forbidden)
+│   │   ├── roadmap.md          # hand-maintained (AWOS retired /awos:roadmap)
+│   │   ├── architecture.md
+│   │   ├── delivery-flow.md    # decisions behind /implement-feature and /fix-bug
+│   │   └── hired-agents.md     # specialist roster + hooks + gaps
 │   └── spec/
-│       └── 001-core-pipeline/
+│       ├── 001-core-pipeline/
+│       ├── 002-ml-customization/
+│       └── 003-editable-strudel-generation/   # functional + technical + tasks
+├── eval/                       # similarity gate: gate.py, thresholds.yaml, datasets/
+├── mcp_servers/loop/           # FastMCP: render_strudel, compare_render, verify_strudel, eval_gate
+├── .sisyphus/                  # plan + evidence trail for multi-iteration runs
 ├── Makefile
 ├── Dockerfile
 └── go.mod
@@ -939,7 +966,7 @@ go test ./...
 
 ## Domain Experts
 
-When working on specific areas, the golang-expert (`.awos/subagents/golang-expert.md`) provides patterns for:
+When working on specific areas, the golang-expert (`.claude/agents/golang-expert.md`) provides patterns for:
 - Concurrency (errgroup, channels)
 - Error handling (wrapping, sentinel errors)
 - Interface design

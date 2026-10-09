@@ -1,0 +1,91 @@
+# Tasks: Editable, Live-Codeable Strudel Generation
+
+- **Functional Spec:** [functional-spec.md](./functional-spec.md)
+- **Technical Spec:** [technical-considerations.md](./technical-considerations.md)
+- `SKIP_TESTS = false`
+
+> Honesty rule for this list: this feature is partly built. A task is `[x]` ONLY when the
+> thing was verified by grep/ls/cat on 2026-10-09 to exist and work as described, with the
+> evidence appended. Everything else is `[ ]`, including things that are "nearly there".
+> Verification artifacts (scratch copies, temp WAVs, generated test fixtures outside
+> `scripts/python/tests/fixtures/`) are deleted at the end of each Verify task; the
+> regression slice's artifacts are kept.
+
+> Preflight for any render-dependent task (Slices 4, 6, 7): `scripts/node/node_modules` is
+> MISSING on this machine (`ls scripts/node/node_modules` → no such file) — run
+> `cd scripts/node && npm install && npm run build` first; BlackHole device + Multi-Output
+> selected; venv `scripts/python/.venv` resolves (verified: `yaml`, `pytest` import OK).
+
+---
+
+- [ ] **Slice 1: A deliverable can be checked against the editability contract (replay detector)**
+
+  > After this slice `editability_check.py <file.strudel>` says pass/fail with reasons; v012 and the current v023 fail, a v023 without the vocal replay passes.
+  - [x] Generator emits per-voice editable bar arrays (`let bass = [...]`, `let lead = [...]`), one `$:` block per voice, and `setcps()` from the detected BPM. **[Agent: strudel-expert]** — evidence: `scripts/python/generate_dynamic_strudel.py:11-19` (docstring contract), `:451` (`"setcps(cps)"`); `.cache/stems/Regime CLT (Dj Brunin XM, Aurora Shukita)/v023/output.strudel:6-7, 12, 93, 182, 187, 189, 196`
+  - [x] Sound-name + invalid-method validation exists for the LLM codegen path (`VALID_SOUNDS`, `INVALID_METHODS`, `validate_code`). **[Agent: llm-expert]** — evidence: `scripts/python/strudel_validation.py:182, 195, 209`; `scripts/python/ollama_agent.py:878` (`_validate_code`)
+  - [ ] Task: Create `scripts/python/editability_check.py` with `EditabilityResult`, `check_editability(code, mode_hint=None)`, `to_json_fields()`, and a CLI (`<file> [--json]`, exit 0/1/2) implementing rules R1–R6 from technical-considerations §2.2-A (R1 `slice(N,run(N)).slow(N)`, R1 `loopAt(`, R2 full-stem sounds / `samples_orig|segs|stems.json`, R3 editable-voice counting, R4 `// texture` allowance only with ≥2 editable voices, R5 loop-only fail, R6 mode from header or inference). Comments are stripped before matching; `bass.slice(0,4)` must NOT trip R1. **[Agent: python-expert]**
+  - [ ] Task: Add `.loopAt(` and `s("originalfull")`/`s("<stem>full")` to `strudel_validation.py` `INVALID_METHODS`/patterns so the LLM codegen path (`ollama_agent.py:878`) also rejects replay at generation time, and run `strudel_validation.validate_code` over `generate_dynamic_strudel.py` output (today it is only applied to LLM output). **[Agent: llm-expert]**
+  - [ ] Task: Copy fixtures into `scripts/python/tests/fixtures/editability/`: v012 `output.strudel` (loop-only replay), v023 `output.strudel` (vocal replay on line 196), v023 with line 196 removed, `sample_pack/output_loops.strudel`, a hand-written `synth` sample, a texture sample (2 editable voices + marker), a 1-editable-voice texture sample. Trim the huge `.gain("<…>")` patterns to keep fixtures small. **[Agent: testing-expert]**
+  - [ ] Task: Write `scripts/python/tests/test_editability_check.py` — one positive and one negative case per rule, expected verdicts per technical-considerations §2.2-A, `@spec: 003-editable-strudel-generation`. **[Agent: testing-expert]**
+  - [ ] Verify: `scripts/python/.venv/bin/python -m pytest scripts/python/tests/test_editability_check.py -q` is green; run the CLI on the real v012/v023 `output.strudel` (exit 1 both, violations name line 196 for v023) and on the v023-minus-vocal fixture (exit 0, mode `sample-instrument`). Delete any scratch `.strudel` copies made outside `tests/fixtures/`. **[Agent: testing-expert]**
+
+- [ ] **Slice 2: Similarity is only computed on detector-passing output, and every result carries `generation_mode` + `editability`**
+
+  > After this slice `compare_audio.py --strudel`, `ai_improver.py`, `eval/gate.py` and the `loop` MCP all refuse to score replay and stamp the new keys; the current v023 headline is correctly disqualified.
+  - [x] MAE-weighted similarity (freq .40 / mfcc .20 / energy .15 / brightness .15 / tempo .05 / chroma .05) + `section_aware_similarity` exist. **[Agent: ml-audio-expert]** — evidence: `scripts/python/compare_audio.py:398-407`, `:461-464`
+  - [x] Eval gate with per-genre floors, worst-band guardrail, optional section-aware floor, wired into the iteration loop (auto-reject after floor cleared, early-success stop, `gate` block in `iterations.json`) with pytest coverage. **[Agent: python-expert]** — evidence: `eval/gate.py` (`evaluate_comparison`), `eval/thresholds.yaml`, `scripts/python/ai_improver.py:60-72, 417-428, 996-1001, 1029-1047`; `scripts/python/tests/test_similarity_gate.py` (12 `def test_`)
+  - [x] `loop` MCP `verify_strudel` closes render → compare → gate in one call. **[Agent: python-expert]** — evidence: `mcp_servers/loop/server.py:131-150`; `.mcp.json:10-16`
+  - [ ] Task: `compare_audio.py` — add `--strudel PATH`; on detector fail write `{"editability":"fail","generation_mode":…,"editability_violations":[…],"comparison":null}` and exit 3 (no `overall_similarity`); on pass merge `to_json_fields()` into the top level at both write sites (`:1042`, `:1781`). Metric math untouched. **[Agent: ml-audio-expert]**
+  - [ ] Task: `ai_improver.py` — run the detector before the BlackHole render (`:579`); on fail record an iteration entry with `editability: "fail"`, skip render/compare, never update `best_similarity`, continue. Pass `--strudel` to both `compare_audio.py` calls (`:626`, `:1110`). Stamp `generation_mode` + `editability` into `metadata.json` (`:1156-1168`) and `gate_summary` (`:1029-1047`). **[Agent: python-expert]**
+  - [ ] Task: `eval/gate.py` — `floor_for_genre(genre, thresholds, mode=None)` / `section_aware_floor_for_genre(…, mode=None)` prefer `modes.<mode>`; `evaluate_comparison(…, mode=None)` reads `generation_mode` from the JSON when not passed and FAILS with reason `editability: fail` when the JSON says so; `GateResult` gains `mode`, `editability`. Existing 12 tests must stay green. **[Agent: python-expert]**
+  - [ ] Task: `mcp_servers/loop/server.py` — `verify_strudel` runs the detector first and returns `{"ok": false, "stage": "editability", …}` on fail; `compare_render` gets `strudel_path` and passes `--strudel`; `compare_render`/`eval_gate` accept `mode`. **Cleanup:** remove `NODE_SYNTH` (`:28`, points at `scripts/node/dist/render-strudel-node.js` which does not exist — source deleted in commit `f18f5cc`, `scripts/node/src/` has only `record-strudel-blackhole.ts`) and the `recorder: Literal["blackhole","node"]` option; add a preflight error when `scripts/node/node_modules` is missing; fix `scripts/node/package.json` `"render"` script that points at the same deleted file. **[Agent: python-expert]**
+  - [ ] Task: Tests — extend `test_similarity_gate.py` (mode lookup + fallback, `editability: fail` → gate fail); new `test_compare_audio_stamping.py` with 2-second synthetic WAVs (`soundfile`) proving exit 3 / no `overall_similarity` on a failing fixture and the five new keys on a passing one. **[Agent: testing-expert]**
+  - [ ] Verify: pytest for `test_similarity_gate.py` + `test_compare_audio_stamping.py` green; integration without render — copy v023 `comparison.json` + `output.strudel` to the scratchpad, run `compare_audio.py --strudel` stamping path (or the stamping helper) and `python eval/gate.py <scratch>/comparison.json --genre brazilian_funk` → must print FAIL with `editability: fail`; `loop` MCP `eval_gate` on the same file returns `gate_passed: false`. Delete the scratch copies. **[Agent: testing-expert]**
+
+- [ ] **Slice 3: The vocal voice is editable data (no `vocalsfull` replay in the default output)**
+
+  > After this slice the default `generate_dynamic_strudel.py` output passes the detector with all four voices, and the loop survives only as an explicit `--vocal-mode texture` layer.
+  - [x] Stem-derived pitched sample-instruments for bass/melodic (pyin multisamples) + drum one-shots + hosted `samples.json`, played by the user's `note()` patterns. **[Agent: ml-audio-expert]** — evidence: `scripts/python/build_sample_pack.py:1-20` (docstring); pack dir `.cache/stems/Regime CLT (Dj Brunin XM, Aurora Shukita)/sample_pack/{bass,melodic,drums,samples.json}`; v023 `output.strudel` uses `.s("regime_bass")` ×2, `.s("regime_lead")` ×1
+  - [ ] Task: `build_sample_pack.py` — add a `vocals/` pitched multisample set (same pyin path as `bass/`/`melodic/`, manifest key `<prefix>_vocal`) and an onset-sliced `vox0..voxN` one-shot set with edge fades (reuse the fade logic of `generate_hybrid_strudel.write_continuous_loop`). Thresholds percentile-derived from this track, no absolute constants (CLAUDE.md ZERO HARDCODING). **[Agent: ml-audio-expert]**
+  - [ ] Task: Vocal transcription — run `transcribe.py` (Basic Pitch) on `vocals.wav` → `sample_pack/vocals.mid`; fold to the detected vocal range with the existing `fold_pitch` and keep a monophonic line (`pick="high"`). Document the range-folding rule. **[Agent: music-theory-expert]**
+  - [ ] Task: Vocal chop slicing quality — choose onset detection + fade lengths so chops are click-free and grid-quantisable; expose the chop pattern derivation (onsets → 16-step `let vox = [...]`). **[Agent: audio-dsp-expert]**
+  - [ ] Task: `generate_dynamic_strudel.py` — replace `--vocal-loop/--no-vocal-loop` (`:288-290`) with `--vocal-mode {instrument,chops,texture,none}` (default `instrument`); `instrument` emits `let vocal = [...]` + `$: note(cat(...vocal)).s("<prefix>_vocal")…` reusing `bar_env_pattern` (`:145`); `chops` emits `let vox = [...]` + `$: s(cat(...vox))…`; `texture` keeps today's loop (`:589-593`) but appends the `// texture` marker; emit `// generation_mode:` header line. **[Agent: strudel-expert]**
+  - [ ] Task: Re-run `scripts/auto-calibrate.sh` logic for the vocal lever — make `calibrate_dynamic.py` aware of `cal-vocal` so the new vocal voice is balanced by measurement, not by hand. **[Agent: python-expert]**
+  - [ ] Task: Generator tests (skip when the Regime CLT `sample_pack/` is absent): each `--vocal-mode` output passes/fails the detector as specified (`texture` passes only with ≥2 editable voices; `instrument`/`chops`/`none` always pass). **[Agent: testing-expert]**
+  - [ ] Verify: generate all four `--vocal-mode` variants into the scratchpad (generation only — no Demucs, no render), run `editability_check.py --json` on each and assert the verdicts; eyeball that `let vocal`/`let vox` arrays are non-empty for Regime CLT. Delete the scratch outputs. **[Agent: testing-expert]**
+
+- [ ] **Slice 4: Two honest generation modes with measured per-mode floors**
+
+  > After this slice `--mode sample-instrument` (default) and `--mode synth` both produce detector-passing output, each mode has a floor in `eval/thresholds.yaml` taken from a real BlackHole render, and the reference dataset has a real track.
+  - [x] Data-driven mix calibration loop exists (comparison.json → next generator knobs; full generate→render→compare→calibrate script). **[Agent: python-expert]** — evidence: `scripts/python/calibrate_dynamic.py:1-25`, `scripts/auto-calibrate.sh:1-31`, v023 `calibration_params.json`
+  - [ ] Task: `generate_dynamic_strudel.py --mode {sample-instrument,synth}` (default `sample-instrument`): `synth` skips the `await samples(...)` lines (`:452-458`), picks bass/lead/drum sounds from `sound_selector.retrieve_genre_context(genre)` / `synth_profiles.py` (no hardcoded names), uses the existing `--drum-mode bank` path (`:291`); both modes write `// generation_mode: <mode>`. `scripts/auto-calibrate.sh` passes `--mode` through. **[Agent: strudel-expert]**
+  - [ ] Task: `generate_sample_strudel.py:190` — add `sample-instrument` as alias of `instrument` and make it the default; `loops` keeps a `// generation_mode: loops — texture/diagnostic, NOT a deliverable` banner; `scripts/sample-pipeline.sh` default `MODE="loops"` → `instrument`. `generate_hybrid_strudel.py:259` (`loopAt`) marks uploaded voices as `// texture` or is retired. **[Agent: python-expert]**
+  - [ ] Task: `eval/thresholds.yaml` — add the `modes:` block (`sample_instrument`, `synth`: `genres`, `section_aware`, and `measured: {overall, section_aware, run}`) per technical-considerations §2.2-E. Leave values empty until measured; never type a guess. **[Agent: python-expert]**
+  - [ ] Task: Measure (E2E, macOS, after preflight): render both modes for Regime CLT with the editable vocal via `loop` MCP `verify_strudel(recorder='blackhole')`; both must report `editability: pass`; write the two measured scores into `modes.*.measured` and set floors = measured − stated margin; add the Regime CLT entry (`cache_key`, `version`, `genre`, `mode`) to `eval/datasets/reference_tracks.yaml` (currently `tracks: []`). **[Agent: ml-audio-expert]**
+  - [ ] Task: Editability Test as code — script that changes one note in `bass[0]` of the sample-instrument output, re-renders 8 bars, and asserts the difference signal is above the noise floor only in the edited bar window. **[Agent: audio-dsp-expert]**
+  - [ ] Verify: `pytest scripts/python/tests/test_similarity_gate.py -q` green including the dataset layer on the real entry; `--mode synth` output contains no `samples(` and passes the detector; the Editability Test script reports a localised difference. Delete temp renders/WAVs/scratch `.strudel` files and stop any `generative serve`/local HTTP server by its recorded PID. **[Agent: testing-expert]**
+
+- [ ] **Slice 5: The report shows the mode and editability verdict, never a replay score**
+
+  > After this slice the HTML headline reads "<pct>% — mode: … · editable: pass", a replay run shows a badge instead of a number, and per-stem panels say they come from demucs re-separation.
+  - [ ] Task: `scripts/python/generate_report.py:95-104` — headline label with `generation_mode` + `editability`; red "REPLAY / UNVERIFIED — not a deliverable" badge and no percentage when `editability != "pass"`; caption on the per-stem section: "stems obtained by demucs re-separation of the rendered mix (lossy, not a true stem-match view)". **[Agent: python-expert]**
+  - [ ] Task: `internal/report/generator.go:67-75, 349-356` — add `GenerationMode`/`Editability` JSON fields and the same headline/badge/caption logic. **[Agent: golang-expert]**
+  - [ ] Task: Tests — Python: headline contains `mode:` and `editable:`; failing comparison renders the badge and no `%` headline. Go: `internal/report/generator_test.go` on fixture `comparison.json` with and without the new keys. **[Agent: testing-expert]**
+  - [ ] Verify: run `generate_report.py` against a scratch copy of the v023 version dir with (a) the stamped failing `comparison.json` → badge, (b) a hand-edited passing one → labelled headline; `go test ./internal/report/...` green. Delete the scratch report HTML and copies. **[Agent: testing-expert]**
+
+- [ ] **Slice 6: Docs, defaults and test hygiene match reality**
+
+  > After this slice CLAUDE.md/README/llms docs carry only measured numbers and real defaults, the preflight names `npm install`, and the repo has its first Go test.
+  - [x] Task: `CLAUDE.md:73` — replace 93.6/95.6/96.2 with the measured v023 values 93.8/95.9/96.7 and note that v023's vocal voice was a stem replay (pre-contract measurement) — evidence: CLAUDE.md "Current achievement" paragraph (2026-10-09). Still open: after Slice 4 replace with the detector-passing per-mode numbers and their run ids. **[Agent: python-expert]**
+  - [x] Task: `CLAUDE.md:15-21` Environment Preflight — add "`scripts/node/node_modules` present (`cd scripts/node && npm install`) and `dist/record-strudel-blackhole.js` built (`npm run build`)". **[Agent: python-expert]** — evidence: CLAUDE.md Environment Preflight bullet 2 (2026-10-09)
+  - [x] Task: `README.md:391-394` — align with `cmd/midi-grep/main.go:323-326`: `--iterate` default 20, `--target-similarity` 0.99, `--ollama-model` `midi-grep-strudel-mistral` — evidence: README.md CLI flags table (2026-10-09)
+  - [ ] Task: `README.md` CLI flags table — add `--mode` and `--vocal-mode` once Slices 3–4 ship them. **[Agent: python-expert]** rows where the generator flags are documented. **[Agent: golang-expert]**
+  - [ ] Task: `llms.txt` + `llms-full.txt` — document `editability_check.py`, `--mode`, `--vocal-mode`, the new JSON keys, per-mode floors, and the loop MCP `node` option removal (CLAUDE.md "Context Document Maintenance"). **[Agent: python-expert]**
+  - [x] Task: First Go test — `internal/cache/cache_test.go` for `KeyForURL` (`cache.go:168`), `ExtractVideoID` (`:498`) and `KeyForFile` generic-name fallback (`:184`); stdlib `testing` only. **[Agent: golang-expert]** — evidence: `internal/cache/cache_test.go`, `go test ./internal/cache/` PASS 2026-10-09 (18 subtests)
+  - [ ] Verify: `grep -n "93.6\|llama3:8b" CLAUDE.md README.md` returns nothing stale; `grep -n "npm install" CLAUDE.md` hits the preflight; `go test ./...` green; `grep -rn "render-strudel-node" mcp_servers scripts/node/package.json` returns nothing. No artifacts to delete. **[Agent: testing-expert]**
+
+- [ ] **Slice 7: Feature Testing & Regression**
+
+  > Verifies the whole feature end-to-end against functional-spec.md, run after all implementation slices are complete.
+  - [ ] Read functional-spec.md acceptance criteria in full. Generate acceptance-level tests that verify the entire feature as a whole — not individual slices. Cover applicable layers (unit for pure logic, integration for service interactions, e2e for user flows) based on the project's testing stack. Write tests with RED validation (must fail before implementation is confirmed done). Annotate each test with `@spec: [spec-directory]` and `@regression` if suitable for long-term regression. **[Agent: testing-expert]**
+  - [ ] Run all generated tests. All must pass. Fix any failures before proceeding. **[Agent: testing-expert]**

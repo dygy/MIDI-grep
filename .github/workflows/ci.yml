@@ -1,0 +1,87 @@
+# MIDI-grep CI — the remote gate named in context/product/delivery-flow.md §4.
+#
+# Three independent jobs mirror the local static-check stage of /implement-feature:
+#   go      build + vet + test (stdlib tests only)
+#   node    install (no Chromium download) + tsc build of the BlackHole recorder
+#   python  pytest over scripts/python/tests with the lightweight analysis subset
+#
+# What CI deliberately does NOT do: run Demucs/Basic Pitch (needs ~1GB of models and
+# TensorFlow 2.15), talk to Ollama, or render Strudel (BlackHole is a macOS virtual audio
+# device). The similarity eval gate stays a local, BlackHole-only step (see delivery-flow
+# §2 "Sanctioned verification path"); CI only proves the code builds and the pure-logic
+# tests pass.
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  go:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: go.mod
+          cache: true
+      - run: go build ./...
+      - run: go vet ./...
+      - run: test -z "$(gofmt -l ./cmd ./internal)" || { gofmt -l ./cmd ./internal; exit 1; }
+      - run: go test ./...
+
+  node:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scripts/node
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+          cache-dependency-path: scripts/node/package-lock.json
+      - run: npm ci --no-audit --no-fund
+        env:
+          PUPPETEER_SKIP_DOWNLOAD: "1"
+      - run: npm run build
+      - run: test -f dist/record-strudel-blackhole.js
+
+  python:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: scripts/python
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: pip
+          cache-dependency-path: scripts/python/requirements.txt
+      - run: sudo apt-get update -qq && sudo apt-get install -y -qq libsndfile1 ffmpeg
+      # The analysis subset only — the full requirements.txt pulls TensorFlow 2.15,
+      # Demucs and CLAP, which the unit tests do not import (reproduced locally on
+      # 2026-10-09 in a fresh Python 3.11 venv: 76 + 97 tests pass with exactly this set).
+      - run: >
+          pip install --disable-pip-version-check
+          "numpy>=1.24,<2" "librosa>=0.10" "soundfile>=0.12" scipy "pyyaml>=6"
+          pytest "scikit-learn<=1.5.1" pretty_midi
+      # tests/ (76) plus the root-level test_*.py modules (97) — both pass on this subset.
+      - run: python -m pytest -q tests test_*.py
+
+  hooks:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: bash -n .claude/hooks/*.sh
+      - run: python3 -c "import json; json.load(open('.claude/settings.json')); json.load(open('.mcp.json'))"
