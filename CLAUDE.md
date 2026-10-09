@@ -100,14 +100,20 @@ The `docs-freshness` hook reminds you once per session when a pipeline file chan
    - AI analyzes differences and generates new parameters
    - Store learnings in ClickHouse for future tracks
 
-**Current achievement:** editable dynamic-Strudel (transcribed notes on trained instruments, all
-voices present incl. the real vocal) at **93.8% overall / 95.9% section-aware / 96.7% freq balance,
-tempo_sim 1.000** on Regime CLT (brazilian_funk; `v023/comparison.json`, 2026-06-30), driven by the data-driven `calibrate_dynamic.py`
-loop (no hardcoded mix values). CAVEAT (Oct 2026 audit): v023's vocal voice is a full-stem replay
-(`s("vocalsfull")…slow(N)`), which violates `values.md` A1 — so this is NOT yet a contract-passing
-editable score; spec 003 Slice 3 makes the vocal editable and re-measures the floor. NOTE: numbers measured BEFORE the Jun-2026 recorder tempo fix (the
-72% / 88.7% / 92.4% / 94.6% history) were on ~25%-sped-up audio and are invalid — see the recorder
-fix below. Earlier honest baselines were ~60-70% (the old 90%+ was inflated by a cosine bug).
+**Current achievement (honest, contract-passing):** editable dynamic-Strudel with ALL voices as
+editable data — transcribed bass/lead/VOCAL notes on stem-derived sample-instruments + extracted drum
+patterns — at **87.4% overall / 91.9% section-aware / 88.5% freq balance** on Regime CLT
+(brazilian_funk; `v024/comparison.json`, 2026-10-09, `editability: pass`, `generation_mode:
+sample-instrument`). This is the measured `sample_instrument` floor source in `eval/thresholds.yaml`
+(floor = measured − 0.02). `--mode synth` (palette sounds, no samples) measured **75.9% / 84.1%**
+(`v025`), also detector-passing. Its `tempo_similarity` reads 0.365 because the beat tracker locks onto
+123 BPM on this content; a 136-BPM click rendered through the same chain measures 136.0, so playback
+speed is correct (open task: robust tempo estimate). HISTORY: v023 (2026-06-30) scored 93.8% / 95.9%
+but its vocal voice was a full-stem replay (`s("vocalsfull")…slow(N)`, `values.md` A1) — the
+`editability_check.py` detector now FAILS it and `compare_audio.py --strudel` refuses to score it.
+NOTE: numbers measured BEFORE the Jun-2026 recorder tempo fix (the 72% / 88.7% / 92.4% / 94.6%
+history) were on ~25%-sped-up audio and are invalid — see the recorder fix below. Earlier honest
+baselines were ~60-70% (the old 90%+ was inflated by a cosine bug).
 **Target:** 80%+ similarity across all genres through AI learning, not hardcoding
 
 **Data-driven mix calibration (Jun 2026):** `scripts/python/calibrate_dynamic.py` +
@@ -541,7 +547,7 @@ midi-grep/
 ├── mcp_servers/loop/           # FastMCP: render_strudel, compare_render, verify_strudel, eval_gate
 ├── .sisyphus/                  # plan + evidence trail for multi-iteration runs
 ├── Makefile
-├── Dockerfile
+├── docker-compose.clickhouse.yml   # optional ClickHouse store (app Dockerfile retired Oct 2026)
 └── go.mod
 ```
 

@@ -15,11 +15,20 @@ Levers (all multiply the *current* value, sqrt-damped + clamped to avoid oscilla
   bass-mult  <- bass band       (60-250 Hz body of the pitched bass sample)
   cal-lead   <- low_mid+mid     (lead/melodic body; the usual deficit)
   lead-lpf   <- high+high_mid   (excess brightness -> lower the cutoff)
+  cal-vocal  <- vocal stem RMS  (spec 003 Slice 3: the editable vocal voice is balanced by
+                                 measurement. Primary source: ``stems.vocals`` in the sibling
+                                 ``stem_comparison.json`` (original vs rendered rms_mean).
+                                 compare_audio.py does not pair a vocals stem yet, so until it
+                                 does the lever falls back to the full-mix ``high_mid`` band
+                                 ratio — the band the vocal's presence region dominates once
+                                 lead/hats are driven by their own levers — with a wide
+                                 dead-band and a gentler step because it is a proxy.)
   master-gain<- overall RMS      (gentle; the recorder limiter caps absolute loudness)
 
 Usage:
   python calibrate_dynamic.py --comparison <comparison.json> \
-      [--bass-mult 0.62 --sub-gain 0.5 --lead-lpf 6500 --master-gain 0.6 --cal-lead 1.0] \
+      [--bass-mult 0.62 --sub-gain 0.5 --lead-lpf 6500 --master-gain 0.6 --cal-lead 1.0 \
+       --cal-vocal 1.0] [--stem-comparison <stem_comparison.json>] \
       [--state <prev_params.json>] [--out <next_params.json>]
 
 Prints a human-readable diff and a ready-to-paste CLI fragment; writes the next param set
@@ -63,6 +72,10 @@ def main() -> int:
     ap.add_argument("--lead-lpf", type=int, default=5000)
     ap.add_argument("--hat-gain", type=float, default=0.0)
     ap.add_argument("--master-gain", type=float, default=0.6)
+    ap.add_argument("--cal-vocal", type=float, default=1.0)
+    ap.add_argument("--stem-comparison", type=Path, default=None,
+                    help="per-stem comparison JSON (compare_audio.py --stems). Default: a "
+                         "stem_comparison.json next to --comparison when present")
     ap.add_argument("--state", type=Path, default=None,
                     help="prev_params.json to read current knob values from (overrides the "
                          "per-knob flags above for any key it contains)")
@@ -76,6 +89,7 @@ def main() -> int:
         "lead_lpf": float(args.lead_lpf),
         "hat_gain": args.hat_gain,
         "master_gain": args.master_gain,
+        "cal_vocal": args.cal_vocal,
     }
     if args.state and args.state.exists():
         prev = json.loads(args.state.read_text())
@@ -141,6 +155,32 @@ def main() -> int:
     else:
         nxt["hat_gain"] = round(cur["hat_gain"], 3)
 
+    # --- vocal: balance the editable vocal voice by measurement ----------------------------
+    # Primary: the vocal stem's own RMS ratio from stem_comparison.json (demucs re-separation
+    # of the render vs the original vocal stem). Fallback: full-mix high_mid band ratio —
+    # a proxy, so dead-banded (+-15%) and damped harder (0.35) with a narrower step clamp.
+    sc_path = args.stem_comparison or args.comparison.with_name("stem_comparison.json")
+    voc_stem = None
+    if sc_path.exists():
+        try:
+            voc_stem = (json.loads(sc_path.read_text()).get("stems") or {}).get("vocals")
+        except (OSError, ValueError):
+            voc_stem = None
+    try:
+        o_v = voc_stem["original"]["spectral"]["rms_mean"]
+        r_v = voc_stem["rendered"]["spectral"]["rms_mean"]
+        r_vocal = (o_v + eps) / (r_v + eps)
+        vocal_src = f"vocal stem rms ({sc_path.name})"
+        nxt["cal_vocal"] = round(clamp(cur["cal_vocal"] * damp(r_vocal, hi=1.6), 0.3, 3.0), 3)
+    except (TypeError, KeyError):
+        r_vocal = ratio(["high_mid"])
+        vocal_src = "high_mid band proxy (no stems.vocals in stem_comparison.json)"
+        if r_vocal > 1.15 or r_vocal < 0.85:
+            nxt["cal_vocal"] = round(clamp(cur["cal_vocal"] * damp(r_vocal, strength=0.35, lo=0.85, hi=1.2),
+                                           0.3, 3.0), 3)
+        else:
+            nxt["cal_vocal"] = round(cur["cal_vocal"], 3)
+
     # --- master gain: gentle nudge toward energy parity, capped to keep the recorder's -----
     # 0 dBFS limiter out of it (clipping destroys the band balance we just fixed). -----------
     rms_ratio = comp.get("raw_rms_ratio", 1.0)
@@ -162,15 +202,17 @@ def main() -> int:
           f"rms_ratio {rms_ratio:.2f}", file=sys.stderr)
     print(f"   centroid orig {cent_o:.0f} vs rend {cent_r:.0f} "
           f"(bright {comp.get('brightness_similarity',0)*100:.0f}%)", file=sys.stderr)
+    print(f"   vocal ratio {r_vocal:.2f} from {vocal_src}", file=sys.stderr)
     print("== knob deltas ==", file=sys.stderr)
-    for k in ["sub_gain", "bass_mult", "cal_lead", "lead_lpf", "hat_gain", "master_gain"]:
+    for k in ["sub_gain", "bass_mult", "cal_lead", "lead_lpf", "hat_gain", "master_gain", "cal_vocal"]:
         a, b = cur[k], nxt[k]
         arrow = "->" if a != b else "=="
         print(f"   {k:12s} {a} {arrow} {b}", file=sys.stderr)
 
     cli = (f"--bass-mult {nxt['bass_mult']} --sub-gain {nxt['sub_gain']} "
            f"--cal-lead {nxt['cal_lead']} --lead-lpf {nxt['lead_lpf']} "
-           f"--hat-gain {nxt['hat_gain']} --master-gain {nxt['master_gain']}")
+           f"--hat-gain {nxt['hat_gain']} --master-gain {nxt['master_gain']} "
+           f"--cal-vocal {nxt['cal_vocal']}")
     print(cli)   # stdout: the CLI fragment, easy to capture in a wrapper
 
     if args.out:

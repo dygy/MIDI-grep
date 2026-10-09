@@ -53,6 +53,12 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   recorder is the only render path and the only one that may gate.
 - **`scripts/python/compare_audio.py`** — similarity via **MAE** on frequency bands (NOT cosine —
   cosine hid 20%+ band errors). Weights: Freq 40%, MFCC 20%, Energy 15%, Brightness 15%, Tempo/Chroma 5%.
+- **`scripts/python/generate_dynamic_strudel.py`** — the editable generator (spec 003). `--mode
+  {sample-instrument,synth}` (default sample-instrument; synth = palette sounds, no `samples()`),
+  `--vocal-mode {instrument,chops,texture,none}` (default instrument = transcribed `let vocal` on the
+  `<prefix>_vocal` multisample; `texture` is the old full-stem loop, allowed only under ≥2 editable
+  voices and tagged `// texture`). Header lines `// generation_mode:` / `// vocal_mode:`; runs
+  `strudel_validation.validate_code` on its own output.
 - **`scripts/python/calibrate_dynamic.py`** — data-driven mix calibrator: reads a render's
   `comparison.json` and emits the NEXT `generate_dynamic_strudel.py` knobs (sub-gain, bass-mult,
   cal-lead, lead-lpf, hat-gain, master-gain). Each knob is a damped proportional correction of a

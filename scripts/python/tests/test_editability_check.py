@@ -290,3 +290,31 @@ def test_validate_code_rejects_replay(code, needle):
 def test_validate_code_still_accepts_editable_code():
     _, err = validate_code('$: note("c3 e3").sound("sawtooth").lpf(400)\n$: s("bd sd").bank("RolandTR808")')
     assert err == ""
+
+
+def test_r3_sound_pattern_fed_by_bar_array_is_editable():
+    """``s(cat(...vox))`` on a declared one-shot bar array mirrors the ``note(cat(...arr))`` rule
+    (Slice 3 chops voice showed as "unclassified")."""
+    code = (
+        'await samples("https://x.invalid/samples.json")\n' + HEADER
+        + 'let vox = ["vox0 ~ ~ vox3", "~ vox7 ~ ~"]\n'
+        + '$: note(cat(...bass)).s("regime_bass")\n'
+        + "$: s(cat(...vox)).room(0.2)\n"
+    )
+    res = check_editability(code)
+    assert res.passed, res.violations
+    assert res.unclassified_voices == []
+    kinds = {v.label: v.kind for v in res.editable_voices}
+    assert kinds == {"bass": "editable", "vox": "editable"}
+    vox = next(v for v in res.editable_voices if v.label == "vox")
+    assert any(r.startswith("R3") and "vox" in r for r in vox.reasons), vox.reasons
+    assert res.generation_mode == "sample-instrument"
+
+
+def test_r3_sound_pattern_fed_by_replay_array_is_still_replay():
+    code = HEADER + 'let loops = ["drumsloop ~", "~ vocalsfull"]\n' \
+        + '$: note(cat(...bass)).s("sawtooth")\n$: s(cat(...loops))\n'
+    res = check_editability(code)
+    assert not res.passed
+    assert "R2" in rules(res)
+    assert [v.label for v in res.editable_voices] == ["bass"]

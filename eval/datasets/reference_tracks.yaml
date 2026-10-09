@@ -16,7 +16,19 @@
 # stays green until you've generated renders locally. Commit small/curated comparison.json copies
 # under eval/datasets/fixtures/ if you want the gate to run in CI without the cache.
 
-tracks: []
+tracks:
+  - name: "Regime CLT (Dj Brunin XM, Aurora Shukita)"
+    genre: brazilian_funk
+    mode: sample-instrument
+    cache_key: "Regime CLT (Dj Brunin XM, Aurora Shukita)"
+    version: v024
+    # First detector-passing render (editable vocal, Slice 3). overall 0.8743 / section-aware 0.9194.
+  - name: "Regime CLT (Dj Brunin XM, Aurora Shukita) — synth mode"
+    genre: brazilian_funk
+    mode: synth
+    cache_key: "Regime CLT (Dj Brunin XM, Aurora Shukita)"
+    version: v025
+    # Pure-synth render (palette sounds, no samples()). overall 0.7589 / section-aware 0.8406.
   # - name: "Caravan Palace - Lone Digger"
   #   genre: electro_swing
   #   cache_key: "Caravan Palace - Lone Digger (Official MV)"

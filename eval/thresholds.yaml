@@ -64,3 +64,62 @@ section_aware:
     house:            0.45
     lofi:             0.45
     jazz:             0.40
+
+# Per-MODE floors (spec 003 §2.2-E). `eval/gate.py` resolves `modes.<mode>.genres.<genre>`
+# (and `modes.<mode>.section_aware.<genre>`) BEFORE the genre-wide `genres:` /
+# `section_aware:` tables above; a genre/mode with no entry here falls back to those.
+#
+# Mode keys are normalised the same way as genres (`sample-instrument` → `sample_instrument`).
+#
+# RULE: every value here is a REGRESSION FLOOR taken from a real, detector-PASSING
+# (editability: pass) BlackHole render of that mode: floor = measured − a stated margin, and
+# the raw measurement + the run it came from is recorded under `measured:` so the number is
+# reproducible. NEVER type a guessed value — leave the entry absent until it is measured
+# (Slice 4 of context/spec/003-editable-strudel-generation/tasks.md fills it in).
+#
+# Shape (values intentionally absent until measured):
+#   modes:
+#     sample_instrument:
+#       genres:        { <genre>: <measured − margin> }
+#       section_aware: { <genre>: <measured − margin> }
+#       measured:      { <genre>: { overall: <x>, section_aware: <y>, run: "<cache_key>/vNNN",
+#                                   margin: <m> } }
+#     synth:
+#       genres:        { ... }
+#       section_aware: { ... }
+#       measured:      { ... }
+modes:
+  sample_instrument:
+    # Floors = measured − margin (margin 0.02 ≈ the run-to-run noise of a BlackHole render).
+    # Measured 2026-10-09 on the first contract-passing (editable-vocal) render; see `measured`.
+    genres:
+      brazilian_funk: 0.85
+    section_aware:
+      brazilian_funk: 0.90
+    measured:
+      brazilian_funk:
+        overall: 0.8743
+        section_aware: 0.9194
+        frequency_balance: 0.8851
+        tempo_similarity: 0.3651   # beat tracker reads 123 BPM on this content; a 136-BPM click
+                                   # track through the same chain measured 136.0 → playback is correct
+        run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v024"
+        margin: 0.02
+        editability: pass
+        vocal_mode: instrument
+  synth:
+    # Pure palette synthesis (no stem samples) — inherently further from the master; floor = measured − 0.02.
+    genres:
+      brazilian_funk: 0.74
+    section_aware:
+      brazilian_funk: 0.82
+    measured:
+      brazilian_funk:
+        overall: 0.7589
+        section_aware: 0.8406
+        frequency_balance: 0.6144
+        tempo_similarity: 0.3651   # same beat-tracker behaviour as sample_instrument (see above)
+        run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v025"
+        margin: 0.02
+        editability: pass
+        vocal_mode: instrument

@@ -36,9 +36,17 @@ def build_sample_map(sm: dict, mode: str) -> dict:
     """Build an inline, array-valued Strudel sample map for the chosen mode.
 
     Every value is a list of relative paths (the only shape this Strudel build's
-    ``samples()`` accepts). The base URL is applied by Strudel at load time.
+    ``samples()`` accepts) or, for a pitched multisample, the note-keyed map
+    ``build_sample_pack.py`` wrote. The base URL is applied by Strudel at load time.
+
+    The result is a SUPERSET of the pack manifest: every key of ``strudel.json`` is
+    carried through (spec 003 Slice 3 found the rewrite dropping ``<prefix>_vocal`` and
+    the ``vox<N>`` chops, which silenced ``generate_dynamic_strudel.py``'s editable vocal
+    voice), so one hosted ``samples.json`` serves every generator.
     """
-    out: dict[str, list[str]] = {}
+    out: dict[str, object] = {}
+    handled = {"drumsloop", "bassloop", "melodicloop", "vocalsloop", "bd", "sd", "hh", "oh",
+               "trackbass", "tracklead"}
 
     # Loops are arrays already — keep the ones that exist.
     for name in ("drumsloop", "bassloop", "melodicloop", "vocalsloop"):
@@ -56,6 +64,19 @@ def build_sample_map(sm: dict, mode: str) -> dict:
             rep = _representative(sm.get(voice))
             if rep:
                 out[voice] = [rep]
+
+    # Everything else the builder wrote — the pitched vocal map (``<prefix>_vocal``), the
+    # vocal chops (``vox<N>``) and any future section — passes through in a samples()-legal
+    # shape: dict (note-keyed map) and non-empty lists verbatim, a bare path as a 1-element array.
+    for name, value in sm.items():
+        if name in handled or name.startswith("_") or name in out:
+            continue
+        if isinstance(value, dict) and value:
+            out[name] = value
+        elif isinstance(value, list) and value:
+            out[name] = value
+        elif isinstance(value, str) and value:
+            out[name] = [value]
 
     return out
 
@@ -187,7 +208,11 @@ def main() -> int:
     ap.add_argument("--pack-dir", required=True, type=Path)
     ap.add_argument("--base-url", required=True,
                     help="e.g. http://localhost:5555/regime-clt or https://pub-xxxx.r2.dev/regime-clt")
-    ap.add_argument("--mode", choices=["loops", "instrument", "hybrid"], default="loops")
+    # Spec 003: `sample-instrument` (alias of `instrument`) is the default deliverable mode.
+    # `loops` is texture/diagnostic output only — it replays the real stems and fails the
+    # editability contract (values.md A1), so it is never a deliverable.
+    ap.add_argument("--mode", choices=["sample-instrument", "instrument", "loops", "hybrid"],
+                    default="sample-instrument")
     ap.add_argument("--out", type=Path, help="output .strudel (default: pack-dir/output_<mode>.strudel)")
     args = ap.parse_args()
 
@@ -198,17 +223,21 @@ def main() -> int:
     # serves every mode; per-mode code just references the sound names it needs.
     full_map = build_sample_map(sm, "instrument")  # instrument == superset
     samples_url = write_resolved_json(args.pack_dir, full_map, args.base_url)
+    mode = "instrument" if args.mode == "sample-instrument" else args.mode
     lines = header(samples_url, args.base_url, float(pack.get("bpm", 120)), pack.get("key"))
-    if args.mode == "loops":
+    if mode == "loops":
+        lines.insert(0, "// generation_mode: loops — texture/diagnostic, NOT a deliverable (values.md A1)")
         lines += loops_block(pack, sm)
-    elif args.mode == "instrument":
+    elif mode == "instrument":
+        lines.insert(0, "// generation_mode: sample-instrument")
         lines += instrument_block(sm, pack.get("key"))
     else:
+        lines.insert(0, "// generation_mode: hybrid — real loops are texture under editable voices")
         lines += hybrid_block(pack, sm, pack.get("key"))
 
-    out = args.out or (args.pack_dir / f"output_{args.mode}.strudel")
+    out = args.out or (args.pack_dir / f"output_{mode}.strudel")
     out.write_text("\n".join(lines) + "\n")
-    print(json.dumps({"out": str(out), "mode": args.mode, "base_url": args.base_url,
+    print(json.dumps({"out": str(out), "mode": mode, "base_url": args.base_url,
                       "samples_url": samples_url, "sounds": list(full_map)}, indent=2))
     return 0
 

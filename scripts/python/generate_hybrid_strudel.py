@@ -216,6 +216,7 @@ def main() -> int:
 
     # 3. Emit code: generated library batidao (drums+bass) + custom R2 loops.
     L = [
+        "// generation_mode: hybrid — real loops are texture under editable voices",
         f"// MIDI-grep hybrid — library genre groove + hosted custom samples",
         f"// genre={args.genre}  bpm={args.bpm:.0f}  key={args.key}  base={base}",
         f"setcps({cps:.6f})",
@@ -256,7 +257,9 @@ def main() -> int:
             key_name = f"{v}full"
             if key_name in custom:
                 # real audio already carries its spectrum — gain+room only, no lpf
-                L.append(f'$: s("{key_name}").loopAt({nbars}){fx_chain(fx[v], drop_lpf=True)}')
+                # Spec 003 R4: a replayed stem is allowed only as texture under editable
+                # voices; the marker is what the editability detector looks for.
+                L.append(f'$: s("{key_name}").loopAt({nbars}){fx_chain(fx[v], drop_lpf=True)}  // texture')
         L.append("")
 
     out = args.out or (args.out_pack / "output_hybrid.strudel")

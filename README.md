@@ -393,6 +393,18 @@ This installs:
 | `--ollama` | `true` | Use Ollama (free local LLM) for AI improvement |
 | `--ollama-model` | `midi-grep-strudel-mistral` | Ollama model to use (see Ollama Setup in CLAUDE.md for building it) |
 
+### Generator flags (Python, spec 003)
+
+The editable generator `scripts/python/generate_dynamic_strudel.py` (driven by `scripts/auto-calibrate.sh`) takes:
+
+| Flag | Default | Description |
+|------|---------|-------------|
+| `--mode` | `sample-instrument` | `sample-instrument` plays your note arrays on stem-derived multisamples; `synth` uses genre-palette synth sounds and no `samples()` |
+| `--vocal-mode` | `instrument` | `instrument` = transcribed `let vocal` on the `<prefix>_vocal` multisample, `chops` = onset chops `let vox`, `texture` = the old full-stem loop (allowed only under ≥2 editable voices, tagged `// texture`), `none` |
+| `--cal-vocal` | `1.0` | Vocal level knob set by `calibrate_dynamic.py` from the measured render |
+
+Every output carries a `// generation_mode:` header and is checked by `scripts/python/editability_check.py`; replayed audio is rejected before any similarity is computed.
+
 ### Default Analysis Features
 
 All analysis features are **enabled by default**:
@@ -952,7 +964,7 @@ midi-grep/
 │   └── python/             # AI + ML scripts (code gen, comparison, LLM)
 ├── context/                # AWOS product docs
 ├── Makefile
-├── Dockerfile
+├── docker-compose.clickhouse.yml   # optional ClickHouse store (app Dockerfile retired Oct 2026)
 └── README.md
 ```
 
@@ -973,16 +985,11 @@ Controls note timing precision:
 
 ## Docker
 
-```bash
-# Build image
-docker build -t midi-grep .
-
-# Run extraction
-docker run -v $(pwd):/data midi-grep extract --input /data/track.wav
-
-# Run server
-docker run -p 8080:8080 midi-grep serve
-```
+**Retired (Oct 2026).** The app `Dockerfile` was removed: it had been broken since Feb 2026
+(Go 1.21 base vs Go 1.25 in `go.mod`, no yt-dlp, Node or Demucs in the image) and a container can
+never run the only render path, which needs the macOS BlackHole virtual audio device. Linux
+buildability is proven by CI (`.github/workflows/ci.yml`) instead. `docker-compose.clickhouse.yml`
+(the optional ClickHouse learning store) still works and is unrelated to the app image.
 
 ## Development
 

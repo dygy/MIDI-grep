@@ -389,10 +389,13 @@ Supporting Python modules: `spectrogram_analyzer.py` (mel-spectrogram gap insigh
 **Current reality: MIDI-grep runs on a local macOS workstation. There is no viable container or
 cloud deployment path today.**
 
-- **Docker is NOT currently viable.** `Dockerfile` builds with `golang:1.21-alpine` while `go.mod`
-  requires Go 1.25.5, and the runtime stage installs no `yt-dlp`, no Node/Puppeteer, and no Demucs
-  models; `docker-compose.yml` does not exist (only `docker-compose.clickhouse.yml`). Treat the
-  Dockerfile as stale until rewritten.
+- **Docker: retired (decision 2026-10-09).** The app `Dockerfile` was deleted. It had been broken
+  since Feb 2026 (`golang:1.21-alpine` vs Go 1.25.5 in `go.mod`; no `yt-dlp`, Node/Puppeteer or
+  Demucs models in the runtime stage), Docker is not installed on the development machine so no
+  rewrite could be validated, and a container can never host the macOS-only render path. Linux
+  buildability of the Go, Node and Python-analysis layers is proven by CI instead. Only
+  `docker-compose.clickhouse.yml` (optional learning store) remains. Revisit only if a non-render
+  deployment target (analysis-only API) becomes a goal.
 - **BlackHole rendering is macOS-only** (BlackHole virtual device + ffmpeg avfoundation). Since the
   recorder is the only render path, similarity scoring, the `--iterate` loop, the eval gate and the
   `loop` MCP all require macOS.
@@ -510,7 +513,6 @@ midi-grep/
 │
 ├── CLAUDE.md, llms.txt, llms-full.txt   # Canonical build/run + reference docs
 ├── Modelfile, Modelfile.mistral          # Ollama custom model definitions
-├── Dockerfile                            # STALE — not currently viable (see §4)
 ├── docker-compose.clickhouse.yml
 ├── Makefile
 └── go.mod                                # go 1.25.5

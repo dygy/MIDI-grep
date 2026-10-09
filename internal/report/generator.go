@@ -46,15 +46,38 @@ type ReportData struct {
 	// Comparison results (from JSON)
 	Comparison *ComparisonResult
 
+	// Per-stem comparison results (from stem_comparison.json, optional)
+	StemComparison *StemComparisonResult
+
 	// AI params (from JSON)
 	AIParams map[string]interface{}
 }
 
-// ComparisonResult holds audio comparison metrics
+// ComparisonResult holds audio comparison metrics.
+//
+// GenerationMode, Editability and EditabilityViolations are stamped by the editability
+// detector (spec 003 §2.3). They are absent on pre-spec-003 runs, in which case
+// Editability is "" and the report notes that editability was not checked. On a failed
+// run `comparison` is null, which leaves Comparison at its zero value.
 type ComparisonResult struct {
-	Original   AudioMetrics   `json:"original"`
-	Rendered   AudioMetrics   `json:"rendered"`
-	Comparison ComparisonData `json:"comparison"`
+	Original              AudioMetrics   `json:"original"`
+	Rendered              AudioMetrics   `json:"rendered"`
+	Comparison            ComparisonData `json:"comparison"`
+	GenerationMode        string         `json:"generation_mode"`
+	Editability           string         `json:"editability"`
+	EditabilityViolations []string       `json:"editability_violations"`
+}
+
+// StemComparisonResult holds the per-stem comparison (stem_comparison.json). The stems it
+// scores come from demucs re-separation of the rendered mix, not from a true stem match.
+type StemComparisonResult struct {
+	Aggregate StemAggregate `json:"aggregate"`
+}
+
+// StemAggregate holds the weighted per-stem similarity and the per-stem breakdown
+type StemAggregate struct {
+	WeightedOverall float64                       `json:"weighted_overall"`
+	PerStem         map[string]map[string]float64 `json:"per_stem"`
 }
 
 // AudioMetrics holds metrics for a single audio file
@@ -130,6 +153,15 @@ func (g *Generator) LoadData() (*ReportData, error) {
 		var comp ComparisonResult
 		if json.Unmarshal(compData, &comp) == nil {
 			data.Comparison = &comp
+		}
+	}
+
+	// Load per-stem comparison JSON (optional)
+	stemPath := filepath.Join(g.versionDir, "stem_comparison.json")
+	if stemData, err := os.ReadFile(stemPath); err == nil {
+		var stems StemComparisonResult
+		if json.Unmarshal(stemData, &stems) == nil {
+			data.StemComparison = &stems
 		}
 	}
 
@@ -346,38 +378,62 @@ func generateChartsHTML(comp *ComparisonResult) string {
 
 	var sb strings.Builder
 
-	// Overall similarity score
-	overall := comp.Comparison.OverallSimilarity * 100
-	color := similarityColor(overall)
-	sb.WriteString(fmt.Sprintf(`
-		<div style="text-align: center; margin-bottom: 1.5rem;">
+	// Editability verdict (spec 003 §2.2-F). A replay / unverified run never gets a
+	// similarity score: badge instead of the headline, and no scores table.
+	isReplay := comp.Editability != "" && comp.Editability != "pass"
+	if isReplay {
+		sb.WriteString(generateEditabilityBadgeHTML(comp.GenerationMode, comp.EditabilityViolations))
+		if len(comp.Original.Bands) == 0 && len(comp.Rendered.Bands) == 0 {
+			return sb.String()
+		}
+	} else {
+		// Overall similarity score
+		overall := comp.Comparison.OverallSimilarity * 100
+		color := similarityColor(overall)
+		var verdictLine string
+		if comp.Editability == "pass" {
+			mode := comp.GenerationMode
+			if mode == "" {
+				mode = "unknown"
+			}
+			verdictLine = fmt.Sprintf(
+				`<div class="editability-verdict" style="margin-top: 0.25rem; font-weight: 600; color: #3fb950;">%.0f%% — mode: %s · editable: pass</div>`,
+				overall, html.EscapeString(mode))
+		} else {
+			verdictLine = `<div class="editability-verdict" style="margin-top: 0.25rem; font-size: 0.8rem; color: var(--text-secondary);">editability: not checked (pre-spec-003 run)</div>`
+		}
+		sb.WriteString(fmt.Sprintf(`
+		<div class="overall-headline" style="text-align: center; margin-bottom: 1.5rem;">
 			<div style="font-size: 3rem; font-weight: bold; color: %s;">%.0f%%</div>
 			<div style="color: var(--text-secondary);">Overall Similarity</div>
+			%s
 		</div>
-	`, color, overall))
-
-	// Similarity scores table
-	metrics := []struct {
-		Label string
-		Value float64
-	}{
-		{"Timbre (MFCC)", comp.Comparison.MFCCSimilarity},
-		{"Harmony (Chroma)", comp.Comparison.ChromaSimilarity},
-		{"Brightness", comp.Comparison.BrightnessSimilarity},
-		{"Tempo", comp.Comparison.TempoSimilarity},
-		{"Frequency Balance", comp.Comparison.FrequencyBalanceSimilarity},
-		{"Energy", comp.Comparison.EnergySimilarity},
+	`, color, overall, verdictLine))
 	}
 
-	var rows strings.Builder
-	for _, m := range metrics {
-		pct := m.Value * 100
-		c := similarityColor(pct)
-		barWidth := pct
-		if barWidth > 100 {
-			barWidth = 100
+	// Similarity scores table (withheld for a replay run)
+	if !isReplay {
+		metrics := []struct {
+			Label string
+			Value float64
+		}{
+			{"Timbre (MFCC)", comp.Comparison.MFCCSimilarity},
+			{"Harmony (Chroma)", comp.Comparison.ChromaSimilarity},
+			{"Brightness", comp.Comparison.BrightnessSimilarity},
+			{"Tempo", comp.Comparison.TempoSimilarity},
+			{"Frequency Balance", comp.Comparison.FrequencyBalanceSimilarity},
+			{"Energy", comp.Comparison.EnergySimilarity},
 		}
-		rows.WriteString(fmt.Sprintf(`
+
+		var rows strings.Builder
+		for _, m := range metrics {
+			pct := m.Value * 100
+			c := similarityColor(pct)
+			barWidth := pct
+			if barWidth > 100 {
+				barWidth = 100
+			}
+			rows.WriteString(fmt.Sprintf(`
 			<tr>
 				<td style="padding: 0.5rem; color: var(--text-secondary);">%s</td>
 				<td style="padding: 0.5rem; width: 60%%;">
@@ -388,14 +444,15 @@ func generateChartsHTML(comp *ComparisonResult) string {
 				<td style="padding: 0.5rem; text-align: right; font-weight: 600; color: %s;">%.0f%%</td>
 			</tr>
 		`, m.Label, barWidth, c, c, pct))
-	}
+		}
 
-	sb.WriteString(fmt.Sprintf(`
+		sb.WriteString(fmt.Sprintf(`
 		<div class="chart-item" style="padding: 1rem;">
 			<h4 style="margin-bottom: 1rem; color: var(--text-primary);">Similarity Scores</h4>
 			<table style="width: 100%%; border-collapse: collapse;">%s</table>
 		</div>
 	`, rows.String()))
+	}
 
 	// Frequency bands comparison
 	bands := []struct {
@@ -447,6 +504,111 @@ func generateChartsHTML(comp *ComparisonResult) string {
 	`, bandRows.String()))
 
 	return sb.String()
+}
+
+// editabilityBadgeText is shown instead of a similarity headline when editability != "pass".
+const editabilityBadgeText = "REPLAY / UNVERIFIED — not a deliverable"
+
+// stemSectionCaption labels the per-stem section: its stems are not a true stem match.
+const stemSectionCaption = "stems obtained by demucs re-separation of the rendered mix (lossy, not a true stem-match view)"
+
+// editabilityOf returns the top-level editability verdict, or "" when comparison.json is
+// missing or predates spec 003.
+func editabilityOf(comp *ComparisonResult) string {
+	if comp == nil {
+		return ""
+	}
+	return comp.Editability
+}
+
+func generateEditabilityBadgeHTML(generationMode string, violations []string) string {
+	if generationMode == "" {
+		generationMode = "unknown"
+	}
+	var items strings.Builder
+	for _, v := range violations {
+		items.WriteString(fmt.Sprintf(`<li style="margin: 0.15rem 0;">%s</li>`, html.EscapeString(v)))
+	}
+	violationsHTML := ""
+	if items.Len() > 0 {
+		violationsHTML = fmt.Sprintf(`<ul style="text-align: left; display: inline-block; margin: 0.75rem auto 0; padding-left: 1.25rem; color: var(--text-secondary); font-size: 0.85rem;">%s</ul>`, items.String())
+	}
+	return fmt.Sprintf(`
+		<div class="editability-badge" style="text-align: center; margin-bottom: 1.5rem;">
+			<div style="display: inline-block; padding: 0.6rem 1.2rem; border-radius: 6px; background: #f85149; color: #fff; font-weight: 700; letter-spacing: 0.04em;">%s</div>
+			<div style="margin-top: 0.5rem; color: var(--text-secondary);">mode: %s · editable: fail</div>
+			%s
+		</div>
+	`, editabilityBadgeText, html.EscapeString(generationMode), violationsHTML)
+}
+
+// generateStemComparisonHTML renders the per-stem comparison card. editability is the
+// top-level verdict from comparison.json ("" on legacy runs); a replay / unverified run gets
+// the caption and a "scores withheld" note, never numbers.
+func generateStemComparisonHTML(stems *StemComparisonResult, editability string) string {
+	if stems == nil {
+		return ""
+	}
+
+	var body strings.Builder
+	body.WriteString(fmt.Sprintf(`<div class="full-width" style="font-size: 0.8rem; color: var(--text-secondary); margin-bottom: 0.75rem;">%s</div>`, stemSectionCaption))
+
+	if editability != "" && editability != "pass" {
+		body.WriteString(fmt.Sprintf(`<div class="no-data full-width">per-stem scores withheld — editability: %s (replay / unverified run, not a deliverable)</div>`, html.EscapeString(editability)))
+	} else {
+		weighted := stems.Aggregate.WeightedOverall * 100
+		body.WriteString(fmt.Sprintf(`
+		<div style="text-align: center; margin-bottom: 1.5rem;">
+			<div style="font-size: 2.5rem; font-weight: bold; color: %s;">%.1f%%</div>
+			<div style="color: var(--text-secondary);">Weighted Per-Stem Similarity</div>
+		</div>
+	`, similarityColor(weighted), weighted))
+
+		if len(stems.Aggregate.PerStem) > 0 {
+			var rows strings.Builder
+			for _, name := range []string{"melodic", "drums", "bass"} {
+				m, ok := stems.Aggregate.PerStem[name]
+				if !ok {
+					continue
+				}
+				overall := m["overall"] * 100
+				rows.WriteString(fmt.Sprintf(`
+				<tr>
+					<td style="padding: 0.5rem; font-weight: 600; text-transform: capitalize;">%s</td>
+					<td style="padding: 0.5rem; text-align: center; color: %s; font-weight: 600;">%.0f%%</td>
+					<td style="padding: 0.5rem; text-align: center;">%.0f%%</td>
+					<td style="padding: 0.5rem; text-align: center;">%.0f%%</td>
+					<td style="padding: 0.5rem; text-align: center;">%.0f%%</td>
+				</tr>
+			`, name, similarityColor(overall), overall, m["mfcc"]*100, m["freq_balance"]*100, m["energy"]*100))
+			}
+			body.WriteString(fmt.Sprintf(`
+		<div class="chart-item" style="padding: 1rem;">
+			<h4 style="margin-bottom: 1rem; color: var(--text-primary);">Per-Stem Breakdown</h4>
+			<table style="width: 100%%; border-collapse: collapse;">
+				<tr style="border-bottom: 1px solid var(--border);">
+					<th style="padding: 0.5rem; text-align: left; color: var(--text-secondary);">Stem</th>
+					<th style="padding: 0.5rem; text-align: center; color: var(--text-secondary);">Overall</th>
+					<th style="padding: 0.5rem; text-align: center; color: var(--text-secondary);">MFCC</th>
+					<th style="padding: 0.5rem; text-align: center; color: var(--text-secondary);">Freq Bal</th>
+					<th style="padding: 0.5rem; text-align: center; color: var(--text-secondary);">Energy</th>
+				</tr>
+				%s
+			</table>
+		</div>
+	`, rows.String()))
+		}
+	}
+
+	return fmt.Sprintf(`
+        <div class="card">
+            <div class="card-title">
+                <svg viewBox="0 0 16 16"><path d="M2 2.5A2.5 2.5 0 0 1 4.5 0h8.75a.75.75 0 0 1 .75.75v12.5a.75.75 0 0 1-.75.75h-2.5a.75.75 0 0 1 0-1.5h1.75v-2h-8a1 1 0 0 0-.714 1.7.75.75 0 1 1-1.072 1.05A2.495 2.495 0 0 1 2 11.5Zm10.5-1h-8a1 1 0 0 0-1 1v6.708A2.486 2.486 0 0 1 4.5 9h8ZM5 12.25a.25.25 0 0 1 .25-.25h3.5a.25.25 0 0 1 .25.25v3.25a.25.25 0 0 1-.4.2l-1.45-1.087a.249.249 0 0 0-.3 0L5.4 15.7a.25.25 0 0 1-.4-.2Z"/></svg>
+                Per-Stem Comparison
+            </div>
+            <div class="charts-grid">%s</div>
+        </div>
+`, body.String())
 }
 
 func abs(x float64) float64 {
@@ -520,6 +682,9 @@ func generateHTML(data *ReportData) string {
 	// Encode chart images
 	chartFrequencyData := encodeImageBase64(data.ChartFrequencyPath)
 	chartSimilarityData := encodeImageBase64(data.ChartSimilarityPath)
+	if e := editabilityOf(data.Comparison); e != "" && e != "pass" {
+		chartSimilarityData = "" // a replay run's similarity gauge is a replay score too
+	}
 	chartSpecOrigData := encodeImageBase64(data.ChartSpecOrigPath)
 	chartSpecRendData := encodeImageBase64(data.ChartSpecRendPath)
 	chartChromaOrigData := encodeImageBase64(data.ChartChromaOrigPath)
@@ -695,6 +860,8 @@ func generateHTML(data *ReportData) string {
 
         %s
 
+        %s
+
         <div class="card">
             <div class="card-title">
                 <svg viewBox="0 0 16 16"><path d="M0 1.75C0 .784.784 0 1.75 0h12.5C15.216 0 16 .784 16 1.75v12.5A1.75 1.75 0 0 1 14.25 16H1.75A1.75 1.75 0 0 1 0 14.25Z"/></svg>
@@ -794,6 +961,7 @@ func generateHTML(data *ReportData) string {
 		html.EscapeString(style),              // stat
 		generateChartsHTML(data.Comparison),   // charts HTML
 		generateAIAnalysisCard(data.AIParams), // AI analysis card
+		generateStemComparisonHTML(data.StemComparison, editabilityOf(data.Comparison)), // per-stem card
 		chartsSection,                         // visual charts
 		html.EscapeString(data.StrudelCode),   // code block
 		time.Now().Format("2006-01-02 15:04"), // footer time

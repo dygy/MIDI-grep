@@ -82,29 +82,83 @@ def clean_track_name(folder_name):
         return re.sub(r'\s*\[[^\]]+\]$', '', folder_name)
     return folder_name
 
+EDITABILITY_BADGE_TEXT = "REPLAY / UNVERIFIED — not a deliverable"
+STEM_SECTION_CAPTION = (
+    "stems obtained by demucs re-separation of the rendered mix "
+    "(lossy, not a true stem-match view)"
+)
+
+
+def generate_editability_badge_html(generation_mode, violations):
+    """Red badge shown instead of a similarity headline when editability != pass."""
+    mode = html.escape(str(generation_mode or 'unknown'))
+    items = ''.join(
+        f'<li style="margin: 0.15rem 0;">{html.escape(str(v))}</li>' for v in (violations or [])
+    )
+    violations_html = (
+        f'<ul style="text-align: left; display: inline-block; margin: 0.75rem auto 0; '
+        f'padding-left: 1.25rem; color: var(--text-secondary); font-size: 0.85rem;">{items}</ul>'
+        if items else ''
+    )
+    return f'''
+        <div class="editability-badge" style="text-align: center; margin-bottom: 1.5rem;">
+            <div style="display: inline-block; padding: 0.6rem 1.2rem; border-radius: 6px;
+                        background: #f85149; color: #fff; font-weight: 700; letter-spacing: 0.04em;">
+                {EDITABILITY_BADGE_TEXT}
+            </div>
+            <div style="margin-top: 0.5rem; color: var(--text-secondary);">mode: {mode} · editable: fail</div>
+            {violations_html}
+        </div>
+    '''
+
+
 def generate_charts_html(comparison_results):
     """Generate HTML charts from comparison JSON data - pure HTML/CSS, no images."""
     if not comparison_results:
         return '<div class="no-data" style="margin-top: 1rem;">No comparison data available (render audio first)</div>'
 
-    comp = comparison_results.get('comparison', {})
-    orig = comparison_results.get('original', {})
-    rend = comparison_results.get('rendered', {})
+    # `comparison` is null on a run the editability detector rejected (spec 003 §2.2-C).
+    comp = comparison_results.get('comparison') or {}
+    orig = comparison_results.get('original') or {}
+    rend = comparison_results.get('rendered') or {}
 
     html_parts = []
 
-    # Overall similarity score
-    overall = comp.get('overall_similarity', 0) * 100
-    overall_color = '#3fb950' if overall >= 70 else '#d29922' if overall >= 50 else '#f85149'
-    html_parts.append(f'''
-        <div style="text-align: center; margin-bottom: 1.5rem;">
+    # Editability verdict (spec 003 §2.2-F). Keys are absent on pre-spec-003 runs.
+    editability = comparison_results.get('editability')
+    generation_mode = comparison_results.get('generation_mode') or 'unknown'
+    violations = comparison_results.get('editability_violations') or []
+    is_replay = 'editability' in comparison_results and editability != 'pass'
+
+    if is_replay:
+        # A replay / unverified run never gets a similarity score — badge instead.
+        html_parts.append(generate_editability_badge_html(generation_mode, violations))
+        if not orig and not rend:
+            return f'<div class="charts-grid">{"".join(html_parts)}</div>'
+    else:
+        # Overall similarity score
+        overall = comp.get('overall_similarity', 0) * 100
+        overall_color = '#3fb950' if overall >= 70 else '#d29922' if overall >= 50 else '#f85149'
+        if editability == 'pass':
+            verdict_line = (
+                f'<div class="editability-verdict" style="margin-top: 0.25rem; font-weight: 600; color: #3fb950;">'
+                f'{overall:.0f}% — mode: {html.escape(str(generation_mode))} · editable: pass</div>'
+            )
+        else:
+            verdict_line = (
+                '<div class="editability-verdict" style="margin-top: 0.25rem; font-size: 0.8rem; color: var(--text-secondary);">'
+                'editability: not checked (pre-spec-003 run)</div>'
+            )
+        html_parts.append(f'''
+        <div class="overall-headline" style="text-align: center; margin-bottom: 1.5rem;">
             <div style="font-size: 3rem; font-weight: bold; color: {overall_color};">{overall:.0f}%</div>
             <div style="color: var(--text-secondary);">Overall Similarity</div>
+            {verdict_line}
         </div>
     ''')
 
-    # Similarity scores table
-    metrics = [
+    # Similarity scores table (withheld for a replay run — it is not a deliverable's score)
+    metrics = [] if is_replay else [
         ('Timbre (MFCC)', 'mfcc_similarity'),
         ('Harmony (Chroma)', 'chroma_similarity'),
         ('Brightness', 'brightness_similarity'),
@@ -130,7 +184,8 @@ def generate_charts_html(comparison_results):
             </tr>
         '''
 
-    html_parts.append(f'''
+    if metrics:
+        html_parts.append(f'''
         <div class="chart-item" style="padding: 1rem;">
             <h4 style="margin-bottom: 1rem; color: var(--text-primary);">Similarity Scores</h4>
             <table style="width: 100%; border-collapse: collapse;">{rows}</table>
@@ -510,12 +565,26 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
     '''
 
 
-def generate_stem_comparison_html(stem_results, stem_charts):
-    """Generate per-stem comparison HTML section."""
+def generate_stem_comparison_html(stem_results, stem_charts, editability=None):
+    """Generate per-stem comparison HTML section.
+
+    `editability` is the top-level verdict from comparison.json (None on legacy runs). A
+    replay / unverified run gets the caption and a "scores withheld" note, never numbers.
+    """
     if not stem_results:
         return ''
 
-    html_parts = []
+    html_parts = [
+        f'<div class="full-width" style="font-size: 0.8rem; color: var(--text-secondary); '
+        f'margin-bottom: 0.75rem;">{STEM_SECTION_CAPTION}</div>'
+    ]
+
+    if editability is not None and editability != 'pass':
+        html_parts.append(
+            f'<div class="no-data full-width">per-stem scores withheld — editability: '
+            f'{html.escape(str(editability))} (replay / unverified run, not a deliverable)</div>'
+        )
+        return _wrap_stem_card(html_parts)
     aggregate = stem_results.get('aggregate', {})
     per_stem = aggregate.get('per_stem', {})
     worst_sections = aggregate.get('worst_sections', [])
@@ -637,6 +706,11 @@ def generate_stem_comparison_html(stem_results, stem_charts):
             </div>
         ''')
 
+    return _wrap_stem_card(html_parts)
+
+
+def _wrap_stem_card(html_parts):
+    """Card wrapper for the per-stem comparison section."""
     return f'''
         <div class="card">
             <div class="card-title">
@@ -1224,13 +1298,17 @@ def generate_report(cache_dir, version_dir, output_path=None, iterations_file=No
     chart_waveform_data = encode_image_base64(str(chart_waveform)) if chart_waveform.exists() else None
     chart_onset_data = encode_image_base64(str(chart_onset)) if chart_onset.exists() else None
     chart_mfcc_data = encode_image_base64(str(chart_mfcc)) if chart_mfcc.exists() else None
-    has_individual_charts = any([chart_frequency_data, chart_similarity_data])
-
     # Load comparison results JSON for HTML charts
     comparison_results = None
     if comparison_json_path.exists():
         with open(comparison_json_path) as f:
             comparison_results = json.load(f)
+
+    # A replay / unverified run's similarity gauge image is a replay score too (spec 003 §2.2-F)
+    run_editability = (comparison_results or {}).get('editability')
+    if run_editability is not None and run_editability != 'pass':
+        chart_similarity_data = None
+    has_individual_charts = any([chart_frequency_data, chart_similarity_data])
 
     # Load per-stem comparison results
     stem_comparison_results = None
@@ -2035,7 +2113,8 @@ def generate_report(cache_dir, version_dir, output_path=None, iterations_file=No
 
         {generate_ai_analysis_card(ai_params)}
 
-        {generate_stem_comparison_html(stem_comparison_results, stem_charts)}
+        {generate_stem_comparison_html(stem_comparison_results, stem_charts,
+                                       (comparison_results or {}).get('editability'))}
 
         {generate_iteration_progression_html(iterations_data) if iterations_data else ''}
 

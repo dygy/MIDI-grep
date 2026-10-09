@@ -1,6 +1,9 @@
+# @layer: unit
+# @spec: 003-editable-strudel-generation
+# @regression
 """Eval gate tests for MIDI-grep similarity.
 
-Two layers:
+Two layers (plus the spec-003 per-mode / editability layer, 1c):
 
 1. Gate-logic tests — synthetic comparison dicts exercise eval/gate.py directly. These always
    run and prove the gate enforces floors + the worst-band guardrail.
@@ -169,6 +172,175 @@ def test_section_aware_from_aggregate_dict(tmp_path):
     assert res.passed, res.message
     assert res.section_aware_similarity == pytest.approx(0.60)
     assert res.section_aware_passed is True
+
+
+# ---------------------------------------------------------------------------
+# Layer 1c: spec 003 — per-mode floors + editability short-circuit (synthetic, always run)
+# ---------------------------------------------------------------------------
+
+from eval.gate import (  # noqa: E402
+    GateResult,
+    resolve_floor,
+    section_aware_floor_for_genre,
+)
+from eval.gate import main as gate_main  # noqa: E402
+
+
+def _mode_thresholds() -> dict:
+    """A thresholds dict with a MEASURED per-mode block for one genre only. Values are
+    synthetic test data — never copied into eval/thresholds.yaml (floors there are measured)."""
+    return {
+        "default": 0.55,
+        "genres": {"brazilian_funk": 0.62, "electro_swing": 0.60},
+        "max_worst_band_diff": 0.30,
+        "section_aware": {"default": 0.45, "genres": {"brazilian_funk": 0.50}},
+        "modes": {
+            "sample_instrument": {
+                "genres": {"brazilian_funk": 0.80},
+                "section_aware": {"brazilian_funk": 0.70},
+                "measured": {"brazilian_funk": {"overall": 0.83, "section_aware": 0.73, "run": "x/v001"}},
+            },
+            # synth: block present but EMPTY (the shape thresholds.yaml ships before measurement)
+            "synth": {"genres": None, "section_aware": None, "measured": None},
+        },
+    }
+
+
+def test_floor_prefers_mode_block_when_present():
+    th = _mode_thresholds()
+    assert floor_for_genre("brazilian_funk", th, mode="sample-instrument") == pytest.approx(0.80)
+    # mode key normalisation: dash/underscore/case are equivalent
+    assert floor_for_genre("brazilian_funk", th, mode="Sample_Instrument") == pytest.approx(0.80)
+    assert resolve_floor("brazilian_funk", th, mode="sample-instrument") == (0.80, "modes.sample_instrument")
+
+
+def test_floor_falls_back_to_genre_when_mode_has_no_entry():
+    th = _mode_thresholds()
+    # genre not measured for this mode → genre-wide floor
+    assert floor_for_genre("electro_swing", th, mode="sample-instrument") == pytest.approx(0.60)
+    assert resolve_floor("electro_swing", th, mode="sample-instrument")[1] == "genres"
+    # mode block present but empty (synth before measurement) → genre-wide floor
+    assert floor_for_genre("brazilian_funk", th, mode="synth") == pytest.approx(0.62)
+    # unknown mode / no mode → unchanged legacy behaviour
+    assert floor_for_genre("brazilian_funk", th, mode="made_up") == pytest.approx(0.62)
+    assert floor_for_genre("brazilian_funk", th) == pytest.approx(0.62)
+    assert floor_for_genre("unlisted", th, mode="sample-instrument") == pytest.approx(0.55)
+
+
+def test_section_aware_floor_prefers_mode_block_then_falls_back():
+    th = _mode_thresholds()
+    assert section_aware_floor_for_genre("brazilian_funk", th, mode="sample-instrument") == pytest.approx(0.70)
+    assert section_aware_floor_for_genre("brazilian_funk", th, mode="synth") == pytest.approx(0.50)
+    assert section_aware_floor_for_genre("brazilian_funk", th) == pytest.approx(0.50)
+    assert section_aware_floor_for_genre("electro_swing", th, mode="sample-instrument") == pytest.approx(0.45)
+
+
+def test_shipped_thresholds_have_modes_shape_with_no_guessed_values():
+    """eval/thresholds.yaml ships the modes: block STRUCTURE only — a floor appears there only
+    after a detector-passing render is measured (Slice 4). Guard against typed guesses."""
+    modes = THRESHOLDS.get("modes")
+    assert isinstance(modes, dict) and set(modes) >= {"sample_instrument", "synth"}
+    for mode_name, block in modes.items():
+        block = block or {}
+        assert set(block) <= {"genres", "section_aware", "measured"}, mode_name
+        floors = block.get("genres") or {}
+        measured = block.get("measured") or {}
+        for genre_key in floors:
+            assert genre_key in measured, (
+                f"modes.{mode_name}.genres.{genre_key} has a floor with no measured: entry — "
+                "floors must come from a real run, never a guess"
+            )
+        # every measured floor must be reproducible: floor == measured.overall − margin, with the run named
+        for genre_key, floor in floors.items():
+            m = measured[genre_key]
+            assert {"overall", "run", "margin"} <= set(m), f"modes.{mode_name}.measured.{genre_key} incomplete"
+            assert floor == pytest.approx(round(m["overall"] - m["margin"], 2), abs=1e-9), (
+                f"modes.{mode_name}.genres.{genre_key}={floor} is not measured.overall − margin"
+            )
+            if "section_aware" in (block.get("section_aware") or {}):
+                assert block["section_aware"][genre_key] == pytest.approx(
+                    round(m["section_aware"] - m["margin"], 2), abs=1e-9)
+    # a measured mode floor is what the mode lookup returns; an unmeasured mode falls back to the genre floor
+    si = (modes.get("sample_instrument") or {}).get("genres") or {}
+    expected_si = si.get("brazilian_funk", THRESHOLDS["genres"]["brazilian_funk"])
+    assert floor_for_genre("brazilian_funk", THRESHOLDS, mode="sample-instrument") == expected_si
+    sy = (modes.get("synth") or {}).get("genres") or {}
+    expected_sy = sy.get("brazilian_funk", THRESHOLDS["genres"]["brazilian_funk"])
+    assert floor_for_genre("brazilian_funk", THRESHOLDS, mode="synth") == expected_sy
+
+
+def test_evaluate_reads_generation_mode_from_json_and_uses_mode_floor(tmp_path):
+    th = _mode_thresholds()
+    p = tmp_path / "comparison.json"
+    # 0.70 clears the genre floor (0.62) but NOT the measured sample-instrument floor (0.80)
+    p.write_text(json.dumps({
+        "generation_mode": "sample-instrument",
+        "editability": "pass",
+        "editability_violations": [],
+        "comparison": {"overall_similarity": 0.70, "worst_band_diff": 5.0},
+    }))
+    res = evaluate_comparison(p, genre="brazilian_funk", thresholds=th)
+    assert res.mode == "sample-instrument"
+    assert res.editability == "pass"
+    assert res.floor == pytest.approx(0.80)
+    assert res.floor_source == "modes.sample_instrument"
+    assert not res.passed and "floor 0.800" in res.message
+    # explicit mode= overrides the JSON key: synth has no measured floor → genre floor → pass
+    res2 = evaluate_comparison(p, genre="brazilian_funk", thresholds=th, mode="synth")
+    assert res2.mode == "synth" and res2.floor == pytest.approx(0.62) and res2.passed, res2.message
+
+
+def test_evaluate_fails_on_editability_fail_even_with_high_score(tmp_path):
+    p = tmp_path / "comparison.json"
+    p.write_text(json.dumps({
+        "generation_mode": "sample-instrument",
+        "editability": "fail",
+        "editability_violations": ["R1 line 196 [vocalsfull]: reconstruction-by-playback"],
+        "comparison": {"overall_similarity": 0.95, "worst_band_diff": 2.0},
+    }))
+    res = evaluate_comparison(p, genre="brazilian_funk", thresholds=THRESHOLDS)
+    assert isinstance(res, GateResult)
+    assert not res.passed
+    assert "editability: fail" in res.message
+    assert "vocalsfull" in res.message
+    assert res.editability == "fail" and res.mode == "sample-instrument"
+
+
+def test_evaluate_fails_on_short_circuit_payload_with_null_comparison(tmp_path):
+    """The exact shape compare_audio.py --strudel writes on a detector fail (exit 3)."""
+    p = tmp_path / "comparison.json"
+    p.write_text(json.dumps({
+        "editability": "fail",
+        "generation_mode": "loops",
+        "editability_violations": ["R5: loop-only output"],
+        "comparison": None,
+    }))
+    res = evaluate_comparison(p, genre="brazilian_funk", thresholds=THRESHOLDS)
+    assert not res.passed
+    assert res.message.startswith("FAIL [brazilian_funk] editability: fail")
+    # a bare comparison: null (no editability key) is equally unscoreable
+    p2 = tmp_path / "c2.json"
+    p2.write_text(json.dumps({"comparison": None}))
+    res2 = evaluate_comparison(p2, genre="brazilian_funk", thresholds=THRESHOLDS)
+    assert not res2.passed and "editability: fail" in res2.message
+
+
+def test_legacy_comparison_without_new_keys_is_unchanged(tmp_path):
+    path = _write_comparison(tmp_path, overall=0.90, worst_band_pct=5.0)
+    res = evaluate_comparison(path, genre="brazilian_funk", thresholds=THRESHOLDS)
+    assert res.passed, res.message
+    assert res.mode is None and res.editability is None and res.floor_source == "genres"
+
+
+def test_cli_accepts_mode_and_reports_editability_fail(tmp_path, capsys):
+    p = tmp_path / "comparison.json"
+    p.write_text(json.dumps({"editability": "fail", "editability_violations": ["R1"], "comparison": None}))
+    rc = gate_main([str(p), "--genre", "brazilian_funk", "--mode", "sample-instrument"])
+    out = capsys.readouterr().out
+    assert rc == 1 and "editability: fail" in out
+    ok = tmp_path / "ok.json"
+    ok.write_text(json.dumps({"comparison": {"overall_similarity": 0.9}}))
+    assert gate_main([str(ok), "--genre", "brazilian_funk", "--mode", "synth"]) == 0
 
 
 # ---------------------------------------------------------------------------

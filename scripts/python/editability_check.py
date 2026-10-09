@@ -101,6 +101,8 @@ _R2_MANIFEST = re.compile(r"samples\(\s*[\"'`][^\"'`]*samples_(orig|segs|stems)\
 _SOUND_CALL = re.compile(r"(?<![\w$])(?:\.\s*)?(?:s|sound)\(\s*([\"'`])(.*?)\1", re.S)
 # a BARE s("…")/sound("…") is pattern data (drum hits); a chained .s("…") only picks the instrument
 _SOUND_PATTERN_CALL = re.compile(r"(?<![\w$.])(?:s|sound)\(\s*([\"'`])(.*?)\1", re.S)
+# a bare s(...)/sound(...) whose argument is an expression (e.g. s(cat(...vox)) on a bar array)
+_SOUND_PATTERN_OPEN = re.compile(r"(?<![\w$.])(?:s|sound)\(")
 _NOTE_CALL = re.compile(r"(?<![\w$.])note\(")
 _SPREAD_NAME = re.compile(r"\.\.\.\s*([A-Za-z_$][\w$]*)")
 _LET_ARRAY = re.compile(r"^\s*(?:let|const|var)\s+([A-Za-z_$][\w$]*)\s*=\s*\[", re.M)
@@ -311,6 +313,44 @@ def _sound_tokens(arg: str) -> list[str]:
     return [t for t in _TOKEN.findall(cleaned)]
 
 
+def _array_literal_tokens(stripped: str) -> dict[str, list[str]]:
+    """``let name = ["a ~ b", "c"]`` → {name: [a, b, c]}: the mini-notation tokens inside each
+    declared bar array's string literals (what a ``s(cat(...name))`` voice actually plays)."""
+    out: dict[str, list[str]] = {}
+    for m in _LET_ARRAY.finditer(stripped):
+        open_idx = stripped.index("[", m.end() - 1)
+        close = _matching_bracket(stripped, open_idx)
+        body = stripped[open_idx + 1 : close] if close > 0 else stripped[open_idx + 1 :]
+        toks: list[str] = []
+        for lit in _STRING_LITERAL.finditer(body):
+            toks.extend(_sound_tokens(lit.group(2)))
+        out[m.group(1)] = toks
+    return out
+
+
+def _matching_bracket(text: str, open_idx: int) -> int:
+    depth = 0
+    i = open_idx
+    in_str: str | None = None
+    while i < len(text):
+        c = text[i]
+        if in_str:
+            if c == "\\":
+                i += 1
+            elif c == in_str:
+                in_str = None
+        elif c in "\"'`":
+            in_str = c
+        elif c == "[":
+            depth += 1
+        elif c == "]":
+            depth -= 1
+            if depth == 0:
+                return i
+        i += 1
+    return -1
+
+
 # ── voice classification ──────────────────────────────────────────────────────────────────
 def _classify_voice(
     idx: int,
@@ -319,10 +359,12 @@ def _classify_voice(
     line_end: int,
     declared_arrays: set[str],
     marker_lines: set[int],
+    array_tokens: dict[str, list[str]] | None = None,
 ) -> VoiceInfo:
     reasons: list[str] = []
     sounds: list[str] = []
     replay = False
+    array_tokens = array_tokens or {}
 
     m = _R1_SLICE_RUN_SLOW.search(text)
     if m:
@@ -350,8 +392,27 @@ def _classify_voice(
             n in declared_arrays for n in _SPREAD_NAME.findall(note_arg)
         )
     pattern_sounds = [t for pm in _SOUND_PATTERN_CALL.finditer(text) for t in _sound_tokens(pm.group(2))]
+    # R3 mirror of the note(cat(...arr)) rule: a bare s(...) fed by a declared bar array of
+    # one-shot names (the chops voice `s(cat(...vox))`). The array literal's tokens are the
+    # pattern data, so they take the same R2 replay-name screening as a string literal would.
+    sound_arrays: list[str] = []
+    for om in _SOUND_PATTERN_OPEN.finditer(text):
+        close = _matching_paren(text, om.end() - 1)
+        s_arg = text[om.end() : close] if close > 0 else text[om.end() :]
+        if _STRING_LITERAL.search(s_arg):
+            continue  # literal form, handled by _SOUND_PATTERN_CALL above
+        for n in _SPREAD_NAME.findall(s_arg):
+            if n in declared_arrays and n not in sound_arrays:
+                sound_arrays.append(n)
+    for n in sound_arrays:
+        for tok in array_tokens.get(n, []):
+            pattern_sounds.append(tok)
+            sounds.append(tok)
+            if _R2_REPLAY_NAME.match(tok):
+                replay = True
+                reasons.append(f"R2 full-stem/loop sample `{tok}` in bar array {n}")
     has_oneshot_sound = bool(pattern_sounds) and not any(_R2_REPLAY_NAME.match(t) for t in pattern_sounds)
-    has_sound_call = bool(_SOUND_PATTERN_CALL.search(text))
+    has_sound_call = bool(_SOUND_PATTERN_CALL.search(text)) or bool(sound_arrays)
 
     label = arrays[0] if arrays else (sounds[0] if sounds else f"voice{idx}")
     snippet = " ".join(text.split())
@@ -365,7 +426,9 @@ def _classify_voice(
         reasons.append("R3 note() fed by " + ("bar array " + ",".join(arrays) if arrays else "mini-notation"))
     elif has_oneshot_sound or (has_sound_call and not pattern_sounds):
         kind = "editable"
-        reasons.append("R3 s() one-shot pattern" + (f" ({', '.join(dict.fromkeys(pattern_sounds))})" if pattern_sounds else " (rests only)"))
+        fed = f" fed by bar array {','.join(sound_arrays)}" if sound_arrays else ""
+        reasons.append("R3 s() one-shot pattern" + fed
+                       + (f" ({', '.join(dict.fromkeys(pattern_sounds))})" if pattern_sounds else " (rests only)"))
     else:
         kind = "unclassified"
         reasons.append("no note()/s() pattern data found")
@@ -423,6 +486,7 @@ def check_editability(code: str, *, mode_hint: str | None = None) -> Editability
         raise ParseError("no statements found")
 
     declared_arrays = set(_LET_ARRAY.findall(stripped))
+    array_tokens = _array_literal_tokens(stripped)
     details: list[Violation] = []
     voices: list[VoiceInfo] = []
     has_samples_load = bool(_SAMPLES_LOAD.search(stripped))
@@ -442,7 +506,7 @@ def check_editability(code: str, *, mode_hint: str | None = None) -> Editability
                 continue
         for v_text, l0, l1 in _voices_from_statement(s_off + (len(s_text) - len(head)), head, stripped):
             idx += 1
-            voices.append(_classify_voice(idx, v_text, l0, l1, declared_arrays, marker_lines))
+            voices.append(_classify_voice(idx, v_text, l0, l1, declared_arrays, marker_lines, array_tokens))
 
     editable = [v for v in voices if v.kind == "editable"]
     texture = [v for v in voices if v.kind == "texture"]

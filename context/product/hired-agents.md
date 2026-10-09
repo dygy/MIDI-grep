@@ -40,7 +40,7 @@ orchestrator's copy of the AWOS registry agent, with this project's pytest skill
 | pytest acceptance tests (`scripts/python/tests/`) | `testing-expert` | ✅ Covered | testing-expert |
 | Playwright MCP browser checks for `serve` | `testing-expert` | ✅ Covered — `verify-ui` 1.0.0 installed from the registry and bound | testing-expert |
 | GitHub Actions CI (`.github/workflows/ci.yml`: go / node / python / hooks jobs) | `infra` | ⚠️ Partial — workflow added 2026-10-09, `gha-diagnosis` skill installed for red runs; no agent owns infra | — |
-| Docker image | `infra` | ❌ Missing — Dockerfile is broken (Go 1.21 base, no yt-dlp/Node/demucs) and cannot host the macOS-only render path | — |
+| Docker image | — | ➖ Retired 2026-10-09 — Dockerfile deleted (see architecture.md §4); CI proves Linux buildability | — |
 
 ## Registered Specialist Subagents
 
@@ -77,9 +77,9 @@ registry.
   `typescript-development`.
 - **UI verification.** `verify-ui` is now installed and bound to `testing-expert`, but `serve` has
   not yet been driven through it — the first web-UI change should.
-- **Infra.** CI now exists (`.github/workflows/ci.yml`) but is unowned; the Dockerfile is still
-  broken. Decide whether Docker is a goal at all (BlackHole rendering is macOS-only, so a container
-  can never run the headline path).
+- **Infra.** CI now exists (`.github/workflows/ci.yml`) but no agent owns it; Docker was retired
+  (decision 2026-10-09, architecture.md §4) because a container can never run the macOS-only
+  render path and the image had been broken since Feb 2026.
 - **Registry hooks.** Searched 2026-10-09; the registry returned none. The project's own hooks
   (`branch-current.sh`, `docs-freshness.sh`) and the CI `go vet`/`gofmt`/pytest jobs cover the
   format-and-test guardrail instead.

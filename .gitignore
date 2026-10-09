@@ -67,3 +67,6 @@ training_data/
 # Delivery-flow working evidence (local AI review files, UI verification screenshots)
 review/
 docs/screenshots/
+
+# wrangler CLI scratch (created by R2 probes)
+.wrangler/

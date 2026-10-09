@@ -5,6 +5,14 @@ Reads `eval/thresholds.yaml` (per-genre regression floors) and evaluates a
 for its genre. Code-authoritative: callers (pytest, CI, the iteration loop) decide
 pass/fail from `GateResult.passed`, independent of any dashboard.
 
+Spec 003 (editable Strudel) additions:
+  * per-mode floors — `modes.<mode>.genres.<genre>` / `modes.<mode>.section_aware.<genre>`
+    are preferred when present, otherwise the genre-wide `genres.<genre>` /
+    `section_aware.genres.<genre>` lookup is used (and then `default`).
+  * the gate FAILS with reason `editability: fail` when the comparison.json carries
+    `editability: "fail"` or `comparison: null` (compare_audio.py --strudel short-circuit).
+  * `GateResult.mode` / `.editability` / `.floor_source` report what was resolved.
+
 Usage (library):
     from eval.gate import load_thresholds, evaluate_comparison
     th = load_thresholds()
@@ -12,7 +20,7 @@ Usage (library):
     assert res.passed, res.message
 
 Usage (CLI):
-    python eval/gate.py path/to/comparison.json --genre electro_swing
+    python eval/gate.py path/to/comparison.json --genre electro_swing [--mode sample-instrument]
 """
 from __future__ import annotations
 
@@ -45,6 +53,12 @@ class GateResult:
     section_aware_similarity: float | None = None
     section_aware_floor: float | None = None
     section_aware_passed: bool | None = None
+    # Spec 003: generation mode the floor was resolved for, the editability verdict carried
+    # by the comparison.json (None for legacy files), and where the floor came from
+    # ("modes.<mode>" or "genres").
+    mode: str | None = None
+    editability: str | None = None
+    floor_source: str | None = None
 
 
 def load_thresholds(path: str | Path = THRESHOLDS_PATH) -> dict[str, Any]:
@@ -58,15 +72,45 @@ def load_thresholds(path: str | Path = THRESHOLDS_PATH) -> dict[str, Any]:
         return yaml.safe_load(f)
 
 
-def floor_for_genre(genre: str | None, thresholds: dict[str, Any]) -> float:
-    """Return the similarity floor for a genre, falling back to the default."""
+def _norm_key(value: str | None) -> str | None:
+    """Normalise a genre/mode key: lower-case, spaces/dashes -> underscores."""
+    if not value:
+        return None
+    return value.strip().lower().replace("-", "_").replace(" ", "_")
+
+
+def _mode_block(thresholds: dict[str, Any], mode: str | None) -> dict[str, Any]:
+    """Return `modes.<mode>` (normalised key) or {} when absent / empty."""
+    mkey = _norm_key(mode)
+    if not mkey:
+        return {}
+    modes = thresholds.get("modes") or {}
+    return modes.get(mkey) or {}
+
+
+def resolve_floor(
+    genre: str | None, thresholds: dict[str, Any], mode: str | None = None
+) -> tuple[float, str]:
+    """Return (floor, source) — source is "modes.<mode>" when a per-mode floor exists for
+    the genre, else "genres" (the genre-wide lookup, which itself falls back to `default`)."""
     default = float(thresholds.get("default", 0.55))
-    if not genre:
-        return default
-    genres = thresholds.get("genres", {}) or {}
-    # Normalise: lower-case, spaces/dashes -> underscores.
-    key = genre.strip().lower().replace("-", "_").replace(" ", "_")
-    return float(genres.get(key, default))
+    key = _norm_key(genre)
+    if key:
+        mode_genres = _mode_block(thresholds, mode).get("genres") or {}
+        if mode_genres.get(key) is not None:
+            return float(mode_genres[key]), f"modes.{_norm_key(mode)}"
+        genres = thresholds.get("genres", {}) or {}
+        return float(genres.get(key, default)), "genres"
+    return default, "genres"
+
+
+def floor_for_genre(
+    genre: str | None, thresholds: dict[str, Any], mode: str | None = None
+) -> float:
+    """Return the similarity floor for a genre, preferring `modes.<mode>.genres.<genre>`
+    when `mode` is given and a measured per-mode floor exists, else the genre-wide floor,
+    else the default."""
+    return resolve_floor(genre, thresholds, mode)[0]
 
 
 def _read_similarity(
@@ -83,8 +127,8 @@ def _read_similarity(
       - aggregate.section_aware_similarity   (per-stem mode, compare_stems())
     Returns None when the field is absent (old comparison dicts).
     """
-    comp = comparison.get("comparison", {})
-    agg = comparison.get("aggregate", {})
+    comp = comparison.get("comparison") or {}
+    agg = comparison.get("aggregate") or {}
     if "overall_similarity" in comp:
         similarity = float(comp["overall_similarity"])
     elif "weighted_overall" in agg:
@@ -104,16 +148,24 @@ def _read_similarity(
     return similarity, worst_frac, section_aware
 
 
-def section_aware_floor_for_genre(genre: str | None, thresholds: dict[str, Any]) -> float | None:
-    """Return the optional section_aware_floor for a genre (or the global one).
+def section_aware_floor_for_genre(
+    genre: str | None, thresholds: dict[str, Any], mode: str | None = None
+) -> float | None:
+    """Return the optional section_aware floor for a genre (or the global one).
 
+    Lookup order: `modes.<mode>.section_aware.<genre>` (when `mode` is given and the
+    value exists) → `section_aware.genres.<genre>` → `section_aware.default`.
     Returns None when no section_aware floor is configured at all, so callers can
     skip the check for backward compatibility.
     """
+    key = _norm_key(genre)
+    if key:
+        mode_sa = _mode_block(thresholds, mode).get("section_aware") or {}
+        if mode_sa.get(key) is not None:
+            return float(mode_sa[key])
     sa = thresholds.get("section_aware", {}) or {}
     # Check per-genre first
-    if genre:
-        key = genre.strip().lower().replace("-", "_").replace(" ", "_")
+    if key:
         genres_sa = sa.get("genres", {}) or {}
         if key in genres_sa:
             return float(genres_sa[key])
@@ -122,12 +174,27 @@ def section_aware_floor_for_genre(genre: str | None, thresholds: dict[str, Any])
     return float(default_sa) if default_sa is not None else None
 
 
+def _editability_failed(data: dict[str, Any]) -> bool:
+    """True when the comparison.json says the output is not scoreable (spec 003):
+    an explicit `editability: "fail"`, or the short-circuit shape `comparison: null`."""
+    if data.get("editability") == "fail":
+        return True
+    return "comparison" in data and data["comparison"] is None
+
+
 def evaluate_comparison(
     comparison_path: str | Path,
     genre: str | None,
     thresholds: dict[str, Any] | None = None,
+    mode: str | None = None,
 ) -> GateResult:
     """Evaluate one comparison.json against the genre floor and worst-band guardrail.
+
+    `mode` selects the per-mode floor block (`modes.<mode>`); when not passed it is read
+    from the comparison.json `generation_mode` key (absent on legacy files → genre-wide
+    floors). A comparison.json stamped `editability: "fail"` (or written by the
+    compare_audio.py --strudel short-circuit with `comparison: null`) FAILS the gate
+    outright with reason `editability: fail` — no similarity is read.
 
     Also performs an OPTIONAL section-aware check when:
       - the comparison dict contains section_aware_similarity (produced by compare_audio.py
@@ -140,10 +207,32 @@ def evaluate_comparison(
     """
     thresholds = thresholds or load_thresholds()
     data = json.loads(Path(comparison_path).read_text())
-    similarity, worst_frac, section_aware = _read_similarity(data)
-    floor = floor_for_genre(genre, thresholds)
+    if mode is None:
+        mode = data.get("generation_mode")
+    editability = data.get("editability")
+    floor, floor_source = resolve_floor(genre, thresholds, mode)
     max_worst = thresholds.get("max_worst_band_diff")
-    sa_floor = section_aware_floor_for_genre(genre, thresholds)
+    sa_floor = section_aware_floor_for_genre(genre, thresholds, mode)
+    g = genre or "default"
+
+    if _editability_failed(data):
+        violations = data.get("editability_violations") or []
+        msg = f"FAIL [{g}] editability: fail"
+        if violations:
+            msg += " (" + "; ".join(str(v) for v in violations) + ")"
+        return GateResult(
+            passed=False,
+            genre=g,
+            similarity=0.0,
+            floor=floor,
+            worst_band_diff=None,
+            message=msg,
+            mode=mode,
+            editability="fail",
+            floor_source=floor_source,
+        )
+
+    similarity, worst_frac, section_aware = _read_similarity(data)
 
     reasons: list[str] = []
     passed = True
@@ -166,15 +255,17 @@ def evaluate_comparison(
                 f"section_aware_similarity {section_aware:.3f} < section_aware_floor {sa_floor:.3f}"
             )
 
-    g = genre or "default"
+    tag = f"[{g}]" if not mode else f"[{g}/{mode}]"
     if passed:
-        msg = f"PASS [{g}] similarity {similarity:.3f} >= floor {floor:.3f}"
+        msg = f"PASS {tag} similarity {similarity:.3f} >= floor {floor:.3f}"
         if worst_frac is not None:
             msg += f" (worst band {worst_frac:.2%})"
         if section_aware is not None and sa_floor is not None:
             msg += f"; section_aware {section_aware:.3f} >= sa_floor {sa_floor:.3f}"
     else:
-        msg = f"FAIL [{g}] " + "; ".join(reasons)
+        msg = f"FAIL {tag} " + "; ".join(reasons)
+    if editability:
+        msg += f"; editability: {editability}"
     return GateResult(
         passed=passed,
         genre=g,
@@ -185,6 +276,9 @@ def evaluate_comparison(
         section_aware_similarity=section_aware,
         section_aware_floor=sa_floor,
         section_aware_passed=sa_passed,
+        mode=mode,
+        editability=editability,
+        floor_source=floor_source,
     )
 
 
@@ -192,9 +286,14 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="MIDI-grep similarity eval gate")
     ap.add_argument("comparison_json", help="path to a comparison.json from compare_audio.py")
     ap.add_argument("--genre", default=None, help="genre key (e.g. electro_swing)")
+    ap.add_argument("--mode", default=None,
+                    help="generation mode for per-mode floors (sample-instrument | synth); "
+                         "defaults to the comparison.json generation_mode key")
     ap.add_argument("--thresholds", default=str(THRESHOLDS_PATH))
     args = ap.parse_args(argv)
-    res = evaluate_comparison(args.comparison_json, args.genre, load_thresholds(args.thresholds))
+    res = evaluate_comparison(
+        args.comparison_json, args.genre, load_thresholds(args.thresholds), mode=args.mode
+    )
     print(res.message)
     return 0 if res.passed else 1
 

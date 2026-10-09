@@ -10,7 +10,7 @@
 # pack and code work in both.
 #
 # Usage:
-#   scripts/sample-pipeline.sh --url "https://youtu.be/ID" --prefix myid [--mode loops] --local
+#   scripts/sample-pipeline.sh --url "https://youtu.be/ID" --prefix myid [--mode instrument|loops|hybrid] --local
 #   scripts/sample-pipeline.sh --stems-dir ".cache/stems/<name>" --prefix myid --r2
 #
 # Local mode needs: BlackHole 2ch + scripts/node deps (npm install) for rendering.
@@ -20,7 +20,7 @@ set -euo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PY="$ROOT/scripts/python/.venv/bin/python"
-URL=""; STEMS_DIR=""; PREFIX=""; MODE="loops"; TARGET="local"; PORT="5555"; BPM=""
+URL=""; STEMS_DIR=""; PREFIX=""; MODE="instrument"; TARGET="local"; PORT="5555"; BPM=""
 
 while [[ $# -gt 0 ]]; do
   case "$1" in

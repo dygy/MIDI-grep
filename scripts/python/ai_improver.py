@@ -29,6 +29,33 @@ except ImportError:
     def apply_sidechain_to_code(code, depth, **kw):
         return code
 
+# Spec 003 replay detector: runs on every candidate BEFORE the BlackHole render. A failing
+# candidate is never rendered/compared and can never become `best`. Resilient import — a
+# missing module disables the check (reported as editability None) rather than breaking a run.
+try:
+    from editability_check import check_editability, to_json_fields, ParseError as _EditParseError
+    HAS_EDITABILITY = True
+except ImportError:
+    HAS_EDITABILITY = False
+
+
+def _editability_fields(code: str) -> Optional[Dict[str, Any]]:
+    """Detector verdict for `code` as the five comparison.json/metadata.json keys, or None when
+    the detector is unavailable. Parse errors are reported fail-closed (`editability: "fail"`)."""
+    if not HAS_EDITABILITY:
+        return None
+    try:
+        return to_json_fields(check_editability(code))
+    except _EditParseError as e:
+        return {
+            "editability": "fail",
+            "generation_mode": None,
+            "editability_violations": [f"parse error: {e}"],
+            "editable_voice_count": 0,
+            "texture_voice_count": 0,
+        }
+
+
 # ClickHouse connection (kept for backward compat, primary definitions in clickhouse_store.py)
 CLICKHOUSE_BIN = Path(__file__).parent.parent.parent / "bin" / "clickhouse"
 CLICKHOUSE_DB = Path(__file__).parent.parent.parent / ".clickhouse" / "db"
@@ -63,7 +90,7 @@ try:
     _REPO_ROOT = Path(__file__).resolve().parents[2]
     if str(_REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(_REPO_ROOT))
-    from eval.gate import load_thresholds, floor_for_genre, section_aware_floor_for_genre
+    from eval.gate import load_thresholds, floor_for_genre, section_aware_floor_for_genre, resolve_floor
     _GATE_THRESHOLDS = load_thresholds()
     HAS_GATE = True
 except Exception as _gate_exc:  # noqa: BLE001 - any failure just disables the gate
@@ -418,14 +445,28 @@ def improve_strudel(
     # quality bar (genre-aware regression floor) on top of the relative best-tracking logic:
     # once a render clears the floor, any later below-floor render is auto-rejected (reverted),
     # and the final result is reported gate-passed/failed.
-    gate_floor = floor_for_genre(genre, _GATE_THRESHOLDS) if HAS_GATE else None
+    # Spec 003: the generation mode comes from the Strudel header (`// generation_mode:`) via the
+    # detector — it selects the per-mode floor block (`modes.<mode>`) when one is measured, and
+    # is stamped into metadata.json / iterations.json `gate`. Legacy code → genre-wide floors.
+    _initial_edit = _editability_fields(current_code)
+    generation_mode = _initial_edit.get("generation_mode") if _initial_edit else None
+    if HAS_GATE:
+        gate_floor, floor_source = resolve_floor(genre, _GATE_THRESHOLDS, mode=generation_mode)
+    else:
+        gate_floor, floor_source = None, None
     # Section-aware floor (the honest, primary signal — rewards matching the song's evolution,
     # not just its whole-track average). When present, the gate requires BOTH floors.
-    sa_floor = section_aware_floor_for_genre(genre, _GATE_THRESHOLDS) if HAS_GATE else None
+    sa_floor = section_aware_floor_for_genre(genre, _GATE_THRESHOLDS, mode=generation_mode) if HAS_GATE else None
     gate_floor_achieved = False  # flips True once any iteration clears the floor(s)
     if gate_floor is not None:
         sa_txt = f", section-aware {sa_floor*100:.0f}%" if sa_floor is not None else ""
-        print(f"\n--- Eval gate floor for genre '{genre or 'default'}': overall {gate_floor*100:.0f}%{sa_txt} ---")
+        mode_txt = f" mode '{generation_mode}' ({floor_source})" if generation_mode else f" ({floor_source})"
+        print(f"\n--- Eval gate floor for genre '{genre or 'default'}'{mode_txt}: overall {gate_floor*100:.0f}%{sa_txt} ---")
+    if _initial_edit is not None:
+        print(f"--- Editability (spec 003): initial code {_initial_edit['editability'].upper()}"
+              + (f" — {len(_initial_edit['editability_violations'])} violation(s)"
+                 if _initial_edit['editability'] != 'pass' else '') + " ---")
+    best_editability: Optional[Dict[str, Any]] = None  # detector fields of best_code
 
     if 'arrange(' not in current_code:
         if genre:
@@ -579,16 +620,64 @@ def improve_strudel(
         blackhole_recorder = Path(__file__).parent.parent / "node" / "dist" / "record-strudel-blackhole.js"
         iter_duration = exact_duration
 
-        if blackhole_recorder.exists():
-            # Deterministically wire kick-ducks-bass before rendering (idempotent).
-            # Reassign current_code so the persisted best/output carries the duck too.
-            if sidechain_depth > 0:
-                current_code = apply_sidechain_to_code(current_code, sidechain_depth)
-            # Write current code to a temp strudel file for this iteration
-            iter_strudel = Path(output_dir) / f"output_iter_{current_version:03d}.strudel"
-            with open(iter_strudel, 'w') as f:
-                f.write(current_code)
+        # Deterministically wire kick-ducks-bass before rendering (idempotent).
+        # Reassign current_code so the persisted best/output carries the duck too.
+        if sidechain_depth > 0:
+            current_code = apply_sidechain_to_code(current_code, sidechain_depth)
+        # Write current code to a temp strudel file for this iteration (also handed to
+        # compare_audio.py --strudel so the comparison.json carries the editability stamp)
+        iter_strudel = Path(output_dir) / f"output_iter_{current_version:03d}.strudel"
+        with open(iter_strudel, 'w') as f:
+            f.write(current_code)
 
+        # 0. Spec 003 editability contract — BEFORE the render. A replay / non-editable candidate
+        # is recorded as a failed iteration (editability: "fail"), never rendered, never
+        # compared, and can never become `best` (mirrors the last_validation_error skip).
+        edit_fields = _editability_fields(current_code)
+        if edit_fields is not None and edit_fields["editability"] != "pass":
+            violations = edit_fields.get("editability_violations", [])
+            print(f"       ✗ EDITABILITY FAIL ({len(violations)} violation(s)) — not rendering, not scoring:")
+            for v in violations[:6]:
+                print(f"         {v}")
+            iter_data = {
+                "version": current_version,
+                "iteration": iteration + 1,
+                "similarity": 0.0,  # not scored — see editability
+                "code": current_code,
+                "render_path": None,
+                "comparison": {k: 0.0 for k in ("overall", "mfcc", "chroma", "frequency_balance",
+                                                "brightness", "energy", "tempo")},
+                "gate_floor": gate_floor,
+                "gate_passed": False,
+                "phase": "editability",
+                "changes": [f"editability fail: {v}" for v in violations] or ["editability fail"],
+                "was_best": False,
+                "reverted": False,
+                "editability": "fail",
+                "generation_mode": edit_fields.get("generation_mode"),
+                "editability_violations": list(violations),
+            }
+            if agent is not None and hasattr(agent, "messages"):
+                agent.messages.append({"role": "user", "content":
+                    "Your code was REJECTED by the editability contract (it replays the recording "
+                    "instead of playing editable patterns): " + "; ".join(violations[:4]) +
+                    ". Every voice must be a note()/s() pattern over bar arrays or one-shots — "
+                    "no loopAt(), no slice(N, run(N)).slow(N), no *full stem samples."})
+            if best_code and current_code != best_code:
+                print(f"       ↩ reverting to best ({best_similarity*100:.1f}%)")
+                iter_data["reverted"] = True
+                current_code = best_code
+                with open(strudel_path, 'w') as f:
+                    f.write(best_code)
+                iterations_data.append(iter_data)
+                current_version += 1
+                continue
+            iterations_data.append(iter_data)
+            current_version += 1
+            print("       No editable best to fall back to — the loop cannot progress; stopping.")
+            break
+
+        if blackhole_recorder.exists():
             render_cmd = [
                 "node", str(blackhole_recorder),
                 str(iter_strudel),
@@ -627,7 +716,8 @@ def improve_strudel(
                 compare_target,  # instrumental (no vocals) — fair vs our instrumental render
                 str(render_path),
                 "-j",  # Output JSON to stdout
-                "-d", f"{iter_duration:.2f}"
+                "-d", f"{iter_duration:.2f}",
+                "--strudel", str(iter_strudel),  # spec 003: stamp generation_mode + editability
             ]
             if synth_config_path.exists():
                 compare_cmd.extend(["--config", str(synth_config_path)])
@@ -638,6 +728,10 @@ def improve_strudel(
                 comparison = json.loads(compare_result.stdout)
                 with open(comparison_path, 'w') as f:
                     json.dump(comparison, f, indent=2)
+            elif compare_result.returncode == 3:
+                # compare_audio.py's detector disagreed with ours (should not happen — same module)
+                print("       compare_audio.py refused to score: editability fail")
+                comparison = {"comparison": {}, "original": {}, "rendered": {}, "editability": "fail"}
             else:
                 print("       Comparison failed, using initial data")
                 comparison = {"comparison": {}, "original": {}, "rendered": {}}
@@ -693,6 +787,9 @@ def improve_strudel(
             "changes": [],  # Set below
             "was_best": False,  # Set below
             "reverted": False,  # Set below
+            # spec 003: the detector verdict for THIS candidate (pass here — fails never reach this)
+            "editability": edit_fields["editability"] if edit_fields else None,
+            "generation_mode": edit_fields.get("generation_mode") if edit_fields else None,
         }
 
         # Node.js renderer gives ~16% for arrange() code — use initial BlackHole comparison
@@ -799,11 +896,12 @@ def improve_strudel(
             ai_suggestions=None
         )
 
-        # Track best (code AND render file)
-        if current_similarity > best_similarity:
+        # Track best (code AND render file) — only a detector-passing candidate can become best
+        if current_similarity > best_similarity and (edit_fields is None or edit_fields["editability"] == "pass"):
             best_similarity = current_similarity
             best_code = current_code
             best_render_path = render_path
+            best_editability = edit_fields
             iter_data["was_best"] = True
 
         # 4. OPTIMIZATION (Deterministic parameter tuning, then constrained LLM)
@@ -1027,12 +1125,21 @@ def improve_strudel(
             break
 
     # Final eval-gate verdict: did the BEST render clear the genre floor?
-    final_gate_passed = (gate_floor is None) or (best_similarity >= gate_floor)
+    # Spec 003: the shipped best must ALSO satisfy the editability contract (a best that was
+    # never stamped — detector unavailable — is reported as editability None, not pass).
+    if best_editability is None and best_code:
+        best_editability = _editability_fields(best_code)
+    best_edit_verdict = best_editability.get("editability") if best_editability else None
+    final_gate_passed = ((gate_floor is None) or (best_similarity >= gate_floor)) and best_edit_verdict != "fail"
     gate_summary = {
         "genre": genre or "default",
+        "mode": (best_editability or {}).get("generation_mode") or generation_mode,
         "floor": gate_floor,
+        "floor_source": floor_source,  # "modes.<mode>" when a per-mode floor applied, else "genres"
         "section_aware_floor": sa_floor,  # primary signal floor (see eval/thresholds.yaml)
         "best_similarity": best_similarity,
+        "editability": best_edit_verdict,
+        "editability_violations": list((best_editability or {}).get("editability_violations", [])),
         "passed": final_gate_passed,
         "floor_achieved_during_run": gate_floor_achieved,
     }
@@ -1104,6 +1211,14 @@ def improve_strudel(
     if best_render.exists():
         print(f"Using render: {best_render.name}")
 
+        # Write BEST code (not last iteration) to output.strudel FIRST — the final comparison is
+        # stamped against it (compare_audio.py --strudel) so comparison.json carries the verdict.
+        best_strudel_path = Path(output_dir) / "output.strudel"
+        if best_code:
+            with open(best_strudel_path, 'w') as f:
+                f.write(best_code)
+            print(f"Wrote best code ({best_similarity*100:.1f}% similarity) to output.strudel")
+
         # Generate charts (against the instrumental reference, consistent with the iteration compare)
         chart_cmd = [
             sys.executable,
@@ -1112,16 +1227,14 @@ def improve_strudel(
             str(best_render),
             "-c", str(Path(output_dir) / "comparison.png")
         ]
+        if best_strudel_path.exists():
+            chart_cmd.extend(["--strudel", str(best_strudel_path)])  # spec 003 stamping
         chart_result = subprocess.run(chart_cmd, capture_output=True, text=True)
-        if chart_result.returncode != 0:
+        if chart_result.returncode == 3:
+            print("Final comparison refused: output.strudel fails the editability contract "
+                  "(comparison.json written with editability: fail, no score)")
+        elif chart_result.returncode != 0:
             print(f"Chart generation warning: {chart_result.stderr[:200]}")
-
-        # Write BEST code (not last iteration) to output.strudel
-        # The iteration loop tracks best_code based on Node.js comparison
-        if best_code:
-            with open(Path(output_dir) / "output.strudel", 'w') as f:
-                f.write(best_code)
-            print(f"Wrote best code ({best_similarity*100:.1f}% similarity) to output.strudel")
 
         # Copy render
         import shutil
@@ -1163,7 +1276,11 @@ def improve_strudel(
             "drum_hits": metadata.get("drum_hits", existing_meta.get("drum_hits", 0)),
             "ai_improved": True,
             "iterations": current_version,
-            "similarity": best_similarity
+            "similarity": best_similarity,
+            # spec 003: every result carries its generation mode + editability verdict
+            "generation_mode": gate_summary.get("mode"),
+            "editability": gate_summary.get("editability"),
+            "editability_violations": gate_summary.get("editability_violations", []),
         }
         with open(meta_path, 'w') as f:
             json.dump(meta, f, indent=2)

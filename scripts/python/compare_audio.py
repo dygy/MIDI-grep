@@ -17,6 +17,66 @@ from scipy.spatial.distance import cosine
 # Global flag for quiet mode (suppress status messages to stdout)
 _QUIET_MODE = False
 
+# ── Spec 003 editability stamping ─────────────────────────────────────────────────────────
+# When `--strudel PATH` is given, the replay detector (editability_check.py) runs BEFORE any
+# audio is loaded. A failing deliverable is never scored: a short-circuit JSON is written and
+# the process exits 3. A passing one gets `to_json_fields()` merged into the top level of the
+# results dict at every write site (stdout JSON, comparison.json, stem_comparison.json, -o).
+# Without `--strudel` nothing changes (no new keys). Metric math is untouched.
+EXIT_EDITABILITY_FAIL = 3
+_EDITABILITY_STAMP = None  # dict from editability_check.to_json_fields(), or None
+
+
+def run_editability_check(strudel_path):
+    """Run the spec-003 replay detector on a Strudel file and return its JSON fields.
+
+    Returns the five `to_json_fields()` keys (editability / generation_mode /
+    editability_violations / editable_voice_count / texture_voice_count). A parse error or an
+    unreadable file is reported fail-closed as `editability: "fail"` with the reason in
+    `editability_violations` — an unverifiable deliverable must not be scored either.
+    """
+    from editability_check import check_editability, to_json_fields, ParseError
+    try:
+        with open(strudel_path, encoding='utf-8') as f:
+            code = f.read()
+    except OSError as e:
+        return {
+            "editability": "fail",
+            "generation_mode": None,
+            "editability_violations": [f"cannot read strudel file {strudel_path}: {e}"],
+            "editable_voice_count": 0,
+            "texture_voice_count": 0,
+        }
+    try:
+        return to_json_fields(check_editability(code))
+    except ParseError as e:
+        return {
+            "editability": "fail",
+            "generation_mode": None,
+            "editability_violations": [f"parse error: {e}"],
+            "editable_voice_count": 0,
+            "texture_voice_count": 0,
+        }
+
+
+def stamp_editability(results):
+    """Merge the editability fields (if a --strudel check ran) into a results dict (in place)."""
+    if results is not None and _EDITABILITY_STAMP:
+        results.update(_EDITABILITY_STAMP)
+    return results
+
+
+def editability_fail_payload(fields):
+    """The short-circuit JSON written when the detector fails: no `comparison`, no score."""
+    return {
+        "editability": "fail",
+        "generation_mode": fields.get("generation_mode"),
+        "editability_violations": list(fields.get("editability_violations", [])),
+        "editable_voice_count": fields.get("editable_voice_count", 0),
+        "texture_voice_count": fields.get("texture_voice_count", 0),
+        "comparison": None,
+    }
+
 def log(msg):
     """Print message to stderr in quiet mode, stdout otherwise."""
     if _QUIET_MODE:
@@ -1038,9 +1098,10 @@ def generate_comparison_charts(results, original_path, rendered_path, output_dir
 
 def save_comparison_json(results, output_path):
     """Save comparison results as JSON for HTML report generation."""
+    stamp_editability(results)  # spec 003: generation_mode + editability at the top level
     with open(output_path, 'w') as f:
         json.dump(results, f, indent=2)
-    print(f"Comparison JSON saved: {output_path}")
+    log(f"Comparison JSON saved: {output_path}")
 
 def generate_comparison_chart(results, original_path, rendered_path, output_path):
     """Generate a comprehensive comparison chart as PNG (legacy single-image mode)."""
@@ -1730,6 +1791,13 @@ def main():
                             'instead of fixed time windows.')
     parser.add_argument('-q', '--quiet', action='store_true',
                        help='Suppress progress messages (only output JSON)')
+    parser.add_argument('--strudel', default=None, metavar='PATH',
+                       help='Strudel source that produced the render. Runs the spec-003 editability '
+                            '(replay) detector FIRST: on fail writes {"editability":"fail", '
+                            '"comparison":null,...} and exits 3 without scoring; on pass stamps '
+                            'generation_mode/editability into the results JSON.')
+    parser.add_argument('-o', '--output', default=None, metavar='PATH',
+                       help='Write the results JSON (or the editability-fail payload) to this path')
 
     args = parser.parse_args()
 
@@ -1739,6 +1807,35 @@ def main():
     # Enable quiet mode for JSON output (status to stderr, JSON to stdout)
     if args.json:
         _QUIET_MODE = True
+
+    # Spec 003: the replay detector gates scoring. Runs before any audio is touched.
+    global _EDITABILITY_STAMP
+    if args.strudel:
+        fields = run_editability_check(args.strudel)
+        if fields["editability"] != "pass":
+            payload = editability_fail_payload(fields)
+            fail_path = args.output
+            if fail_path is None and args.stems and args.output_dir:
+                fail_path = os.path.join(args.output_dir, "stem_comparison.json")
+            if fail_path is None and args.chart and not args.stems:
+                _chart_dir = args.chart if (args.chart.endswith('/') or os.path.isdir(args.chart)) \
+                    else os.path.dirname(args.chart)
+                if _chart_dir and _chart_dir not in ('.', './', '/'):
+                    fail_path = os.path.join(_chart_dir, "comparison.json")
+            if fail_path:
+                os.makedirs(os.path.dirname(os.path.abspath(fail_path)), exist_ok=True)
+                with open(fail_path, 'w') as f:
+                    json.dump(payload, f, indent=2)
+            if args.json or not fail_path:
+                print(json.dumps(payload, indent=2))
+            for v in payload["editability_violations"]:
+                print(f"editability: {v}", file=sys.stderr)
+            print(f"editability: FAIL — {args.strudel} is a replay / not editable; "
+                  f"no similarity computed (exit {EXIT_EDITABILITY_FAIL})", file=sys.stderr)
+            sys.exit(EXIT_EDITABILITY_FAIL)
+        _EDITABILITY_STAMP = fields
+        log(f"editability: PASS (mode={fields.get('generation_mode')}, "
+            f"{fields.get('editable_voice_count', 0)} editable voice(s))")
 
     # Per-stem comparison mode
     if args.stems:
@@ -1767,6 +1864,9 @@ def main():
 
         if results is None:
             sys.exit(1)
+        stamp_editability(results)  # spec 003 keys ride along on every write/print below
+        if args.output:
+            save_comparison_json(results, args.output)
 
         # Generate stem charts if output dir specified
         if args.output_dir:
@@ -1777,6 +1877,7 @@ def main():
 
             # Save JSON results
             json_path = output_dir / "stem_comparison.json"
+            stamp_editability(results)  # spec 003: generation_mode + editability at the top level
             with open(json_path, 'w') as f:
                 json.dump(results, f, indent=2)
             log(f"Saved stem comparison results: {json_path}")
@@ -1829,6 +1930,9 @@ def main():
 
     if results is None:
         sys.exit(1)
+    stamp_editability(results)  # spec 003 keys ride along on every write/print below
+    if args.output:
+        save_comparison_json(results, args.output)
 
     # Generate chart if requested
     if args.chart:

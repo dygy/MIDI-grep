@@ -1,0 +1,28 @@
+{
+  "duration_analyzed": 60.0,
+  "generation_mode": "sample-instrument",
+  "editability": "pass",
+  "editability_violations": [],
+  "editable_voice_count": 4,
+  "texture_voice_count": 0,
+  "original": {
+    "bands": {"sub_bass": 0.12, "bass": 0.30, "low_mid": 0.25, "mid": 0.20, "high_mid": 0.09, "high": 0.04},
+    "spectral": {"centroid": 1800.0},
+    "rhythm": {"tempo": 136.0}
+  },
+  "rendered": {
+    "bands": {"sub_bass": 0.11, "bass": 0.31, "low_mid": 0.24, "mid": 0.21, "high_mid": 0.09, "high": 0.04},
+    "spectral": {"centroid": 1750.0},
+    "rhythm": {"tempo": 136.0}
+  },
+  "comparison": {
+    "mfcc_similarity": 0.99,
+    "chroma_similarity": 0.96,
+    "brightness_similarity": 0.90,
+    "tempo_similarity": 1.0,
+    "frequency_balance_similarity": 0.97,
+    "energy_similarity": 0.80,
+    "overall_similarity": 0.938
+  },
+  "insights": ["Good frequency balance match"]
+}
