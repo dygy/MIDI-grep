@@ -70,12 +70,13 @@ jobs:
           cache-dependency-path: scripts/python/requirements.txt
       - run: sudo apt-get update -qq && sudo apt-get install -y -qq libsndfile1 ffmpeg
       # The analysis subset only — the full requirements.txt pulls TensorFlow 2.15,
-      # Demucs and CLAP, which the unit tests do not import (reproduced locally on
+      # Demucs and CLAP, which the unit tests do not import; matplotlib is needed because
+      # compare_audio.py (run as a subprocess by the stamping tests) imports librosa.display (reproduced locally on
       # 2026-10-09 in a fresh Python 3.11 venv: 76 + 97 tests pass with exactly this set).
       - run: >
           pip install --disable-pip-version-check
           "numpy>=1.24,<2" "librosa>=0.10" "soundfile>=0.12" scipy "pyyaml>=6"
-          pytest "scikit-learn<=1.5.1" pretty_midi
+          pytest "scikit-learn<=1.5.1" pretty_midi matplotlib
       # tests/ (76) plus the root-level test_*.py modules (97) — both pass on this subset.
       - run: python -m pytest -q tests test_*.py
 
