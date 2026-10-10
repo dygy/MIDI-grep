@@ -53,6 +53,12 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   recorder is the only render path and the only one that may gate.
 - **`scripts/python/compare_audio.py`** — similarity via **MAE** on frequency bands (NOT cosine —
   cosine hid 20%+ band errors). Weights: Freq 40%, MFCC 20%, Energy 15%, Brightness 15%, Tempo/Chroma 5%.
+- **`scripts/editable-pipeline.sh`** — ONE command from a YouTube link to both editable pieces, scored on
+  real playback (spec 004): extract → MIDI per stem → drum bands → sample pack (+vocal) → granular
+  instruments (`build_instruments.py` manifest) → R2/local host → `auto-calibrate.sh` (N iters) + synth
+  render → `compare_audio --strudel` → `eval/gate.py` → `vNNN/` promotion. Reads bpm/key/genre from the
+  track `metadata.json` (stamped by `pipeline_helpers.py stamp`, incl. CLAP genre with the bpm prior);
+  `--genre` overrides are logged. Second track result: 92.8% / 87.2% editable (recorded shortfall vs floors).
 - **`scripts/python/generate_dynamic_strudel.py`** — the editable generator (spec 003). `--mode
   {sample-instrument,synth}` (default sample-instrument; synth = palette sounds, no `samples()`),
   `--vocal-mode {instrument,chops,texture,none}` (default instrument = transcribed `let vocal` on the

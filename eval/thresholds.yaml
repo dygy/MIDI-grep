@@ -107,6 +107,9 @@ modes:
         margin: 0.02
         editability: pass
         vocal_mode: instrument
+    # shortfall 2026-10-10 — second track "VAGABUNDO NÃO NAMORA" v002 (editable, tempo 1.000): overall 0.9282 clears
+    # the 0.88 floor but section-aware 0.8721 < 0.90. Floors come from one track (Regime CLT) and stay; the
+    # shortfall is recorded in reference_tracks.yaml (expected: shortfall) with a follow-up in spec 004 tasks.
   synth:
     # Pure palette synthesis (no stem samples) — inherently further from the master; floor = measured − 0.02.
     genres:
@@ -123,3 +126,6 @@ modes:
         margin: 0.02
         editability: pass
         vocal_mode: instrument
+    # shortfall 2026-10-10 — second track "VAGABUNDO NÃO NAMORA" v003 (editable, tempo 1.000): overall 0.7209 < 0.77,
+    # section-aware 0.7520 < 0.81, worst band 30.07% > 30% guard (freq balance 0.488). Floors stay; recorded as a
+    # shortfall in reference_tracks.yaml with a follow-up in spec 004 tasks.

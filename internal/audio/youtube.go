@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
@@ -35,6 +36,32 @@ func IsYouTubeURL(url string) bool {
 	return false
 }
 
+// ytDlpBinary resolves which yt-dlp to run. YouTube breaks old yt-dlp builds every few months
+// (HTTP 403 on every format), and the Homebrew binary on PATH can lag the venv's pip-installed one
+// by half a year — the first run on a new track on 2026-10-10 failed exactly that way. Order:
+//  1. MIDIGREP_YTDLP (explicit path),
+//  2. the project venv's yt-dlp (scripts/python/.venv/bin/yt-dlp, resolved from the working
+//     directory, then from the directory the binary lives in, i.e. bin/../),
+//  3. "yt-dlp" on PATH.
+func ytDlpBinary() string {
+	if p := os.Getenv("MIDIGREP_YTDLP"); p != "" {
+		return p
+	}
+	candidates := []string{}
+	if wd, err := os.Getwd(); err == nil {
+		candidates = append(candidates, filepath.Join(wd, "scripts", "python", ".venv", "bin", "yt-dlp"))
+	}
+	if exe, err := os.Executable(); err == nil {
+		candidates = append(candidates, filepath.Join(filepath.Dir(exe), "..", "scripts", "python", ".venv", "bin", "yt-dlp"))
+	}
+	for _, c := range candidates {
+		if st, err := os.Stat(c); err == nil && !st.IsDir() {
+			return c
+		}
+	}
+	return "yt-dlp"
+}
+
 // Download downloads audio from a YouTube URL using yt-dlp
 func (d *YouTubeDownloader) Download(ctx context.Context, url, outputDir string) (string, error) {
 	// Check if yt-dlp is installed
@@ -45,7 +72,7 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url, outputDir string)
 	outputPath := filepath.Join(outputDir, "input.%(ext)s")
 
 	// Download best audio and convert to wav
-	cmd := exec.CommandContext(ctx, "yt-dlp",
+	cmd := exec.CommandContext(ctx, ytDlpBinary(),
 		"--no-playlist",         // Only download single video
 		"--extract-audio",       // Extract audio only
 		"--audio-format", "wav", // Convert to WAV
@@ -74,7 +101,7 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url, outputDir string)
 func (d *YouTubeDownloader) downloadAsMp3(ctx context.Context, url, outputDir string) (string, error) {
 	outputPath := filepath.Join(outputDir, "input.%(ext)s")
 
-	cmd := exec.CommandContext(ctx, "yt-dlp",
+	cmd := exec.CommandContext(ctx, ytDlpBinary(),
 		"--no-playlist",
 		"--extract-audio",
 		"--audio-format", "mp3",
@@ -97,16 +124,16 @@ func (d *YouTubeDownloader) downloadAsMp3(ctx context.Context, url, outputDir st
 
 // checkYtDlp verifies yt-dlp is installed
 func (d *YouTubeDownloader) checkYtDlp() error {
-	cmd := exec.Command("yt-dlp", "--version")
+	cmd := exec.Command(ytDlpBinary(), "--version")
 	if err := cmd.Run(); err != nil {
-		return fmt.Errorf("yt-dlp not installed. Install with: brew install yt-dlp (macOS) or pip install yt-dlp")
+		return fmt.Errorf("yt-dlp not runnable (%s). Install/upgrade: scripts/python/.venv/bin/pip install -U yt-dlp (preferred — a stale yt-dlp fails with HTTP 403), or brew install yt-dlp; or set MIDIGREP_YTDLP", ytDlpBinary())
 	}
 	return nil
 }
 
 // GetVideoTitle fetches the video title for display
 func (d *YouTubeDownloader) GetVideoTitle(ctx context.Context, url string) (string, error) {
-	cmd := exec.CommandContext(ctx, "yt-dlp",
+	cmd := exec.CommandContext(ctx, ytDlpBinary(),
 		"--no-playlist", // Only get title for single video, not entire playlist
 		"--get-title",
 		"--no-warnings",

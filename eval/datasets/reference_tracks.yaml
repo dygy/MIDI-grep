@@ -37,3 +37,17 @@ tracks:
   # - name: "Some Funk Track"
   #   genre: brazilian_funk
   #   comparison: eval/datasets/fixtures/some-funk-comparison.json
+  - name: "VAGABUNDO NÃO NAMORA (Christopher Luz)"
+    genre: brazilian_funk
+    mode: sample-instrument
+    cache_key: "VAGABUNDO NÃO NAMORA"
+    version: v002
+    expected: shortfall          # 2026-10-10: overall 0.9282 clears 0.88, section-aware 0.8721 < 0.90 floor. Floors NOT lowered; follow-up in spec 004 tasks.
+    measured: { overall: 0.9282, section_aware: 0.8721 }
+  - name: "VAGABUNDO NÃO NAMORA (Christopher Luz) — synth mode"
+    genre: brazilian_funk
+    mode: synth
+    cache_key: "VAGABUNDO NÃO NAMORA"
+    version: v003
+    expected: shortfall          # 2026-10-10: overall 0.7209 < 0.77, section-aware 0.752 < 0.81, worst band 30.07% > 30% guard. Editable, tempo 1.000.
+    measured: { overall: 0.7209, section_aware: 0.7520 }

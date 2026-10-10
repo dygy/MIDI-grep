@@ -19,8 +19,13 @@ openl3>=0.4.1
 
 # Verification loop MCP server (mcp_servers/loop) + eval gate (eval/gate.py)
 fastmcp>=2.0.0
+pydantic>=2.0   # pipeline_helpers.py / build_instruments.py models (not only via fastmcp)
 pyyaml>=6.0
 
 # Optional: Full RAVE neural network training (for --mode rave)
 # Uncomment if you want to train full neural synthesizers (takes hours)
 # acids-rave>=2.3.0
+
+# YouTube download. Kept in the venv because the Homebrew yt-dlp lags for months and a stale build
+# fails every download with HTTP 403; the Go wrapper prefers scripts/python/.venv/bin/yt-dlp.
+yt-dlp>=2026.8.19

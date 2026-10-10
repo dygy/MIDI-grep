@@ -112,6 +112,13 @@ day, wall-clock capture) read 87.4% / 75.9% with tempo_sim 0.365 — the recorde
 jittered beat timing (fixed, see CAPTURE MODE below). v023 (2026-06-30) scored 93.8% / 95.9% but its
 vocal voice was a full-stem replay (`s("vocalsfull")…slow(N)`, `values.md` A1) — `editability_check.py`
 now FAILS it and `compare_audio.py --strudel` refuses to score it.
+**Second reference track (2026-10-10, spec 004):** "VAGABUNDO NÃO NAMORA" (Christopher Luz, 129.2 BPM
+C# minor, CLAP brazilian_funk 0.50) through the one-command driver `scripts/editable-pipeline.sh`:
+sample-instrument **92.8% overall / 87.2% section-aware** (`v002`), synth **72.1% / 75.2%** (`v003`),
+both `editability: pass`, tempo 1.000. Against the Regime-CLT-derived floors that is a recorded
+**shortfall** (section-aware < 0.90; synth < 0.77/0.81 and worst band 30.07%) — floors were NOT lowered;
+`eval/datasets/reference_tracks.yaml` carries both runs as `expected: shortfall` and spec 004 tasks hold
+the follow-ups. Lesson: floors set from one track are not generalization evidence; the dataset now has two.
 NOTE: numbers measured BEFORE the Jun-2026 recorder tempo fix (the 72% / 88.7% / 92.4% / 94.6%
 history) were on ~25%-sped-up audio and are invalid — see the recorder fix below. Earlier honest
 baselines were ~60-70% (the old 90%+ was inflated by a cosine bug).
