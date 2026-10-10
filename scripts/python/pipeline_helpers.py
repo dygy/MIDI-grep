@@ -11,7 +11,7 @@ CLI (each prints one value / path on stdout, errors on stderr with exit 1)::
     pipeline_helpers.py slug "<title>"
     pipeline_helpers.py num-bars <duration_s> <bpm>
     pipeline_helpers.py next-version <track_dir>
-    pipeline_helpers.py promote --track-dir D --mode M --strudel F --wav F --comparison F \\
+    pipeline_helpers.py promote --track-dir D --mode M --strudel F --wav F --comparison F [--env-correction F] \\
         --generator "<knobs>" --render "<capture>" --compare "<args>" [--vocal-mode instrument]
 """
 
@@ -57,6 +57,7 @@ class RunMetadata(BaseModel):
     similarity_section_aware: float | None
     frequency_balance: float | None
     tempo_similarity: float | None
+    env_correction: str | None = None
 
 
 def slug_from_title(title: str) -> str:
@@ -96,15 +97,26 @@ def _score(comparison: dict[str, object]) -> dict[str, float | None]:
             "freq": num("frequency_balance_similarity"), "tempo": num("tempo_similarity")}
 
 
-def promote_run(track_dir: Path, mode: str, strudel: Path, wav: Path, comparison: Path, meta: RunMeta) -> Path:
+ENV_CORRECTION_FILE = "env_correction.json"
+
+
+def promote_run(track_dir: Path, mode: str, strudel: Path, wav: Path, comparison: Path, meta: RunMeta,
+                env_correction: Path | None = None) -> Path:
     """Create the next ``vNNN`` dir holding the run's four artifacts and return it.
+
+    ``env_correction`` (optional): the per-bar correction JSON the generator applied; copied to
+    ``vNNN/env_correction.json`` and named in ``metadata.json`` so the promoted ``output.strudel``
+    stays reproducible. Absent -> no file and ``metadata.env_correction`` is null.
 
     Raises FileNotFoundError if any input is missing and ValueError for an unknown mode; nothing is
     written in either case.
     """
     if mode not in GENERATION_MODES:
         raise ValueError(f"mode must be one of {GENERATION_MODES}, got {mode!r}")
-    for label, path in (("strudel", strudel), ("wav", wav), ("comparison", comparison)):
+    inputs = [("strudel", strudel), ("wav", wav), ("comparison", comparison)]
+    if env_correction is not None:
+        inputs.append(("env_correction", env_correction))
+    for label, path in inputs:
         if not path.is_file():
             raise FileNotFoundError(f"promote_run: {label} file not found: {path}")
     cmp_doc = json.loads(comparison.read_text(encoding="utf-8"))
@@ -117,6 +129,8 @@ def promote_run(track_dir: Path, mode: str, strudel: Path, wav: Path, comparison
     shutil.copyfile(strudel, vdir / "output.strudel")
     shutil.copyfile(wav, vdir / "render.wav")
     shutil.copyfile(comparison, vdir / "comparison.json")
+    if env_correction is not None:
+        shutil.copyfile(env_correction, vdir / ENV_CORRECTION_FILE)
     doc = RunMetadata(
         version=int(vdir.name[1:]),
         created_at=datetime.now().astimezone().isoformat(timespec="seconds"),
@@ -130,6 +144,7 @@ def promote_run(track_dir: Path, mode: str, strudel: Path, wav: Path, comparison
         similarity_section_aware=score["section"],
         frequency_balance=score["freq"],
         tempo_similarity=score["tempo"],
+        env_correction=ENV_CORRECTION_FILE if env_correction is not None else None,
     )
     (vdir / "metadata.json").write_text(doc.model_dump_json(indent=2) + "\n", encoding="utf-8")
     return vdir
@@ -247,6 +262,8 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--render", required=True)
     pr.add_argument("--compare", required=True)
     pr.add_argument("--vocal-mode", default="instrument")
+    pr.add_argument("--env-correction", type=Path, default=None,
+                    help="per-bar correction JSON the generator applied; persisted as vNNN/env_correction.json")
     args = ap.parse_args(argv)
     try:
         if args.cmd == "slug":
@@ -265,7 +282,8 @@ def main(argv: list[str] | None = None) -> int:
         else:
             meta = RunMeta(generator=args.generator, render=args.render, compare=args.compare,
                            vocal_mode=args.vocal_mode)
-            print(promote_run(args.track_dir, args.mode, args.strudel, args.wav, args.comparison, meta))
+            print(promote_run(args.track_dir, args.mode, args.strudel, args.wav, args.comparison, meta,
+                                     env_correction=args.env_correction))
     except (FileNotFoundError, ValueError) as exc:
         print(f"pipeline_helpers: {exc}", file=sys.stderr)
         return 1

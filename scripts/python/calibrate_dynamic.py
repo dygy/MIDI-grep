@@ -38,6 +38,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import sys
 from pathlib import Path
 
@@ -57,6 +58,78 @@ def damp(ratio: float, *, strength: float = 0.5, lo: float = 0.7, hi: float = 1.
 
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
+
+
+ENV_VOICES = {          # voice -> band keys whose orig/rend share ratio drives it
+    "bass": ["sub_bass", "bass"],
+    "lead": ["mid", "high_mid"],
+}
+ENV_EPS = 1e-4
+# Bound on the COMPOSED per-bar multiplier: corrections multiply across iterations, so the product
+# needs a cap; a single step is already limited by damp(). Emitted in the JSON as "clamp" so the
+# generator reads the bound from the data instead of duplicating it.
+ENV_LO, ENV_HI = 0.5, 2.0
+
+
+def window_corrections(windows: list[dict]) -> dict[str, list[float]]:
+    """Per-window damped multipliers {bass, lead, master} from compare_audio section_windows."""
+    out: dict[str, list[float]] = {"bass": [], "lead": [], "master": []}
+    for w in windows:
+        for voice, keys in ENV_VOICES.items():
+            o = sum(w["orig_bands"].get(k, 0.0) for k in keys)
+            r = sum(w["rend_bands"].get(k, 0.0) for k in keys)
+            out[voice].append(damp((o + ENV_EPS) / (r + ENV_EPS)))
+        out["master"].append(damp((w["orig_rms"] + ENV_EPS) / (w["rend_rms"] + ENV_EPS)))
+    return out
+
+
+def per_bar(centres: list[float], vals: list[float], bars: int, bar_s: float) -> list[float]:
+    """Linear interpolation across window centres, held flat beyond the first/last centre."""
+    res = []
+    for b in range(bars):
+        t = (b + 0.5) * bar_s
+        if t <= centres[0]:
+            res.append(vals[0])
+        elif t >= centres[-1]:
+            res.append(vals[-1])
+        else:
+            for i in range(1, len(centres)):
+                if t <= centres[i]:
+                    f = (t - centres[i - 1]) / (centres[i] - centres[i - 1])
+                    res.append(vals[i - 1] + f * (vals[i] - vals[i - 1]))
+                    break
+    return res
+
+
+def build_env_correction(data: dict, comparison_path: Path, bpm: float | None, bars: int | None,
+                         prev: dict | None) -> dict | None:
+    windows = (data.get("comparison") or {}).get("section_windows") or []
+    if not windows:
+        return None
+    if bpm is None:
+        bpm = float(data["original"]["rhythm"]["tempo"])   # measured fallback
+    bar_s = 240.0 / bpm
+    if bars is None:
+        bars = int(math.ceil(max(w["t1"] for w in windows) / bar_s))
+    centres = [(w["t0"] + w["t1"]) / 2.0 for w in windows]
+    wc = window_corrections(windows)
+    voices = {}
+    for v, vals in wc.items():
+        curve = per_bar(centres, vals, bars, bar_s)
+        pv = (prev or {}).get("voices", {}).get(v, [])
+        if pv and len(pv) != bars:
+            # previous curve is on another bar grid: resample it (linear over its bar centres)
+            # instead of silently discarding the accumulated correction.
+            prev_bar_s = 240.0 / float(prev["bpm"]) if prev.get("bpm") else bar_s
+            pv = per_bar([(i + 0.5) * prev_bar_s for i in range(len(pv))], pv, bars, bar_s)
+            print(f"env-correction: previous curve has a different bar count "
+                  f"({len(prev['voices'][v])} vs {bars}) for '{v}'; resampled onto the new grid",
+                  file=sys.stderr)
+        if pv:
+            curve = [c * p for c, p in zip(curve, pv)]
+        voices[v] = [round(clamp(c, ENV_LO, ENV_HI), 4) for c in curve]
+    return {"window_s": float(windows[0]["t1"] - windows[0]["t0"]), "bpm": bpm, "bars": bars,
+            "clamp": [ENV_LO, ENV_HI], "source": str(comparison_path), "voices": voices}
 
 
 def main() -> int:
@@ -80,6 +153,15 @@ def main() -> int:
                     help="prev_params.json to read current knob values from (overrides the "
                          "per-knob flags above for any key it contains)")
     ap.add_argument("--out", type=Path, default=None, help="write next params as JSON here")
+    ap.add_argument("--env-correction-out", type=Path, default=None,
+                    help="write per-bar bass/lead/master multiplier curves (from the comparison's "
+                         "section_windows) as JSON here")
+    ap.add_argument("--env-correction-in", type=Path, default=None,
+                    help="previous env-correction JSON; new curves are multiplied onto it")
+    ap.add_argument("--bpm", type=float, default=None,
+                    help="generator BPM for bar mapping (default: measured original tempo)")
+    ap.add_argument("--bars", type=int, default=None,
+                    help="bar count of the generated arrangement (default: ceil(analysed span / bar))")
     args = ap.parse_args()
 
     cur = {
@@ -217,6 +299,19 @@ def main() -> int:
 
     if args.out:
         args.out.write_text(json.dumps(nxt, indent=2) + "\n")
+
+    if args.env_correction_out:
+        prev = None
+        if args.env_correction_in and args.env_correction_in.exists():
+            prev = json.loads(args.env_correction_in.read_text())
+        env = build_env_correction(data, args.comparison, args.bpm, args.bars, prev)
+        if env is None:
+            print("env-correction: comparison has no section_windows (re-run compare_audio.py); "
+                  "nothing written", file=sys.stderr)
+        else:
+            args.env_correction_out.write_text(json.dumps(env, indent=2) + "\n")
+            print(f"env-correction: wrote {env['bars']} bars x {len(env['voices'])} voices "
+                  f"-> {args.env_correction_out}", file=sys.stderr)
 
     return 0
 

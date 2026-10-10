@@ -288,6 +288,8 @@ run_synth() {
     log "stage 7: no sample-instrument calibration found; synth uses the generator's cold-start defaults"
   fi
   local key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
+  # NOTE: no --env-correction here: the per-bar correction was measured on sample-instrument renders, not
+  # synth (follow-up: measure a synth-mode correction in its own calibration pass).
   "$PY" "$SP/generate_dynamic_strudel.py" --stems-dir "$TRACK" --pack-dir "$PACK" \
     --bass-midi "$PACK/bass.mid" --lead-midi "$PACK/melodic.mid" --drums-json "$PACK/drums_bands.json" \
     --base-url "$BASE" --mode synth --bpm "$BPM" "${key_arg[@]}" --genre "$GENRE" --num-bars "$BARS" \
@@ -323,11 +325,12 @@ score_and_promote() {
   log "stage 8: $mode editability_rc=$edit_rc gate_rc=$gate_rc :: $(tr '\n' ' ' < "$W/gate.txt")"
 
   log "stage 9: promote $mode"
-  local vdir
+  local vdir env_arg=()
+  [ -s "$W/best.env.json" ] && env_arg=(--env-correction "$W/best.env.json")
   vdir="$("${PH[@]}" promote --track-dir "$TRACK" --mode "$mode" --strudel "$STR" --wav "$WAV" --comparison "$CJ" \
     --generator "generate_dynamic_strudel.py --mode $mode (knobs from calibrate_dynamic.py: $(cat "$W/best.params"); genre $GENRE; bars $BARS)" \
     --render "$RENDER_NOTE; -d $DUR; pack served from $BASE/" \
-    --compare "compare_audio.py -d $COMPARE_SECONDS --strudel (detector-stamped)" --vocal-mode instrument)" \
+    --compare "compare_audio.py -d $COMPARE_SECONDS --strudel (detector-stamped)" --vocal-mode instrument ${env_arg[@]+"${env_arg[@]}"})" \
     || die "stage 9 promote failed for $mode"
   "$PY" - "$W/result.json" "$mode" "$vdir" "$STR" "$WAV" "$CJ" "$edit_rc" "$gate_rc" "$W/gate.txt" <<'PYR'
 import json, sys
