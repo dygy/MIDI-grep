@@ -564,6 +564,7 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     # won't reward it. A track that evolves (louder drop, different chord) will score
     # LOWER here than a well-adapted render, making this an honest evolution signal.
     # Falls back to overall_similarity if windowing fails (guard: short audio, errors).
+    results['comparison']['section_windows'] = []
     try:
         _window_size = 10.0  # seconds — long enough for stable MFCC, short enough for structure
         _window_samples = int(_window_size * 22050)
@@ -571,6 +572,7 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
             # Compute per-window similarity directly from loaded (normalized) arrays
             _windows = min_len // _window_samples
             _win_sims = []
+            _win_records = []
             for _wi in range(_windows):
                 _ws = _wi * _window_samples
                 _we = _ws + _window_samples
@@ -587,8 +589,11 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
                     _mfcc_w = float(1 - cosine(_omfcc, _rmfcc))
                     if np.isnan(_mfcc_w):
                         _mfcc_w = 0.0
-                _ob = np.array(list(compute_frequency_bands(_ow).values()))
+                _ob_d = compute_frequency_bands(_ow)
+                _band_names = list(_ob_d.keys())   # band names come from the in-loop call
+                _ob = np.array(list(_ob_d.values()))
                 _rb = np.array(list(compute_frequency_bands(_rw).values()))
+                _band_diff = {n: float(d) for n, d in zip(_band_names, _rb - _ob)}
                 if np.sum(_ob) > 0:
                     _bd = np.abs(_ob - _rb)
                     _band_w = float(max(0.0, 1.0 - np.mean(_bd) * 2))
@@ -602,7 +607,18 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
                 _energy_w = float(min(_o_rms, _r_rms) / max(_o_rms, _r_rms, 1e-10))
                 _win_sim = 0.40 * _mfcc_w + 0.35 * _band_w + 0.25 * _energy_w
                 _win_sims.append(float(_win_sim))
+                _win_records.append({
+                    't0': float(_ws / 22050), 't1': float(_we / 22050),
+                    'mfcc': _mfcc_w, 'band': _band_w, 'energy': _energy_w,
+                    'win': float(_win_sim), 'orig_rms': _o_rms, 'rend_rms': _r_rms,
+                    'band_diff': _band_diff,
+                    # absolute band shares, so downstream can form orig/rend ratios
+                    # (band_diff alone cannot): consumed by calibrate_dynamic.py
+                    'orig_bands': {n: float(v) for n, v in zip(_band_names, _ob)},
+                    'rend_bands': {n: float(v) for n, v in zip(_band_names, _rb)},
+                })
             if _win_sims:
+                results['comparison']['section_windows'] = _win_records
                 results['comparison']['section_aware_similarity'] = float(np.mean(_win_sims))
                 results['comparison']['section_aware_window_count'] = len(_win_sims)
             else:
@@ -614,6 +630,7 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
             results['comparison']['section_aware_window_count'] = 0
     except Exception as _e:
         log(f"  WARNING: section_aware_similarity computation failed ({_e}), falling back to overall")
+        results['comparison']['section_windows'] = []
         results['comparison']['section_aware_similarity'] = float(overall)
         results['comparison']['section_aware_window_count'] = 0
 

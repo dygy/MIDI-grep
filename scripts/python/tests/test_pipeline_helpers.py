@@ -74,10 +74,29 @@ def test_promote_run_writes_four_files_and_metadata(tmp_path: Path) -> None:
     meta = json.loads((vdir / "metadata.json").read_text())
     assert set(meta) == {"version", "created_at", "generation_mode", "editability", "vocal_mode", "generator", "render",
                          "compare", "similarity_overall", "similarity_section_aware", "frequency_balance",
-                         "tempo_similarity"}
+                         "tempo_similarity", "env_correction"}
+    assert meta["env_correction"] is None and not (vdir / "env_correction.json").exists()
     assert (meta["version"], meta["generation_mode"], meta["editability"], meta["vocal_mode"]) == (5, "synth", "pass", "instrument")
     assert (meta["similarity_overall"], meta["tempo_similarity"]) == (0.7879, 0.4624)
     assert json.loads((vdir / "comparison.json").read_text()) == doc
+
+
+def test_promote_run_persists_env_correction(tmp_path: Path) -> None:
+    s, w, c = _inputs(tmp_path, {"editability": "pass", "comparison": {}})
+    env = tmp_path / "best.env.json"
+    env.write_text(json.dumps({"bars": 2, "voices": {"bass": [1.0, 1.2]}, "clamp": [0.8, 1.5]}))
+    vdir = promote_run(tmp_path / "t", "sample-instrument", s, w, c, META, env_correction=env)
+    assert json.loads((vdir / "env_correction.json").read_text()) == json.loads(env.read_text())
+    assert json.loads((vdir / "metadata.json").read_text())["env_correction"] == "env_correction.json"
+
+
+def test_promote_run_missing_env_correction_errors_and_creates_nothing(tmp_path: Path) -> None:
+    s, w, c = _inputs(tmp_path, {"editability": "pass", "comparison": {}})
+    track = tmp_path / "t"
+    track.mkdir()
+    with pytest.raises(FileNotFoundError):
+        promote_run(track, "synth", s, w, c, META, env_correction=tmp_path / "nope.json")
+    assert list(track.iterdir()) == []
 
 
 def test_promote_run_editability_fail_reports_no_similarity(tmp_path: Path) -> None:

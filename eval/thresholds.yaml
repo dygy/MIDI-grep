@@ -107,9 +107,10 @@ modes:
         margin: 0.02
         editability: pass
         vocal_mode: instrument
-    # shortfall 2026-10-10 — second track "VAGABUNDO NÃO NAMORA" v002 (editable, tempo 1.000): overall 0.9282 clears
-    # the 0.88 floor but section-aware 0.8721 < 0.90. Floors come from one track (Regime CLT) and stay; the
-    # shortfall is recorded in reference_tracks.yaml (expected: shortfall) with a follow-up in spec 004 tasks.
+    # 2026-10-10 — second track "VAGABUNDO NÃO NAMORA": v002 fell short on section-aware (0.8721 < 0.90) while
+    # overall cleared (0.9282). Fix #10 (per-bar bass/lead/master correction derived from the comparison's
+    # section_windows, applied by generate_dynamic_strudel --env-correction) → v004 0.9320 / 0.9216 PASS with the
+    # same global knobs and these floors unchanged.
   synth:
     # Pure palette synthesis (no stem samples) — inherently further from the master; floor = measured − 0.02.
     genres:

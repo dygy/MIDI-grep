@@ -135,4 +135,12 @@ the pipeline broke on the new song was fixed in the pipeline rather than patched
 
 ## Change Log
 
-- (none yet)
+- **2026-10-10 — fix #10 (follow-up, no criterion changed).** The §2.3 shortfall recorded for the
+  sample-instrument run `v002` (0.9282 / 0.8721 < 0.90 section floor) is resolved: the per-window data
+  (`compare_audio.py` now exports `comparison.section_windows`) showed the bass/lead balance flipping
+  across sections under one global knob set; `calibrate_dynamic.py --env-correction-out` derives a damped
+  per-bar bass/lead/master correction from it and `generate_dynamic_strudel.py --env-correction` applies
+  it. Same global knobs, floors unchanged → `v004` **0.9320 / 0.9216 PASS** (`editability: pass`, tempo
+  1.000). `eval/datasets/reference_tracks.yaml` now points the sample-instrument entry at `v004`
+  (`expected: pass`); `v002` stays on record in its comment and in CLAUDE.md. The synth shortfall (`v003`,
+  GitHub #11) is unchanged. Evidence lines above that cite `v002` as the dataset run are historical.

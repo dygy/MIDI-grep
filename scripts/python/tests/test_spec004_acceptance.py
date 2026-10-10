@@ -388,7 +388,9 @@ def _dataset_problems(entries: list[dict], runs: dict[str, str]) -> list[str]:
     return problems
 
 
-RUNS = {"sample-instrument": "v002", "synth": "v003"}
+# v002 was the sample-instrument run spec 004 recorded (shortfall 0.9282 / 0.8721); fix #10 re-rendered the same
+# knobs with the measured per-bar correction as v004 (0.9320 / 0.9216, PASS), which the dataset now points at.
+RUNS = {"sample-instrument": "v004", "synth": "v003"}
 
 
 def test_23_dataset_has_both_modes_pointing_at_the_recorded_runs():
@@ -439,8 +441,9 @@ def _shortfall_problems(entry: dict, comparison: dict, th: dict) -> list[str]:
     floor = th["modes"][mode]["genres"]["brazilian_funk"]
     sa_floor = th["modes"][mode]["section_aware"]["brazilian_funk"]
     problems = []
+    # compare_audio.py stores worst_band_diff in PERCENT; the gate's ceiling is a fraction (eval/gate.py converts)
     below = comp["overall_similarity"] < floor or comp["section_aware_similarity"] < sa_floor \
-        or comp["worst_band_diff"] > th["max_worst_band_diff"]
+        or comp["worst_band_diff"] / 100.0 > th["max_worst_band_diff"]
     if entry.get("expected") == "shortfall" and not below:
         problems.append("recorded as shortfall but clears every floor")
     if entry.get("expected") != "shortfall" and below:
@@ -454,17 +457,34 @@ def _shortfall_problems(entry: dict, comparison: dict, th: dict) -> list[str]:
 
 
 @needs_track
-@pytest.mark.parametrize("version", ["v002", "v003"])
-def test_23_shortfall_records_equal_the_run_and_floors_are_untouched(version):
+@pytest.mark.parametrize("version,expected", [("v004", "pass"), ("v003", "shortfall")])
+def test_23_shortfall_records_equal_the_run_and_floors_are_untouched(version, expected):
     th = yaml.safe_load(_read(THRESHOLDS))
     assert _floor_problems(th) == []
     entry = next(e for e in _dataset_entries(yaml.safe_load(_read(DATASET))) if e["version"] == version)
+    assert entry.get("expected") == expected
     assert _shortfall_problems(entry, _comparison(version), th) == []
-    # the shipped gate agrees: fails the floor yet the deliverable is editable
+    # the shipped gate agrees with the record, and the deliverable is editable either way
     res = evaluate_comparison(TRACK / version / "comparison.json", genre="brazilian_funk", thresholds=load_thresholds())
-    assert not res.passed and res.editability == "pass"
-    # the shortfall is explained next to the floors it did not clear
-    assert re.search(rf"shortfall .*{re.escape(TRACK_KEY)}.*{version}", _read(THRESHOLDS))
+    assert res.passed == (expected == "pass") and res.editability == "pass"
+    if expected == "shortfall":
+        # the shortfall is explained next to the floors it did not clear
+        assert re.search(rf"shortfall .*{re.escape(TRACK_KEY)}.*{version}", _read(THRESHOLDS))
+
+
+@needs_track
+def test_23_fix10_cleared_the_section_floor_without_touching_knobs_or_floors():
+    """Fix #10: v004 = v002's global knobs + a per-bar env correction measured from v002's section windows."""
+    if not (TRACK / "v002").is_dir() or not (TRACK / "v004").is_dir():
+        pytest.skip("v002/v004 not both cached")
+    th = yaml.safe_load(_read(THRESHOLDS))
+    sa_floor = th["modes"]["sample_instrument"]["section_aware"]["brazilian_funk"]
+    before, after = _comparison("v002")["comparison"], _comparison("v004")["comparison"]
+    assert before["section_aware_similarity"] < sa_floor <= after["section_aware_similarity"]
+    assert after["overall_similarity"] >= before["overall_similarity"]
+    assert (TRACK / "v004" / "env_correction.json").exists()
+    assert "// env_correction:" in _read(TRACK / "v004" / "output.strudel")
+    assert _floor_problems(th) == []
 
 
 def test_23_a_tampered_record_or_lowered_floor_is_detected():
@@ -476,13 +496,16 @@ def test_23_a_tampered_record_or_lowered_floor_is_detected():
     foreign["modes"]["synth"]["measured"]["brazilian_funk"]["run"] = f"{TRACK_KEY}/v003"
     assert any("not the first track" in p for p in _floor_problems(foreign))
 
-    comp = {"comparison": {"overall_similarity": 0.9282, "section_aware_similarity": 0.8721, "worst_band_diff": 0.05}}
+    comp = {"comparison": {"overall_similarity": 0.9282, "section_aware_similarity": 0.8721, "worst_band_diff": 5.0}}  # percent
     ok = {"mode": "sample-instrument", "expected": "shortfall", "measured": {"overall": 0.9282, "section_aware": 0.8721}}
     assert _shortfall_problems(ok, comp, th) == []
     assert "recorded overall != run" in _shortfall_problems({**ok, "measured": {"overall": 0.95}}, comp, th)
     assert "recorded as shortfall but clears every floor" in _shortfall_problems(
         ok, {"comparison": {**comp["comparison"], "section_aware_similarity": 0.95}}, th)
     assert "below a floor but not recorded as a shortfall" in _shortfall_problems({**ok, "expected": "pass"}, comp, th)
+    good = {"comparison": {"overall_similarity": 0.9320, "section_aware_similarity": 0.9216, "worst_band_diff": 2.54}}
+    assert _shortfall_problems({"mode": "sample-instrument", "expected": "pass",
+                                "measured": {"overall": 0.9320, "section_aware": 0.9216}}, good, th) == []
 
 
 def test_23_floors_are_derived_from_the_measured_run_minus_margin():
@@ -502,9 +525,10 @@ def test_23_claude_md_names_the_second_track_with_its_run_ids():
     text = _read(REPO / "CLAUDE.md")
     assert TRACK_KEY in text and "Second reference track" in text
     para = text[text.index("Second reference track"):][:1400]
-    assert "`v002`" in para and "`v003`" in para
-    assert "92.8%" in para and "87.2%" in para and "72.1%" in para and "75.2%" in para
-    assert "shortfall" in para and "NOT lowered" in para
+    assert "`v004`" in para and "`v003`" in para and "`v002`" in para
+    assert "93.2%" in para and "92.2%" in para and "72.1%" in para and "75.2%" in para
+    assert "92.8%" in para and "87.2%" in para          # the pre-fix shortfall stays on record
+    assert "shortfall" in para and "floors unchanged" in para
     # the first track's numbers sit in the same section (side by side)
     assert "Regime CLT" in text[: text.index("Second reference track")]
 

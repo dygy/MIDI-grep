@@ -304,6 +304,91 @@ def bar_env_pattern(stem_path: Path, nbars: int, bpm: float, *,
     return [[float(norm[b * steps + s]) for s in range(steps)] for b in range(nbars)]
 
 
+ENV_CORRECTION_VOICES = ("bass", "lead", "master")
+ENV_CORRECTION_CLAMP = "clamp"   # reserved key in load_env_correction()'s result
+
+
+def load_env_correction(path: Path, nbars: int) -> dict[str, list[float]]:
+    """Read a ``calibrate_dynamic.py --env-correction-out`` JSON into per-voice, per-bar
+    multipliers aligned to ``nbars`` (index-aligned; the last multiplier is held when the file
+    has fewer bars, extras are dropped, with a warning on any mismatch).
+
+    The returned dict also carries the bound for the COMPOSED (voice x master) multiplier under
+    the reserved key ``"clamp"`` = ``[lo, hi]``: the file's own ``clamp`` when present, else the
+    ``[min, max]`` over every voice array in the file (the correction's own range). The bound is
+    always data, never a generator constant.
+
+    Raises ``ValueError`` with the offending path/field on malformed input.
+    """
+    try:
+        raw = json.loads(Path(path).read_text())
+    except (OSError, json.JSONDecodeError) as exc:
+        raise ValueError(f"--env-correction {path}: cannot read JSON ({exc})") from exc
+    voices = raw.get("voices") if isinstance(raw, dict) else None
+    if not isinstance(voices, dict):
+        raise ValueError(f"--env-correction {path}: missing object field 'voices'")
+    out: dict[str, list[float]] = {}
+    for name in ENV_CORRECTION_VOICES:
+        vals = voices.get(name)
+        if vals is None:
+            continue
+        if (not isinstance(vals, list) or not vals
+                or not all(isinstance(v, (int, float)) and not isinstance(v, bool) and v >= 0 for v in vals)):
+            raise ValueError(f"--env-correction {path}: voices.{name} must be a non-empty list of "
+                             "non-negative numbers")
+        out[name] = [float(v) for v in vals]
+    if not out:
+        raise ValueError(f"--env-correction {path}: voices has none of {list(ENV_CORRECTION_VOICES)}")
+    file_bars = raw.get("bars", max(len(v) for v in out.values()))
+    if file_bars != nbars or any(len(v) != nbars for v in out.values()):
+        print(f"WARNING env-correction: {Path(path).name} has bars={file_bars} but --num-bars={nbars}; "
+              "aligning by index and holding the last multiplier", file=sys.stderr)
+    result: dict[str, list[float]] = {k: [v[min(i, len(v) - 1)] for i in range(nbars)] for k, v in out.items()}
+    clamp = raw.get("clamp")
+    if clamp is not None:
+        if (not isinstance(clamp, list) or len(clamp) != 2
+                or not all(isinstance(c, (int, float)) and not isinstance(c, bool) and c >= 0 for c in clamp)
+                or clamp[0] > clamp[1]):
+            raise ValueError(f"--env-correction {path}: clamp must be [lo, hi] with 0 <= lo <= hi")
+        result[ENV_CORRECTION_CLAMP] = [float(clamp[0]), float(clamp[1])]
+    else:
+        flat = [x for v in out.values() for x in v]
+        result[ENV_CORRECTION_CLAMP] = [min(flat), max(flat)]
+    return result
+
+
+def compose_env_multipliers(voice_m: list[float] | None, master_m: list[float] | None,
+                            clamp: list[float] | None) -> list[float] | None:
+    """Per-bar multiplier for one voice: voice x master, bounded to ``clamp`` = ``[lo, hi]``.
+
+    Either input may be None (only the other applies); both None -> None (no correction).
+    """
+    if voice_m and master_m:
+        m = [a * b for a, b in zip(voice_m, master_m)]
+    else:
+        m = voice_m or master_m
+    if not m:
+        return None
+    if clamp:
+        lo, hi = clamp
+        m = [min(hi, max(lo, x)) for x in m]
+    return m
+
+
+def apply_env_correction(env_bars: list[list[float]] | None,
+                         mults: list[float] | None) -> list[list[float]] | None:
+    """Scale each bar of a per-step envelope by that bar's multiplier.
+
+    Hard-silence steps (0.0) stay 0.0 (the voice is absent where the original stem is). The
+    envelopes are 0..1 (normalised to the stem's peak), so a step never exceeds the largest
+    multiplier; bounding the multipliers themselves is ``compose_env_multipliers``' job.
+    """
+    if not env_bars or not mults:
+        return env_bars
+    return [[0.0 if v == 0.0 else v * mults[b] for v in steps]
+            for b, steps in enumerate(env_bars)]
+
+
 # librosa imported lazily to keep the module importable without the audio stack
 import librosa  # noqa: E402
 
@@ -477,6 +562,10 @@ def main() -> int:
     ap.add_argument("--rhythm", choices=["onset", "grid"], default="grid",
                     help="grid=quantise MIDI (better pitch/timbre fidelity); onset=stem onsets drive timing "
                          "(sparser but librosa bass onset detection is unreliable -> worse mfcc)")
+    ap.add_argument("--env-correction", type=Path, default=None, metavar="PATH",
+                    help="JSON from calibrate_dynamic.py --env-correction-out: per-BAR multipliers "
+                         "(voices.bass/lead/master) applied to the per-bar gain envelopes, so "
+                         "section-level bass/lead balance follows the measured render-vs-original ratios")
     ap.add_argument("--out", type=Path)
     args = ap.parse_args()
 
@@ -674,6 +763,7 @@ def main() -> int:
         f"// generation_mode: {generation_mode}",
         "// editability: checked-by editability_check.py",
         f"// vocal_mode: {vocal_mode}",
+        *([f"// env_correction: {args.env_correction.name}"] if args.env_correction else []),
         f"// BPM: {args.bpm:.0f}",
         f"// Key: {args.key}",
         f"// Bars: {nbars}  Duration: {dur:.0f}s",
@@ -728,6 +818,30 @@ def main() -> int:
     # while still ducking in breakdowns. gamma 1.0 = faithful envelope.
     drum_env = bar_env_pattern(args.stems_dir / "drums.wav", nbars, args.bpm, floor=args.drum_floor, gamma=1.0, steps=args.env_steps)
     voc_env = bar_env_pattern(args.stems_dir / "vocals.wav", nbars, args.bpm, floor=0.10, steps=args.env_steps)
+
+    # Measured per-section correction (calibrate_dynamic.py --env-correction-out): scales each
+    # voice's per-bar envelope BEFORE gain_pattern folds base*env into the single .gain(). The
+    # bass line and its sub layer share bass_env; "master" scales every voice.
+    if args.env_correction:
+        try:
+            corr = load_env_correction(args.env_correction, nbars)
+        except ValueError as exc:
+            print(f"ERROR: {exc}", file=sys.stderr)
+            return 2
+        master_m = corr.get("master")
+        clamp = corr.get(ENV_CORRECTION_CLAMP)
+
+        def _corrected(env, voice):
+            m = compose_env_multipliers(corr.get(voice), master_m, clamp)
+            if env is None and m:
+                # missing/silent stem: a flat all-ones envelope so the per-bar curve still shapes it
+                env = [[1.0] * max(1, int(args.env_steps)) for _ in range(nbars)]
+            return apply_env_correction(env, m)
+
+        bass_env = _corrected(bass_env, "bass")
+        lead_env = _corrected(lead_env, "lead")
+        drum_env = _corrected(drum_env, "drums")
+        voc_env = _corrected(voc_env, "vocal")
 
     # IMPORTANT: Strudel's chained .gain() REPLACES (last wins), it does NOT multiply (verified
     # empirically). So a voice must carry exactly ONE .gain(): the per-bar envelope pattern with
@@ -925,6 +1039,7 @@ def main() -> int:
                       "vocal_bars": len(vocal_note_bars or vox_bars or []),
                       "vocal_range": list(vocal_range) if vocal_range else None,
                       "generation_mode": generation_mode,
+                      "env_correction": str(args.env_correction) if args.env_correction else None,
                       "uses_custom_samples": needs_samples,
                       "editability": editability, "editability_violations": violations,
                       "validation": (validation_error or "ok") if editability != "pass" else "ok"},

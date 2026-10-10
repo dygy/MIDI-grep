@@ -58,7 +58,11 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   instruments (`build_instruments.py` manifest) → R2/local host → `auto-calibrate.sh` (N iters) + synth
   render → `compare_audio --strudel` → `eval/gate.py` → `vNNN/` promotion. Reads bpm/key/genre from the
   track `metadata.json` (stamped by `pipeline_helpers.py stamp`, incl. CLAP genre with the bpm prior);
-  `--genre` overrides are logged. Second track result: 92.8% / 87.2% editable (recorded shortfall vs floors).
+  `--genre` overrides are logged. Second track: 93.2% / 92.2% editable (v004, after the #10 per-bar correction).
+- **Section-aware diagnostics (fix #10):** `compare_audio.py` stores `comparison.section_windows` (per 10-s
+  window mfcc/band/energy/win/rms/band_diff); `calibrate_dynamic.py --env-correction-out` derives per-bar
+  bass/lead/master multipliers from them (damped, composable via `--env-correction-in`); the generator applies
+  them with `--env-correction PATH`; `auto-calibrate.sh` chains it per iteration and keeps `best.env.json`.
 - **`scripts/python/generate_dynamic_strudel.py`** — the editable generator (spec 003). `--mode
   {sample-instrument,synth}` (default sample-instrument; synth = palette sounds, no `samples()`),
   `--vocal-mode {instrument,chops,texture,none}` (default instrument = transcribed `let vocal` on the

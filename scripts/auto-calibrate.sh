@@ -42,7 +42,7 @@ CMP="$ROOT/scripts/python/compare_audio.py"
 REC="$ROOT/scripts/node/dist/record-strudel-blackhole.js"
 
 STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" BARS="78"
-ITERS="6" DUR="170" BASS_SOUND="" LEAD_SOUND="" VOCAL_MODE="instrument" MODE="sample-instrument"
+ENV_START=""; ITERS="6" DUR="170" BASS_SOUND="" LEAD_SOUND="" VOCAL_MODE="instrument" MODE="sample-instrument"
 WORK="${TMPDIR:-/tmp}/auto-calibrate.$$"
 # starting knobs (generator defaults are sane cold-start values)
 BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" CV="1.0"
@@ -55,6 +55,8 @@ while [ $# -gt 0 ]; do case "$1" in
   --vocal-mode) VOCAL_MODE="$2"; shift 2;;
   --mode) MODE="$2"; shift 2;;
   --workdir) WORK="$2"; shift 2;;
+  --start) read -r BM SG CL LLPF HG MG CV <<<"$2"; shift 2;;   # resume from a previous BEST: "BM SG CL LLPF HG MG CV"
+  --env-start) ENV_START="$2"; shift 2;;                        # per-bar env-correction JSON to apply from iteration 1
   *) echo "unknown arg: $1" >&2; exit 64;;
 esac; done
 [ -n "$STEMS" ] && [ -n "$BASE" ] || { echo "need --stems and --base" >&2; exit 64; }
@@ -74,10 +76,13 @@ mkdir -p "$WORK"
 echo "workdir: $WORK"
 
 best=-1; best_params=""; best_tag=""
+rm -f "$WORK/best.env.json"   # never report a stale env from a previous run
+PREV_ENV="${ENV_START:-}"   # env-correction JSON measured from the previous iteration (fed to the next generation); --env-start seeds it
 for i in $(seq 1 "$ITERS"); do
   TAG="cal$i"; STRU="$WORK/$TAG.strudel"; WAV="$WORK/$TAG.wav"; CJ="$WORK/$TAG.cmp.json"
   inst_arg=(); [ -n "$INST" ] && inst_arg=(--samples-url "$INST")
   key_arg=();  [ -n "$KEY" ]  && key_arg=(--key "$KEY")
+  env_arg=();  [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && env_arg=(--env-correction "$PREV_ENV")
   snd_arg=();  [ -n "$BASS_SOUND" ] && snd_arg+=(--bass-sound "$BASS_SOUND")
   [ -n "$LEAD_SOUND" ] && snd_arg+=(--lead-sound "$LEAD_SOUND")
   "$PY" "$GEN" --stems-dir "$STEMS" --pack-dir "$PACK" \
@@ -86,7 +91,7 @@ for i in $(seq 1 "$ITERS"); do
     --mode "$MODE" --bpm "$BPM" "${key_arg[@]}" --genre "$GENRE" --num-bars "$BARS" \
     --drum-mode "$DRUM_MODE" --vocal-mode "$VOCAL_MODE" \
     --bass-mult "$BM" --sub-gain "$SG" --cal-lead "$CL" --lead-lpf "$LLPF" \
-    --hat-gain "$HG" --master-gain "$MG" --cal-vocal "$CV" --out "$STRU" >/dev/null 2>&1 \
+    --hat-gain "$HG" --master-gain "$MG" --cal-vocal "$CV" "${env_arg[@]}" --out "$STRU" >/dev/null 2>&1 \
     || { echo "[$TAG] GEN FAILED"; break; }
 
   # Never pkill -9 the capture right before a render: on 2026-10-09 that left BlackHole/avfoundation
@@ -107,22 +112,27 @@ for i in $(seq 1 "$ITERS"); do
 
   # keep best by overall similarity
   better=$("$PY" -c "print(1 if $OVER>$best else 0)")
-  if [ "$better" = "1" ]; then best="$OVER"; best_params="$BM $SG $CL $LLPF $HG $MG $CV"; best_tag="$TAG";
+  if [ "$better" = "1" ]; then best="$OVER"; best_params="$BM $SG $CL $LLPF $HG $MG $CV"; best_tag="$TAG"
+    rm -f "$WORK/best.env.json"; [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && cp "$PREV_ENV" "$WORK/best.env.json"
     cp "$STRU" "$WORK/best.strudel"; cp "$WAV" "$WORK/best.wav"; cp "$CJ" "$WORK/best.cmp.json"; fi
 
   # calibrate -> next knobs
-  CLI=$("$PY" "$CAL" --comparison "$CJ" \
+  ENV_OUT="$WORK/$TAG.env.json"
+  envin_arg=(); [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && envin_arg=(--env-correction-in "$PREV_ENV")
+  CLI=$("$PY" "$CAL" --comparison "$CJ" --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" "${envin_arg[@]}" \
     --bass-mult "$BM" --sub-gain "$SG" --cal-lead "$CL" --lead-lpf "$LLPF" \
-    --hat-gain "$HG" --master-gain "$MG" --cal-vocal "$CV" 2>/dev/null)
+    --hat-gain "$HG" --master-gain "$MG" --cal-vocal "$CV" 2>"$WORK/$TAG.cal.log")
   # parse "--bass-mult X --sub-gain Y ..." into the loop vars
   set -- $CLI
   while [ $# -gt 0 ]; do case "$1" in
     --bass-mult) BM="$2";; --sub-gain) SG="$2";; --cal-lead) CL="$2";;
     --lead-lpf) LLPF="$2";; --hat-gain) HG="$2";; --master-gain) MG="$2";; --cal-vocal) CV="$2";;
   esac; shift 2; done
+  [ -s "$ENV_OUT" ] && PREV_ENV="$ENV_OUT"
 done
 
 echo "BEST: $best_tag overall=$best  params: $best_params"
 echo "  strudel: $WORK/best.strudel"
+[ -s "$WORK/best.env.json" ] && echo "  env:     $WORK/best.env.json  (per-bar bass/lead/master correction used by the best render; pass --env-correction)"
 echo "  wav:     $WORK/best.wav"
 echo "  promote into the cache as a new vNNN (render/output.strudel/comparison + separate.py stems + generate_report.py)."
