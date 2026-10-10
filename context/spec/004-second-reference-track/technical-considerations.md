@@ -1,7 +1,7 @@
 # Technical Specification: Second Reference Track for the Honest Eval Dataset
 
 - **Functional Specification:** [functional-spec.md](./functional-spec.md) (Approved)
-- **Status:** Approved
+- **Status:** Completed (2026-10-10 — acceptance evidence in functional-spec.md; follow-ups #10 #11 #12)
 - **Author(s):** `/implement-feature` run, 2026-10-10
 - **Can this change alter Strudel output?** **Yes — only through pipeline-defect fixes.** Every step is
   the existing pipeline; a fix made because the new track exposes a defect changes what the generator

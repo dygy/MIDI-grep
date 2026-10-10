@@ -71,6 +71,9 @@ Generative flags: `--mode granular|rave`, `--models`, `--github`, `--threshold`,
 | `ai_improver.py` | Iteration loop + ClickHouse learning; skips iteration on validation failure |
 | `ai_code_generator.py` | Rule-based generator (legacy/fallback to Ollama) |
 | `compare_audio.py` | Rendered-vs-original similarity (MAE freq balance — see §6); `--config` for tempo tolerance |
+| `editable-pipeline.sh` (scripts/) | Spec 004 driver, stages 1–9 idempotent (`--force`), `--mode both|sample-instrument|synth`, `--iters`, `--dur`, `--r2|--local`, `--genre` (logged override), BlackHole probe + idle guard; JSON summary on stdout |
+| `build_instruments.py` | Granular model dirs (`pitched_map`, legacy per-grain medians fallback) + kit one-shots → `instruments/samples.json` (note-keyed dicts, kit arrays, absolute `_base`) |
+| `pipeline_helpers.py` | `slug`, `num-bars`, `next-version`, `promote` (vNNN + metadata), `stamp` (bpm/key/duration/genre provenance into the track metadata.json) |
 | `generate_dynamic_strudel.py` | Editable generator: bar arrays per voice, `--mode sample-instrument\|synth`, `--vocal-mode instrument\|chops\|texture\|none` (+ `--vocal-midi`, `--vocal-sound`), `cal-*` knobs incl. `--cal-vocal`; emits `// generation_mode:` header and self-validates with `strudel_validation` |
 | `build_sample_pack.py` | Stem → sample pack: drum one-shots, pyin multisamples for bass/melodic/**vocals** (`<prefix>_vocal`), onset vocal chops `vox0..N`, host-resolved `samples.json` |
 | `editability_check.py` | Replay/editability detector (spec 003 §2.2-A rules R1–R6): `check_editability(code)` → `EditabilityResult`, CLI exit 0/1/2, `--json`; `strudel_validation.validate_code` also rejects `.loopAt(` and `<stem>full`/`<stem>loop` sounds |

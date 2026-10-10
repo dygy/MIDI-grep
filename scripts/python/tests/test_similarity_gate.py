@@ -382,4 +382,17 @@ def test_reference_track_meets_gate(track):
     if not path.exists():
         pytest.skip(f"comparison.json not found for {track.get('name')!r}: {path} (run an extraction first)")
     res = evaluate_comparison(path, genre=track.get("genre"), thresholds=THRESHOLDS)
-    assert res.passed, res.message
+    expected = track.get("expected", "pass")
+    if expected == "shortfall":
+        # An honestly recorded shortfall (spec 004 §2.3): the track is kept as a reference, the floor
+        # is NOT lowered, and the record must agree with the run — it fails the gate, the output is
+        # still a detector-passing deliverable, and the recorded numbers are the run's numbers.
+        assert not res.passed, f"{track.get('name')!r} is recorded as a shortfall but now clears the gate — update the record"
+        assert res.editability == "pass", f"a shortfall entry must still be an editable deliverable: {res.message}"
+        comp = json.loads(path.read_text())["comparison"]
+        for key in ("overall", "section_aware"):
+            if key in (track.get("measured") or {}):
+                field = "overall_similarity" if key == "overall" else "section_aware_similarity"
+                assert comp[field] == pytest.approx(track["measured"][key], abs=5e-4), f"{key} recorded != run"
+    else:
+        assert res.passed, res.message

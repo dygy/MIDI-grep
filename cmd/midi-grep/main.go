@@ -882,9 +882,16 @@ func runExtract(cmd *cobra.Command, args []string) error {
 		}
 	}
 
-	// Generate HTML report
+	// Generate HTML report — only when a render exists to report on. With --render none the
+	// report step used to abort the whole extraction ("missing render.wav"), after stems, analysis
+	// and Strudel had already been produced (2026-10-10, spec 004 defect #3).
 	var reportPath string
-	if versionDir != "" || result.CacheDir != "" {
+	if renderAudio != "none" && renderedPath == "" {
+		// Review #5: a render was REQUESTED and nothing came out — that is a failure to surface,
+		// not a report to skip silently.
+		return fmt.Errorf("render requested (--render %s) but no WAV was produced; check BlackHole/recorder (see errors above)", renderAudio)
+	}
+	if shouldGenerateReport(renderAudio, renderedPath) && (versionDir != "" || result.CacheDir != "") {
 		reportDir := versionDir
 		if reportDir == "" {
 			reportDir = result.CacheDir
@@ -1472,6 +1479,27 @@ func generateStemComparison(stems StemPaths, outputDir, scriptsDir string, durat
 }
 
 // generateHTMLReport generates an HTML report for the extraction
+// shouldGenerateReport reports whether the HTML report step should run: never when rendering was
+// disabled with --render none, and only when a rendered WAV exists for the report to embed.
+// absOutputDir makes a user-supplied output directory absolute against the caller's working
+// directory, so subprocesses that change cwd write where the user expects.
+func absOutputDir(dir string) string {
+	if dir == "" {
+		dir = "models"
+	}
+	if abs, err := filepath.Abs(dir); err == nil {
+		return abs
+	}
+	return dir
+}
+
+func shouldGenerateReport(renderMode, renderedPath string) bool {
+	if renderMode == "none" {
+		return false
+	}
+	return renderedPath != ""
+}
+
 func generateHTMLReport(cacheDir, versionDir, outputPath, scriptsDir string) error {
 	script := filepath.Join(scriptsDir, "generate_report.py")
 	if _, err := os.Stat(script); os.IsNotExist(err) {
@@ -1698,7 +1726,7 @@ func runGenProcess(cmd *cobra.Command, args []string) error {
 		"-m", "rave.cli",
 		"process", stemsDir,
 		"--track-id", genTrackID,
-		"--output", genOutputDir,
+		"--output", absOutputDir(genOutputDir),
 		"--models", genModelsPath,
 		"--mode", genTrainingMode,
 		"--threshold", fmt.Sprintf("%.2f", genThreshold),
@@ -1738,11 +1766,15 @@ func runGenTrain(cmd *cobra.Command, args []string) error {
 		python = "python3"
 	}
 
+	// --output is relative to where the USER ran the command, but rave.cli runs with cwd =
+	// scripts/python, so a relative "models" silently landed in scripts/python/models/ (hidden by
+	// .gitignore) — spec 004 defect #7. Resolve it before handing it to the subprocess.
+	outputDir := absOutputDir(genOutputDir)
 	pyArgs := []string{
 		"-m", "rave.cli",
 		"train", audioPath,
 		"--name", genModelName,
-		"--output", genOutputDir,
+		"--output", outputDir,
 		"--mode", genTrainingMode,
 	}
 

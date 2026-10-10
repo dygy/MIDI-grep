@@ -122,11 +122,19 @@ def load_clap_model():
     # Fallback to transformers CLAP
     try:
         from transformers import ClapModel, ClapProcessor
-        model = ClapModel.from_pretrained("laion/clap-htsat-unfused")
+        # safetensors avoids torch.load entirely: transformers >= 4.5x refuses torch.load on
+        # torch < 2.6 (CVE-2025-32434) and this venv pins torch 2.5 for acids-rave. Without this
+        # the detector silently failed and the pipeline fell back to BPM heuristics (2026-10-10).
+        try:
+            model = ClapModel.from_pretrained("laion/clap-htsat-unfused", use_safetensors=True)
+        except (OSError, ValueError):
+            model = ClapModel.from_pretrained("laion/clap-htsat-unfused")
         processor = ClapProcessor.from_pretrained("laion/clap-htsat-unfused")
         return (model, processor), 'transformers'
-    except ImportError:
-        pass
+    except (ImportError, OSError, ValueError, RuntimeError) as exc:
+        # Review #6: the plain-load fallback raises the torch.load ValueError on torch < 2.6; any
+        # load failure must reach the heuristic fallback, not crash the detector.
+        print(f"Warning: CLAP unavailable ({type(exc).__name__}: {str(exc)[:120]})", file=sys.stderr)
 
     return None, None
 
@@ -364,6 +372,7 @@ def main():
     output = {
         'audio_path': args.audio_path,
         'bpm': args.bpm,
+        'model_type': model_type or 'fallback',   # laion_clap | transformers | fallback (BPM/spectral heuristic)
         'detected_genre': results[0][0],
         'confidence': results[0][1]['score'],
         'rankings': [

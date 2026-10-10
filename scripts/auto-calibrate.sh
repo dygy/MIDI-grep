@@ -84,12 +84,20 @@ for i in $(seq 1 "$ITERS"); do
     --bass-midi "$PACK/bass.mid" --lead-midi "$PACK/melodic.mid" \
     --drums-json "$PACK/drums_bands.json" --base-url "$BASE" "${inst_arg[@]}" "${snd_arg[@]}" \
     --mode "$MODE" --bpm "$BPM" "${key_arg[@]}" --genre "$GENRE" --num-bars "$BARS" \
-    --sub-octave 1 --lead-hpf 95 --drum-mode "$DRUM_MODE" --vocal-mode "$VOCAL_MODE" \
+    --drum-mode "$DRUM_MODE" --vocal-mode "$VOCAL_MODE" \
     --bass-mult "$BM" --sub-gain "$SG" --cal-lead "$CL" --lead-lpf "$LLPF" \
     --hat-gain "$HG" --master-gain "$MG" --cal-vocal "$CV" --out "$STRU" >/dev/null 2>&1 \
     || { echo "[$TAG] GEN FAILED"; break; }
 
-  pkill -9 -f "ffmpeg.*avfoundation" 2>/dev/null; sleep 1
+  # Never pkill -9 the capture right before a render: on 2026-10-09 that left BlackHole/avfoundation
+  # wedged (every following capture produced no file). Wait for any live recorder to finish instead.
+  # Bounded + anchored (review #2): wait at most 120 s for a LIVE recorder/capture, matched on the
+  # actual invocations (not any process whose command line mentions the file name).
+  waited=0
+  while pgrep -f "node .*record-strudel-blackhole\.js|ffmpeg .* -f avfoundation" >/dev/null; do
+    [ "$waited" -ge 120 ] && { echo "[$TAG] a recorder/capture has been running for 120 s — stale? (pgrep -fl 'record-strudel|avfoundation'); aborting"; exit 75; }
+    sleep 2; waited=$((waited+2))
+  done; sleep 3
   node "$REC" "$STRU" -o "$WAV" -d "$DUR" >"$WORK/$TAG.render.log" 2>&1
   [ -f "$WAV" ] || { echo "[$TAG] RENDER FAILED (see $WORK/$TAG.render.log)"; break; }
 
