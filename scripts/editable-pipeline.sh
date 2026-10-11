@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # editable-pipeline.sh — one command from a YouTube link to editable Strudel, scored on real playback.
 #
-# Implements spec 004 technical-considerations §2.1 stages 1-9. Each stage skips when its output
+# Implements spec 004 technical-considerations §2.1 stages 1-10. Each stage skips when its output
 # already exists (use --force to redo). Every number that varies per track (bpm, key, genre, bars,
 # generator knobs) is READ from the track's metadata.json / produced by calibrate_dynamic.py via
 # scripts/auto-calibrate.sh — this driver sets no per-track constant.
@@ -17,11 +17,14 @@
 #                      --mode synth with the BEST knobs + a BlackHole render
 #   8 score + gate     compare_audio.py -d 135 --strudel ; eval/gate.py ; editability_check.py
 #   9 promote          pipeline_helpers.py promote -> vNNN/{output.strudel,render.wav,comparison.json,metadata.json}
+#  10 report           pipeline_helpers.py report -> vNNN/{report.html,comparison.png,chart_*.png,render_*.wav,
+#                      stem_comparison.json,iterations.json,iterations/}; Demucs on the render + each calibration
+#                      iteration render (~2 min each). A missing/failed report is an ERROR, never a skip.
 #
 # Usage:
 #   scripts/editable-pipeline.sh --url <youtube> [--title "<cache folder title>"] [--prefix <slug>]
 #       [--genre <g>] [--mode sample-instrument|synth|both] [--iters 3] [--dur 170]
-#       [--r2 | --local] [--force]
+#       [--r2 | --local] [--no-iteration-stems] [--force]
 #
 #   --url      YouTube link (required unless --title names an already-extracted track dir)
 #   --title    locate an already-extracted track dir .cache/stems/<title> (skips stage 1 when complete)
@@ -31,6 +34,7 @@
 #   --iters    sample-instrument calibration iterations (default 3; best of N is kept)
 #   --dur      BlackHole capture seconds per render (default 170)
 #   --r2       host on the project's public R2 bucket (default); --local serves on localhost:5555
+#   --no-iteration-stems  stage 10: skip Demucs on each calibration iteration (report keeps the mixes only)
 #   --force    redo every stage even if its output exists
 #
 # Requires (checked per stage, not up front): BlackHole + Multi-Output selected, node recorder built
@@ -52,7 +56,7 @@ LOCAL_PORT="5555"
 COMPARE_SECONDS="135"
 RENDER_NOTE="record-strudel-blackhole.js RAW capture + uniform speed correction (ffmpeg wallclock restamp)"
 
-URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="3" DUR="170" HOSTING="r2" FORCE=""
+URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="3" DUR="170" HOSTING="r2" FORCE="" ITER_STEMS_ARG=()
 
 usage() { sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
 log() { echo "[editable-pipeline] $*" >&2; }
@@ -68,6 +72,7 @@ while [ $# -gt 0 ]; do case "$1" in
   --dur) DUR="${2:?--dur needs a value}"; shift 2;;
   --r2) HOSTING="r2"; shift;;
   --local) HOSTING="local"; shift;;
+  --no-iteration-stems) ITER_STEMS_ARG=(--no-iteration-stems); shift;;
   --force) FORCE="1"; shift;;
   -h|--help) usage; exit 0;;
   *) echo "unknown arg: $1 (see --help)" >&2; exit 64;;
@@ -305,10 +310,29 @@ run_synth() {
   sleep 3
 }
 
+# ---------------------------------------------------------------- stage 10: report
+# report_stage <mode> <vNNN dir>: charts + render stems + per-stem comparison + iteration history +
+# report.html (idempotent per artifact). The mode's calibration workdir supplies the iteration history.
+report_stage() {
+  local mode="$1" vdir="$2" W="$PW/$1" gate_arg=()
+  [ -n "$vdir" ] && [ -d "$vdir" ] || die "stage 10 ($mode): promoted version dir missing: '$vdir'"
+  [ -s "$W/gate.txt" ] && gate_arg=(--gate-verdict "$(jget "$W/result.json" gate_verdict)" \
+    --gate-message "$(tr '\n' ' ' < "$W/gate.txt")")
+  log "stage 10: report $mode -> $vdir"
+  "${PH[@]}" report --track-dir "$TRACK" --version "$(basename "$vdir")" --seconds "$COMPARE_SECONDS" \
+    --calib-workdir "$W" ${ITER_STEMS_ARG[@]+"${ITER_STEMS_ARG[@]}"} ${FORCE:+--force} ${gate_arg[@]+"${gate_arg[@]}"} >&2 \
+    || die "stage 10 report failed for $mode ($vdir)"
+  [ -s "$vdir/report.html" ] || die "stage 10 produced no $vdir/report.html"
+}
+
 # ---------------------------------------------------------------- stages 8-9: score, gate, promote
 score_and_promote() {
   local mode="$1"; local W="$PW/$mode"; local STR="$W/best.strudel" WAV="$W/best.wav" CJ="$W/comparison.json"
-  if stage_done "$W/result.json"; then log "stage 8-9 skip ($mode): result.json exists"; return 0; fi
+  if stage_done "$W/result.json"; then
+    log "stage 8-9 skip ($mode): result.json exists"
+    report_stage "$mode" "$(jget "$W/result.json" version_dir)"   # a run promoted before stage 10 existed (or whose report failed) still gets one
+    return 0
+  fi
   log "stage 8: score $mode (compare_audio -d $COMPARE_SECONDS --strudel)"
   local cmp_rc=0
   "$PY" "$SP/compare_audio.py" "$TRACK/original.wav" "$WAV" -d "$COMPARE_SECONDS" -j --strudel "$STR" -o "$CJ" \
@@ -341,10 +365,12 @@ json.dump({
     "comparison": f"{vdir}/comparison.json", "editability": meta["editability"],
     "editability_rc": int(edit_rc), "gate_rc": int(gate_rc), "gate_verdict": "PASS" if int(gate_rc) == 0 else "FAIL",
     "gate_message": open(gate_txt).read().strip(),
+    "report": f"{vdir}/report.html",
     "similarity_overall": meta["similarity_overall"], "similarity_section_aware": meta["similarity_section_aware"],
     "frequency_balance": meta["frequency_balance"], "tempo_similarity": meta["tempo_similarity"],
 }, open(out, "w"), indent=2)
 PYR
+  report_stage "$mode" "$vdir"
 }
 
 for m in $(modes); do

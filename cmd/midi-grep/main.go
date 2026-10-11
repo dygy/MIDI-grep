@@ -1478,9 +1478,6 @@ func generateStemComparison(stems StemPaths, outputDir, scriptsDir string, durat
 	return cmd.Run()
 }
 
-// generateHTMLReport generates an HTML report for the extraction
-// shouldGenerateReport reports whether the HTML report step should run: never when rendering was
-// disabled with --render none, and only when a rendered WAV exists for the report to embed.
 // absOutputDir makes a user-supplied output directory absolute against the caller's working
 // directory, so subprocesses that change cwd write where the user expects.
 func absOutputDir(dir string) string {
@@ -1493,6 +1490,8 @@ func absOutputDir(dir string) string {
 	return dir
 }
 
+// shouldGenerateReport reports whether the HTML report step should run: never when rendering was
+// disabled with --render none, and only when a rendered WAV exists for the report to embed.
 func shouldGenerateReport(renderMode, renderedPath string) bool {
 	if renderMode == "none" {
 		return false
@@ -1500,6 +1499,7 @@ func shouldGenerateReport(renderMode, renderedPath string) bool {
 	return renderedPath != ""
 }
 
+// generateHTMLReport generates an HTML report for the extraction
 func generateHTMLReport(cacheDir, versionDir, outputPath, scriptsDir string) error {
 	script := filepath.Join(scriptsDir, "generate_report.py")
 	if _, err := os.Stat(script); os.IsNotExist(err) {

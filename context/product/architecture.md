@@ -266,6 +266,13 @@ driven by generated/edited `note()` bar arrays — the "dynamic Strudel" path in
 `scripts/python/generate_dynamic_strudel.py`, which `auto-calibrate.sh` tunes. R2 hosting needs
 `npx wrangler login` or R2 S3 keys (`R2_ACCOUNT_ID/R2_BUCKET/R2_PUBLIC_BASE/R2_ACCESS_KEY_ID/R2_SECRET_ACCESS_KEY`).
 
+**Editable pipeline stage 10 (report).** `scripts/editable-pipeline.sh` ends every promoted `vNNN/` with
+`pipeline_helpers.py report` (`build_report`): charts (made in a temp dir — `compare_audio.py --chart`
+overwrites `comparison.json`), Demucs render stems, `stem_comparison.json`, `iterations.json` from the
+calibration workdir (`was_best` only for a byte-identical render) and `report.html`. Report audio is 128k mp3
+twins (`render.mp3`, `embed/`, `iterations/`), reused only while newer than their source. The report is
+mandatory: a failed or missing `report.html` aborts the driver.
+
 ### Generative Mode (`generative` / `gen` / `rave`)
 
 Stems → timbre embedding (OpenL3/CLAP, `scripts/python/rave/timbre_embeddings.py`) → model search
@@ -645,6 +652,8 @@ workstation.
   the `node` recorder option is dead and must never gate. macOS only.
 - **Report E2E:** `midi-grep report <cache-dir>` (Go `internal/report`) or `generate_report.py`
   producing a self-contained `report.html`.
+  The editable driver's stage 10 (`pipeline_helpers.py report`, covered by `tests/test_report_stage.py` with
+  injected fake runners — no Demucs/BlackHole) builds it for every promoted version.
 
 ### Browser Automation
 

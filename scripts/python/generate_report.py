@@ -14,14 +14,32 @@ import base64
 from pathlib import Path
 from datetime import datetime
 
+def twin_is_fresh(twin, source):
+    """An mp3 twin may stand in for its source only when it is not older than that source."""
+    try:
+        return os.path.getmtime(twin) >= os.path.getmtime(source)
+    except OSError:
+        return False
+
+
+def prefer_mp3(path):
+    """Embedding picks the mp3 twin of a wav when it exists and is not older than the wav (a wav data URI
+    is ~10x larger; a stale twin would play old audio next to new scores)."""
+    path = str(path)
+    if path.endswith('.wav') and twin_is_fresh(path[:-4] + '.mp3', path):
+        return path[:-4] + '.mp3'
+    return path
+
+
 def encode_audio_base64(path):
-    """Encode audio file as base64 data URI."""
+    """Encode audio file as base64 data URI (mp3 twin preferred over wav)."""
+    path = prefer_mp3(path)
     if not os.path.exists(path):
         return None
     with open(path, 'rb') as f:
         data = base64.b64encode(f.read()).decode('utf-8')
     ext = path.split('.')[-1]
-    mime = 'audio/wav' if ext == 'wav' else f'audio/{ext}'
+    mime = {'wav': 'audio/wav', 'mp3': 'audio/mpeg'}.get(ext, f'audio/{ext}')
     return f"data:{mime};base64,{data}"
 
 def encode_image_base64(path):
@@ -112,7 +130,24 @@ def generate_editability_badge_html(generation_mode, violations):
     '''
 
 
-def generate_charts_html(comparison_results):
+def generate_gate_html(gate):
+    """Eval-gate verdict vs the similarity floor, next to the editability headline (spec 003 §2.5 honesty:
+    a FAIL is shown as a FAIL, never softened)."""
+    if not gate:
+        return ''
+    verdict = str(gate.get('verdict') or '').upper()
+    if verdict not in ('PASS', 'FAIL'):
+        return ''
+    color = '#3fb950' if verdict == 'PASS' else '#f85149'
+    msg = html.escape(str(gate.get('message') or ''))
+    return (f'<div class="gate-verdict" style="text-align: center; margin-bottom: 1.5rem;">'
+            f'<span style="font-weight: 700; color: {color};">eval gate: {verdict}</span>'
+            f'<span style="color: var(--text-secondary);"> vs the similarity floor</span>'
+            f'{"<div style=" + chr(34) + "font-size: 0.8rem; color: var(--text-secondary);" + chr(34) + ">" + msg + "</div>" if msg else ""}'
+            f'</div>')
+
+
+def generate_charts_html(comparison_results, gate=None):
     """Generate HTML charts from comparison JSON data - pure HTML/CSS, no images."""
     if not comparison_results:
         return '<div class="no-data" style="margin-top: 1rem;">No comparison data available (render audio first)</div>'
@@ -133,6 +168,7 @@ def generate_charts_html(comparison_results):
     if is_replay:
         # A replay / unverified run never gets a similarity score — badge instead.
         html_parts.append(generate_editability_badge_html(generation_mode, violations))
+        html_parts.append(generate_gate_html(gate))
         if not orig and not rend:
             return f'<div class="charts-grid">{"".join(html_parts)}</div>'
     else:
@@ -156,6 +192,7 @@ def generate_charts_html(comparison_results):
             {verdict_line}
         </div>
     ''')
+        html_parts.append(generate_gate_html(gate))
 
     # Similarity scores table (withheld for a replay run — it is not a deliverable's score)
     metrics = [] if is_replay else [
@@ -376,6 +413,8 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
             was_best = it.get("was_best", False)
             sim_color = '#3fb950' if sim >= 70 else '#d29922' if sim >= 50 else '#f85149'
             best_marker = ' <span style="color: #3fb950; font-size: 0.65rem;">[Best]</span>' if was_best else ''
+            if it.get("rejected"):
+                sim_color = '#f85149'
             group_name = f'iter-{ver}'
 
             # Check for stem files first
@@ -423,7 +462,7 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
                     # Sub-header for this iteration
                     iteration_tracks.append(f'''
                         <div class="iter-subheader" style="padding: 0.3rem 0.75rem; font-size: 0.75rem; color: {sim_color}; background: var(--bg-tertiary); border-left: 3px solid {sim_color}; margin-top: 0.25rem;">
-                            v{ver} ({sim:.0f}%){best_marker}
+                            {iteration_label(it)} ({iteration_sim_text(it)}){best_marker}
                         </div>
                     ''')
                     iteration_tracks.extend(stem_tracks_html)
@@ -444,7 +483,7 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
                 iteration_tracks.append(f'''
                     <div class="daw-track daw-track-iteration" data-stem="{group_name}">
                         <div class="track-header" style="--track-color: {sim_color};">
-                            <div class="track-name">v{ver} ({sim:.0f}%){best_marker}</div>
+                            <div class="track-name">{iteration_label(it)} ({iteration_sim_text(it)}){best_marker}</div>
                         </div>
                         <div class="track-waveform" onclick="seekAudio(event)">
                             <canvas class="track-canvas" data-stem="{group_name}" data-color="{sim_color}"></canvas>
@@ -454,7 +493,7 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
 
             iteration_group_buttons.append(
                 f'<button class="group-btn" onclick="playGroup(\'{group_name}\')" '
-                f'data-group="{group_name}" style="font-size:0.7rem;padding:0.35rem 0.6rem;">v{ver}</button>'
+                f'data-group="{group_name}" style="font-size:0.7rem;padding:0.35rem 0.6rem;">{iteration_label(it)}</button>'
             )
 
     # Pass iteration audio group definitions as JS variables
@@ -796,11 +835,19 @@ def generate_iteration_progression_html(iterations_data):
     if not iterations_data:
         return ''
 
-    iterations = iterations_data.get("iterations", [])
-    if not iterations:
+    all_iterations = iterations_data.get("iterations", [])
+    if not all_iterations:
         return ''
+    iterations = [it for it in all_iterations if not it.get("rejected")]   # a rejected row has no score to plot
+    rejected_rows = [it for it in all_iterations if it.get("rejected")]
+    if not iterations:
+        iterations = all_iterations
 
     best_sim = iterations_data.get("best_similarity", 0) * 100
+    lineage_note = ''
+    if iterations_data.get("matched_promoted") is False:
+        lineage_note = ('<div style="margin: 0.5rem 0; color: #d29922; font-size: 0.85rem;">'
+                        'calibration history (promoted render not among these iterations)</div>')
 
     # Build SVG line chart
     n = len(iterations)
@@ -870,7 +917,7 @@ def generate_iteration_progression_html(iterations_data):
     for i, it in enumerate(iterations):
         px = x_pos(i)
         ver = it.get("version", i + 1)
-        x_labels_svg += f'<text x="{px:.1f}" y="{chart_height - 5}" text-anchor="middle" fill="#8b949e" font-size="10">v{ver}</text>\n'
+        x_labels_svg += f'<text x="{px:.1f}" y="{chart_height - 5}" text-anchor="middle" fill="#8b949e" font-size="10">{iteration_label(it)}</text>\n'
 
     chart_svg = f'''
         <svg viewBox="0 0 {chart_width} {chart_height}" style="width: 100%; max-width: {chart_width}px; height: auto;">
@@ -893,7 +940,7 @@ def generate_iteration_progression_html(iterations_data):
     # Build table rows
     table_rows = ""
     prev_sim = None
-    for it in iterations:
+    for it in all_iterations:
         ver = it.get("version", 0)
         sim = it.get("similarity", 0) * 100
         phase = it.get("phase", "?")
@@ -902,16 +949,21 @@ def generate_iteration_progression_html(iterations_data):
         reverted = it.get("reverted", False)
 
         # Delta from previous
-        if prev_sim is not None:
+        if it.get("rejected"):
+            delta_str = '<span style="color: var(--text-secondary);">-</span>'
+        elif prev_sim is not None:
             delta = sim - prev_sim
             delta_str = f'<span style="color: {"#3fb950" if delta >= 0 else "#f85149"};">{delta:+.1f}%</span>'
         else:
             delta_str = '<span style="color: var(--text-secondary);">-</span>'
-        prev_sim = sim
+        if not it.get("rejected"):
+            prev_sim = sim
 
-        sim_color = '#3fb950' if sim >= 70 else '#d29922' if sim >= 50 else '#f85149'
-        phase_badge = f'<span class="badge {"badge-blue" if phase == "deterministic" else "badge-orange"}">{phase}</span>'
+        sim_color = '#3fb950' if sim >= 70 and not it.get("rejected") else '#d29922' if sim >= 50 and not it.get("rejected") else '#f85149'
+        phase_badge = f'<span class="badge {"badge-blue" if phase in DETERMINISTIC_PHASES else "badge-orange"}">{phase}</span>'
         best_badge = ' <span class="badge badge-green">best</span>' if was_best else ''
+        if it.get("rejected"):
+            best_badge += ' <span class="badge" style="background: #f85149; color: #fff;">REPLAY / UNVERIFIED</span>'
         reverted_badge = ' <span class="badge" style="background: rgba(248, 81, 73, 0.2); color: #f85149;">reverted</span>' if reverted else ''
 
         changes_str = html.escape("; ".join(changes[:3])) if changes else "-"
@@ -920,8 +972,8 @@ def generate_iteration_progression_html(iterations_data):
 
         table_rows += f'''
             <tr style="border-bottom: 1px solid var(--border);">
-                <td style="padding: 0.5rem; font-weight: 500;">v{ver}</td>
-                <td style="padding: 0.5rem; color: {sim_color}; font-weight: 600;">{sim:.1f}%</td>
+                <td style="padding: 0.5rem; font-weight: 500;">{iteration_label(it)}</td>
+                <td style="padding: 0.5rem; color: {sim_color}; font-weight: 600;">{iteration_sim_text(it, 1)}</td>
                 <td style="padding: 0.5rem;">{delta_str}</td>
                 <td style="padding: 0.5rem;">{phase_badge}{best_badge}{reverted_badge}</td>
                 <td style="padding: 0.5rem; font-size: 0.8rem; color: var(--text-secondary);">{changes_str}</td>
@@ -934,9 +986,10 @@ def generate_iteration_progression_html(iterations_data):
                 <svg viewBox="0 0 16 16"><path d="M1.5 1.75V13.5h13.75a.75.75 0 0 1 0 1.5H.75a.75.75 0 0 1-.75-.75V1.75a.75.75 0 0 1 1.5 0Zm14.28 2.53-5.25 5.25a.75.75 0 0 1-1.06 0L7 7.06 4.28 9.78a.751.751 0 0 1-1.042-.018.751.751 0 0 1-.018-1.042l3.25-3.25a.75.75 0 0 1 1.06 0L10 7.94l4.72-4.72a.751.751 0 0 1 1.042.018.751.751 0 0 1 .018 1.042Z"/></svg>
                 Iteration History
                 <span style="font-size: 0.8rem; font-weight: 400; color: var(--text-secondary); margin-left: 0.5rem;">
-                    ({len(iterations)} iterations, best: {best_sim:.1f}%)
+                    ({len(all_iterations)} iterations, best: {best_sim:.1f}%)
                 </span>
             </div>
+            {lineage_note}
 
             <div style="padding: 1rem; background: var(--bg-tertiary); border-radius: 6px; margin-bottom: 1rem;">
                 {chart_svg}
@@ -984,21 +1037,23 @@ def generate_iteration_code_accordion_html(iterations_data, version_path):
         if not strudel_file.exists():
             strudel_file = version_path.parent / f"output_v{ver:03d}.strudel"
         if not strudel_file.exists():
+            strudel_file = version_path / "iterations" / f"output_iter_{ver:03d}.strudel"
+        if not strudel_file.exists():
             continue
 
         with open(strudel_file) as f:
             code = f.read()
 
-        sim_color = '#3fb950' if sim >= 70 else '#d29922' if sim >= 50 else '#f85149'
+        sim_color = '#3fb950' if sim >= 70 and not it.get("rejected") else '#d29922' if sim >= 50 and not it.get("rejected") else '#f85149'
         best_marker = ' (Best)' if was_best else ''
-        phase_label = 'Det.' if phase == 'deterministic' else 'LLM'
+        phase_label = 'Det.' if phase in DETERMINISTIC_PHASES else 'LLM'
 
         accordion_items += f'''
             <details class="iter-code-details" style="margin-bottom: 0.5rem;">
                 <summary style="cursor: pointer; padding: 0.75rem; background: var(--bg-tertiary); border-radius: 6px; display: flex; align-items: center; gap: 0.75rem; list-style: none;">
-                    <span style="color: var(--text-secondary); font-size: 0.85rem;">v{ver}</span>
-                    <span style="color: {sim_color}; font-weight: 600; font-size: 0.85rem;">{sim:.1f}%{best_marker}</span>
-                    <span class="badge {"badge-blue" if phase == "deterministic" else "badge-orange"}" style="font-size: 0.7rem;">{phase_label}</span>
+                    <span style="color: var(--text-secondary); font-size: 0.85rem;">{iteration_label(it)}</span>
+                    <span style="color: {sim_color}; font-weight: 600; font-size: 0.85rem;">{iteration_sim_text(it, 1)}{best_marker}</span>
+                    <span class="badge {"badge-blue" if phase in DETERMINISTIC_PHASES else "badge-orange"}" style="font-size: 0.7rem;">{phase_label}</span>
                     <button class="copy-btn" onclick="event.stopPropagation(); copyIterCode('iter-code-{ver}')" style="margin-left: auto; font-size: 0.7rem;">Copy</button>
                 </summary>
                 <div class="code-block" style="margin-top: 0.25rem;">
@@ -1029,13 +1084,13 @@ def generate_iteration_analysis_html(iterations_data):
     if not iterations_data:
         return ''
 
-    iterations = iterations_data.get("iterations", [])
+    iterations = [it for it in iterations_data.get("iterations", []) if not it.get("rejected")]
     if len(iterations) < 2:
         return ''
 
     # Analyze patterns
     findings = []
-    phase1_count = sum(1 for it in iterations if it.get("phase") == "deterministic")
+    phase1_count = sum(1 for it in iterations if it.get("phase") in DETERMINISTIC_PHASES)
     phase2_count = sum(1 for it in iterations if it.get("phase") == "constrained_llm")
     revert_count = sum(1 for it in iterations if it.get("reverted"))
 
@@ -1062,7 +1117,7 @@ def generate_iteration_analysis_html(iterations_data):
     # Detect Phase 1 convergence speed
     phase1_improvements = []
     for i, it in enumerate(iterations):
-        if i == 0 or it.get("phase") != "deterministic":
+        if i == 0 or it.get("phase") not in DETERMINISTIC_PHASES:
             continue
         prev = iterations[i - 1]
         delta = (it.get("similarity", 0) - prev.get("similarity", 0)) * 100
@@ -1078,7 +1133,7 @@ def generate_iteration_analysis_html(iterations_data):
 
     findings.append(f'<div style="margin-bottom: 1rem;">'
                      f'<strong style="color: var(--text-primary);">Best Result:</strong> '
-                     f'v{best_iter.get("version")} at {best_sim:.1f}% '
+                     f'{iteration_label(best_iter)} at {best_sim:.1f}% '
                      f'(iteration {best_idx + 1} of {len(iterations)})'
                      f'</div>')
 
@@ -1121,6 +1176,37 @@ def generate_iteration_analysis_html(iterations_data):
             </div>
         </div>
     '''
+
+
+# Phases that are rule-based (no LLM): the AI improver's "deterministic" and the editable pipeline's "calibration".
+DETERMINISTIC_PHASES = ("deterministic", "calibration")
+_ITERATION_PATH_KEYS = ("render_path", "strudel_path", "stem_melodic_path", "stem_drums_path", "stem_bass_path")
+
+
+def iteration_label(it):
+    """Calibration rows say "iter N" (a bare "vN" reads as the promoted version); Go/LLM rows keep "vN"."""
+    return it.get("label") or f"v{it.get('version', 0)}"
+
+
+def iteration_sim_text(it, digits=0):
+    """Percentage text, or the honest "rejected (replay)" for an editability-failed iteration."""
+    if it.get("rejected"):
+        return "rejected (replay)"
+    return f"{it.get('similarity', 0) * 100:.{digits}f}%"
+
+
+def resolve_iteration_paths(iterations_data, version_path):
+    """Make relative iteration paths (as the editable pipeline writes them) resolve against the version dir.
+    Also normalises an editability-failed iteration (similarity null) to rejected=True, similarity 0.0."""
+    for it in (iterations_data or {}).get("iterations", []):
+        if it.get("similarity") is None:
+            it["rejected"] = True
+            it["similarity"] = 0.0
+        for key in _ITERATION_PATH_KEYS:
+            val = it.get(key)
+            if val and not os.path.isabs(val):
+                it[key] = str(Path(version_path) / val)
+    return iterations_data
 
 
 def generate_report(cache_dir, version_dir, output_path=None, iterations_file=None):
@@ -1183,6 +1269,10 @@ def generate_report(cache_dir, version_dir, output_path=None, iterations_file=No
 
     # Rendered stem files (for per-stem comparison) - check .wav then .mp3
     def find_render_stem(name):
+        twin = version_path / "embed" / f"render_{name}.mp3"
+        for src in (version_path / f"render_{name}.wav", version_path / f"render_{name}.mp3"):
+            if src.exists() and twin_is_fresh(twin, src):
+                return twin
         wav = version_path / f"render_{name}.wav"
         if wav.exists():
             return wav
@@ -1277,6 +1367,18 @@ def generate_report(cache_dir, version_dir, output_path=None, iterations_file=No
     strudel_info = extract_info_from_strudel(strudel_code) if strudel_code else {}
 
     # Encode files as base64 (stems and render validated above - guaranteed to exist)
+    def original_embed(p, key):
+        """Original stems live at track level as wav; the pipeline's vNNN/embed/ holds their mp3 twins
+        (named by role, so a legacy piano.wav is embedded from embed/melodic.mp3)."""
+        if p is None:
+            return None
+        twin = version_path / "embed" / f"{key}.mp3"
+        return twin if twin_is_fresh(twin, p) else p
+
+    melodic_path = original_embed(melodic_path, "melodic")
+    drums_path = original_embed(drums_path, "drums")
+    vocals_path = original_embed(vocals_path, "vocals")
+    bass_path = original_embed(bass_path, "bass")
     melodic_data = encode_audio_base64(str(melodic_path))
     drums_data = encode_audio_base64(str(drums_path))
     vocals_data = encode_audio_base64(str(vocals_path)) if vocals_path else None
@@ -1328,6 +1430,10 @@ def generate_report(cache_dir, version_dir, output_path=None, iterations_file=No
                 with open(check_path) as f:
                     iterations_data = json.load(f)
                 break
+
+    resolve_iteration_paths(iterations_data, version_path)
+    # Eval-gate verdict: metadata.json["gate"] (stage 10 stores it there too), else iterations.json["gate"].
+    gate = metadata.get('gate') or (iterations_data or {}).get('gate')
 
     # Encode stem comparison charts
     stem_charts = {}
@@ -2108,7 +2214,7 @@ def generate_report(cache_dir, version_dir, output_path=None, iterations_file=No
                     <div class="stat-label">Style</div>
                 </div>
             </div>
-            {generate_charts_html(comparison_results)}
+            {generate_charts_html(comparison_results, gate)}
         </div>
 
         {generate_ai_analysis_card(ai_params)}
