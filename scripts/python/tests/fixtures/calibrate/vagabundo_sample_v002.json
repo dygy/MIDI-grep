@@ -1,0 +1,138 @@
+{
+  "duration_analyzed": 135.0,
+  "original": {
+    "spectral": {
+      "centroid_mean": 2367.5347945823332,
+      "centroid_std": 949.9527938309601,
+      "bandwidth_mean": 2298.1640929921814,
+      "rolloff_mean": 4738.506532084462,
+      "flatness_mean": 0.02132492884993553,
+      "zcr_mean": 0.11338253434597523,
+      "rms_mean": 0.09073086827993393,
+      "rms_std": 0.04201924055814743
+    },
+    "rhythm": {
+      "tempo": 129.19921875,
+      "beat_count": 281,
+      "tempo_candidates": [
+        {
+          "method": "full_band_beat_track",
+          "bpm": 129.19921875,
+          "support": 0.42385198920965195
+        },
+        {
+          "method": "low_band_tempo",
+          "bpm": 129.19921875,
+          "support": 0.6304885447025299
+        }
+      ],
+      "tempo_method": "low_band_tempo",
+      "onset_strength_mean": 1.523780107498169,
+      "onset_strength_std": 1.4603791236877441,
+      "rhythm_regularity": 1.0
+    },
+    "bands": {
+      "sub_bass": 0.26873162388801575,
+      "bass": 0.32192879915237427,
+      "low_mid": 0.07484778016805649,
+      "mid": 0.20551228523254395,
+      "high_mid": 0.09937772154808044,
+      "high": 0.02713504433631897
+    }
+  },
+  "rendered": {
+    "spectral": {
+      "centroid_mean": 2133.516366045006,
+      "centroid_std": 632.4077078026969,
+      "bandwidth_mean": 1970.8526037612387,
+      "rolloff_mean": 4129.032439713139,
+      "flatness_mean": 0.015366156585514545,
+      "zcr_mean": 0.11506859117002063,
+      "rms_mean": 0.0811375081539154,
+      "rms_std": 0.05836750566959381
+    },
+    "rhythm": {
+      "tempo": 129.19921875,
+      "beat_count": 290,
+      "tempo_candidates": [
+        {
+          "method": "full_band_beat_track",
+          "bpm": 129.19921875,
+          "support": 0.2869805246591568
+        },
+        {
+          "method": "low_band_tempo",
+          "bpm": 129.19921875,
+          "support": 0.2460583783686161
+        }
+      ],
+      "tempo_method": "full_band_beat_track",
+      "onset_strength_mean": 2.077773332595825,
+      "onset_strength_std": 2.5513997077941895,
+      "rhythm_regularity": 1.0
+    },
+    "bands": {
+      "sub_bass": 0.2989138066768646,
+      "bass": 0.2909673750400543,
+      "low_mid": 0.05527148395776749,
+      "mid": 0.2049984335899353,
+      "high_mid": 0.12660442292690277,
+      "high": 0.013611244037747383
+    }
+  },
+  "comparison": {
+    "mfcc_similarity": 0.9920081496238708,
+    "chroma_similarity": 0.9794187545776367,
+    "brightness_similarity": 0.901155231562875,
+    "tempo_ratio_used": 1.0,
+    "tempo_diff_bpm": 0.0,
+    "tempo_candidates": [
+      {
+        "method": "full_band_beat_track",
+        "bpm": 129.19921875,
+        "support": 0.2869805246591568
+      },
+      {
+        "method": "low_band_tempo",
+        "bpm": 129.19921875,
+        "support": 0.2460583783686161
+      }
+    ],
+    "tempo_method": "full_band_beat_track",
+    "tempo_similarity": 1.0,
+    "band_differences": {
+      "sub_bass": 3.0182182788848877,
+      "bass": 3.0961424112319946,
+      "low_mid": 1.9576296210289001,
+      "mid": 0.05138516426086426,
+      "high_mid": 2.7226701378822327,
+      "high": 1.3523800298571587
+    },
+    "worst_band_diff": 3.0961424112319946,
+    "frequency_balance_similarity": 0.9593385811895132,
+    "energy_similarity": 0.7460279166698456,
+    "raw_rms_ratio": 0.36229402057868637,
+    "overall_similarity": 0.9281854723643694,
+    "section_aware_similarity": 0.8721129997791159,
+    "section_aware_window_count": 13
+  },
+  "insights": [
+    "Overall similarity: 92.8%",
+    "Tempo: Excellent match (129 vs 129 BPM)",
+    "Timbre: Very similar (99%)",
+    "Harmony: Strong match (98%)",
+    "",
+    "Frequency balance:",
+    "  sub_bass: orig 26.9% vs rend 29.9% (+3.0%)",
+    "  bass: orig 32.2% vs rend 29.1% (-3.1%)",
+    "  mid: orig 20.6% vs rend 20.5% (-0.1%)",
+    "  high: orig 2.7% vs rend 1.4% (-1.4%)",
+    "",
+    "Suggestions to improve similarity:"
+  ],
+  "editability": "pass",
+  "generation_mode": "sample-instrument",
+  "editability_violations": [],
+  "editable_voice_count": 7,
+  "texture_voice_count": 0
+}

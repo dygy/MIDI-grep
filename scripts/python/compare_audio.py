@@ -280,21 +280,25 @@ def compute_rhythm_features(y, sr=22050, prior_bpm=None):
 
     return features
 
+# Band table (Hz) behind every `bands` / `band_differences` number. Module level so calibrate_dynamic.py
+# derives its band-edge bounds from the same source instead of retyping them.
+FREQ_BANDS = {
+    'sub_bass': (20, 60),      # Sub bass
+    'bass': (60, 250),         # Bass
+    'low_mid': (250, 500),     # Low mids
+    'mid': (500, 2000),        # Mids
+    'high_mid': (2000, 4000),  # High mids
+    'high': (4000, 10000),     # Highs
+}
+
+
 def compute_frequency_bands(y, sr=22050):
     """Analyze energy in frequency bands (sub-bass, bass, mids, highs)."""
     # Compute spectrogram
     S = np.abs(librosa.stft(y))
     freqs = librosa.fft_frequencies(sr=sr)
 
-    # Define bands
-    bands = {
-        'sub_bass': (20, 60),      # Sub bass
-        'bass': (60, 250),         # Bass
-        'low_mid': (250, 500),     # Low mids
-        'mid': (500, 2000),        # Mids
-        'high_mid': (2000, 4000),  # High mids
-        'high': (4000, 10000),     # Highs
-    }
+    bands = FREQ_BANDS
 
     band_energy = {}
     total_energy = np.sum(S ** 2)

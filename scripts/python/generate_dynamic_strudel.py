@@ -45,6 +45,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import re
 import sys
 from pathlib import Path
 
@@ -54,6 +55,7 @@ import pretty_midi
 # reuse the drum-groove converter + effects helpers
 sys.path.insert(0, str(Path(__file__).parent))
 import generate_hybrid_strudel as H  # noqa: E402
+import partial_register as PR  # noqa: E402
 from editability_check import check_editability  # noqa: E402  (spec 003 detector)
 from sound_selector import pick_palette_sound  # noqa: E402  (genre palette — no hardcoded names)
 from strudel_validation import VALID_SOUNDS  # noqa: E402  (library sound catalog)
@@ -66,6 +68,28 @@ NOTE_NAMES = ["c", "cs", "d", "ds", "e", "f", "fs", "g", "gs", "a", "as", "b"]
 
 def midi_name(pitch: int) -> str:
     return f"{NOTE_NAMES[pitch % 12]}{pitch // 12 - 1}"
+
+
+def _bars_hz(bars: list[str] | None, pick) -> float:
+    pitches = []
+    for bar in bars or []:
+        for tok in bar.split():
+            m = re.fullmatch(r"([a-g]s?)(-?\d+)", tok)
+            if m and m.group(1) in NOTE_NAMES:
+                pitches.append((int(m.group(2)) + 1) * 12 + NOTE_NAMES.index(m.group(1)))
+    return round(440.0 * 2 ** ((pick(pitches) - 69) / 12), 2) if pitches else 0.0
+
+
+def bars_max_hz(bars: list[str] | None) -> float:
+    """Highest fundamental (Hz) among the note names of ``bars`` (0.0 if none). Reported so the
+    calibrator can derive the bass low-pass floor from the actual material, not a typed value."""
+    return _bars_hz(bars, max)
+
+
+def bars_min_hz(bars: list[str] | None) -> float:
+    """Lowest fundamental (Hz) among the note names of ``bars`` (0.0 if none); floor of the lead
+    high-pass lever (a cutoff below the lowest note filters nothing)."""
+    return _bars_hz(bars, min)
 
 
 def fold_pitch(pitch: int, lo: int, hi: int) -> int:
@@ -543,6 +567,15 @@ def main() -> int:
                     help="lead low-pass (Hz); raise toward ~7000 to restore himid sparkle")
     ap.add_argument("--lead-hpf", type=int, default=300,
                     help="lead high-pass (Hz); lower toward ~150 to restore lowmid body")
+    ap.add_argument("--partial-reference", type=Path, default=None,
+                    help="sound register table (default data/partial_reference.json, written by "
+                         "probe_sound_register.py); empty/missing -> warn and apply no octave shift")
+    ap.add_argument("--lead-octave", type=PR.octave_arg, default="auto",
+                    help="octaves (int) to move the lead line up, or 'auto' (default): synth mode only, "
+                         "derived by partial_register.py from the original stem's dominant-partial register "
+                         "minus the palette sound's measured reference; sample modes always 0")
+    ap.add_argument("--vocal-octave", type=PR.octave_arg, default="auto",
+                    help="same as --lead-octave for the vocal line (synth mode, --vocal-mode instrument)")
     ap.add_argument("--sub-gain", type=float, default=0.7,
                     help="sub-sine layer gain (raise to fill the 20-60Hz sub_bass band)")
     ap.add_argument("--bass-cut", type=int, default=0,
@@ -621,16 +654,36 @@ def main() -> int:
     # RHYTHM from the stem's real onsets, PITCH from the transcription (onset-driven) — the
     # transcription over-produces notes ~5x, so plain grid-quantising makes a too-busy line
     # that loses the original's groove. Fall back to midi_to_bars if onset detection fails.
+    def _octave(arg, stem: Path, midi: Path, lo: int, hi: int, sound: str):
+        """(octaves, measured original dominant-partial log2 or None, decision dict or None).
+        Sample modes: always (0, None, None)."""
+        if str(arg) != "auto":
+            return int(arg), None, {"shift": int(arg), "reason": "explicit flag"}
+        if not synth:
+            return 0, None, None
+        try:
+            # cached beside the pack: calibration iterations 2..N reuse an unchanged stem's analysis
+            stat, pw, _hit = PR.cached_register(args.pack_dir / "register.json", stem.stem, stem, midi, lo, hi)
+        except Exception as exc:  # noqa: BLE001 - unmeasurable stem/midi -> no evidence, no shift
+            print(f"WARNING octave: could not measure {stem.name} ({exc}); no shift", file=sys.stderr)
+            return 0, None, {"shift": 0, "reason": f"unmeasurable: {exc}"}
+        table = PR.load_table(args.partial_reference) if args.partial_reference else PR.load_table()
+        dec = PR.octave_decision(stat, sound, table, pw)
+        return dec["shift"], stat, dec
+
+    lead_oct, lead_partial, lead_dec = _octave(args.lead_octave, args.stems_dir / "melodic.wav", args.lead_midi,
+                                     48, 79, lead_sound)
+    llo, lhi = 48 + 12 * lead_oct, 79 + 12 * lead_oct
     if args.rhythm == "onset":
         bass_bars = onset_driven_bars(args.stems_dir / "bass.wav", args.bass_midi, args.bpm, nbars,
                                       pick="low", lo=28, hi=48) \
             or midi_to_bars(args.bass_midi, args.bpm, nbars, pick="low", lo=28, hi=48)
         lead_bars = onset_driven_bars(args.stems_dir / "melodic.wav", args.lead_midi, args.bpm, nbars,
-                                      pick="high", lo=48, hi=79) \
-            or midi_to_bars(args.lead_midi, args.bpm, nbars, pick="high", lo=48, hi=79)
+                                      pick="high", lo=llo, hi=lhi) \
+            or midi_to_bars(args.lead_midi, args.bpm, nbars, pick="high", lo=llo, hi=lhi)
     else:
         bass_bars = midi_to_bars(args.bass_midi, args.bpm, nbars, pick="low", lo=28, hi=48)
-        lead_bars = midi_to_bars(args.lead_midi, args.bpm, nbars, pick="high", lo=48, hi=79)
+        lead_bars = midi_to_bars(args.lead_midi, args.bpm, nbars, pick="high", lo=llo, hi=lhi)
     if not bass_bars and not lead_bars:
         print("ERROR: no note material extracted", file=sys.stderr)
         return 1
@@ -649,6 +702,7 @@ def main() -> int:
     vocal_note_bars: list[str] | None = None   # instrument: note strings on <prefix>_vocal
     vox_bars: list[str] | None = None       # chops: vox<N> one-shot strings
     vocal_range: tuple[int, int] | None = None
+    vocal_oct, vocal_partial, vocal_dec = 0, None, None
     if synth:
         vocal_sound = _library_sound(args.vocal_sound, "vocal")
     else:
@@ -670,6 +724,9 @@ def main() -> int:
                 _downgrade(f"no transcription at {vocal_midi} (run transcribe.py vocals.wav {vocal_midi})")
             else:
                 lo, hi = vocal_range
+                vocal_oct, vocal_partial, vocal_dec = _octave(args.vocal_octave, args.stems_dir / "vocals.wav", vocal_midi,
+                                                   lo, hi, vocal_sound)
+                lo, hi = lo + 12 * vocal_oct, hi + 12 * vocal_oct   # the fold window moves, so the DATA is transposed
                 if args.rhythm == "onset":
                     vocal_note_bars = onset_driven_bars(args.stems_dir / "vocals.wav", vocal_midi, args.bpm, nbars,
                                                         pick="high", lo=lo, hi=hi) \
@@ -785,6 +842,7 @@ def main() -> int:
     # rendered ran HOT in bass/low-mid and (especially) high-mid, and SHORT on
     # high/top air. With only gain/lpf/hpf + layering available in Strudel:
     bass_fx["gain"] = round(bass_fx["gain"] * args.bass_mult * args.cal_bass, 2)   # tame bass/low-mid boom
+    bass_lpf_analysis = int(bass_fx.get("lpf") or 0)   # analysis-derived cutoff, before any override
     if args.bass_lpf:
         bass_fx["lpf"] = args.bass_lpf   # cut trackbass upper-bass harmonics → energy shifts toward sub
     # NOTE: raising lead gain adds high-mid faster than lpf removes it (lead lives
@@ -1035,6 +1093,13 @@ def main() -> int:
                       "lead_bars": len(lead_bars or []), "drums": bool(detected),
                       "drum_mode": args.drum_mode,
                       "bass_sound": bass_sound, "lead_sound": lead_sound,
+                      # effective bass low-pass + its bounds, fed back to calibrate_dynamic.py
+                      "bass_lpf": int(bass_fx.get("lpf") or 0), "bass_lpf_analysis": bass_lpf_analysis,
+                      "bass_note_max_hz": bars_max_hz(bass_bars),
+                      "lead_octave": lead_oct, "vocal_octave": vocal_oct,
+                      "lead_octave_decision": lead_dec, "vocal_octave_decision": vocal_dec,
+                      "lead_partial_log2": lead_partial, "vocal_partial_log2": vocal_partial,
+                      "lead_hpf": int(args.lead_hpf), "lead_note_min_hz": bars_min_hz(lead_bars),
                       "vocal_mode": vocal_mode, "vocal_sound": vocal_sound if vocal_note_bars else None,
                       "vocal_bars": len(vocal_note_bars or vox_bars or []),
                       "vocal_range": list(vocal_range) if vocal_range else None,

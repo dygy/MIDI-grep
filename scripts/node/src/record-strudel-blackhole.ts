@@ -12,6 +12,11 @@
  * 4. Inserts code and clicks play
  * 5. Records via ffmpeg from BlackHole
  *
+ * Process hygiene: SIGKILL of an ffmpeg that is still opening the avfoundation device is KNOWN to
+ * wedge BlackHole (spec 004 s3), and device open can be slow while the browser launch competes for
+ * the machine. So ffmpeg is stopped quit -> SIGTERM -> (long grace) -> SIGKILL, and "no output" is
+ * only judged after playback has started.
+ *
  * Usage:
  *   node dist/record-strudel-blackhole.js input.strudel -o output.wav -d 30
  */
@@ -19,6 +24,61 @@
 import puppeteer from 'puppeteer';
 import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
+import { killEscalate, TailBuffer, isAlive, watchCaptureStart, createFatal } from './capture-guard.js';
+
+// Robustness state (Oct 2026): a wedged ffmpeg (SIGTERM ignored, 0 bytes written) once outlived the
+// recorder and kept BlackHole busy. Every exit path goes through fatal()/cleanupChildren().
+let ffmpegProc: ReturnType<typeof spawn> | null = null;
+let browserRef: { close(): Promise<void>; process(): { kill(s?: NodeJS.Signals): boolean } | null } | null = null;
+const ffmpegStderr = new TailBuffer(20);
+let startWatch: { cancel: () => void } | null = null;
+let dying = false;
+
+// "No output" is judged only once playback has started (audio must flow from then on). Deadline is
+// derived from the recorder's own waits after that point: the 2 s sample-load settle below plus
+// ffmpeg's default 5 s input probe (analyzeduration) = 7 s. Device open itself is never time-boxed.
+const POST_PLAY_SETTLE_MS = 2000;
+const FFMPEG_ANALYZE_MS = 5000;
+const NO_OUTPUT_DEADLINE_MS = POST_PLAY_SETTLE_MS + FFMPEG_ANALYZE_MS;
+const SPAWN_SETTLE_MS = 1000;
+// Escalation graces. SIGKILL only after quit (5 s) + SIGTERM (25 s) = 30 s: device open has been seen
+// to take several seconds under browser-launch load and must complete by the 60 s play-wait bound at
+// worst; 30 s is far past the observed slow case, and SIGKILL mid-open wedges BlackHole.
+const QUIT_GRACE_MS = 5000;
+const TERM_GRACE_MS = 25000;
+const escalation = { quitGraceMs: QUIT_GRACE_MS, termGraceMs: TERM_GRACE_MS, killWaitMs: 2000, log: (m: string) => console.error(m) };
+
+async function cleanupChildren(): Promise<void> {
+  dying = true;
+  startWatch?.cancel();
+  try { await browserRef?.close(); } catch { /* ignore */ }
+  try { browserRef?.process()?.kill('SIGKILL'); } catch { /* ignore */ }
+  if (ffmpegProc && isAlive(ffmpegProc)) {
+    const proc = ffmpegProc;
+    const outcome = await killEscalate(proc, { ...escalation, quit: () => { proc.stdin?.write('q'); } });
+    console.error(`ffmpeg cleanup: ${outcome}`);
+  }
+}
+
+const fatalImpl = createFatal({
+  log: m => console.error(m),
+  tail: () => ffmpegStderr.tail(),
+  cleanup: cleanupChildren,
+  exit: c => process.exit(c),
+});
+// Returns a promise that never resolves in practice (process exits); typed never for callers.
+const fatal = (message: string, code = 1): Promise<never> =>
+  fatalImpl(message, code) as unknown as Promise<never>;
+
+// Puppeteer's own signal handlers are disabled at launch so fatal() owns shutdown (q-stop, escalation, stderr tail).
+const SIGNAL_EXIT = { SIGINT: 130, SIGTERM: 143, SIGHUP: 129 } as const;
+for (const sig of Object.keys(SIGNAL_EXIT) as (keyof typeof SIGNAL_EXIT)[]) {
+  process.on(sig, () => { void fatal(`Recorder received ${sig}; shutting down children`, SIGNAL_EXIT[sig]); });
+}
+process.on('uncaughtException', err => { void fatal(`Uncaught exception: ${err?.stack || err}`); });
+process.on('unhandledRejection', err => { void fatal(`Unhandled rejection: ${err}`); });
+// Last-resort synchronous net: never leave ffmpeg behind even if the async path was skipped.
+process.on('exit', () => { try { if (ffmpegProc && isAlive(ffmpegProc)) ffmpegProc.kill('SIGKILL'); } catch { /* ignore */ } });
 
 interface RecordOptions {
   duration: number;
@@ -70,16 +130,41 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
        '-t', String(duration + 10),
        '-af', 'aresample=async=1',
        '-ar', '44100', '-ac', '2', '-y', outputPath];
+  // A stale file from an earlier run would defeat the "ffmpeg created output" check below.
+  try { fs.unlinkSync(outputPath); } catch { /* none */ }
   const captureStartMs = Date.now();
   const ffmpeg = spawn('ffmpeg', ffmpegArgs, { stdio: ['pipe', 'pipe', 'pipe'] });
+  ffmpegProc = ffmpeg;
+  // Drain both pipes: stderr was previously never read, and a full pipe blocks ffmpeg. Keep a tail.
+  ffmpeg.stderr?.on('data', d => ffmpegStderr.push(d));
+  ffmpeg.stdout?.on('data', () => {});
+  ffmpeg.on('error', err => { void fatal(`Failed to run ffmpeg: ${err.message}`); });
+  // Early detection: before play only a dead ffmpeg is an error; watch.arm() below starts the no-output clock.
+  const watch = watchCaptureStart({
+    child: ffmpeg,
+    deadlineMs: NO_OUTPUT_DEADLINE_MS,
+    onStarted: ms => console.log(`ffmpeg capture started after ${(ms / 1000).toFixed(2)} s`),
+    sizeOf: () => { try { return fs.statSync(outputPath).size; } catch { return 0; } },
+  });
+  startWatch = watch;
+  watch.result.then(o => {
+    if (o === 'no-output') {
+      void fatal(`ffmpeg produced no output ${NO_OUTPUT_DEADLINE_MS / 1000} s after playback started — BlackHole capture did not start; device busy or wedged`);
+    } else if (o === 'ffmpeg-exited' && !dying) {
+      void fatal(`ffmpeg exited (code ${ffmpeg.exitCode}, signal ${ffmpeg.signalCode}) before producing output — BlackHole capture did not start`);
+    }
+  });
 
-  await new Promise(r => setTimeout(r, 1000));
+  await new Promise(r => setTimeout(r, SPAWN_SETTLE_MS));
 
   // Launch browser (NOT headless - Web Audio is silent in headless mode)
   // Position offscreen with minimal size, disable background throttling
   console.log('Opening browser (background)...');
   const browser = await puppeteer.launch({
     headless: false,
+    handleSIGINT: false,
+    handleSIGTERM: false,
+    handleSIGHUP: false,
     args: [
       '--no-sandbox',
       '--autoplay-policy=no-user-gesture-required',
@@ -98,6 +183,7 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
       '--no-default-browser-check'
     ]
   });
+  browserRef = browser;
 
   // Use AppleScript to hide Chrome window (macOS only)
   try {
@@ -267,6 +353,7 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
     });
     if (isPlaying) {
       console.log('Playback started, recording...');
+      watch.arm();
       break;
     }
     await new Promise(r => setTimeout(r, 200));
@@ -276,7 +363,7 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
   }
 
   // Wait a bit more for samples to fully load
-  await new Promise(r => setTimeout(r, 2000));
+  await new Promise(r => setTimeout(r, POST_PLAY_SETTLE_MS));
 
   // Wait for duration
   console.log(`Recording for ${duration} seconds...`);
@@ -297,15 +384,20 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
   await browser.close();
   const captureWallSeconds = (Date.now() - captureStartMs) / 1000;
   console.log(`Capture wall-clock span: ${captureWallSeconds.toFixed(3)} s (mode ${captureMode})`);
-  ffmpeg.stdin?.write('q');
+  watch.cancel();
+  browserRef = null;
+  try { ffmpeg.stdin?.write('q'); } catch { /* stdin already closed */ }
+  // 3 s for a graceful 'q' finish, then SIGTERM (2 s grace), then SIGKILL — never leave ffmpeg behind.
   await new Promise<void>(resolve => {
-    ffmpeg.on('close', resolve);
-    setTimeout(() => { ffmpeg.kill('SIGTERM'); resolve(); }, 3000);
+    if (!isAlive(ffmpeg)) return resolve();
+    const t = setTimeout(resolve, 3000);
+    ffmpeg.once('exit', () => { clearTimeout(t); resolve(); });
   });
+  const stopOutcome = await killEscalate(ffmpeg, { ...escalation, quitGraceMs: 0 });
+  if (stopOutcome !== 'already-dead') console.log(`ffmpeg did not exit on 'q'; ${stopOutcome}`);
 
-  if (!fs.existsSync(outputPath)) {
-    console.error('Recording failed');
-    process.exit(1);
+  if (!fs.existsSync(outputPath) || fs.statSync(outputPath).size === 0) {
+    await fatal('Recording failed: ffmpeg left no output file');
   }
 
   // Trim leading silence (Strudel takes a few seconds to load before audio starts)
@@ -381,4 +473,4 @@ async function main() {
   await recordStrudel(fs.readFileSync(inputFile, 'utf-8'), { duration, outputPath, useLocal });
 }
 
-main().catch(err => { console.error('Error:', err); process.exit(1); });
+main().catch(err => { void fatal(`Error: ${err?.stack || err}`); });

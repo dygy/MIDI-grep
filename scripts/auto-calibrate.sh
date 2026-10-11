@@ -35,17 +35,22 @@
 # and the instruments samples.json already hosted (R2) so Strudel can fetch it.
 set -uo pipefail
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-PY="$ROOT/scripts/python/.venv/bin/python"
-GEN="$ROOT/scripts/python/generate_dynamic_strudel.py"
-CAL="$ROOT/scripts/python/calibrate_dynamic.py"
-CMP="$ROOT/scripts/python/compare_audio.py"
-REC="$ROOT/scripts/node/dist/record-strudel-blackhole.js"
+# Tool paths are overridable via env (tests point them at stubs); defaults are the real ones.
+PY="${AC_PY:-$ROOT/scripts/python/.venv/bin/python}"
+GEN="${AC_GEN:-$ROOT/scripts/python/generate_dynamic_strudel.py}"
+CAL="${AC_CAL:-$ROOT/scripts/python/calibrate_dynamic.py}"
+CMP="${AC_CMP:-$ROOT/scripts/python/compare_audio.py}"
+GATE="${AC_GATE:-$ROOT/scripts/python/gate_margin.py}"
+REC="${AC_REC:-$ROOT/scripts/node/dist/record-strudel-blackhole.js}"
+NODE_BIN="${AC_NODE:-node}"; SETTLE="${AC_SETTLE_S:-3}"
+PGREP="${AC_PGREP:-pgrep}"; WAIT_MAX="${AC_RECORDER_WAIT_S:-120}"   # tests: AC_PGREP=false, AC_RECORDER_WAIT_S=0
+RC=0   # exit status: 70 when any iteration failed (GEN/RENDER/CMP FAILED, recorder wait abort); BEST is still printed
 
 STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" BARS="78"
 ENV_START=""; ITERS="6" DUR="170" BASS_SOUND="" LEAD_SOUND="" VOCAL_MODE="instrument" MODE="sample-instrument"
 WORK="${TMPDIR:-/tmp}/auto-calibrate.$$"
 # starting knobs (generator defaults are sane cold-start values)
-BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" CV="1.0"
+BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" CV="1.0" BL="0" LH="0"   # BL = bass low-pass override Hz, LH = lead high-pass Hz; 0 = generator/analysis default
 
 while [ $# -gt 0 ]; do case "$1" in
   --stems) STEMS="$2"; shift 2;; --base) BASE="$2"; shift 2;; --inst) INST="$2"; shift 2;;
@@ -55,7 +60,7 @@ while [ $# -gt 0 ]; do case "$1" in
   --vocal-mode) VOCAL_MODE="$2"; shift 2;;
   --mode) MODE="$2"; shift 2;;
   --workdir) WORK="$2"; shift 2;;
-  --start) read -r BM SG CL LLPF HG MG CV <<<"$2"; shift 2;;   # resume from a previous BEST: "BM SG CL LLPF HG MG CV"
+  --start) BL=0; LH=0; read -r BM SG CL LLPF HG MG CV BL LH <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; shift 2;;   # resume from a previous BEST: "BM SG CL LLPF HG MG CV [BL [LH]]" (7, 8 or 9 fields)
   --env-start) ENV_START="$2"; shift 2;;                        # per-bar env-correction JSON to apply from iteration 1
   *) echo "unknown arg: $1" >&2; exit 64;;
 esac; done
@@ -75,7 +80,7 @@ ORIG="$STEMS/original.wav"
 mkdir -p "$WORK"
 echo "workdir: $WORK"
 
-best=-1; best_params=""; best_tag=""
+best=-1; best_params=""; best_tag=""; best_gate="n/a"; : >"$WORK/iters.tsv"
 rm -f "$WORK/best.env.json"   # never report a stale env from a previous run
 PREV_ENV="${ENV_START:-}"   # env-correction JSON measured from the previous iteration (fed to the next generation); --env-start seeds it
 for i in $(seq 1 "$ITERS"); do
@@ -83,56 +88,98 @@ for i in $(seq 1 "$ITERS"); do
   inst_arg=(); [ -n "$INST" ] && inst_arg=(--samples-url "$INST")
   key_arg=();  [ -n "$KEY" ]  && key_arg=(--key "$KEY")
   env_arg=();  [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && env_arg=(--env-correction "$PREV_ENV")
+  lh_arg=();   [ "$LH" -gt 0 ] 2>/dev/null && lh_arg=(--lead-hpf "$LH")   # 0 = generator default
   snd_arg=();  [ -n "$BASS_SOUND" ] && snd_arg+=(--bass-sound "$BASS_SOUND")
   [ -n "$LEAD_SOUND" ] && snd_arg+=(--lead-sound "$LEAD_SOUND")
   "$PY" "$GEN" --stems-dir "$STEMS" --pack-dir "$PACK" \
     --bass-midi "$PACK/bass.mid" --lead-midi "$PACK/melodic.mid" \
-    --drums-json "$PACK/drums_bands.json" --base-url "$BASE" "${inst_arg[@]}" "${snd_arg[@]}" \
-    --mode "$MODE" --bpm "$BPM" "${key_arg[@]}" --genre "$GENRE" --num-bars "$BARS" \
+    --drums-json "$PACK/drums_bands.json" --base-url "$BASE" ${inst_arg[@]+"${inst_arg[@]}"} ${snd_arg[@]+"${snd_arg[@]}"} \
+    --mode "$MODE" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --num-bars "$BARS" \
     --drum-mode "$DRUM_MODE" --vocal-mode "$VOCAL_MODE" \
     --bass-mult "$BM" --sub-gain "$SG" --cal-lead "$CL" --lead-lpf "$LLPF" \
-    --hat-gain "$HG" --master-gain "$MG" --cal-vocal "$CV" "${env_arg[@]}" --out "$STRU" >/dev/null 2>&1 \
-    || { echo "[$TAG] GEN FAILED"; break; }
+    --hat-gain "$HG" --master-gain "$MG" --cal-vocal "$CV" --bass-lpf "$BL" ${lh_arg[@]+"${lh_arg[@]}"} ${env_arg[@]+"${env_arg[@]}"} --out "$STRU" \
+    >"$WORK/$TAG.gen.json" 2>"$WORK/$TAG.gen.log" \
+    || { echo "[$TAG] GEN FAILED"; RC=70; break; }
+  # the generator reports the EFFECTIVE bass cutoff + its bounds (analysis value, top bass note);
+  # the calibrator needs them to move the cutoff by measurement (0 = unreported -> lever off)
+  if ! read -r EBL EBLMAX EBHZ ELH ELHZ < <("$PY" -c "import json;d=json.load(open('$WORK/$TAG.gen.json'));print(d['bass_lpf'],d['bass_lpf_analysis'],d['bass_note_max_hz'],d['lead_hpf'],d['lead_note_min_hz'])" 2>/dev/null); then
+    echo "[$TAG] WARNING: cannot parse the generator summary $WORK/$TAG.gen.json - bass-lpf/lead-hpf levers are OFF this step"
+    EBL=0 EBLMAX=0 EBHZ=0 ELH=0 ELHZ=0
+  fi
 
   # Never pkill -9 the capture right before a render: on 2026-10-09 that left BlackHole/avfoundation
   # wedged (every following capture produced no file). Wait for any live recorder to finish instead.
   # Bounded + anchored (review #2): wait at most 120 s for a LIVE recorder/capture, matched on the
   # actual invocations (not any process whose command line mentions the file name).
   waited=0
-  while pgrep -f "node .*record-strudel-blackhole\.js|ffmpeg .* -f avfoundation" >/dev/null; do
-    [ "$waited" -ge 120 ] && { echo "[$TAG] a recorder/capture has been running for 120 s — stale? (pgrep -fl 'record-strudel|avfoundation'); aborting"; exit 75; }
+  while "$PGREP" -f "node .*record-strudel-blackhole\.js|ffmpeg .* -f avfoundation" >/dev/null; do
+    [ "$waited" -ge "$WAIT_MAX" ] && { echo "[$TAG] a recorder/capture has been running for ${WAIT_MAX} s — stale? (pgrep -fl 'record-strudel|avfoundation'); aborting"; RC=70; break 2; }
     sleep 2; waited=$((waited+2))
-  done; sleep 3
-  node "$REC" "$STRU" -o "$WAV" -d "$DUR" >"$WORK/$TAG.render.log" 2>&1
-  [ -f "$WAV" ] || { echo "[$TAG] RENDER FAILED (see $WORK/$TAG.render.log)"; break; }
+  done; sleep "$SETTLE"
+  "$NODE_BIN" "$REC" "$STRU" -o "$WAV" -d "$DUR" >"$WORK/$TAG.render.log" 2>&1
+  [ -f "$WAV" ] || { echo "[$TAG] RENDER FAILED (see $WORK/$TAG.render.log)"; RC=70; break; }
 
-  "$PY" "$CMP" "$ORIG" "$WAV" -d 135 -j > "$CJ" 2>/dev/null || { echo "[$TAG] CMP FAILED"; break; }
+  "$PY" "$CMP" "$ORIG" "$WAV" -d 135 -j > "$CJ" 2>/dev/null || { echo "[$TAG] CMP FAILED"; RC=70; break; }
   read -r OVER SECT < <("$PY" -c "import json,sys;d=json.load(open('$CJ'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
-  echo "[$TAG] mode=$MODE overall=$OVER section_aware=$SECT  (bm=$BM sg=$SG cl=$CL llpf=$LLPF hg=$HG mg=$MG cv=$CV)"
+  echo "[$TAG] mode=$MODE overall=$OVER section_aware=$SECT  (bm=$BM sg=$SG cl=$CL llpf=$LLPF hg=$HG mg=$MG cv=$CV bl=$BL eff_bl=$EBL lh=$LH eff_lh=$ELH)"
 
-  # keep best by overall similarity
-  better=$("$PY" -c "print(1 if $OVER>$best else 0)")
-  if [ "$better" = "1" ]; then best="$OVER"; best_params="$BM $SG $CL $LLPF $HG $MG $CV"; best_tag="$TAG"
-    rm -f "$WORK/best.env.json"; [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && cp "$PREV_ENV" "$WORK/best.env.json"
-    cp "$STRU" "$WORK/best.strudel"; cp "$WAV" "$WORK/best.wav"; cp "$CJ" "$WORK/best.cmp.json"; fi
+  # Record this iteration; BEST is chosen AFTER the loop (see below) so the ordering is one consistent rule.
+  # Gate margin = smallest margin to the eval-gate floors (eval/thresholds.yaml via eval/gate.py, per
+  # --mode/--genre); "n/a" when the gate cannot be read for this iteration.
+  if GATE_OUT=$("$PY" "$GATE" --comparison "$CJ" --genre "$GENRE" --mode "$MODE" 2>"$WORK/$TAG.gate.log"); then
+    read -r MARG _ <<<"$GATE_OUT"
+  else
+    echo "[$TAG] WARNING: gate margin unavailable ($(tr '\n' ' ' <"$WORK/$TAG.gate.log"))"
+    MARG="n/a"; GATE_OUT="n/a"
+  fi
+  echo "[$TAG] gate: $GATE_OUT"
+  ENVUSED="-"; if [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ]; then cp "$PREV_ENV" "$WORK/$TAG.envused.json"; ENVUSED="$WORK/$TAG.envused.json"; fi
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$TAG" "$OVER" "$MARG" "$GATE_OUT" "$BM $SG $CL $LLPF $HG $MG $CV $BL $LH" "$ENVUSED" >>"$WORK/iters.tsv"
 
   # calibrate -> next knobs
   ENV_OUT="$WORK/$TAG.env.json"
   envin_arg=(); [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && envin_arg=(--env-correction-in "$PREV_ENV")
-  CLI=$("$PY" "$CAL" --comparison "$CJ" --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" "${envin_arg[@]}" \
+  CLI=$("$PY" "$CAL" --comparison "$CJ" --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
     --bass-mult "$BM" --sub-gain "$SG" --cal-lead "$CL" --lead-lpf "$LLPF" \
-    --hat-gain "$HG" --master-gain "$MG" --cal-vocal "$CV" 2>"$WORK/$TAG.cal.log")
+    --hat-gain "$HG" --master-gain "$MG" --cal-vocal "$CV" \
+    --mode "$MODE" --bass-lpf "$EBL" --bass-lpf-max "$EBLMAX" --bass-note-max-hz "$EBHZ" \
+    --lead-hpf "$ELH" --lead-note-min-hz "$ELHZ" 2>"$WORK/$TAG.cal.log")
   # parse "--bass-mult X --sub-gain Y ..." into the loop vars
   set -- $CLI
   while [ $# -gt 0 ]; do case "$1" in
     --bass-mult) BM="$2";; --sub-gain) SG="$2";; --cal-lead) CL="$2";;
-    --lead-lpf) LLPF="$2";; --hat-gain) HG="$2";; --master-gain) MG="$2";; --cal-vocal) CV="$2";;
+    --lead-lpf) LLPF="$2";; --hat-gain) HG="$2";; --master-gain) MG="$2";; --cal-vocal) CV="$2";; --bass-lpf) BL="$2";; --lead-hpf) LH="$2";;
   esac; shift 2; done
   [ -s "$ENV_OUT" ] && PREV_ENV="$ENV_OUT"
 done
 
+# BEST = the iteration with the largest minimum margin to the gate floors (a render that passes both beats one
+# that does not; among failures the one nearest to passing). If the gate was unreadable for ANY iteration the
+# margins are not comparable, so ALL iterations are ranked by overall instead (one consistent ordering).
+SEL=$("$PY" - "$WORK/iters.tsv" <<'PYEOF'
+import sys
+rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1]) if l.strip()]
+if rows:
+    gated = all(r[2] != "n/a" for r in rows)
+    key = (lambda r: (float(r[2]), float(r[1]))) if gated else (lambda r: (float(r[1]),))
+    b = max(rows, key=key)
+    print("\t".join([b[0], b[1], b[3], b[4], b[5], "gate" if gated else "overall"]))
+PYEOF
+)
+if [ -n "$SEL" ]; then
+  IFS=$'\t' read -r best_tag best best_gate best_params best_envused SEL_BY <<<"$SEL"
+  if [ "$SEL_BY" = "overall" ]; then
+    echo "WARNING: gate margin was unreadable for at least one iteration - BEST selected by overall similarity across ALL iterations (floors not applied)"
+    best_gate="n/a (gate unreadable for >=1 iteration)"
+  fi
+  rm -f "$WORK/best.env.json"; [ "$best_envused" != "-" ] && [ -s "$best_envused" ] && cp "$best_envused" "$WORK/best.env.json"
+  cp "$WORK/$best_tag.strudel" "$WORK/best.strudel"; cp "$WORK/$best_tag.wav" "$WORK/best.wav"; cp "$WORK/$best_tag.cmp.json" "$WORK/best.cmp.json"
+fi
 echo "BEST: $best_tag overall=$best  params: $best_params"
+echo "  gate:    $best_gate  (margin PASS/FAIL overall section_aware floor sa_floor; BEST = largest minimum margin to the floors)"
 echo "  strudel: $WORK/best.strudel"
 [ -s "$WORK/best.env.json" ] && echo "  env:     $WORK/best.env.json  (per-bar bass/lead/master correction used by the best render; pass --env-correction)"
 echo "  wav:     $WORK/best.wav"
 echo "  promote + report: scripts/editable-pipeline.sh --title <track> (stages 9-10), or pipeline_helpers.py promote then 'pipeline_helpers.py report --track-dir <track> --version vNNN --seconds 135 --calib-workdir $WORK'."
+[ "$RC" -eq 0 ] || echo "FAILED: at least one iteration did not complete (exit $RC); BEST above covers only the iterations that ran" >&2
+exit "$RC"

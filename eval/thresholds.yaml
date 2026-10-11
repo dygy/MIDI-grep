@@ -127,6 +127,6 @@ modes:
         margin: 0.02
         editability: pass
         vocal_mode: instrument
-    # shortfall 2026-10-10 — second track "VAGABUNDO NÃO NAMORA" v003 (editable, tempo 1.000): overall 0.7209 < 0.77,
-    # section-aware 0.7520 < 0.81, worst band 30.07% > 30% guard (freq balance 0.488). Floors stay; recorded as a
-    # shortfall in reference_tracks.yaml with a follow-up in spec 004 tasks.
+    # shortfall 2026-10-10 — second track "VAGABUNDO NÃO NAMORA" v003 (one synth render with the sample-instrument knobs):
+    # 0.7209 / 0.7520, worst band 30.07% — recorded, floors kept. Fix #11 gave synth mode its own calibration pass (bass-lpf and
+    # lead-hpf levers, measured vocal octave, gate-aware best) → v007 0.9393 / 0.8725 PASS with these floors unchanged.

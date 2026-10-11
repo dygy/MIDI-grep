@@ -49,6 +49,8 @@ tracks:
     genre: brazilian_funk
     mode: synth
     cache_key: "VAGABUNDO NÃO NAMORA"
-    version: v003
-    expected: shortfall          # 2026-10-10: overall 0.7209 < 0.77, section-aware 0.752 < 0.81, worst band 30.07% > 30% guard. Editable, tempo 1.000.
-    measured: { overall: 0.7209, section_aware: 0.7520 }
+    version: v007
+    expected: pass               # 2026-10-11 fix #11: v003 (0.7209 / 0.7520, worst band 30.07%) was ONE synth render with the sample-instrument
+                                 # knobs; v007 = auto-calibrate --mode synth (own knobs: bass-lpf 422, lead-hpf 500, hats 0.135, vocal +1 octave
+                                 # from the measured register) → 0.9393 / 0.8725, worst band 8.41%. Floors unchanged.
+    measured: { overall: 0.9393, section_aware: 0.8725 }

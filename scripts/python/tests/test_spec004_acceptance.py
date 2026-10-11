@@ -5,7 +5,8 @@
 
 The per-slice suites (test_build_instruments, test_pipeline_helpers, test_similarity_gate,
 internal/audio/youtube_test.go, cmd/midi-grep/main_test.go) prove each component. This file proves the
-feature's contract on whole deliverables: the cached v002 / v003 runs of "VAGABUNDO NAO NAMORA", the
+feature's contract on whole deliverables: the cached v002 / v007 runs of "VAGABUNDO NAO NAMORA" (v003 was the first,
+shortfall synth run; fix #11 re-calibrated synth mode as v007), the
 reference dataset, the floors, the docs and the general (not per-track) shape of the defect fixes.
 
 E2E renders (BlackHole) are out of CI scope: cases that need the cached track SKIP when
@@ -119,7 +120,7 @@ def _sample_piece() -> str:
 
 
 def _synth_piece() -> str:
-    return _read(TRACK / "v003" / "output.strudel")
+    return _read(TRACK / "v007" / "output.strudel")
 
 
 def _comparison(version: str) -> dict:
@@ -205,7 +206,7 @@ def test_21_a_sampled_piece_is_not_a_synth_piece():
 
 
 @needs_track
-@pytest.mark.parametrize("version,mode", [("v002", "sample-instrument"), ("v003", "synth")])
+@pytest.mark.parametrize("version,mode", [("v002", "sample-instrument"), ("v007", "synth")])
 def test_21_both_pieces_pass_the_editability_check(version, mode):
     code = _read(TRACK / version / "output.strudel")
     res = check_editability(code)
@@ -228,7 +229,7 @@ def _setcps_error(code: str, bpm: float) -> str | None:
 
 
 @needs_track
-@pytest.mark.parametrize("version", ["v002", "v003"])
+@pytest.mark.parametrize("version", ["v002", "v007"])
 def test_21_tempo_is_set_from_the_song_bpm(version):
     bpm = _json(TRACK / "metadata.json")["bpm"]
     assert _setcps_error(_read(TRACK / version / "output.strudel"), bpm) is None
@@ -265,7 +266,7 @@ def _stamp_problems(doc: dict, expected_mode: str) -> list[str]:
 
 
 @needs_track
-@pytest.mark.parametrize("version,mode", [("v002", "sample-instrument"), ("v003", "synth")])
+@pytest.mark.parametrize("version,mode", [("v002", "sample-instrument"), ("v007", "synth")])
 def test_22_comparisons_state_mode_editability_and_both_similarities(version, mode):
     doc = _comparison(version)
     assert _stamp_problems(doc, mode) == []
@@ -291,7 +292,7 @@ def _tempo_error_fraction(comp: dict, bpm: float) -> float:
 
 
 @needs_track
-@pytest.mark.parametrize("version", ["v002", "v003"])
+@pytest.mark.parametrize("version", ["v002", "v007"])
 def test_22_tempo_is_within_half_a_percent_of_the_song(version):
     comp = _comparison(version)["comparison"]
     bpm = _json(TRACK / "metadata.json")["bpm"]
@@ -307,7 +308,7 @@ def test_22_a_sped_up_recording_is_detected():
 
 
 @needs_track
-@pytest.mark.parametrize("version", ["v002", "v003"])
+@pytest.mark.parametrize("version", ["v002", "v007"])
 def test_22_promoted_run_metadata_matches_its_comparison(version):
     meta, doc = _json(TRACK / version / "metadata.json"), _comparison(version)
     comp = doc["comparison"]
@@ -390,7 +391,7 @@ def _dataset_problems(entries: list[dict], runs: dict[str, str]) -> list[str]:
 
 # v002 was the sample-instrument run spec 004 recorded (shortfall 0.9282 / 0.8721); fix #10 re-rendered the same
 # knobs with the measured per-bar correction as v004 (0.9320 / 0.9216, PASS), which the dataset now points at.
-RUNS = {"sample-instrument": "v004", "synth": "v003"}
+RUNS = {"sample-instrument": "v004", "synth": "v007"}
 
 
 def test_23_dataset_has_both_modes_pointing_at_the_recorded_runs():
@@ -457,7 +458,9 @@ def _shortfall_problems(entry: dict, comparison: dict, th: dict) -> list[str]:
 
 
 @needs_track
-@pytest.mark.parametrize("version,expected", [("v004", "pass"), ("v003", "shortfall")])
+# v003 (the first synth run, 0.7209 / 0.7520) stays on record in the dataset comment, thresholds note and CLAUDE.md;
+# the dataset points synth at v007 (fix #11), so only the current runs are asserted here.
+@pytest.mark.parametrize("version,expected", [("v004", "pass"), ("v007", "pass")])
 def test_23_shortfall_records_equal_the_run_and_floors_are_untouched(version, expected):
     th = yaml.safe_load(_read(THRESHOLDS))
     assert _floor_problems(th) == []
@@ -525,8 +528,9 @@ def test_23_claude_md_names_the_second_track_with_its_run_ids():
     text = _read(REPO / "CLAUDE.md")
     assert TRACK_KEY in text and "Second reference track" in text
     para = text[text.index("Second reference track"):][:1400]
-    assert "`v004`" in para and "`v003`" in para and "`v002`" in para
-    assert "93.2%" in para and "92.2%" in para and "72.1%" in para and "75.2%" in para
+    assert "`v004`" in para and "`v007`" in para and "`v003`" in para and "`v002`" in para
+    assert "93.2%" in para and "92.2%" in para and "93.9%" in para and "87.2%" in para
+    assert "72.1%" in para and "75.2%" in para          # the first synth run stays on record
     assert "92.8%" in para and "87.2%" in para          # the pre-fix shortfall stays on record
     assert "shortfall" in para and "floors unchanged" in para
     # the first track's numbers sit in the same section (side by side)
@@ -889,3 +893,42 @@ def test_promote_run_is_general_acceptance(tmp_path):
     m1, m2 = json.loads((v1 / "metadata.json").read_text()), json.loads((v2 / "metadata.json").read_text())
     assert m1["similarity_overall"] == 0.5 and m1["editability"] == "pass"
     assert m2["similarity_overall"] is None and m2["editability"] == "fail"
+
+
+def _run_synth_body() -> str:
+    sh = _sh_code_only(_read(REPO / "scripts" / "editable-pipeline.sh"))
+    m = re.search(r"^run_synth\(\) \{.*?^\}", sh, re.S | re.M)
+    assert m, "run_synth() not found"
+    return m.group(0)
+
+
+def test_synth_stage_runs_its_own_calibration_loop():
+    """Static (like the 2.5 tests): stage 7 synth must call auto-calibrate.sh --mode synth, not a single render."""
+    body = _run_synth_body()
+    assert re.search(r"auto-calibrate\.sh", body) and re.search(r"--mode synth", body)
+    assert "--iters \"$SYNTH_ITERS\"" in body
+    assert "generate_dynamic_strudel.py" not in body, "synth must not do a single un-calibrated generation"
+    assert "--inst" not in body and "--bass-sound" not in body, "pack-specific flags do not apply to synth"
+
+
+def test_synth_start_knobs_pass_through_unsplit_for_7_8_or_9_fields():
+    """Static: best.params (7, 8 or 9 fields) goes to --start intact; the driver never splits it."""
+    body = _run_synth_body()
+    assert '--start "$knobs"' in body
+    assert not re.search(r"set -- \$knobs|--bass-mult|--bass-lpf|--lead-hpf|read -r", body)
+
+
+def test_no_unguarded_empty_array_expansion_in_driver():
+    """bash 3.2 + set -u: "${arr[@]}" of an empty array aborts. Only never-empty arrays (PH) may be bare."""
+    code = _sh_code_only(_read(REPO / "scripts" / "editable-pipeline.sh"))
+    bare = re.findall(r'(?<!\+)"\$\{(\w+)\[@\]\}"', code)
+    assert [n for n in bare if n != "PH"] == []
+    # (the guarded form ${a[@]+"${a[@]}"} is preceded by '+', excluded by the lookbehind)
+
+
+def test_both_calibrate_calls_check_exit_status():
+    code = _sh_code_only(_read(REPO / "scripts" / "editable-pipeline.sh"))
+    for fn in ("run_sample_instrument", "run_synth"):
+        m = re.search(rf"^{fn}\(\) \{{.*?^\}}", code, re.S | re.M)
+        assert m, fn
+        assert "PIPESTATUS[0]" in m.group(0) and re.search(r"die \"[^\"]*auto-calibrate exited \$cal_rc", m.group(0)), fn

@@ -154,6 +154,13 @@ the pipeline broke on the new song was fixed in the pipeline rather than patched
 
 ## Change Log
 
+- **2026-10-11 — fix #11 (follow-up; tech spec stage 7 amended, no functional criterion changed).** The §2.3 synth
+  shortfall (`v003` 0.7209 / 0.7520, worst band 30.07%) came from the driver rendering synth mode ONCE with the
+  sample-instrument knobs (hat layer 0, bass/sub tuned for a sampled bass) and from the calibrator having no lever for
+  the band a sawtooth bass over-fills (low_mid 37.6% vs 7.5%). Stage 7 now runs `auto-calibrate.sh --mode synth`
+  (own knobs + per-bar correction, started from the sample-instrument BEST); `calibrate_dynamic.py` gains a
+  measurement-driven `bass_lpf` lever (bounded by the bass note range and the analysis cutoff) and a data-driven hat
+  engagement rule. Floors unchanged. Result recorded in the fix log `context/fix-log-11.md` and the dataset.
 - **2026-10-10 — fix `editable-reports-missing` (divergence: scope omission).** The driver was specified as
   stages 1–9 and `promote` as four artifacts; no version promoted by it had an HTML report (VAGABUNDO
   v001–v004, Regime v024–v027), while CLAUDE.md promises the report as an always-on analysis feature and
