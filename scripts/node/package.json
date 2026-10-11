@@ -3,7 +3,8 @@
   "version": "1.0.0",
   "type": "module",
   "scripts": {
-    "build": "tsc"
+    "build": "tsc",
+    "test": "node --test test/capture-guard.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",

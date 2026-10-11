@@ -13,8 +13,8 @@
 #   4 sample pack      build_sample_pack.py
 #   5 instruments      midi-grep generative train (bass, lead) + build_instruments.py
 #   6 host             upload_r2.py (--r2) | local CORS server on :5555 (--local)
-#   7 generate+calib.  auto-calibrate.sh (sample-instrument); one generate_dynamic_strudel.py
-#                      --mode synth with the BEST knobs + a BlackHole render
+#   7 generate+calib.  auto-calibrate.sh (sample-instrument), then auto-calibrate.sh --mode synth
+#                      (start = the sample-instrument BEST knobs when present; own env correction)
 #   8 score + gate     compare_audio.py -d 135 --strudel ; eval/gate.py ; editability_check.py
 #   9 promote          pipeline_helpers.py promote -> vNNN/{output.strudel,render.wav,comparison.json,metadata.json}
 #  10 report           pipeline_helpers.py report -> vNNN/{report.html,comparison.png,chart_*.png,render_*.wav,
@@ -23,7 +23,7 @@
 #
 # Usage:
 #   scripts/editable-pipeline.sh --url <youtube> [--title "<cache folder title>"] [--prefix <slug>]
-#       [--genre <g>] [--mode sample-instrument|synth|both] [--iters 3] [--dur 170]
+#       [--genre <g>] [--mode sample-instrument|synth|both] [--iters 3] [--synth-iters N] [--dur 170]
 #       [--r2 | --local] [--no-iteration-stems] [--force]
 #
 #   --url      YouTube link (required unless --title names an already-extracted track dir)
@@ -32,6 +32,7 @@
 #   --genre    override the genre in metadata.json (the override is logged)
 #   --mode     which pieces to build (default both)
 #   --iters    sample-instrument calibration iterations (default 3; best of N is kept)
+#   --synth-iters  synth calibration iterations (default = --iters)
 #   --dur      BlackHole capture seconds per render (default 170)
 #   --r2       host on the project's public R2 bucket (default); --local serves on localhost:5555
 #   --no-iteration-stems  stage 10: skip Demucs on each calibration iteration (report keeps the mixes only)
@@ -56,7 +57,7 @@ LOCAL_PORT="5555"
 COMPARE_SECONDS="135"
 RENDER_NOTE="record-strudel-blackhole.js RAW capture + uniform speed correction (ffmpeg wallclock restamp)"
 
-URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="3" DUR="170" HOSTING="r2" FORCE="" ITER_STEMS_ARG=()
+URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="3" SYNTH_ITERS="" DUR="170" HOSTING="r2" FORCE="" ITER_STEMS_ARG=()
 
 usage() { sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
 log() { echo "[editable-pipeline] $*" >&2; }
@@ -69,6 +70,7 @@ while [ $# -gt 0 ]; do case "$1" in
   --genre) GENRE_OVERRIDE="${2:?--genre needs a value}"; shift 2;;
   --mode) MODE="${2:?--mode needs a value}"; shift 2;;
   --iters) ITERS="${2:?--iters needs a value}"; shift 2;;
+  --synth-iters) SYNTH_ITERS="${2:?--synth-iters needs a value}"; shift 2;;
   --dur) DUR="${2:?--dur needs a value}"; shift 2;;
   --r2) HOSTING="r2"; shift;;
   --local) HOSTING="local"; shift;;
@@ -78,6 +80,7 @@ while [ $# -gt 0 ]; do case "$1" in
   *) echo "unknown arg: $1 (see --help)" >&2; exit 64;;
 esac; done
 
+SYNTH_ITERS="${SYNTH_ITERS:-$ITERS}"
 case "$MODE" in sample-instrument|synth|both) ;; *) die "--mode must be sample-instrument, synth or both";; esac
 [ -n "$URL" ] || [ -n "$TITLE" ] || die "need --url (or --title of an already-extracted track)"
 [ -x "$PY" ] || die "python venv missing: $PY"
@@ -179,7 +182,7 @@ if stage_done "$PACK/pack.json" "$PACK/samples.json" "$PACK/strudel.json" && bas
 else
   log "stage 4: build sample pack"
   key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
-  "$PY" "$SP/build_sample_pack.py" --stems-dir "$TRACK" --out "$PACK" --bpm "$BPM" "${key_arg[@]}" \
+  "$PY" "$SP/build_sample_pack.py" --stems-dir "$TRACK" --out "$PACK" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} \
     --prefix "$SND" --base-url "$BASE/" >&2 || die "stage 4 build_sample_pack failed"   # SND: sound names never carry '-' 
 fi
 [ -s "$PACK/drums/bd.wav" ] || die "stage 4 pack has no drums/ one-shots in $PACK/drums"
@@ -268,12 +271,14 @@ run_sample_instrument() {
   log "stage 7: auto-calibrate sample-instrument (iters=$ITERS)"
   key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
   "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --base "$BASE" --inst "$INST_BASE""samples.json" \
-    --bpm "$BPM" "${key_arg[@]}" --genre "$GENRE" --bars "$BARS" --iters "$ITERS" --dur "$DUR" \
+    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" --iters "$ITERS" --dur "$DUR" \
     --bass-sound "${SND}_bass" --lead-sound "${SND}_lead" --vocal-mode instrument \
     --mode sample-instrument --workdir "$W" 2>&1 | tee "$W/calibrate.log" >&2
+  local cal_rc="${PIPESTATUS[0]}"
+  [ "$cal_rc" -eq 0 ] || die "sample-instrument auto-calibrate exited $cal_rc (see $W/calibrate.log)"
   local best; best="$(grep '^BEST:' "$W/calibrate.log" | tail -1)"
   [ -n "$best" ] && [ -s "$W/best.wav" ] || die "auto-calibrate produced no BEST render (see $W/calibrate.log)"
-  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG CV" (7 values; CV = cal-vocal)
+  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG CV BL LH" (9 values; CV = cal-vocal, BL = bass-lpf, LH = lead high-pass Hz; 0 = generator default)
   echo "${best##*params: }" > "$W/best.params"
   sleep 3
 }
@@ -282,31 +287,29 @@ run_synth() {
   local W="$PW/synth"; mkdir -p "$W"
   if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params"; then
     log "stage 7 skip (synth): best render exists in $W"; return 0; fi
-  local knobs="" knob_args=()
+  preflight_render
+  # Start from the sample-instrument BEST knobs when present (7, 8 or 9 fields, passed to --start UNSPLIT);
+  # otherwise the calibrator's cold-start defaults. The synth pass then runs its own calibration loop
+  # (knobs + per-bar env correction measured on SYNTH renders), writing $W/best.env.json for stage 9.
+  local start_arg=() knobs=""
   if [ -s "$PW/sample-instrument/best.params" ]; then
     knobs="$(cat "$PW/sample-instrument/best.params")"
-    # shellcheck disable=SC2086
-    set -- $knobs
-    knob_args=(--bass-mult "$1" --sub-gain "$2" --cal-lead "$3" --lead-lpf "$4" --hat-gain "$5" --master-gain "$6" --cal-vocal "${7:-1.0}")
-    log "stage 7: synth uses the calibrated knobs: $knobs"
+    start_arg=(--start "$knobs")
+    log "stage 7: synth calibration starts from the sample-instrument knobs: $knobs"
   else
-    log "stage 7: no sample-instrument calibration found; synth uses the generator's cold-start defaults"
+    log "stage 7: no sample-instrument calibration found; synth calibration starts from cold-start defaults"
   fi
   local key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
-  # NOTE: no --env-correction here: the per-bar correction was measured on sample-instrument renders, not
-  # synth (follow-up: measure a synth-mode correction in its own calibration pass).
-  "$PY" "$SP/generate_dynamic_strudel.py" --stems-dir "$TRACK" --pack-dir "$PACK" \
-    --bass-midi "$PACK/bass.mid" --lead-midi "$PACK/melodic.mid" --drums-json "$PACK/drums_bands.json" \
-    --base-url "$BASE" --mode synth --bpm "$BPM" "${key_arg[@]}" --genre "$GENRE" --num-bars "$BARS" \
-    --drum-mode bank --vocal-mode instrument "${knob_args[@]}" \
-    --out "$W/best.strudel" >&2 || die "stage 7 synth generation failed"
-  preflight_render
-  log "stage 7: render synth through BlackHole (-d $DUR)"
-  node "$REC" "$W/best.strudel" -o "$W/best.wav" -d "$DUR" >"$W/render.log" 2>&1
-  [ -s "$W/best.wav" ] || die "synth render produced no wav (see $W/render.log)"
-  "$PY" "$SP/compare_audio.py" "$TRACK/original.wav" "$W/best.wav" -d "$COMPARE_SECONDS" -j > "$W/best.cmp.json" 2>/dev/null \
-    || die "stage 7 synth compare failed"
-  echo "${knobs:-generator-defaults}" > "$W/best.params"
+  log "stage 7: auto-calibrate synth (iters=$SYNTH_ITERS)"
+  "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --base "$BASE" \
+    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" --iters "$SYNTH_ITERS" --dur "$DUR" \
+    --vocal-mode instrument --mode synth --workdir "$W" ${start_arg[@]+"${start_arg[@]}"} 2>&1 | tee "$W/calibrate.log" >&2
+  local cal_rc="${PIPESTATUS[0]}"
+  [ "$cal_rc" -eq 0 ] || die "synth auto-calibrate exited $cal_rc (see $W/calibrate.log)"
+  local best; best="$(grep '^BEST:' "$W/calibrate.log" | tail -1)"
+  [ -n "$best" ] && [ -s "$W/best.wav" ] || die "synth auto-calibrate produced no BEST render (see $W/calibrate.log)"
+  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG CV [BL [LH]]" (7, 8 or 9 values)
+  echo "${best##*params: }" > "$W/best.params"
   sleep 3
 }
 
@@ -381,7 +384,7 @@ done
 
 # ---------------------------------------------------------------- final JSON summary (stdout)
 RESULTS=(); for m in $(modes); do RESULTS+=("$PW/$m/result.json"); done
-"$PY" - "$TRACK" "$SLUG" "$BPM" "$KEY" "$GENRE" "$BARS" "$BASE" "$HOSTING" "${RESULTS[@]}" <<'PYS'
+"$PY" - "$TRACK" "$SLUG" "$BPM" "$KEY" "$GENRE" "$BARS" "$BASE" "$HOSTING" ${RESULTS[@]+"${RESULTS[@]}"} <<'PYS'
 import json, sys
 track, slug, bpm, key, genre, bars, base, hosting, *results = sys.argv[1:]
 runs = [json.load(open(p)) for p in results]

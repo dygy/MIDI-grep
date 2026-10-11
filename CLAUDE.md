@@ -115,8 +115,9 @@ now FAILS it and `compare_audio.py --strudel` refuses to score it.
 **Second reference track (2026-10-10, spec 004):** "VAGABUNDO NÃO NAMORA" (Christopher Luz, 129.2 BPM
 C# minor, CLAP brazilian_funk 0.50) through the one-command driver `scripts/editable-pipeline.sh` (every promoted `vNNN/` also gets
 `report.html`, render/iteration stems, `stem_comparison.json`, `iterations.json` from stage 10):
-sample-instrument **93.2% overall / 92.2% section-aware** (`v004`, PASS), synth **72.1% / 75.2%** (`v003`,
-recorded shortfall: < 0.77/0.81, worst band 30.07%), both `editability: pass`, tempo 1.000. The first
+sample-instrument **93.2% overall / 92.2% section-aware** (`v004`, PASS), synth **93.9% / 87.2%** (`v007`, PASS;
+the first synth run `v003` scored 72.1% / 75.2% with worst band 30.07% — a recorded shortfall: one render with the
+sample-instrument knobs — fix #11 gave synth its own calibration pass, see below), both `editability: pass`, tempo 1.000. The first
 sample-instrument run (`v002`) scored 92.8% / 87.2% and FAILED the 0.90 section floor; fix #10 found the
 cause in the per-window data (bass/lead balance flipping across sections under one global knob set) and
 added a measured per-bar correction (`calibrate_dynamic.py --env-correction-out` → `generate_dynamic_strudel.py
@@ -137,6 +138,7 @@ those bands are swamped by demucs bleed/noise and pinned lead-lpf while the mix 
 (2) when lead-lpf maxes out and the mix is still dark, the missing brightness is in the DRUMS —
 raise a steady TR808 hat layer (`--hat-gain`), which lifted brightness 70%→91% and overall
 89.8%→92.6% in one step (the extracted lead sample is inherently darker than the original).
+Synth mode adds spectral-placement fixes (bug #11): at generation `partial_register.py` measures where the original stem's strongest partial sits relative to the transcribed fundamentals and transposes a fundamental-dominant palette voice (reference = a track-independent chromatic sweep of the sound, `probe_sound_register.py`; the shift is bounded by floor(original) so the shifted fundamental never exceeds the original's dominant partial) so its energy leaves low_mid; the calibrator adds synth-only `lead-hpf`/`bass-lpf` levers (one per step, bounded by the note material and `compare_audio.FREQ_BANDS`), a vocal-gain hold, a hat overshoot back-off, and `auto-calibrate.sh` selects BEST by margin to the gate floors.
 
 **CRITICAL: Similarity Calculation Fix (Feb 2026)**
 The old cosine-based frequency balance was HIDING massive errors (25% sub_bass, 20% mid differences showed as 95%!).
