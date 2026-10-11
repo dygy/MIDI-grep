@@ -114,6 +114,24 @@ the pipeline broke on the new song was fixed in the pipeline rather than patched
 
 ---
 
+### 2.6 Every promoted version has a complete report (added 2026-10-10, fix `editable-reports-missing`)
+
+- **As a** developer reviewing a run, **I want** every version the pipeline promotes to come with the
+  same self-contained HTML report the `extract` path produces, **so that** I can listen to the original
+  and rendered stems, read the charts and the per-stem comparison, and follow the calibration history
+  without re-running anything.
+  - **Acceptance Criteria:**
+    - [ ] When the pipeline promotes a version (either mode), then `vNNN/report.html` exists and the run
+          FAILS loudly if it cannot be produced — a report is never skipped silently.
+    - [ ] When the report is opened, then it contains the original stems, the rendered mix and its
+          Demucs-separated stems (labelled as re-separation per spec 003 §2.5), the overall charts, the
+          per-stem comparison, the gate/editability headline, and the calibration iteration history with
+          each iteration's render (and its stems unless `--no-iteration-stems`).
+    - [ ] When the report stage runs, then the version's stamped `comparison.json` is byte-identical
+          before and after (the detector verdict and metrics are never recomputed by the report).
+    - [ ] When the report embeds audio, then it uses compressed (mp3) copies so the file stays
+          practical to open (the first run embedded WAVs and reached 227 MB).
+
 ## 3. Scope and Boundaries
 
 ### In-Scope
@@ -122,6 +140,7 @@ the pipeline broke on the new song was fixed in the pipeline rather than patched
 - Recording the results as permanent reference entries, with per-genre minimums handled as in 2.3.
 - Hosting the new track's sample set publicly and pointing the piece at it.
 - Fixing pipeline defects the track exposes, with tests.
+- A complete HTML report for every promoted version (§2.6, stage 10 of the driver).
 - Updating the project's quality claims and context documents.
 
 ### Out-of-Scope
@@ -135,6 +154,13 @@ the pipeline broke on the new song was fixed in the pipeline rather than patched
 
 ## Change Log
 
+- **2026-10-10 — fix `editable-reports-missing` (divergence: scope omission).** The driver was specified as
+  stages 1–9 and `promote` as four artifacts; no version promoted by it had an HTML report (VAGABUNDO
+  v001–v004, Regime v024–v027), while CLAUDE.md promises the report as an always-on analysis feature and
+  spec 003 §2.5 assumes it exists. Added §2.6 (complete report per promoted version) and stage 10 in the
+  technical spec: `pipeline_helpers.py report` = charts → Demucs on `render.wav` → per-stem comparison →
+  `iterations.json` from the calibration workdir → `generate_report.py`, failure = error. Criteria stay
+  unticked until `/awos:verify`; evidence lands in the fix log `context/fix-log-editable-reports-missing.md`.
 - **2026-10-10 — fix #10 (follow-up, no criterion changed).** The §2.3 shortfall recorded for the
   sample-instrument run `v002` (0.9282 / 0.8721 < 0.90 section floor) is resolved: the per-window data
   (`compare_audio.py` now exports `comparison.section_windows`) showed the bass/lead balance flipping

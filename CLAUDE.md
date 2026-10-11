@@ -113,7 +113,8 @@ jittered beat timing (fixed, see CAPTURE MODE below). v023 (2026-06-30) scored 9
 vocal voice was a full-stem replay (`s("vocalsfull")…slow(N)`, `values.md` A1) — `editability_check.py`
 now FAILS it and `compare_audio.py --strudel` refuses to score it.
 **Second reference track (2026-10-10, spec 004):** "VAGABUNDO NÃO NAMORA" (Christopher Luz, 129.2 BPM
-C# minor, CLAP brazilian_funk 0.50) through the one-command driver `scripts/editable-pipeline.sh`:
+C# minor, CLAP brazilian_funk 0.50) through the one-command driver `scripts/editable-pipeline.sh` (every promoted `vNNN/` also gets
+`report.html`, render/iteration stems, `stem_comparison.json`, `iterations.json` from stage 10):
 sample-instrument **93.2% overall / 92.2% section-aware** (`v004`, PASS), synth **72.1% / 75.2%** (`v003`,
 recorded shortfall: < 0.77/0.81, worst band 30.07%), both `editability: pass`, tempo 1.000. The first
 sample-instrument run (`v002`) scored 92.8% / 87.2% and FAILED the 0.90 section floor; fix #10 found the
