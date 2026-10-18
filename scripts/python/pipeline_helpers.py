@@ -12,6 +12,7 @@ CLI (each prints one value / path on stdout, errors on stderr with exit 1)::
     pipeline_helpers.py slug "<title>"
     pipeline_helpers.py num-bars <duration_s> <bpm>
     pipeline_helpers.py next-version <track_dir>
+    pipeline_helpers.py control --genre G --exclude-key K
     pipeline_helpers.py promote --track-dir D --mode M --strudel F --wav F --comparison F [--env-correction F] \\
         --generator "<knobs>" --render "<capture>" --compare "<args>" [--vocal-mode instrument]
     pipeline_helpers.py report --track-dir D --version vNNN --seconds S [--calib-workdir W] \\
@@ -545,6 +546,26 @@ def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_wo
 
 
 
+CONTROL_NONE_EXIT = 3   # `control`: lookup worked, there is simply no other same-genre reference track
+
+
+def control_track_path(genre: str, exclude_key: str, repo_root: Path | None = None) -> Path | None:
+    """``original.wav`` of the first ``eval/datasets/reference_tracks.yaml`` track with the same genre and
+    a different cache_key whose file exists - the chance-control song for ``compare_audio.py --control``."""
+    import yaml  # local: only this subcommand needs it
+
+    root = repo_root or Path(__file__).resolve().parents[2]
+    doc = yaml.safe_load((root / "eval" / "datasets" / "reference_tracks.yaml").read_text(encoding="utf-8")) or {}
+    for track in doc.get("tracks") or []:
+        key = track.get("cache_key")
+        if not key or key == exclude_key or track.get("genre") != genre:
+            continue
+        wav = root / ".cache" / "stems" / key / "original.wav"
+        if wav.is_file():
+            return wav
+    return None
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Helpers for scripts/editable-pipeline.sh")
     sub = ap.add_subparsers(dest="cmd", required=True)
@@ -553,6 +574,9 @@ def main(argv: list[str] | None = None) -> int:
     nb.add_argument("duration", type=float)
     nb.add_argument("bpm", type=float)
     sub.add_parser("next-version").add_argument("track_dir", type=Path)
+    ct = sub.add_parser("control", help="original.wav of another same-genre reference track (chance control)")
+    ct.add_argument("--genre", required=True)
+    ct.add_argument("--exclude-key", required=True, help="cache_key of the track being scored")
     rf = sub.add_parser("record-floor")
     rf.add_argument("--thresholds", required=True, type=Path)
     rf.add_argument("--mode", required=True)
@@ -606,6 +630,18 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "stamp":
             m = stamp_track_metadata(args.track_dir, genre_override=args.genre, detector_json=args.detector_json)
             print(json.dumps({k: m.get(k) for k in ("bpm", "key", "genre", "genre_detected", "genre_confidence", "genre_override", "duration", "style_heuristic")}))
+        elif args.cmd == "control":
+            # exit 0 + path: control found; exit 3: legitimately none (no other same-genre reference track with an
+            # original.wav); exit 1 (the generic handler below): the lookup itself failed (bad/missing yaml, ...)
+            try:
+                found = control_track_path(args.genre, args.exclude_key)
+            except Exception as exc:  # noqa: BLE001 - bad yaml / bad shape: the lookup itself failed -> fail closed (exit 1)
+                print(f"pipeline_helpers: control lookup failed: {type(exc).__name__}: {exc}", file=sys.stderr)
+                return 1
+            if found is None:
+                print(f"pipeline_helpers: no other {args.genre} reference track with an original.wav", file=sys.stderr)
+                return CONTROL_NONE_EXIT
+            print(found)
         elif args.cmd == "next-version":
             print(next_version_dir(args.track_dir))
         else:

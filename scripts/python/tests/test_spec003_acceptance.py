@@ -753,7 +753,12 @@ def test_24_mode_floors_are_reproducible_from_a_real_run():
             strudel = run_dir / "output.strudel"
             res = check_editability(strudel.read_text(encoding="utf-8"))
             assert res.passed and res.generation_mode.replace("-", "_") == mode, res.violations
-            assert evaluate_comparison(comp_path, genre=genre, thresholds=THRESHOLDS).passed
+            res = evaluate_comparison(comp_path, genre=genre, thresholds=THRESHOLDS)
+            if entry[0].get("expected", "pass") == "shortfall":
+                # recorded shortfall (2026-10-18): it must fail the gate, and on the chance margin
+                assert not res.passed and res.chance_passed is False, res.message
+            else:
+                assert res.passed, res.message
             checked += 1
     if checked == 0:
         pytest.skip("cached measured renders absent — static linkage verified only")

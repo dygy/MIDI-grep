@@ -115,9 +115,13 @@ recognizable — while staying fully mine to edit.
 
 **Acceptance Criteria:**
 
-- [x] Similarity (`compare_audio.py`, MAE-weighted: freq 40 / MFCC 20 / energy 15 /
-      brightness 15 / tempo 5 / chroma 5) is computed **only** on output that passes
-      §2.1 (the Editability Test).
+- [x] Similarity (`compare_audio.py`) is half **"sounds like this mix"** (time-averaged:
+      MAE-weighted freq 40 / MFCC 20 / energy 15 / brightness 15 / tempo 5 / chroma 5, reported
+      as `static_similarity`) and half **"is this song, in time"** (after aligning the render to
+      the original: which notes sound when, how the spectrum moves, whether hits land within
+      ±50 ms, how loudness moves — `temporal_similarity`); the same split applies per section.
+      It is computed **only** on output that passes §2.1 (the Editability Test).
+      *(amended 2026-10-18 — see Change Log)*
       — verified 2026-10-09: `compare_audio.py --strudel` runs the detector first; `test_24_replay_is_refused_before_scoring_end_to_end`
 - [x] Computing or reporting similarity on replayed/baked source audio is **INVALID**
       (Anti-Pattern A3) and MUST NOT be presented as a result.
@@ -141,6 +145,16 @@ recognizable — while staying fully mine to edit.
       live-codeable render, NOT replay. This is the `sample-instrument` floor to hold/beat.
       No target is ever set by replay.
       — verified 2026-10-09: measured on BlackHole renders (raw-capture recorder): sample-instrument v026 0.9009/0.9205 (floor 0.88/0.9, tempo 1.000), synth v027 0.7879/0.8319 (floor 0.77/0.81); the 91.4%/59% figures quoted in this bullet were pre-contract (vocal replay) and are superseded
+      — re-measured 2026-10-18 on the amended score (same renders, two reference tracks): sample-instrument
+      Regime v026 0.6967/0.6736, VAGABUNDO v004 0.6626/0.6223 → floors 0.64/0.60; synth Regime v027
+      0.5589/0.5525, VAGABUNDO v007 0.6627/0.5860 → floors 0.54/0.53 (lowest track − 0.02). Genre-wide floors
+      measured on the old scale are checked against `static_similarity` only.
+- [ ] **A render must beat a different song.** Each scored render is also compared against the
+      original of a *different* reference track of the same genre; the render must score above
+      that control by more than the run-to-run noise margin (0.02), or the gate fails. A score
+      that a different song can reach says nothing about this song.
+      *(added 2026-10-18 — not yet verified via `/awos:verify`; measured: v026 +0.120, v004 +0.086,
+      v007 +0.086 pass; Regime synth v027 −0.018 FAILS — recorded shortfall)*
 
 ### 2.5 Reporting reflects the values
 
@@ -179,3 +193,16 @@ scores, **so that** I'm never shown a misleading number again.
 - The *numeric* similarity targets — set per mode by measurement (§2.4), not up front.
 - Net-new genres/modes, web-UI changes, distribution — other roadmap phases.
 - Training new RAVE/granular models — Phase 9 / generative spec (002).
+
+## Change Log
+
+- **2026-10-18 — fix `similarity-blind-time-average`** (`context/fix-log-similarity-blind-time-average.md`).
+  The §2.4 score was entirely time-averaged and could not tell the song apart: against the VAGABUNDO
+  original, our v004 render scored 0.932, a *different* song (Regime CLT original) 0.876 and the
+  original's drums stem alone 0.775; frame-by-frame, which-notes-sound-when correlated ≈0 for both the
+  render and the different song. Amended §2.4: the score is now half time-averaged (old formula, kept
+  as `static_similarity`) and half time-aligned (`temporal_similarity`), per section too; added the
+  "beat a different song" criterion (`--control`, `min_margin_over_chance` 0.02). Mode floors were
+  re-measured on the existing renders and reset (sample-instrument 0.64/0.60, synth 0.54/0.53); all
+  earlier similarity numbers are on the old scale. Status unchanged (Completed) — the new criterion is
+  left unticked until `/awos:verify`.

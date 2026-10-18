@@ -77,6 +77,16 @@ fi
 PACK="$STEMS/sample_pack"
 ORIG="$STEMS/original.wav"
 [ -f "$ORIG" ] || ORIG="$PACK/originalfull.wav"
+# Chance control (same lookup as editable-pipeline.sh stage 8): a DIFFERENT same-genre reference track scored against
+# this original by every iteration, so the gate margin / BEST selection include the chance constraint.
+# pipeline_helpers.py control exits 0 = found, 3 = legitimately none (logged), anything else = the lookup failed.
+CONTROL_ARG=()
+CTRL_PATH="$("$PY" "$ROOT/scripts/python/pipeline_helpers.py" control --genre "$GENRE" --exclude-key "$(basename "$STEMS")" 2>/dev/null)" && CTRL_RC=0 || CTRL_RC=$?
+case "$CTRL_RC" in
+  0) CONTROL_ARG=(--control "$CTRL_PATH"); echo "chance control: $CTRL_PATH";;
+  3) echo "chance control: none (no other $GENRE reference track with an original.wav)";;
+  *) echo "control lookup FAILED (rc=$CTRL_RC) - fix eval/datasets/reference_tracks.yaml" >&2; exit 65;;
+esac
 mkdir -p "$WORK"
 echo "workdir: $WORK"
 
@@ -119,7 +129,7 @@ for i in $(seq 1 "$ITERS"); do
   "$NODE_BIN" "$REC" "$STRU" -o "$WAV" -d "$DUR" >"$WORK/$TAG.render.log" 2>&1
   [ -f "$WAV" ] || { echo "[$TAG] RENDER FAILED (see $WORK/$TAG.render.log)"; RC=70; break; }
 
-  "$PY" "$CMP" "$ORIG" "$WAV" -d 135 -j > "$CJ" 2>/dev/null || { echo "[$TAG] CMP FAILED"; RC=70; break; }
+  "$PY" "$CMP" "$ORIG" "$WAV" -d 135 -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$CJ" 2>/dev/null || { echo "[$TAG] CMP FAILED"; RC=70; break; }
   read -r OVER SECT < <("$PY" -c "import json,sys;d=json.load(open('$CJ'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
   echo "[$TAG] mode=$MODE overall=$OVER section_aware=$SECT  (bm=$BM sg=$SG cl=$CL llpf=$LLPF hg=$HG mg=$MG cv=$CV bl=$BL eff_bl=$EBL lh=$LH eff_lh=$ELH)"
 

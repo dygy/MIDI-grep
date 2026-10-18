@@ -7,6 +7,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"html"
+	"math"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -96,6 +97,30 @@ type ComparisonData struct {
 	TempoSimilarity            float64 `json:"tempo_similarity"`
 	FrequencyBalanceSimilarity float64 `json:"frequency_balance_similarity"`
 	EnergySimilarity           float64 `json:"energy_similarity"`
+
+	// Optional time-aware fields; nil/absent on legacy comparison.json.
+	StaticSimilarity *float64      `json:"static_similarity,omitempty"`
+	Temporal         *TemporalData `json:"temporal,omitempty"`
+	Chance           *ChanceData   `json:"chance,omitempty"`
+	MarginOverChance *float64      `json:"margin_over_chance,omitempty"`
+}
+
+// TemporalData holds the time-aligned similarity components.
+type TemporalData struct {
+	LagSeconds         float64 `json:"lag_seconds"`
+	ChromaCorr         float64 `json:"chroma_corr"`
+	MelCorr            float64 `json:"mel_corr"`
+	OnsetF1            float64 `json:"onset_f1"`
+	EnvelopeCorr       float64 `json:"envelope_corr"`
+	TemporalSimilarity float64 `json:"temporal_similarity"`
+}
+
+// ChanceData is the control score against a different song.
+type ChanceData struct {
+	Path         string  `json:"path"`
+	Overall      float64 `json:"overall"`
+	SectionAware float64 `json:"section_aware"`
+	Temporal     float64 `json:"temporal"`
 }
 
 // Generator creates HTML reports
@@ -427,24 +452,9 @@ func generateChartsHTML(comp *ComparisonResult) string {
 
 		var rows strings.Builder
 		for _, m := range metrics {
-			pct := m.Value * 100
-			c := similarityColor(pct)
-			barWidth := pct
-			if barWidth > 100 {
-				barWidth = 100
-			}
-			rows.WriteString(fmt.Sprintf(`
-			<tr>
-				<td style="padding: 0.5rem; color: var(--text-secondary);">%s</td>
-				<td style="padding: 0.5rem; width: 60%%;">
-					<div style="background: var(--bg-primary); border-radius: 4px; height: 20px; overflow: hidden;">
-						<div style="width: %.0f%%; height: 100%%; background: %s;"></div>
-					</div>
-				</td>
-				<td style="padding: 0.5rem; text-align: right; font-weight: 600; color: %s;">%.0f%%</td>
-			</tr>
-		`, m.Label, barWidth, c, c, pct))
+			rows.WriteString(metricRowHTML(m.Label, m.Value))
 		}
+		rows.WriteString(temporalRowsHTML(&comp.Comparison))
 
 		sb.WriteString(fmt.Sprintf(`
 		<div class="chart-item" style="padding: 1rem;">
@@ -511,6 +521,63 @@ const editabilityBadgeText = "REPLAY / UNVERIFIED — not a deliverable"
 
 // stemSectionCaption labels the per-stem section: its stems are not a true stem match.
 const stemSectionCaption = "stems obtained by demucs re-separation of the rendered mix (lossy, not a true stem-match view)"
+
+// metricRowHTML renders one bar row of the similarity table (value is 0..1).
+func metricRowHTML(label string, value float64) string {
+	pct := value * 100
+	c := similarityColor(pct)
+	barWidth := math.Min(math.Max(pct, 0), 100)
+	return fmt.Sprintf(`
+			<tr>
+				<td style="padding: 0.5rem; color: var(--text-secondary);">%s</td>
+				<td style="padding: 0.5rem; width: 60%%;">
+					<div style="background: var(--bg-primary); border-radius: 4px; height: 20px; overflow: hidden;">
+						<div style="width: %.0f%%; height: 100%%; background: %s;"></div>
+					</div>
+				</td>
+				<td style="padding: 0.5rem; text-align: right; font-weight: 600; color: %s;">%.0f%%</td>
+			</tr>
+		`, html.EscapeString(label), barWidth, c, c, pct)
+}
+
+// temporalRowsHTML renders the optional static/temporal/margin rows; empty for legacy data.
+func temporalRowsHTML(c *ComparisonData) string {
+	var sb strings.Builder
+	if c.StaticSimilarity != nil {
+		sb.WriteString(metricRowHTML("Static (time-averaged)", *c.StaticSimilarity))
+	}
+	if t := c.Temporal; t != nil {
+		sb.WriteString(metricRowHTML("Temporal (time-aligned)", t.TemporalSimilarity))
+		sb.WriteString(metricRowHTML("\u00a0\u00a0pitch-in-time (chroma)", t.ChromaCorr))
+		sb.WriteString(metricRowHTML("\u00a0\u00a0spectrum-in-time (mel)", t.MelCorr))
+		sb.WriteString(metricRowHTML("\u00a0\u00a0onset F1 (\u00b150 ms)", t.OnsetF1))
+		sb.WriteString(metricRowHTML("\u00a0\u00a0loudness envelope", t.EnvelopeCorr))
+	}
+	if c.MarginOverChance != nil {
+		sb.WriteString(marginRowHTML(*c.MarginOverChance, c.Chance))
+	}
+	return sb.String()
+}
+
+// marginRowHTML renders the signed margin over the different-song control, in points.
+func marginRowHTML(margin float64, chance *ChanceData) string {
+	pts := margin * 100
+	color := "#f85149"
+	if pts > 0 {
+		color = "#3fb950"
+	}
+	note := ""
+	if chance != nil {
+		note = fmt.Sprintf("control scored %.0f%% overall", chance.Overall*100)
+	}
+	return fmt.Sprintf(`
+			<tr>
+				<td style="padding: 0.5rem; color: var(--text-secondary);">Margin over a different song</td>
+				<td style="padding: 0.5rem; color: var(--text-secondary); font-size: 0.8rem;">%s</td>
+				<td style="padding: 0.5rem; text-align: right; font-weight: 600; color: %s;">%+.1f pts</td>
+			</tr>
+		`, note, color, pts)
+}
 
 // editabilityOf returns the top-level editability verdict, or "" when comparison.json is
 // missing or predates spec 003.

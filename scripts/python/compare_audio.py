@@ -309,7 +309,135 @@ def compute_frequency_bands(y, sr=22050):
 
     return band_energy
 
-def compare_audio(original_path, rendered_path, duration=60, synth_config_path=None):
+# --- Time-aligned (temporal) similarity -------------------------------------------------
+# The static components below (mean MFCC, mean chroma, average band shares, mean centroid) are
+# time-averages: two different songs in the same genre score alike. The temporal block asks
+# "is this THE song, in time": after aligning the two signals it compares frame-by-frame chroma,
+# log-mel and RMS, plus onset-matching F1 (MIREX convention: greedy one-to-one, +/-50 ms).
+TEMPORAL_HOP = 512
+TEMPORAL_ONSET_TOL_S = 0.05   # MIREX onset-evaluation tolerance window (+/-50 ms)
+TEMPORAL_N_MELS = 64
+
+
+def _align_by_onset_envelope(orig, rend, sr, max_lag_s, hop=TEMPORAL_HOP):
+    """Align `rend` to `orig` by the lag maximizing the normalized cross-correlation of their
+    onset-strength envelopes, searching +/- max_lag_s. Returns (orig_a, rend_a, lag_seconds):
+    equal-length views. lag_seconds > 0 means the render's events come EARLIER than the
+    original's (the original's head was trimmed); < 0 means the render's head was trimmed."""
+    ea = librosa.onset.onset_strength(y=orig, sr=sr, hop_length=hop)
+    eb = librosa.onset.onset_strength(y=rend, sr=sr, hop_length=hop)
+    n = min(len(ea), len(eb))
+    ea = ea[:n] - ea[:n].mean()
+    eb = eb[:n] - eb[:n].mean()
+    max_lag = int(min(max(max_lag_s, 0.0) * sr / hop, n // 2))
+    best_lag, best_score = 0, -np.inf
+    for lag in range(-max_lag, max_lag + 1):
+        x = ea[lag:] if lag >= 0 else ea[:n + lag]
+        y = eb[:n - lag] if lag >= 0 else eb[-lag:]
+        denom = np.linalg.norm(x) * np.linalg.norm(y)
+        score = float(np.dot(x, y) / denom) if denom > 0 else -np.inf
+        if score > best_score:
+            best_lag, best_score = lag, score
+    shift = best_lag * hop
+    if shift >= 0:
+        orig, rend = orig[shift:], rend
+    else:
+        orig, rend = orig, rend[-shift:]
+    m = min(len(orig), len(rend))
+    return orig[:m], rend[:m], float(best_lag * hop / sr)
+
+
+def _framewise_corr_per_frame(A, B):
+    """Pearson correlation across feature bins for each frame of A and B (bins x frames).
+    Returns (corr per frame, mask of frames where both have non-zero variance across bins)."""
+    n = min(A.shape[1], B.shape[1])
+    A = A[:, :n] - A[:, :n].mean(axis=0)
+    B = B[:, :n] - B[:, :n].mean(axis=0)
+    na = np.linalg.norm(A, axis=0)
+    nb = np.linalg.norm(B, axis=0)
+    active = (na > 0) & (nb > 0)
+    corr = np.zeros(n)
+    corr[active] = (A[:, active] * B[:, active]).sum(axis=0) / (na[active] * nb[active])
+    return corr, active
+
+
+def _mean_active(corr, active):
+    return float(corr[active].mean()) if active.any() else 0.0
+
+
+def _pearson(x, y):
+    n = min(len(x), len(y))
+    x, y = x[:n] - np.mean(x[:n]), y[:n] - np.mean(y[:n])
+    denom = np.linalg.norm(x) * np.linalg.norm(y)
+    return float(np.dot(x, y) / denom) if denom > 0 else 0.0
+
+
+def onset_f_measure(ref, est, tol=TEMPORAL_ONSET_TOL_S):
+    """Onset F1 with greedy one-to-one matching within +/- tol seconds (MIREX convention)."""
+    ref = np.sort(np.asarray(ref, dtype=float))
+    est = np.sort(np.asarray(est, dtype=float))
+    if len(ref) == 0 or len(est) == 0:
+        return 0.0
+    used = np.zeros(len(est), dtype=bool)
+    hits = 0
+    for r in ref:
+        d = np.abs(est - r)
+        d[used] = np.inf
+        j = int(np.argmin(d))
+        if d[j] <= tol:
+            used[j] = True
+            hits += 1
+    if hits == 0:
+        return 0.0
+    p, rc = hits / len(est), hits / len(ref)
+    return float(2 * p * rc / (p + rc))
+
+
+def compute_temporal_frames(orig, rend, sr=22050, hop=TEMPORAL_HOP):
+    """Frame-level arrays on ALIGNED equal-length signals, reusable for whole-file and
+    per-window scoring: per-frame chroma/mel Pearson (+ activity masks), both RMS envelopes,
+    and both onset time lists."""
+    ca = librosa.feature.chroma_cqt(y=orig, sr=sr, hop_length=hop)
+    cb = librosa.feature.chroma_cqt(y=rend, sr=sr, hop_length=hop)
+    ma = librosa.power_to_db(librosa.feature.melspectrogram(y=orig, sr=sr, hop_length=hop, n_mels=TEMPORAL_N_MELS))
+    mb = librosa.power_to_db(librosa.feature.melspectrogram(y=rend, sr=sr, hop_length=hop, n_mels=TEMPORAL_N_MELS))
+    chroma_c, chroma_act = _framewise_corr_per_frame(ca, cb)
+    mel_c, mel_act = _framewise_corr_per_frame(ma, mb)
+    return {
+        'chroma_c': chroma_c, 'chroma_act': chroma_act,
+        'mel_c': mel_c, 'mel_act': mel_act,
+        'env_o': librosa.feature.rms(y=orig, hop_length=hop)[0],
+        'env_r': librosa.feature.rms(y=rend, hop_length=hop)[0],
+        'on_o': librosa.onset.onset_detect(y=orig, sr=sr, hop_length=hop, units='time'),
+        'on_r': librosa.onset.onset_detect(y=rend, sr=sr, hop_length=hop, units='time'),
+        'sr': sr, 'hop': hop,
+    }
+
+
+def temporal_components(fr, t0=None, t1=None):
+    """The four temporal components (each clamped to [0,1]) plus their mean, over the whole
+    aligned signal or the [t0, t1) seconds slice of the frame arrays."""
+    sr, hop = fr['sr'], fr['hop']
+    if t0 is None:
+        f0, f1 = 0, None
+        on_o, on_r = fr['on_o'], fr['on_r']
+    else:
+        f0, f1 = int(t0 * sr / hop), int(t1 * sr / hop)
+        on_o = fr['on_o'][(fr['on_o'] >= t0) & (fr['on_o'] < t1)]
+        on_r = fr['on_r'][(fr['on_r'] >= t0) & (fr['on_r'] < t1)]
+    sl = slice(f0, f1)
+    comps = {
+        'chroma_corr': _mean_active(fr['chroma_c'][sl], fr['chroma_act'][sl]),
+        'mel_corr': _mean_active(fr['mel_c'][sl], fr['mel_act'][sl]),
+        'onset_f1': onset_f_measure(on_o, on_r),
+        'envelope_corr': _pearson(fr['env_o'][sl], fr['env_r'][sl]),
+    }
+    comps = {k: float(min(1.0, max(0.0, v))) if np.isfinite(v) else 0.0 for k, v in comps.items()}
+    comps['temporal_similarity'] = float(np.mean(list(comps.values())))
+    return comps
+
+
+def compare_audio(original_path, rendered_path, duration=60, synth_config_path=None, control_path=None):
     """Compare original and rendered audio files.
 
     Args:
@@ -317,6 +445,9 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
         rendered_path: Path to rendered audio
         duration: Max duration to analyze
         synth_config_path: Optional path to synth_config.json for AI-derived tolerance
+        control_path: Optional audio of a DIFFERENT song (same genre). It is scored against the
+            same original with this same function (no further control) and recorded as
+            comparison.chance / comparison.margin_over_chance: the render must beat it.
     """
     # Load AI-derived config for tempo tolerance AND expected BPM
     ai_tempo_tolerance = None
@@ -359,6 +490,9 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
                 'energy_similarity': 0.0, 'brightness_similarity': 0.0,
                 'frequency_balance_similarity': 0.0, 'tempo_similarity': 0.0,
                 'section_aware_similarity': 0.0, 'section_aware_window_count': 0,
+                'static_similarity': 0.0,
+                'temporal': {'lag_seconds': 0.0, 'chroma_corr': 0.0, 'mel_corr': 0.0,
+                             'onset_f1': 0.0, 'envelope_corr': 0.0, 'temporal_similarity': 0.0},
                 'render_empty': True,
             },
             'insights': ['Rendered audio is empty/too short — likely a Strudel parse or render error.'],
@@ -561,6 +695,47 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
                 safe_sum += v * w
                 safe_weight += w
         overall = safe_sum / safe_weight if safe_weight > 0 else 0.0
+    static_overall = float(overall)
+    results['comparison']['static_similarity'] = static_overall
+
+    # Temporal similarity: align the render to the original (lag of max normalized cross-correlation
+    # of onset envelopes, searched within ONE BAR at the original's own tempo), then compare the
+    # aligned signals frame by frame. Static = "sounds like this mix"; temporal = "is this song,
+    # in time". Equal weight, because the static terms alone cannot tell two songs of one genre apart.
+    log("Computing temporal (time-aligned) similarity...")
+    temporal_frames = None
+    temporal_failed = False
+    # The aligned signals feed BOTH halves of every score (whole file and section windows), so the static and
+    # temporal halves of a window always cover the same audio. Unaligned fallback only if alignment itself fails.
+    orig_a, rend_a = original, rendered
+    temporal = {'lag_seconds': 0.0, 'chroma_corr': 0.0, 'mel_corr': 0.0, 'onset_f1': 0.0,
+                'envelope_corr': 0.0, 'temporal_similarity': 0.0}
+    try:
+        bpm_o = float(results['original']['rhythm']['tempo'])
+        if not np.isfinite(bpm_o) or bpm_o <= 0:
+            log("  WARNING: no valid original tempo, aligning with lag 0 only")
+            max_lag_s = 0.0
+        else:
+            max_lag_s = 4 * 60.0 / bpm_o   # one 4/4 bar
+        orig_a, rend_a, lag_s = _align_by_onset_envelope(original, rendered, 22050, max_lag_s)
+        temporal_frames = compute_temporal_frames(orig_a, rend_a)
+        temporal = {'lag_seconds': lag_s, **temporal_components(temporal_frames)}
+    except Exception as _e:
+        # A measurement failure is never silently scored: overall falls back to the static score alone, the
+        # failure is written into the result, and eval/gate.py FAILS any comparison carrying temporal_failed.
+        log(f"  WARNING: temporal similarity failed ({_e}); overall = static, temporal_failed set")
+        temporal_failed = True
+        temporal_frames = None
+        orig_a, rend_a = original, rendered
+        temporal = {**temporal, 'error': f"{type(_e).__name__}: {_e}"}
+    results['comparison']['temporal'] = temporal
+    if temporal_failed:
+        results['comparison']['temporal_failed'] = True
+        overall = static_overall
+    else:
+        overall = 0.5 * static_overall + 0.5 * temporal['temporal_similarity']
+    if np.isnan(overall):
+        overall = 0.0
     results['comparison']['overall_similarity'] = float(overall)
 
     # Section-aware similarity: mean per-window score using fixed 10s windows.
@@ -572,16 +747,17 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     try:
         _window_size = 10.0  # seconds — long enough for stable MFCC, short enough for structure
         _window_samples = int(_window_size * 22050)
-        if min_len >= _window_samples * 2:
-            # Compute per-window similarity directly from loaded (normalized) arrays
-            _windows = min_len // _window_samples
+        _aligned_len = min(len(orig_a), len(rend_a))   # shorter than min_len by the lag; the tail is dropped
+        if _aligned_len >= _window_samples * 2:
+            # Compute per-window similarity directly from the aligned (normalized) arrays
+            _windows = _aligned_len // _window_samples
             _win_sims = []
             _win_records = []
             for _wi in range(_windows):
                 _ws = _wi * _window_samples
                 _we = _ws + _window_samples
-                _ow = original[_ws:_we]
-                _rw = rendered[_ws:_we]
+                _ow = orig_a[_ws:_we]
+                _rw = rend_a[_ws:_we]
                 # MFCC + band + energy (same proportions as compare_windowed)
                 _omfcc = compute_mfcc_features(_ow)
                 _rmfcc = compute_mfcc_features(_rw)
@@ -609,11 +785,22 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
                 _o_rms = float(np.sqrt(np.mean(_ow ** 2)))
                 _r_rms = float(np.sqrt(np.mean(_rw ** 2)))
                 _energy_w = float(min(_o_rms, _r_rms) / max(_o_rms, _r_rms, 1e-10))
-                _win_sim = 0.40 * _mfcc_w + 0.35 * _band_w + 0.25 * _energy_w
+                _static_win = 0.40 * _mfcc_w + 0.35 * _band_w + 0.25 * _energy_w
+                # temporal components for the same window, sliced from the aligned frame arrays
+                if temporal_frames is not None:
+                    _tw = temporal_components(temporal_frames, _ws / 22050, _we / 22050)
+                else:
+                    _tw = {'chroma_corr': 0.0, 'mel_corr': 0.0, 'onset_f1': 0.0,
+                           'envelope_corr': 0.0, 'temporal_similarity': 0.0}
+                _win_sim = _static_win if temporal_failed else 0.5 * _static_win + 0.5 * _tw['temporal_similarity']
                 _win_sims.append(float(_win_sim))
                 _win_records.append({
                     't0': float(_ws / 22050), 't1': float(_we / 22050),
                     'mfcc': _mfcc_w, 'band': _band_w, 'energy': _energy_w,
+                    'static': float(_static_win),
+                    'chroma_corr': _tw['chroma_corr'], 'mel_corr': _tw['mel_corr'],
+                    'onset_f1': _tw['onset_f1'], 'envelope_corr': _tw['envelope_corr'],
+                    'temporal': _tw['temporal_similarity'],
                     'win': float(_win_sim), 'orig_rms': _o_rms, 'rend_rms': _r_rms,
                     'band_diff': _band_diff,
                     # absolute band shares, so downstream can form orig/rend ratios
@@ -637,6 +824,28 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
         results['comparison']['section_windows'] = []
         results['comparison']['section_aware_similarity'] = float(overall)
         results['comparison']['section_aware_window_count'] = 0
+
+    # Chance control: the same function scores a DIFFERENT song against this original.
+    if control_path:
+        log(f"Scoring chance control: {control_path}")
+        # same function, same synth_config as the render (same tempo handling), no further control
+        try:
+            ctrl = compare_audio(original_path, control_path, duration, synth_config_path=synth_config_path)
+            cc = (ctrl or {}).get('comparison') or {}
+            if not cc or cc.get('render_empty'):
+                raise ValueError("control audio could not be scored (empty / unreadable / too short)")
+            results['comparison']['chance'] = {
+                'path': str(control_path),
+                'overall': cc['overall_similarity'],
+                'section_aware': cc.get('section_aware_similarity'),
+                'temporal': cc['temporal']['temporal_similarity'],
+                **({'temporal_failed': True} if cc.get('temporal_failed') else {}),
+            }
+            results['comparison']['margin_over_chance'] = float(
+                results['comparison']['overall_similarity'] - cc['overall_similarity'])
+        except Exception as _e:  # fail closed: eval/gate.py FAILS a comparison whose chance control errored
+            log(f"  WARNING: chance control failed ({_e})")
+            results['comparison']['chance'] = {'path': str(control_path), 'error': f"{type(_e).__name__}: {_e}"}
 
     # Generate insights
     results['insights'] = generate_insights(results)
@@ -679,6 +888,16 @@ def generate_insights(results):
         insights.append(f"Harmony: Partial match ({chroma_pct:.0f}%)")
     else:
         insights.append(f"Harmony: Different key/chords ({chroma_pct:.0f}%)")
+
+    # Temporal (time-aligned)
+    t = comp.get('temporal')
+    if t:
+        insights.append(
+            f"Temporal: {t['temporal_similarity']*100:.0f}% (chroma {t['chroma_corr']*100:.0f}%, "
+            f"mel {t['mel_corr']*100:.0f}%, onsets F1 {t['onset_f1']*100:.0f}%, "
+            f"envelope {t['envelope_corr']*100:.0f}%; lag {t['lag_seconds']:+.3f}s)")
+    if 'margin_over_chance' in comp:
+        insights.append(f"Margin over a different song: {comp['margin_over_chance']*100:+.1f} points")
 
     # Frequency balance
     insights.append("")
@@ -729,6 +948,21 @@ def print_report(results):
         bar_len = int(max(0, min(1, value)) * 20)  # Clamp to 0-1 range
         bar = "█" * bar_len + "░" * (20 - bar_len)
         print(f"{label:30} [{bar}] {value*100:5.1f}%")
+
+    temporal = results['comparison'].get('temporal')
+    if temporal:
+        print("\n--- TEMPORAL (time-aligned) ---")
+        print(f"{'Lag Seconds':30} {temporal['lag_seconds']:+.3f}")
+        for key in ('chroma_corr', 'mel_corr', 'onset_f1', 'envelope_corr', 'temporal_similarity'):
+            value = temporal[key]
+            bar_len = int(max(0, min(1, value)) * 20)
+            bar = "█" * bar_len + "░" * (20 - bar_len)
+            print(f"{key.replace('_', ' ').title():30} [{bar}] {value*100:5.1f}%")
+    chance = results['comparison'].get('chance')
+    if chance:
+        print(f"\nChance control (different song): overall {chance['overall']*100:.1f}%, "
+              f"temporal {chance['temporal']*100:.1f}% -> margin "
+              f"{results['comparison']['margin_over_chance']*100:+.1f} points")
 
     print("\n--- INSIGHTS ---")
     for insight in results['insights']:
@@ -837,6 +1071,13 @@ def generate_similarity_chart(results, output_path):
     metric_labels = ['Timbre (MFCC)', 'Harmony (Chroma)', 'Brightness',
                      'Tempo', 'Frequency Balance', 'Energy']
     values = [results['comparison'].get(m, 0) * 100 for m in metrics]
+    # Temporal components (time-aligned; together 50% of overall)
+    _t = results['comparison'].get('temporal') or {}
+    for _k, _lbl in (('chroma_corr', 'Chroma (in time)'), ('mel_corr', 'Log-mel (in time)'),
+                     ('onset_f1', 'Onsets F1'), ('envelope_corr', 'RMS envelope')):
+        if _k in _t:
+            metric_labels.append(_lbl)
+            values.append(_t[_k] * 100)
 
     # Gradient colors based on value
     def get_color(v):
@@ -856,6 +1097,11 @@ def generate_similarity_chart(results, output_path):
     # Add weight indicators (must match actual weights in compare_audio())
     weights = {'Timbre (MFCC)': 20, 'Harmony (Chroma)': 5, 'Brightness': 15,
                'Tempo': 5, 'Frequency Balance': 40, 'Energy': 15}
+    # static terms make up 50% of overall (weights above are within that half); temporal rows
+    # are equal quarters of the other 50%
+    weights = {k: v / 2 for k, v in weights.items()}
+    weights.update({'Chroma (in time)': 12.5, 'Log-mel (in time)': 12.5,
+                    'Onsets F1': 12.5, 'RMS envelope': 12.5})
 
     bars = ax_main.barh(metric_labels, values, color=colors, alpha=0.9,
                         edgecolor=[c.replace('f8', 'ff').replace('3f', '5f') for c in colors],
@@ -872,7 +1118,7 @@ def generate_similarity_chart(results, output_path):
                      va='center', fontsize=11, color='#c9d1d9', fontweight='bold')
         # Weight indicator (smaller, gray)
         weight = weights.get(label, 0)
-        ax_main.text(2, bar.get_y() + bar.get_height()/2, f'({weight}%)',
+        ax_main.text(2, bar.get_y() + bar.get_height()/2, f'({weight:g}%)',
                      va='center', fontsize=9, color='#6e7681', alpha=0.8)
 
     # Add threshold lines
@@ -1460,6 +1706,7 @@ def compare_stems(stem_pairs, duration=60, window_size=5.0, synth_config_path=No
                 'mfcc': stem_result['comparison']['mfcc_similarity'],
                 'freq_balance': stem_result['comparison']['frequency_balance_similarity'],
                 'energy': stem_result['comparison']['energy_similarity'],
+                'temporal': stem_result['comparison'].get('temporal', {}).get('temporal_similarity'),
             }
 
         # Section-aligned worst list (preferred over fixed windows when sections present)
@@ -1875,6 +2122,9 @@ def main():
                        help='Output as JSON')
     parser.add_argument('-c', '--chart', help='Output path for comparison chart PNG')
     parser.add_argument('--config', help='Path to synth_config.json for AI-derived tolerance')
+    parser.add_argument('--control', default=None, metavar='PATH',
+                        help='Audio of a DIFFERENT (same-genre) song, scored against the same original; '
+                             'writes comparison.chance and comparison.margin_over_chance')
 
     # Per-stem comparison mode
     parser.add_argument('--stems', action='store_true',
@@ -2000,6 +2250,8 @@ def main():
                     print(f"  Timbre:       {metrics['mfcc']*100:5.1f}%")
                     print(f"  Freq Balance: {metrics['freq_balance']*100:5.1f}%")
                     print(f"  Energy:       {metrics['energy']*100:5.1f}%")
+                    if metrics.get('temporal') is not None:
+                        print(f"  Temporal:     {metrics['temporal']*100:5.1f}%")
 
             if 'aggregate' in results and 'weighted_overall' in results['aggregate']:
                 print(f"\nWEIGHTED OVERALL: {results['aggregate']['weighted_overall']*100:.1f}%")
@@ -2029,7 +2281,8 @@ def main():
         parser.print_help()
         sys.exit(1)
 
-    results = compare_audio(args.original, args.rendered, args.duration, args.config)
+    results = compare_audio(args.original, args.rendered, args.duration, args.config,
+                            control_path=args.control)
 
     if results is None:
         sys.exit(1)

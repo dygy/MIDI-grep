@@ -100,7 +100,20 @@ The `docs-freshness` hook reminds you once per session when a pipeline file chan
    - AI analyzes differences and generates new parameters
    - Store learnings in ClickHouse for future tracks
 
-**Current achievement (honest, contract-passing):** editable dynamic-Strudel with ALL voices as
+**CRITICAL: the score was rescaled 2026-10-18 — every number below this paragraph is on the OLD
+time-averaged scale (now `static_similarity`).** The old score could not tell the song apart: vs the
+VAGABUNDO original, our v004 render read 0.932, a DIFFERENT song 0.876, the drums stem alone 0.775 —
+mean MFCC/chroma/bands are ≈ equal for anything in the genre. `overall_similarity` is now
+0.5 × static + 0.5 × `temporal_similarity` (render aligned to the original within one bar; frame-wise
+chroma + log-mel correlation, onset F1 ±50 ms, RMS-envelope correlation), and the gate requires beating a
+different same-genre song by 0.02 (`--control`, `margin_over_chance`). **Honest state on the new scale**
+(same renders re-scored): sample-instrument Regime v026 **69.7% / 67.4%**, VAGABUNDO v004 **66.3% / 62.2%**;
+synth VAGABUNDO v007 **66.3% / 58.6%**, Regime v027 **55.9% / 55.3% — FAILS: a different song scores
+higher** (margin −0.018). Different-song control ≈ 57.7%. Which-notes-sound-when (chroma in time) is ≈0
+on three of the four renders — the main gap; the next suspect is the sample instruments (100 ms grains,
+wrong pitch labels). Floors reset: sample-instrument 0.64/0.60, synth 0.54/0.53.
+
+**Previous achievement (old scale, contract-passing):** editable dynamic-Strudel with ALL voices as
 editable data — transcribed bass/lead/VOCAL notes on stem-derived sample-instruments + extracted drum
 patterns — at **90.1% overall / 92.1% section-aware / 91.6% freq balance,
 tempo_sim 1.000** on Regime CLT (brazilian_funk; `v026/comparison.json`, 2026-10-09, `editability: pass`,
@@ -392,13 +405,17 @@ below is the only render path. Dead references to `render-strudel-node.js` still
   - Cosine was hiding 20%+ band differences (showed 95% when sub_bass was -25% off!)
   - MAE properly penalizes per-band differences
   - Penalty if ANY band is >15% off
-- **Similarity Weights:**
-  - Frequency Balance: **40%** (most important - if bands are off, audio sounds wrong)
-  - MFCC (timbre): 20%
-  - Energy: 15%
-  - Brightness: 15%
-  - Tempo: 5% (usually matches)
-  - Chroma: 5% (often inflated)
+- **Similarity = 0.5 × static + 0.5 × temporal (Oct 2026):**
+  - `static_similarity` (time-averaged — "sounds like this mix"): Frequency Balance **40%**, MFCC 20%,
+    Energy 15%, Brightness 15%, Tempo 5%, Chroma 5%
+  - `temporal_similarity` (time-aligned — "is this song, in time"): render aligned to the original by
+    onset-envelope cross-correlation within one bar, then the mean (clamped 0–1) of frame-wise chroma
+    correlation, frame-wise log-mel correlation, onset F1 (±50 ms), RMS-envelope correlation →
+    `comparison.temporal`
+  - Section windows use the same 50/50 split (per-window `static`/`temporal` fields)
+  - `--control <other same-genre original.wav>` → `comparison.chance` + `margin_over_chance`; the gate
+    fails below `min_margin_over_chance` (0.02). `editable-pipeline.sh` stage 8 picks the control via
+    `pipeline_helpers.py control`. Genre-wide floors (old scale) are checked against `static_similarity`.
 - Tracks per-band differences in `band_differences` and `worst_band_diff`
 - Generates 6 individual chart images + combined comparison chart
 - Saves comparison.json for HTML report data

@@ -205,9 +205,13 @@ gate accept/reject decisions.**
 ### Comparison & Eval Gate
 
 - **`scripts/python/compare_audio.py`** — rendered-vs-original similarity. Uses **MAE** on
-  frequency bands, not cosine (cosine hid 20%+ band errors). Weights: Frequency Balance **40%**,
-  MFCC 20%, Energy 15%, Brightness 15%, Tempo 5%, Chroma 5%; penalty if any band is >15% off.
-  Also emits `section_aware_similarity` (per-window MFCC 40% / bands 35% / energy 25%) and
+  frequency bands, not cosine (cosine hid 20%+ band errors). Since 2026-10-18 `overall_similarity` =
+  0.5 × `static_similarity` (time-averaged: Frequency Balance **40%**, MFCC 20%, Energy 15%, Brightness
+  15%, Tempo 5%, Chroma 5%; penalty if any band is >15% off) + 0.5 × `temporal_similarity` (render aligned
+  within one bar; frame-wise chroma/log-mel correlation, onset F1 ±50 ms, RMS-envelope correlation).
+  `--control` scores a different same-genre song → `margin_over_chance`, gated at 0.02.
+  Also emits `section_aware_similarity` (per window: 0.5 × static [MFCC 40% / bands 35% / energy 25%] +
+  0.5 × temporal) and
   per-stem comparison. Writes `comparison.json` + charts.
 - **`eval/`** — code-authoritative similarity gate:
   - `eval/thresholds.yaml` — per-genre regression floors (`default: 0.55`; e.g. `brazilian_funk: 0.62`,
