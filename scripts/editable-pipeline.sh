@@ -131,7 +131,8 @@ META="$TRACK/metadata.json"
 # Stage 1b — stamp: the Go cache writes only title/url/video_id here; bpm/key/style live in the
 # latest vNNN/metadata.json (spec 004 defect #6). Run the deep genre detector (CLAP, with the
 # analysed bpm as prior) and consolidate everything into the track metadata — once.
-if [ -z "$(jget "$META" bpm)" ] || [ -n "$FORCE" ]; then
+# Also re-stamp a track whose bpm predates the phase-coherence refinement (no bpm_method).
+if [ -z "$(jget "$META" bpm)" ] || [ -z "$(jget "$META" bpm_method)" ] || [ -n "$FORCE" ]; then
   mkdir -p "$TRACK/.pipeline"
   VBPM="$(for v in "$TRACK"/v[0-9][0-9][0-9]; do jget "$v/metadata.json" bpm; done | tail -1)"
   GJ="$TRACK/.pipeline/genre.json"

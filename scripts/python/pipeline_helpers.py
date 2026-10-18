@@ -159,6 +159,21 @@ def promote_run(track_dir: Path, mode: str, strudel: Path, wav: Path, comparison
     return vdir
 
 
+def _refine_track_bpm(track_dir: Path, meta: dict, *, coarse: float) -> None:
+    """Replace the tempogram-grid bpm with the phase-coherence refinement (spec 001 §2.3: play at the
+    correct speed). Refines on ``drums.wav`` when present (the cleanest pulse), else ``original.wav``;
+    records ``bpm``, ``bpm_coarse``, ``bpm_method``, ``bpm_confidence``. No audio -> bpm is left as is."""
+    from tempo_refine import refine_bpm_file
+    src = next((p for p in (track_dir / "drums.wav", track_dir / "original.wav") if p.exists()), None)
+    if src is None:
+        return
+    r = refine_bpm_file(str(src), coarse)
+    meta["bpm_coarse"] = round(coarse, 4)
+    meta["bpm"] = round(float(r["bpm"]), 3)
+    meta["bpm_method"] = f"{r['method']} ({src.name})"
+    meta["bpm_confidence"] = round(float(r["confidence"]), 4)
+
+
 def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
                          detector_json: Path | None = None) -> dict:
     """Consolidate the per-track facts the pipeline needs into ``<track>/metadata.json``.
@@ -178,15 +193,19 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
         raise FileNotFoundError(f"no vNNN/metadata.json under {track_dir} — run stage 1 first")
     # Review #8: promoted vNNN dirs carry no bpm — use the latest version that has one.
     with_bpm = [v for v in versions if json.loads((v / "metadata.json").read_text()).get("bpm") not in (None, "")]
-    if not with_bpm:
+    if with_bpm:
+        vmeta = json.loads((with_bpm[-1] / "metadata.json").read_text())
+        for src, dst in (("bpm", "bpm"), ("key", "key"), ("style", "style_heuristic")):
+            if src in vmeta and vmeta[src] not in (None, ""):
+                meta[dst] = vmeta[src]
+        coarse = float(vmeta["bpm"])
+    elif meta.get("bpm") not in (None, ""):
+        # An earlier stamp (or a hand-stamped track) is the only bpm source: re-refine from ITS coarse value.
+        coarse = float(meta.get("bpm_coarse") or meta["bpm"])
+    else:
         raise ValueError(f"no vNNN/metadata.json under {track_dir} carries a bpm (extraction analysis missing)")
-    vmeta = json.loads((with_bpm[-1] / "metadata.json").read_text())
-    for src, dst in (("bpm", "bpm"), ("key", "key"), ("style", "style_heuristic")):
-        if src in vmeta and vmeta[src] not in (None, ""):
-            meta[dst] = vmeta[src]
-    if "bpm" not in meta:
-        raise ValueError(f"{with_bpm[-1]}/metadata.json has no bpm")
-    meta["bpm"] = float(meta["bpm"])
+    meta["bpm"] = float(coarse)
+    _refine_track_bpm(track_dir, meta, coarse=coarse)
     orig = track_dir / "original.wav"
     if orig.exists():
         import soundfile as sf

@@ -762,12 +762,13 @@ def test_25_pipeline_code_has_no_per_track_constants(path):
 
 def test_25_a_per_track_constant_would_be_caught():
     sh = PIPELINE_CODE[0]
-    assert _literal_hits(sh, "BPM=129.2\n")
+    live = FALLBACK_META["bpm"] if not (TRACK / "metadata.json").exists() else _json(TRACK / "metadata.json")["bpm"]
+    assert _literal_hits(sh, f"BPM={live}\n")
     assert _literal_hits(sh, 'KEY="C# minor"\n')
     assert _literal_hits(sh, 'SLUG=vagabundo-nao-namora\n')
     assert _literal_hits(sh, "URL=https://youtu.be/SKjOR5EOR8Y\n")
     py = PIPELINE_CODE[1]
-    assert _literal_hits(py, "BPM = 129\n")
+    assert _literal_hits(py, f"BPM = {round(live)}\n")
     assert _literal_hits(py, 'NAME = "VAGABUNDO NÃO NAMORA"\n')
     # prose is not code: comments and docstrings do not count
     assert _literal_hits(py, '"""e.g. VAGABUNDO NÃO NAMORA at 129 BPM"""\nx = 1  # 129\n') == []
