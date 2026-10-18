@@ -52,7 +52,10 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
 - **Node.js synth** — REMOVED (Jun 2026). `render-strudel-node.ts` no longer exists; the BlackHole
   recorder is the only render path and the only one that may gate.
 - **`scripts/python/compare_audio.py`** — similarity via **MAE** on frequency bands (NOT cosine —
-  cosine hid 20%+ band errors). Weights: Freq 40%, MFCC 20%, Energy 15%, Brightness 15%, Tempo/Chroma 5%.
+  cosine hid 20%+ band errors). Since 2026-10-18 overall = 0.5 × static (Freq 40%, MFCC 20%, Energy 15%,
+  Brightness 15%, Tempo/Chroma 5%, time-averaged) + 0.5 × temporal (aligned frame-wise chroma/mel corr,
+  onset F1 ±50 ms, envelope corr); `--control` = a different same-genre song the render must beat by 0.02.
+  The old time-averaged score scored a different song 0.876 vs our 0.932 — pre-2026-10-18 numbers are old-scale.
 - **`scripts/editable-pipeline.sh`** — ONE command from a YouTube link to both editable pieces, scored on
   real playback (spec 004): extract → MIDI per stem → drum bands → sample pack (+vocal) → granular
   instruments (`build_instruments.py` manifest) → R2/local host → `auto-calibrate.sh` (N iters) then `auto-calibrate.sh --mode synth`

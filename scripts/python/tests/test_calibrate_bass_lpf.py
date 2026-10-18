@@ -342,13 +342,16 @@ def test_hat_drums_path_shut_when_full_mix_high_already_above_original(tmp_path)
 def test_gate_margin_picks_nearest_to_floors():
     sys.path.insert(0, str(SCRIPTS))
     import gate_margin
-    # real run 2 (synth floors 0.77 / 0.81): cal1 0.8229/0.7955 is nearer than cal2 0.8269/0.777
+    # real run 2: cal1 0.8229/0.7955 is nearer than cal2 0.8269/0.777 (floors read from thresholds.yaml, never retyped)
+    from eval import gate
+    thr = gate.load_thresholds()
+    f, sf = gate.floor_for_genre("brazilian_funk", thr, "synth"), gate.section_aware_floor_for_genre("brazilian_funk", thr, "synth")
     def m(o, sa):
-        return min(o - 0.77, sa - 0.81)
+        return min(o - f, sa - sf)
     assert m(0.8229, 0.7955) > m(0.8269, 0.777) > m(0.7975, 0.7706)
     got = gate_margin.margins(RUN2_CAL1, "brazilian_funk", "synth")
-    assert got["floor"] == pytest.approx(0.77) and got["sa_floor"] == pytest.approx(0.81)
-    assert got["margin"] == pytest.approx(min(got["overall"] - 0.77, got["sa"] - 0.81))
+    assert got["floor"] == pytest.approx(f) and got["sa_floor"] == pytest.approx(sf)
+    assert got["margin"] == pytest.approx(min(got["overall"] - f, got["sa"] - sf))
 
 
 def _seq_cmp(tmp_path: Path, rows: list[tuple[float, float]]) -> str:

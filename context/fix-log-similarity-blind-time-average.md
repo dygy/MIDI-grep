@@ -1,0 +1,17 @@
+# fix-log similarity-blind-time-average
+- Step1 fetch: description source. Preflight OK (gh dygy, venv, node, BlackHole).
+- Step2: no prior PR/log.
+- Step3: branch fix/similarity-blind-time-average off origin/main.
+- Step4 diagnose (verified): controls — VAG v004 0.932, different song 0.876, drums-only 0.775; temporal chroma ≈0 both. Surfaces: compare_audio (producer), gate.py, gate_margin.py, thresholds.yaml, reference_tracks.yaml, editable-pipeline.sh stage 8, generate_report.py, Go report (display). calibrate_dynamic clean.
+- Step5 classify: DIVERGENCE, spec 003 §2.4 (weights criterion).
+- Step6: dispatched ml-audio-expert (Python surfaces + test). Go report pending.
+- QUEUED next run (user 2026-10-18): instruments fix. Prep: editable-pipeline.sh:195 calls generative train w/o --grain-ms -> trainer.py default 100 ms (hardcoded); pyin on 100 ms grain w/ fmin 30 Hz ≈ 1 frame -> octave label errors. Fix = grain length from stem note durations (bass.mid/melodic.mid) + label verification gate in build_instruments.
+- Step6 done (ml-audio-expert): compare_audio temporal block, static_similarity, overall=0.5/0.5, windows, --control, gate chance check, gate_margin, pipeline_helpers control, driver stage 8, report rows. 544 passed/3 skipped.
+- Step7 fail->pass (orchestrator): old compare_audio.py → test_temporal_similarity 7 failed/3 passed; new → 10 passed.
+- Re-measure (existing BlackHole renders, metric-only change; old saved as comparison.static-only.json): v026 0.6967/0.6736 m+0.120; v027 0.5589/0.5525 m-0.018 (fails chance); v004 0.6626/0.6223 m+0.086; v007 0.6627/0.5860 m+0.086. static reproduces old exactly.
+- Floors → sample_instrument 0.64/0.60, synth 0.54/0.53 (min across tracks −0.02); genre-wide tables gate static_similarity. Sent to same specialist. Go report → golang-expert (parallel).
+- Step8 static gate: go ok, node ok, pytest 549 passed/3 skipped; gate v026 PASS, v027 FAIL (chance), v004 PASS, v007 PASS. Render re-verification = re-score of existing BlackHole renders (metric-only change, Strudel output unaffected).
+- Step9: user approved amend; spec 003 §2.4 amended + Change Log; log moved to context/.
+- Step10 review: /code-review medium → 10 findings (2 high, 5 med, 3 low), review/fix-similarity-blind-time-average.md; user: fix all. #1-8,#10 → ml-audio-expert (re-score after #3/#4); #9 → golang-expert.
+- Step10 fixes: #9 Go (doc comment) ok; #1-8,#10 Python ok, 555 passed/3 skipped. Re-score after #3/#4: v026 0.6967/0.6736, v027 0.5589/0.5525 (FAIL chance −0.018), v004 0.6626/0.6223, v007 0.6627/0.5860; floors unchanged 0.64/0.60, 0.54/0.53. Docs/spec synced to these.
+- Step11: commit + push; log frozen.

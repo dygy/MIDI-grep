@@ -412,11 +412,14 @@ def test_23_dataset_entry_missing_a_mode_or_run_is_detected():
     assert _dataset_problems([], RUNS)
 
 
-# Floors of the first track at the moment spec 004 started; "never lowered" == these exact values hold.
+# Mode floors after the 2026-10-18 rescale (overall = 0.5 static + 0.5 temporal; each = round(min over the mode's
+# reference tracks - 0.02, 2)); "never lowered" == these exact values hold. They replaced the static-only
+# 0.88/0.90 (sample-instrument) and 0.77/0.81 (synth), recorded in thresholds.yaml.
 REGIME_FLOORS = {
-    "sample_instrument": {"genres": 0.88, "section_aware": 0.90},
-    "synth": {"genres": 0.77, "section_aware": 0.81},
+    "sample_instrument": {"genres": 0.64, "section_aware": 0.60},
+    "synth": {"genres": 0.54, "section_aware": 0.53},
 }
+OLD_STATIC_SA_FLOOR = 0.90      # pre-rescale sample-instrument section-aware floor (static scale), for fix #10's history
 
 
 def _floor_problems(th: dict) -> list[str]:
@@ -429,9 +432,12 @@ def _floor_problems(th: dict) -> list[str]:
                 problems.append(f"{mode}.{table}.brazilian_funk lowered to {got} (< {want})")
             elif got != want:
                 problems.append(f"{mode}.{table}.brazilian_funk changed to {got} (expected {want}; raising needs its own spec)")
-        run = block["measured"]["brazilian_funk"]["run"]
-        if not run.startswith(REGIME_KEY):
-            problems.append(f"{mode} floor source is {run!r}, not the first track")
+        m = block["measured"]["brazilian_funk"]
+        tracks = m.get("tracks") or []
+        if m["run"] not in [t["run"] for t in tracks]:
+            problems.append(f"{mode} floor source is {m['run']!r}, not a measured track")
+        elif m["overall"] != min(t["overall"] for t in tracks):
+            problems.append(f"{mode} floor source is not the lowest-scoring measured track")
     return problems
 
 
@@ -481,10 +487,12 @@ def test_23_fix10_cleared_the_section_floor_without_touching_knobs_or_floors():
     if not (TRACK / "v002").is_dir() or not (TRACK / "v004").is_dir():
         pytest.skip("v002/v004 not both cached")
     th = yaml.safe_load(_read(THRESHOLDS))
-    sa_floor = th["modes"]["sample_instrument"]["section_aware"]["brazilian_funk"]
+    # v002 is a static-scale record (never re-scored); v004 carries the static components of the new scorer,
+    # which reproduce the old formula exactly, so the claim is checked on the static scale vs the old 0.90 floor.
     before, after = _comparison("v002")["comparison"], _comparison("v004")["comparison"]
-    assert before["section_aware_similarity"] < sa_floor <= after["section_aware_similarity"]
-    assert after["overall_similarity"] >= before["overall_similarity"]
+    after_static_sa = sum(w["static"] for w in after["section_windows"]) / len(after["section_windows"])
+    assert before["section_aware_similarity"] < OLD_STATIC_SA_FLOOR <= after_static_sa
+    assert after["static_similarity"] >= before["overall_similarity"]
     assert (TRACK / "v004" / "env_correction.json").exists()
     assert "// env_correction:" in _read(TRACK / "v004" / "output.strudel")
     assert _floor_problems(th) == []
@@ -493,22 +501,26 @@ def test_23_fix10_cleared_the_section_floor_without_touching_knobs_or_floors():
 def test_23_a_tampered_record_or_lowered_floor_is_detected():
     th = yaml.safe_load(_read(THRESHOLDS))
     lowered = json.loads(json.dumps(th))
-    lowered["modes"]["sample_instrument"]["section_aware"]["brazilian_funk"] = 0.85   # "make the shortfall pass"
+    lowered["modes"]["sample_instrument"]["section_aware"]["brazilian_funk"] = 0.55   # "make the shortfall pass"
     assert any("lowered" in p for p in _floor_problems(lowered))
     foreign = json.loads(json.dumps(th))
     foreign["modes"]["synth"]["measured"]["brazilian_funk"]["run"] = f"{TRACK_KEY}/v003"
-    assert any("not the first track" in p for p in _floor_problems(foreign))
+    assert any("not a measured track" in p for p in _floor_problems(foreign))
+    notmin = json.loads(json.dumps(th))
+    notmin["modes"]["synth"]["measured"]["brazilian_funk"]["overall"] = 0.99   # a floor source that is not the lowest track
+    assert any("not the lowest-scoring" in p for p in _floor_problems(notmin))
 
-    comp = {"comparison": {"overall_similarity": 0.9282, "section_aware_similarity": 0.8721, "worst_band_diff": 5.0}}  # percent
-    ok = {"mode": "sample-instrument", "expected": "shortfall", "measured": {"overall": 0.9282, "section_aware": 0.8721}}
+    # an overall-ok / section-aware-below-floor run on the current (rescaled) floors: 0.60 section floor, 0.55 measured
+    comp = {"comparison": {"overall_similarity": 0.70, "section_aware_similarity": 0.55, "worst_band_diff": 5.0}}  # percent
+    ok = {"mode": "sample-instrument", "expected": "shortfall", "measured": {"overall": 0.70, "section_aware": 0.55}}
     assert _shortfall_problems(ok, comp, th) == []
     assert "recorded overall != run" in _shortfall_problems({**ok, "measured": {"overall": 0.95}}, comp, th)
     assert "recorded as shortfall but clears every floor" in _shortfall_problems(
         ok, {"comparison": {**comp["comparison"], "section_aware_similarity": 0.95}}, th)
     assert "below a floor but not recorded as a shortfall" in _shortfall_problems({**ok, "expected": "pass"}, comp, th)
-    good = {"comparison": {"overall_similarity": 0.9320, "section_aware_similarity": 0.9216, "worst_band_diff": 2.54}}
+    good = {"comparison": {"overall_similarity": 0.6626, "section_aware_similarity": 0.6242, "worst_band_diff": 2.54}}
     assert _shortfall_problems({"mode": "sample-instrument", "expected": "pass",
-                                "measured": {"overall": 0.9320, "section_aware": 0.9216}}, good, th) == []
+                                "measured": {"overall": 0.6626, "section_aware": 0.6242}}, good, th) == []
 
 
 def test_23_floors_are_derived_from_the_measured_run_minus_margin():
@@ -858,13 +870,17 @@ def test_25_cached_track_metadata_carries_provenance():
         assert _setcps_error(_read(TRACK / version / "output.strudel"), meta["bpm"]) is None
 
 
-@pytest.mark.parametrize("version,floor_ok", [("v026", True), ("v027", True)])
+# v027 (synth) clears its overall / section floors but FAILS the chance margin (-0.018 < 0.02): a different song
+# scores higher against the Regime original than the render does. It is a recorded shortfall.
+@pytest.mark.parametrize("version,floor_ok", [("v026", True), ("v027", False)])
 def test_25_regime_clt_references_still_clear_their_floors(version, floor_ok):
     path = STEMS / REGIME_KEY / version / "comparison.json"
     if not path.exists():
         pytest.skip(f"{REGIME_KEY}/{version} cache absent")
     res = evaluate_comparison(path, genre="brazilian_funk", thresholds=load_thresholds())
     assert res.passed is floor_ok, res.message
+    if not floor_ok:
+        assert res.chance_passed is False and "margin over chance" in res.message
     # negative: the same record with its section-aware score knocked below the floor must fail
     doc = _json(path)
     doc["comparison"]["section_aware_similarity"] = 0.10

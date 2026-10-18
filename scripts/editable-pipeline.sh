@@ -337,8 +337,17 @@ score_and_promote() {
     return 0
   fi
   log "stage 8: score $mode (compare_audio -d $COMPARE_SECONDS --strudel)"
+  # Chance control: a DIFFERENT same-genre reference track scored against this original by the same function.
+  local control control_arg=() control_rc=0
+  control="$("${PH[@]}" control --genre "$GENRE" --exclude-key "$(basename "$TRACK")")" || control_rc=$?
+  case "$control_rc" in
+    0) control_arg=(--control "$control"); log "stage 8: chance control = $control";;
+    3) log "stage 8: no control track (no other $GENRE reference track with an original.wav in the cache)";;
+    *) die "stage 8: control lookup FAILED (rc=$control_rc) - fix eval/datasets/reference_tracks.yaml; not scoring without the chance check";;
+  esac
   local cmp_rc=0
   "$PY" "$SP/compare_audio.py" "$TRACK/original.wav" "$WAV" -d "$COMPARE_SECONDS" -j --strudel "$STR" -o "$CJ" \
+    ${control_arg[@]+"${control_arg[@]}"} \
     >"$W/compare.stdout" 2>"$W/compare.stderr" || cmp_rc=$?
   [ -s "$CJ" ] || die "stage 8 compare_audio wrote no comparison.json for $mode (rc=$cmp_rc, see $W/compare.stderr)"
   local edit_rc=0 gate_rc=0

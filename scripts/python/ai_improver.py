@@ -90,7 +90,8 @@ try:
     _REPO_ROOT = Path(__file__).resolve().parents[2]
     if str(_REPO_ROOT) not in sys.path:
         sys.path.insert(0, str(_REPO_ROOT))
-    from eval.gate import load_thresholds, floor_for_genre, section_aware_floor_for_genre, resolve_floor
+    from eval.gate import (load_thresholds, floor_for_genre, section_aware_floor_for_genre, resolve_floor,
+                           evaluate_comparison_data)
     _GATE_THRESHOLDS = load_thresholds()
     HAS_GATE = True
 except Exception as _gate_exc:  # noqa: BLE001 - any failure just disables the gate
@@ -260,6 +261,20 @@ def map_windows_to_sections(windowed: dict, sections: list) -> list:
     # Sort worst first
     section_scores.sort(key=lambda x: x["similarity"])
     return section_scores
+
+
+def _control_args(genre: str, original_audio: str) -> list:
+    """`--control <other same-genre reference original.wav>` for compare_audio.py (same lookup as the
+    editable-pipeline driver), or [] when there is legitimately no other reference track for the genre.
+    A failing lookup (bad yaml, ...) raises: the chance check must not be silently skipped."""
+    if not HAS_GATE or not genre:
+        return []
+    from pipeline_helpers import control_track_path
+    found = control_track_path(genre, Path(original_audio).resolve().parent.name)
+    if found is None:
+        print(f"[gate] no control track for genre '{genre}' (chance check skipped, logged)")
+        return []
+    return ["--control", str(found)]
 
 
 def build_instrumental_reference(original_audio: str, output_dir: str) -> str:
@@ -458,6 +473,9 @@ def improve_strudel(
     # not just its whole-track average). When present, the gate requires BOTH floors.
     sa_floor = section_aware_floor_for_genre(genre, _GATE_THRESHOLDS, mode=generation_mode) if HAS_GATE else None
     gate_floor_achieved = False  # flips True once any iteration clears the floor(s)
+    best_gate_passed = False     # the eval gate's verdict on the BEST render's own comparison (a carried-over
+                                 # previous best has no comparison here, so it is not claimed to pass)
+    control_args = _control_args(genre, original_audio)
     if gate_floor is not None:
         sa_txt = f", section-aware {sa_floor*100:.0f}%" if sa_floor is not None else ""
         mode_txt = f" mode '{generation_mode}' ({floor_source})" if generation_mode else f" ({floor_source})"
@@ -721,6 +739,7 @@ def improve_strudel(
             ]
             if synth_config_path.exists():
                 compare_cmd.extend(["--config", str(synth_config_path)])
+            compare_cmd.extend(control_args)
             compare_result = subprocess.run(compare_cmd, capture_output=True, text=True)
 
             comparison_path = Path(output_dir) / f"comparison_v{current_version:03d}.json"
@@ -755,15 +774,16 @@ def improve_strudel(
         # Eval-gate verdict: require BOTH the overall floor AND (when available) the section-aware
         # floor. Section-aware is the primary quality signal — a static loop can clear overall but
         # not section-aware, so this stops the loop from "passing" on a non-evolving render.
-        overall_ok = (gate_floor is None) or (current_similarity >= gate_floor)
-        sa_ok = (sa_floor is None) or (section_aware is None) or (section_aware >= sa_floor)
-        gate_passed = overall_ok and sa_ok
+        # The verdict is eval/gate.py's own (scale selection, chance margin, temporal_failed, editability), run on
+        # this iteration's in-memory comparison: the loop can never disagree with `python eval/gate.py`.
+        gate_passed = False
         if gate_floor is not None:
-            mark = "✓ PASS" if gate_passed else "✗ FAIL"
-            detail = f"overall {current_similarity*100:.1f}%/{gate_floor*100:.0f}%"
-            if section_aware is not None and sa_floor is not None:
-                detail += f", section-aware {section_aware*100:.1f}%/{sa_floor*100:.0f}%"
-            print(f"       Gate: {mark} ({detail})")
+            if comp_scores.get("overall_similarity") is not None:
+                gate_res = evaluate_comparison_data(comparison, genre, _GATE_THRESHOLDS, mode=generation_mode)
+                gate_passed = gate_res.passed
+                print(f"       Gate: {'✓' if gate_passed else '✗'} {gate_res.message}")
+            else:
+                print("       Gate: ✗ FAIL (no similarity in this comparison)")
 
         # Track iteration data for manifest
         iter_data = {
@@ -902,6 +922,7 @@ def improve_strudel(
             best_code = current_code
             best_render_path = render_path
             best_editability = edit_fields
+            best_gate_passed = gate_passed
             iter_data["was_best"] = True
 
         # 4. OPTIMIZATION (Deterministic parameter tuning, then constrained LLM)
@@ -1130,7 +1151,7 @@ def improve_strudel(
     if best_editability is None and best_code:
         best_editability = _editability_fields(best_code)
     best_edit_verdict = best_editability.get("editability") if best_editability else None
-    final_gate_passed = ((gate_floor is None) or (best_similarity >= gate_floor)) and best_edit_verdict != "fail"
+    final_gate_passed = ((gate_floor is None) or best_gate_passed) and best_edit_verdict != "fail"
     gate_summary = {
         "genre": genre or "default",
         "mode": (best_editability or {}).get("generation_mode") or generation_mode,
@@ -1226,7 +1247,7 @@ def improve_strudel(
             compare_target,
             str(best_render),
             "-c", str(Path(output_dir) / "comparison.png")
-        ]
+        ] + control_args
         if best_strudel_path.exists():
             chart_cmd.extend(["--strudel", str(best_strudel_path)])  # spec 003 stamping
         chart_result = subprocess.run(chart_cmd, capture_output=True, text=True)

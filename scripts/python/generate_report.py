@@ -147,6 +147,28 @@ def generate_gate_html(gate):
             f'</div>')
 
 
+def _score_color(pct):
+    """The one colour rule for every similarity row (percent in, hex out)."""
+    return '#3fb950' if pct >= 70 else '#d29922' if pct >= 50 else '#f85149'
+
+
+def _metric_row_html(label, value):
+    """One similarity-table row: label, bar, percent. `value` is a 0-1 fraction."""
+    val = value * 100
+    color = _score_color(val)
+    return f'''
+            <tr>
+                <td style="padding: 0.5rem; color: var(--text-secondary);">{html.escape(label)}</td>
+                <td style="padding: 0.5rem; width: 60%;">
+                    <div style="background: var(--bg-primary); border-radius: 4px; height: 20px; overflow: hidden;">
+                        <div style="width: {min(max(val, 0), 100)}%; height: 100%; background: {color};"></div>
+                    </div>
+                </td>
+                <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: {color};">{val:.0f}%</td>
+            </tr>
+        '''
+
+
 def generate_charts_html(comparison_results, gate=None):
     """Generate HTML charts from comparison JSON data - pure HTML/CSS, no images."""
     if not comparison_results:
@@ -204,20 +226,36 @@ def generate_charts_html(comparison_results, gate=None):
         ('Energy', 'energy_similarity'),
     ]
 
-    rows = ''
-    for label, key in metrics:
-        val = comp.get(key, 0) * 100
-        color = '#3fb950' if val >= 70 else '#d29922' if val >= 50 else '#f85149'
-        bar_width = min(val, 100)
+    rows = ''.join(_metric_row_html(label, comp.get(key, 0)) for label, key in metrics)
+
+    # Static / time-aligned rows + margin over a different song (labels match internal/report/generator.go)
+    temporal = comp.get('temporal') or {}
+
+    if metrics:
+        nb = '\u00a0\u00a0'
+        if comp.get('static_similarity') is not None:
+            rows += _metric_row_html('Static (time-averaged)', comp['static_similarity'])
+        if comp.get('temporal_failed'):
+            rows += ('<tr><td style="padding: 0.5rem; color: #f85149;">Temporal (time-aligned)</td>'
+                     '<td colspan="2" style="padding: 0.5rem; color: #f85149;">FAILED: '
+                     + html.escape(str((temporal or {}).get('error', 'unknown error'))) + '</td></tr>')
+        elif temporal:
+            rows += _metric_row_html('Temporal (time-aligned)', temporal.get('temporal_similarity', 0))
+            for label, key in ((nb + 'pitch-in-time (chroma)', 'chroma_corr'),
+                               (nb + 'spectrum-in-time (mel)', 'mel_corr'),
+                               (nb + 'onset F1 (\u00b150 ms)', 'onset_f1'),
+                               (nb + 'loudness envelope', 'envelope_corr')):
+                rows += _metric_row_html(label, temporal.get(key, 0))
+    if metrics and comp.get('margin_over_chance') is not None:
+        chance = comp.get('chance') or {}
+        margin = comp['margin_over_chance'] * 100
+        color = '#3fb950' if margin > 0 else '#f85149'
         rows += f'''
             <tr>
-                <td style="padding: 0.5rem; color: var(--text-secondary);">{label}</td>
-                <td style="padding: 0.5rem; width: 60%;">
-                    <div style="background: var(--bg-primary); border-radius: 4px; height: 20px; overflow: hidden;">
-                        <div style="width: {bar_width}%; height: 100%; background: {color};"></div>
-                    </div>
-                </td>
-                <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: {color};">{val:.0f}%</td>
+                <td style="padding: 0.5rem; color: var(--text-secondary);">Margin over a different song</td>
+                <td style="padding: 0.5rem; color: var(--text-secondary); font-size: 0.8rem;">
+                    control scored {chance.get('overall', 0) * 100:.0f}% overall</td>
+                <td style="padding: 0.5rem; text-align: right; font-weight: 600; color: {color};">{margin:+.1f} pts</td>
             </tr>
         '''
 

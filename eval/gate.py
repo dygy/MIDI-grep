@@ -59,6 +59,13 @@ class GateResult:
     mode: str | None = None
     editability: str | None = None
     floor_source: str | None = None
+    # Chance control: overall minus the overall of a DIFFERENT same-genre song scored against the
+    # same original (comparison.margin_over_chance). None when the comparison has no control or
+    # thresholds.yaml has no `min_margin_over_chance` (legacy files skip the check silently).
+    margin_over_chance: float | None = None
+    chance_passed: bool | None = None
+    # True when compare_audio.py could not compute the temporal half (comparison.temporal_failed): the gate FAILS.
+    temporal_failed: bool | None = None
 
 
 def load_thresholds(path: str | Path = THRESHOLDS_PATH) -> dict[str, Any]:
@@ -148,6 +155,43 @@ def _read_similarity(
     return similarity, worst_frac, section_aware
 
 
+def resolve_section_aware_floor(
+    genre: str | None, thresholds: dict[str, Any], mode: str | None = None
+) -> tuple[float | None, str | None]:
+    """(floor, source) for the section-aware check; source is "modes.<mode>" or "genres" (the
+    genre-wide / default tables), None when no floor is configured at all."""
+    key = _norm_key(genre)
+    if key:
+        mode_sa = _mode_block(thresholds, mode).get("section_aware") or {}
+        if mode_sa.get(key) is not None:
+            return float(mode_sa[key]), f"modes.{_norm_key(mode)}"
+    floor = section_aware_floor_for_genre(genre, thresholds, None)
+    return floor, ("genres" if floor is not None else None)
+
+
+def select_scores(
+    comp: dict[str, Any],
+    similarity: float,
+    section_aware: float | None,
+    floor_source: str | None,
+    sa_source: str | None,
+) -> tuple[float, float | None, str, str]:
+    """Pick the scores a floor is compared with. Per-mode floors were measured on the current
+    overall / section_aware scale (0.5 static + 0.5 temporal). The genre-wide tables were measured on
+    the STATIC scale (before the temporal half existed) and cannot be re-measured, so when a floor
+    comes from them and the comparison carries `static_similarity`, `static_similarity` (and the mean
+    of the section windows' `static` values; none -> skip the check) is compared instead.
+    Returns (similarity, section_aware, overall_label, section_label)."""
+    label, sa_label = "similarity", "section_aware_similarity"
+    if floor_source == "genres" and comp.get("static_similarity") is not None:
+        similarity, label = float(comp["static_similarity"]), "static similarity"
+    if sa_source == "genres" and comp.get("static_similarity") is not None:
+        statics = [w["static"] for w in comp.get("section_windows") or [] if w.get("static") is not None]
+        section_aware = float(sum(statics) / len(statics)) if statics else None
+        sa_label = "static section_aware"
+    return similarity, section_aware, label, sa_label
+
+
 def section_aware_floor_for_genre(
     genre: str | None, thresholds: dict[str, Any], mode: str | None = None
 ) -> float | None:
@@ -188,7 +232,20 @@ def evaluate_comparison(
     thresholds: dict[str, Any] | None = None,
     mode: str | None = None,
 ) -> GateResult:
-    """Evaluate one comparison.json against the genre floor and worst-band guardrail.
+    """Evaluate one comparison.json file (see `evaluate_comparison_data`)."""
+    data = json.loads(Path(comparison_path).read_text())
+    return evaluate_comparison_data(data, genre, thresholds, mode)
+
+
+def evaluate_comparison_data(
+    data: dict[str, Any],
+    genre: str | None,
+    thresholds: dict[str, Any] | None = None,
+    mode: str | None = None,
+) -> GateResult:
+    """Evaluate one comparison dict (the content of a comparison.json, or compare_audio.py's in-memory
+    result) against the genre floor and worst-band guardrail. The same logic serves the CLI, the tests
+    and the --iterate loop, so they can never disagree.
 
     `mode` selects the per-mode floor block (`modes.<mode>`); when not passed it is read
     from the comparison.json `generation_mode` key (absent on legacy files → genre-wide
@@ -206,13 +263,12 @@ def evaluate_comparison(
     Backward compat: if either field is absent the section-aware check is silently skipped.
     """
     thresholds = thresholds or load_thresholds()
-    data = json.loads(Path(comparison_path).read_text())
     if mode is None:
         mode = data.get("generation_mode")
     editability = data.get("editability")
     floor, floor_source = resolve_floor(genre, thresholds, mode)
     max_worst = thresholds.get("max_worst_band_diff")
-    sa_floor = section_aware_floor_for_genre(genre, thresholds, mode)
+    sa_floor, sa_source = resolve_section_aware_floor(genre, thresholds, mode)
     g = genre or "default"
 
     if _editability_failed(data):
@@ -233,12 +289,14 @@ def evaluate_comparison(
         )
 
     similarity, worst_frac, section_aware = _read_similarity(data)
+    similarity, section_aware, sim_label, sa_label = select_scores(
+        data.get("comparison") or {}, similarity, section_aware, floor_source, sa_source)
 
     reasons: list[str] = []
     passed = True
     if similarity < floor:
         passed = False
-        reasons.append(f"similarity {similarity:.3f} < floor {floor:.3f}")
+        reasons.append(f"{sim_label} {similarity:.3f} < floor {floor:.3f}")
     if max_worst is not None and worst_frac is not None and worst_frac > float(max_worst):
         passed = False
         reasons.append(
@@ -252,16 +310,41 @@ def evaluate_comparison(
         if not sa_passed:
             passed = False
             reasons.append(
-                f"section_aware_similarity {section_aware:.3f} < section_aware_floor {sa_floor:.3f}"
+                f"{sa_label} {section_aware:.3f} < section_aware_floor {sa_floor:.3f}"
             )
+
+    # A measurement failure must neither pass nor be silently scored.
+    comp_block = data.get("comparison") or {}
+    temporal_failed = bool(comp_block.get("temporal_failed")) or None
+    if temporal_failed:
+        passed = False
+        reasons.append("temporal scoring failed: " + str((comp_block.get("temporal") or {}).get("error", "unknown error")))
+    chance_block = comp_block.get("chance") or {}
+    if chance_block.get("error") or chance_block.get("temporal_failed"):
+        passed = False
+        reasons.append("chance control failed: " + str(chance_block.get("error", "its temporal scoring failed")))
+
+    # Chance check (optional - needs the comparison's margin_over_chance AND a threshold).
+    # Spec: the render must beat a different song by MORE than the margin (strict).
+    margin = comp_block.get("margin_over_chance")
+    margin = float(margin) if margin is not None else None
+    min_margin = thresholds.get("min_margin_over_chance")
+    chance_passed: bool | None = None
+    if margin is not None and min_margin is not None:
+        chance_passed = margin > float(min_margin)
+        if not chance_passed:
+            passed = False
+            reasons.append(f"margin over chance {margin:.3f} <= {float(min_margin):.3f}")
 
     tag = f"[{g}]" if not mode else f"[{g}/{mode}]"
     if passed:
-        msg = f"PASS {tag} similarity {similarity:.3f} >= floor {floor:.3f}"
+        msg = f"PASS {tag} {sim_label} {similarity:.3f} >= floor {floor:.3f}"
         if worst_frac is not None:
             msg += f" (worst band {worst_frac:.2%})"
         if section_aware is not None and sa_floor is not None:
-            msg += f"; section_aware {section_aware:.3f} >= sa_floor {sa_floor:.3f}"
+            msg += f"; {sa_label} {section_aware:.3f} >= sa_floor {sa_floor:.3f}"
+        if chance_passed:
+            msg += f"; margin over chance {margin:.3f} > {float(min_margin):.3f}"
     else:
         msg = f"FAIL {tag} " + "; ".join(reasons)
     if editability:
@@ -279,6 +362,9 @@ def evaluate_comparison(
         mode=mode,
         editability=editability,
         floor_source=floor_source,
+        margin_over_chance=margin,
+        chance_passed=chance_passed,
+        temporal_failed=temporal_failed,
     )
 
 
