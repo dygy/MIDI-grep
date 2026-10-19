@@ -123,7 +123,7 @@ tempo (`temporal.lag_seconds`); then on the aligned signals `chroma_corr` (per-f
 chroma_cqt bins, non-silent frames), `mel_corr` (same on 64-band log-mel), `onset_f1` (greedy one-to-one
 onset matching ±50 ms, MIREX convention, no mir_eval dep), `envelope_corr` (frame RMS Pearson); mean of the
 four clamped to [0,1]. Section windows carry `static`, `temporal` and the four components, `win` = 50/50.
-`--control <path>` scores another same-genre original against the same original (no nested control, no
+Alignment (2026-10-19): true local maxima of the onset-xcorr within ±1 bar (bar = measured 3 or 4 beats at the track tempo) are candidates; the onset best stays unless a tied candidate (deficit < 1 standard error block-wise, or a whole number of bars away) is separated by the beat-block chroma trajectory by > 1 standard error of its own; unscorable scores are null; `temporal.lag_candidates` records them (onset_score, harmony_score, onset_tied, chosen, decided_by). `--control <path>` scores another same-genre original against the same original (no nested control, no
 synth_config) → `comparison.chance {path, overall, section_aware, temporal}` + `margin_over_chance`.
 `eval/gate.py` fails below `min_margin_over_chance` (0.02, thresholds.yaml); genre-wide floors (old scale)
 are compared with `static_similarity` (section-aware: mean window `static`). `gate_margin.py` adds the chance
@@ -132,7 +132,7 @@ margin. `pipeline_helpers.py control --genre G --exclude-key K` picks the contro
 Regime v026 0.6967/0.6736 (+0.120), v027 synth 0.5589/0.5525 (−0.018, FAIL), VAGABUNDO v004 0.6626/0.6223
 (+0.086), v007 synth 0.6627/0.5860 (+0.086); mode floors sample-instrument 0.64/0.60, synth 0.54/0.53.
 2026-10-19 re-baseline (offline renderer, refined tempo, note-aligned verified instruments, no vocals,
-scored vs instrumental.wav): sample-instrument VAGABUNDO v013 0.7170/0.7073, Regime v031 0.7794/0.7744 → floors 0.70/0.69; synth Regime v032 0.6709/0.6523, VAGABUNDO v014 0.7240/0.7007 → floors 0.65/0.63; margins +0.096 to +0.204.
+scored vs instrumental.wav): sample-instrument VAGABUNDO v013 0.7170/0.7073, Regime v031 0.7794/0.7744 → floors 0.70/0.69; synth VAGABUNDO v014 0.7240/0.7007, Regime v032 0.7479/0.7361 → floors 0.70/0.68; margins +0.142 to +0.204 (v013 +0.142, v014 +0.149, v031 +0.204, v032 +0.173).
 Target: 80%+ across genres via AI learning, not hardcoding.
 Tempo estimate (Oct 2026): `estimate_tempo()` keeps the full-band `beat_track` read and adds a low-band (30-200 Hz STFT-flux) `librosa.feature.tempo` candidate (original's BPM only as `start_bpm`); the candidate with stronger onset-envelope autocorrelation support wins. Both candidates + `tempo_method` are written to `comparison.json` (`tempo_candidates`, `tempo_method`); weights unchanged.
 

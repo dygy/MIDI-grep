@@ -63,3 +63,24 @@ func TestTemporalRows(t *testing.T) {
 		})
 	}
 }
+
+// Unscorable alignment scores are written as null (never -Infinity/NaN); the report must parse and render them.
+func TestLagCandidatesAcceptNull(t *testing.T) {
+	extra := `, "static_similarity": 0.9,
+	"temporal": {"lag_seconds": 0.0, "lag_candidates": [
+		{"lag_seconds": 0.0, "onset_score": 0.4, "harmony_score": null, "onset_tied": true, "chosen": true, "decided_by": "onset"},
+		{"lag_seconds": 1.7, "onset_score": null, "harmony_score": null, "onset_tied": false, "chosen": false}],
+		"chroma_corr": 0.5, "mel_corr": 0.6, "onset_f1": 0.4, "envelope_corr": 0.7, "temporal_similarity": 0.55},
+	"chance": {"path": "x.wav", "overall": 0.42, "section_aware": 0.4, "temporal": 0.1, "lag_seconds": null, "lag_candidates": null},
+	"margin_over_chance": 0.38`
+	var comp ComparisonResult
+	if err := json.Unmarshal([]byte(comparisonJSON(extra)), &comp); err != nil {
+		t.Fatalf("unmarshal with null scores: %v", err)
+	}
+	if got := comp.Comparison.Temporal.LagCandidates; len(got) != 2 || got[0].HarmonyScore != nil || !got[0].Chosen {
+		t.Fatalf("candidates not parsed as expected: %+v", got)
+	}
+	if out := generateChartsHTML(&comp); !strings.Contains(out, "Temporal (time-aligned)") {
+		t.Fatalf("temporal row missing")
+	}
+}

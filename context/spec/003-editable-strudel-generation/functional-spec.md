@@ -152,14 +152,14 @@ recognizable — while staying fully mine to edit.
       0.5589/0.5525, VAGABUNDO v007 0.6627/0.5860 → floors 0.54/0.53 (lowest track − 0.02). Genre-wide floors
       measured on the old scale are checked against `static_similarity` only.
       — re-measured 2026-10-19 (offline renderer, refined tempo, note-aligned verified instruments, no vocal
-      voice, scored against `instrumental.wav`): sample-instrument VAGABUNDO v013 0.7170/0.7073, Regime v031 0.7794/0.7744 → floors 0.70/0.69; synth Regime v032 0.6709/0.6523, VAGABUNDO v014 0.7240/0.7007 → floors 0.65/0.63.
+      voice, scored against `instrumental.wav`): sample-instrument VAGABUNDO v013 0.7170/0.7073, Regime v031 0.7794/0.7744 → floors 0.70/0.69; synth VAGABUNDO v014 0.7240/0.7007, Regime v032 0.7479/0.7361 → floors 0.70/0.68.
 - [ ] **A render must beat a different song.** Each scored render is also compared against the
       original of a *different* reference track of the same genre; the render must score above
       that control by more than the run-to-run noise margin (0.02), or the gate fails. A score
       that a different song can reach says nothing about this song.
       *(added 2026-10-18 — not yet verified via `/awos:verify`; measured: v026 +0.120, v004 +0.086,
       v007 +0.086 pass; Regime synth v027 −0.018 FAILS — recorded shortfall; 2026-10-19 on the instrumental
-      target: v013 +0.142, v014 +0.149, v031 +0.204, v032 +0.096 — all pass)*
+      target: v013 +0.142, v014 +0.149, v031 +0.204, v032 +0.173 (after the alignment fix; +0.096 one bar off) — all pass)*
 
 ### 2.5 Reporting reflects the values
 
@@ -217,5 +217,12 @@ scores, **so that** I'm never shown a misleading number again.
   the track's instrumental (`instrumental.wav` = bass + drums + melodic stems), including the different-song
   control. On the two reference tracks the three stems leave 49% / 34% of the original's RMS unexplained without
   the vocal stem (8% / 6% with it), so the old full-mix target scored us against a large part we must not make.
-  Floors re-measured on the instrumental target: sample-instrument VAGABUNDO v013 0.7170/0.7073, Regime v031 0.7794/0.7744 → floors 0.70/0.69; synth Regime v032 0.6709/0.6523, VAGABUNDO v014 0.7240/0.7007 → floors 0.65/0.63 (all four
-  pass, margins over the different-song control +0.096 to +0.204).
+  Floors re-measured on the instrumental target: sample-instrument VAGABUNDO v013 0.7170/0.7073, Regime v031 0.7794/0.7744 → floors 0.70/0.69; synth VAGABUNDO v014 0.7240/0.7007, Regime v032 0.7479/0.7361 → floors 0.70/0.68 (all four
+  pass, margins over the different-song control +0.142 to +0.204).
+- **2026-10-19 — fix `compare-alignment-one-bar-off` (conformance, §2.4; floors raised by owner decision).** The
+  temporal block aligned render and original by the onset-envelope peak within ±1 bar; the envelope is bar-periodic,
+  so 0 and ±1 bar nearly tie — Regime v032 locked one bar off (temporal 0.460 vs 0.614 aligned; overall 0.6709 →
+  0.7479), and v031 / v013 won by < 0.01. Candidates are now the onset-curve's true local maxima; the onset best
+  stays unless the harmony trajectory separates a tied (or bar-aliased) candidate by more than its own standard
+  error (`comparison.temporal.lag_candidates` lists them; unscorable scores are null). The other three pieces and the control
+  are unchanged. Synth floors re-derived by the rule (lowest − 0.02): 0.65/0.63 → 0.70/0.68.

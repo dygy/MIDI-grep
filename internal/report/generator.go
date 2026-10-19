@@ -107,12 +107,24 @@ type ComparisonData struct {
 
 // TemporalData holds the time-aligned similarity components.
 type TemporalData struct {
-	LagSeconds         float64 `json:"lag_seconds"`
-	ChromaCorr         float64 `json:"chroma_corr"`
-	MelCorr            float64 `json:"mel_corr"`
-	OnsetF1            float64 `json:"onset_f1"`
-	EnvelopeCorr       float64 `json:"envelope_corr"`
-	TemporalSimilarity float64 `json:"temporal_similarity"`
+	LagSeconds         float64        `json:"lag_seconds"`
+	LagCandidates      []LagCandidate `json:"lag_candidates,omitempty"`
+	ChromaCorr         float64        `json:"chroma_corr"`
+	MelCorr            float64        `json:"mel_corr"`
+	OnsetF1            float64        `json:"onset_f1"`
+	EnvelopeCorr       float64        `json:"envelope_corr"`
+	TemporalSimilarity float64        `json:"temporal_similarity"`
+}
+
+// LagCandidate is one alignment candidate. Scores are null in comparison.json when unscorable
+// (never -Infinity/NaN), hence the pointers.
+type LagCandidate struct {
+	LagSeconds   float64  `json:"lag_seconds"`
+	OnsetScore   *float64 `json:"onset_score"`
+	HarmonyScore *float64 `json:"harmony_score"`
+	OnsetTied    bool     `json:"onset_tied"`
+	Chosen       bool     `json:"chosen"`
+	DecidedBy    string   `json:"decided_by,omitempty"`
 }
 
 // ChanceData is the control score against a different song.
@@ -121,6 +133,9 @@ type ChanceData struct {
 	Overall      float64 `json:"overall"`
 	SectionAware float64 `json:"section_aware"`
 	Temporal     float64 `json:"temporal"`
+	// the control goes through the same alignment; null/absent on older files
+	LagSeconds    *float64       `json:"lag_seconds,omitempty"`
+	LagCandidates []LagCandidate `json:"lag_candidates,omitempty"`
 }
 
 // Generator creates HTML reports

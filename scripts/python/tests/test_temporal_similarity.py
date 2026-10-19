@@ -94,7 +94,7 @@ def test_chroma_in_time_sees_the_chord_sequence(scores):
 def test_temporal_block_shape_and_blend(scores):
     good, _ = scores
     t = good["temporal"]
-    assert set(t) == {"lag_seconds", "chroma_corr", "mel_corr", "onset_f1", "envelope_corr", "temporal_similarity"}
+    assert set(t) == {"lag_seconds", "lag_candidates", "chroma_corr", "mel_corr", "onset_f1", "envelope_corr", "temporal_similarity"}
     comps = [t[k] for k in ("chroma_corr", "mel_corr", "onset_f1", "envelope_corr")]
     assert all(0.0 <= c <= 1.0 for c in comps)
     assert t["temporal_similarity"] == pytest.approx(np.mean(comps))

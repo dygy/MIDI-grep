@@ -423,10 +423,10 @@ def test_23_dataset_entry_missing_a_mode_or_run_is_detected():
 
 # Mode floors after the 2026-10-19 re-baseline (overall = 0.5 static + 0.5 temporal, vs instrumental.wav; each =
 # round(min over the mode's reference tracks - 0.02, 2)); "never lowered" == these exact values hold. History:
-# 0.64/0.60 and 0.54/0.53 (2026-10-18, BlackHole, full-mix reference), 0.88/0.90 and 0.77/0.81 (static-only scale).
+# synth 0.65/0.63 (2026-10-19, Regime v032 scored one bar mis-aligned), 0.64/0.60 and 0.54/0.53 (2026-10-18, BlackHole, full-mix reference), 0.88/0.90 and 0.77/0.81 (static-only scale).
 REGIME_FLOORS = {
     "sample_instrument": {"genres": 0.70, "section_aware": 0.69},
-    "synth": {"genres": 0.65, "section_aware": 0.63},
+    "synth": {"genres": 0.70, "section_aware": 0.68},
 }
 OLD_STATIC_SA_FLOOR = 0.90      # pre-rescale sample-instrument section-aware floor (static scale), for fix #10's history
 

@@ -9,6 +9,7 @@ import json
 import os
 import numpy as np
 import librosa
+from scipy.signal import find_peaks
 import librosa.display
 import sys
 from scipy import signal
@@ -319,32 +320,205 @@ TEMPORAL_ONSET_TOL_S = 0.05   # MIREX onset-evaluation tolerance window (+/-50 m
 TEMPORAL_N_MELS = 64
 
 
-def _align_by_onset_envelope(orig, rend, sr, max_lag_s, hop=TEMPORAL_HOP):
-    """Align `rend` to `orig` by the lag maximizing the normalized cross-correlation of their
-    onset-strength envelopes, searching +/- max_lag_s. Returns (orig_a, rend_a, lag_seconds):
+def _shifted_pair(a, b, lag):
+    """Overlap of two equal-rate sequences for a lag in frames (lag > 0: a's head is dropped)."""
+    n = min(a.shape[-1], b.shape[-1])
+    if lag >= 0:
+        return a[..., lag:n], b[..., :n - lag]
+    return a[..., :n + lag], b[..., -lag:n]
+
+
+# A lag candidate is "tied" with the onset-best one when their score difference is smaller than this many
+# standard errors of that difference (block-wise over bars), and a harmony preference must exceed the same
+# number of standard errors to overrule the onset evidence. 1 = the usual one-standard-error convention.
+ALIGN_TIE_Z = 1.0
+ALIGN_MIN_BLOCKS = 3   # fewer bars than this gives no standard error: "cannot separate"
+
+
+def _separation_z(terms_a, terms_b):
+    """z of (sum a - sum b) from per-block score contributions: mean difference over its standard error.
+    Fewer than ALIGN_MIN_BLOCKS blocks, or no variance with no difference -> 0.0 (cannot separate)."""
+    j = min(len(terms_a), len(terms_b))
+    if j < ALIGN_MIN_BLOCKS:
+        return 0.0
+    d = np.asarray(terms_a[:j]) - np.asarray(terms_b[:j])
+    se = float(np.std(d, ddof=1)) * np.sqrt(j)
+    tot = float(d.sum())
+    if se <= 0:
+        return float(np.inf) if tot > 0 else (-float(np.inf) if tot < 0 else 0.0)
+    return tot / se
+
+
+def _pearson_terms(x, y, group):
+    """(score, per-group contributions) of the Pearson correlation of x and y (2-D: bins x columns).
+    Contributions are the products summed over `group` columns, over the norms: they add up to the score."""
+    x = x - x.mean(axis=1, keepdims=True)
+    y = y - y.mean(axis=1, keepdims=True)
+    d = np.linalg.norm(x) * np.linalg.norm(y)
+    if d <= 0:
+        return None, []
+    prod = (x * y).sum(axis=0)
+    g = max(1, int(group))
+    k = len(prod) // g
+    return float(prod.sum() / d), list(prod[:k * g].reshape(k, g).sum(axis=1) / d)
+
+
+def _harmony_terms(ca, cb, lag, beat_frames, beats_per_bar):
+    """Selection-only score of one lag: Pearson of beat-block-averaged chroma trajectories (per-pitch-class
+    mean removed). Coarse and global, unlike the scored per-frame `chroma_corr`, and NOT bar-periodic: it
+    changes when the chord progression is shifted by a bar. Returns (score or None, per-bar terms)."""
+    x, y = _shifted_pair(ca, cb, lag)
+    nb = min(x.shape[1], y.shape[1]) // beat_frames
+    if nb < 2:
+        return None, []
+    x = x[:, :nb * beat_frames].reshape(x.shape[0], nb, beat_frames).mean(axis=2)
+    y = y[:, :nb * beat_frames].reshape(y.shape[0], nb, beat_frames).mean(axis=2)
+    return _pearson_terms(x, y, beats_per_bar)
+
+
+def _beats_per_bar(onset_env, beat_frames):
+    """3 or 4 beats per bar, whichever the onset envelope's own periodicity supports (mean autocorrelation
+    at the first two multiples of the bar); a tie is 4. Measured, not assumed 4/4."""
+    best, best_v = 4, -np.inf
+    env = onset_env - np.mean(onset_env)
+    denom = float(np.sum(env ** 2))
+    if denom < 1e-12 or beat_frames < 1:
+        return 4
+    ac = np.correlate(env, env, mode='full')[len(env) - 1:] / denom
+    for m in (4, 3):
+        vals = []
+        for k in (1, 2):
+            lag = int(round(m * k * beat_frames))
+            lo, hi = max(1, int(lag * 0.97)), int(np.ceil(lag * 1.03))
+            if hi >= len(ac):
+                break
+            vals.append(float(np.max(ac[lo:hi + 1])))
+        v = float(np.mean(vals)) if vals else -np.inf
+        if v > best_v:
+            best, best_v = m, v
+    return best
+
+
+def _curve_peaks(curve, inside, distance):
+    """Indices of true local maxima of `curve` (at least `distance` apart) that lie inside the search window.
+    `curve` extends beyond the window, so a window edge where the curve still climbs is not a peak."""
+    finite = np.isfinite(curve)
+    floor = curve[finite].min() - 1.0
+    padded = np.concatenate([[floor], np.where(finite, curve, floor), [floor]])
+    peaks, _ = find_peaks(padded, distance=distance)
+    return [int(i) - 1 for i in peaks if inside[int(i) - 1] and finite[int(i) - 1]]
+
+
+def _align_by_onset_envelope(orig, rend, sr, max_lag_s, hop=TEMPORAL_HOP, return_info=False,
+                             beat_s=None, chroma=None, beats_per_bar=None):
+    """Align `rend` to `orig`, searching +/- max_lag_s (one bar). Returns (orig_a, rend_a, lag_seconds):
     equal-length views. lag_seconds > 0 means the render's events come EARLIER than the
-    original's (the original's head was trimmed); < 0 means the render's head was trimmed."""
+    original's (the original's head was trimmed); < 0 means the render's head was trimmed.
+
+    The onset-strength cross-correlation is the primary evidence. Looped music repeats every bar, so lag 0
+    and +/-1 bar nearly tie and the plain argmax can be a coin flip. Therefore:
+      1. Candidates = true local maxima (at least a beat apart) of the curve inside the window. The curve is
+         computed one beat beyond the window so a window edge that is still rising is not a peak.
+      2. b = the best candidate by onset score. A candidate is TIED with b when its deficit is below
+         ALIGN_TIE_Z standard errors (block-wise over bars) or when its lag is b's plus a whole number of bars
+         (+/- half a beat): looped music is self-similar under a bar shift, so its onset score there says
+         nothing about timing. With no tied candidate b is final.
+      3. Among b and its tied candidates the harmony-trajectory score (`_harmony_terms`, not bar-periodic, a
+         different feature from the scored components) may overrule b, but only if it separates the winner
+         from b by more than ALIGN_TIE_Z standard errors of its own; otherwise b stays.
+    beat_s: beat length (default max_lag_s/4); chroma: optional precomputed (chroma_orig, chroma_rend)
+    on the same hop. return_info=True appends the candidate dicts (chosen first) for comparison.json."""
     ea = librosa.onset.onset_strength(y=orig, sr=sr, hop_length=hop)
     eb = librosa.onset.onset_strength(y=rend, sr=sr, hop_length=hop)
     n = min(len(ea), len(eb))
     ea = ea[:n] - ea[:n].mean()
     eb = eb[:n] - eb[:n].mean()
+    beat_s = beat_s if beat_s and beat_s > 0 else max_lag_s / 4
+    beat_frames = max(1, int(round(beat_s * sr / hop)))
     max_lag = int(min(max(max_lag_s, 0.0) * sr / hop, n // 2))
-    best_lag, best_score = 0, -np.inf
-    for lag in range(-max_lag, max_lag + 1):
-        x = ea[lag:] if lag >= 0 else ea[:n + lag]
-        y = eb[:n - lag] if lag >= 0 else eb[-lag:]
+    ext = int(min(max_lag + beat_frames, n // 2))
+    lags = np.arange(-ext, ext + 1)
+    curve = np.full(len(lags), -np.inf)
+    for i, lag in enumerate(lags):
+        x, y = _shifted_pair(ea, eb, int(lag))
         denom = np.linalg.norm(x) * np.linalg.norm(y)
-        score = float(np.dot(x, y) / denom) if denom > 0 else -np.inf
-        if score > best_score:
-            best_lag, best_score = lag, score
+        curve[i] = float(np.dot(x, y) / denom) if denom > 0 else -np.inf
+    inside = np.abs(lags) <= max_lag
+    finite = np.isfinite(curve)
+    if not (finite & inside).any():
+        m = min(len(orig), len(rend))
+        out = (orig[:m], rend[:m], 0.0)
+        return (*out, []) if return_info else out
+    cand = _curve_peaks(curve, inside, beat_frames)
+    if not cand:   # a monotone curve inside the window: its in-window maximum is all there is
+        cand = [int(np.argmax(np.where(inside & finite, curve, -np.inf)))]
+    cand.sort(key=lambda i: -curve[i])
+    bi = cand[0]                                             # onset best (true local maximum)
+    bpb = beats_per_bar or max(1, int(round(max_lag_s / beat_s)))
+    bar_frames = max(1, bpb * beat_frames)
+
+    def onset_terms(i):
+        x, y = _shifted_pair(ea, eb, int(lags[i]))
+        d = np.linalg.norm(x) * np.linalg.norm(y)
+        k = len(x) // bar_frames
+        return list((x * y)[:k * bar_frames].reshape(k, bar_frames).sum(axis=1) / d) if d > 0 else []
+
+    t_best = onset_terms(bi)
+    z_on = {i: _separation_z(t_best, onset_terms(i)) for i in cand[1:]}
+    def bar_alias(i):
+        """lag differs from the onset best by a whole number of bars (+/- half a beat, the same resolution
+        at which neighbouring peaks are merged): onset timing cannot tell these apart, whatever its score."""
+        d = (lags[i] - lags[bi]) / bar_frames
+        return abs(d) >= 0.5 and abs(d - round(d)) * bar_frames < beat_frames / 2
+
+    tied = [bi] + [i for i in cand[1:] if z_on[i] < ALIGN_TIE_Z or bar_alias(i)]
+    if chroma is None and len(tied) > 1:
+        chroma = (librosa.feature.chroma_cqt(y=orig, sr=sr, hop_length=hop),
+                  librosa.feature.chroma_cqt(y=rend, sr=sr, hop_length=hop))
+    harm = {}
+    if chroma is not None and len(cand) > 1:
+        for i in cand:
+            harm[i] = _harmony_terms(chroma[0], chroma[1], int(lags[i]), beat_frames, bpb)
+    chosen, decided_by = bi, 'onset'
+    if len(tied) > 1:
+        scored = [i for i in tied if harm.get(i, (None, []))[0] is not None]
+        if scored:
+            hi = max(scored, key=lambda i: harm[i][0])
+            if hi != bi and bi in scored and _separation_z(harm[hi][1], harm[bi][1]) > ALIGN_TIE_Z:
+                chosen, decided_by = hi, 'harmony'
+    listed = list(dict.fromkeys([chosen, bi] + tied + cand[:2]))
+    infos = []
+    for i in listed:
+        h = harm.get(i, (None, []))[0]
+        infos.append({'lag_seconds': float(lags[i] * hop / sr),
+                      'onset_score': float(curve[i]) if np.isfinite(curve[i]) else None,
+                      'harmony_score': float(h) if h is not None and np.isfinite(h) else None,
+                      'onset_tied': bool(i in tied),
+                      'chosen': bool(i == chosen)})
+    infos[0]['decided_by'] = decided_by
+    best_lag = int(lags[chosen])
     shift = best_lag * hop
     if shift >= 0:
         orig, rend = orig[shift:], rend
     else:
         orig, rend = orig, rend[-shift:]
     m = min(len(orig), len(rend))
-    return orig[:m], rend[:m], float(best_lag * hop / sr)
+    out = (orig[:m], rend[:m], float(best_lag * hop / sr))
+    return (*out, infos) if return_info else out
+
+
+def _empty_temporal(**extra):
+    """The temporal block's full key set at zero: the empty-render and alignment-failure fallbacks."""
+    return {'lag_seconds': 0.0, 'lag_candidates': [], 'chroma_corr': 0.0, 'mel_corr': 0.0,
+            'onset_f1': 0.0, 'envelope_corr': 0.0, 'temporal_similarity': 0.0, **extra}
+
+
+def _slice_chroma(chroma, lag_frames, n_samples, hop):
+    """The precomputed full-signal chroma pair cut to the span of the aligned signals (a lag of whole
+    hops is a whole-frame shift, so this equals recomputing on the aligned audio up to edge padding)."""
+    x, y = _shifted_pair(chroma[0], chroma[1], lag_frames)
+    k = 1 + n_samples // hop
+    return x[:, :k], y[:, :k]
 
 
 def _framewise_corr_per_frame(A, B):
@@ -393,12 +567,15 @@ def onset_f_measure(ref, est, tol=TEMPORAL_ONSET_TOL_S):
     return float(2 * p * rc / (p + rc))
 
 
-def compute_temporal_frames(orig, rend, sr=22050, hop=TEMPORAL_HOP):
+def compute_temporal_frames(orig, rend, sr=22050, hop=TEMPORAL_HOP, chroma=None):
     """Frame-level arrays on ALIGNED equal-length signals, reusable for whole-file and
     per-window scoring: per-frame chroma/mel Pearson (+ activity masks), both RMS envelopes,
     and both onset time lists."""
-    ca = librosa.feature.chroma_cqt(y=orig, sr=sr, hop_length=hop)
-    cb = librosa.feature.chroma_cqt(y=rend, sr=sr, hop_length=hop)
+    if chroma is not None:   # precomputed by the aligner and sliced to the aligned span
+        ca, cb = chroma
+    else:
+        ca = librosa.feature.chroma_cqt(y=orig, sr=sr, hop_length=hop)
+        cb = librosa.feature.chroma_cqt(y=rend, sr=sr, hop_length=hop)
     ma = librosa.power_to_db(librosa.feature.melspectrogram(y=orig, sr=sr, hop_length=hop, n_mels=TEMPORAL_N_MELS))
     mb = librosa.power_to_db(librosa.feature.melspectrogram(y=rend, sr=sr, hop_length=hop, n_mels=TEMPORAL_N_MELS))
     chroma_c, chroma_act = _framewise_corr_per_frame(ca, cb)
@@ -491,8 +668,7 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
                 'frequency_balance_similarity': 0.0, 'tempo_similarity': 0.0,
                 'section_aware_similarity': 0.0, 'section_aware_window_count': 0,
                 'static_similarity': 0.0,
-                'temporal': {'lag_seconds': 0.0, 'chroma_corr': 0.0, 'mel_corr': 0.0,
-                             'onset_f1': 0.0, 'envelope_corr': 0.0, 'temporal_similarity': 0.0},
+                'temporal': _empty_temporal(),
                 'render_empty': True,
             },
             'insights': ['Rendered audio is empty/too short — likely a Strudel parse or render error.'],
@@ -708,18 +884,27 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     # The aligned signals feed BOTH halves of every score (whole file and section windows), so the static and
     # temporal halves of a window always cover the same audio. Unaligned fallback only if alignment itself fails.
     orig_a, rend_a = original, rendered
-    temporal = {'lag_seconds': 0.0, 'chroma_corr': 0.0, 'mel_corr': 0.0, 'onset_f1': 0.0,
-                'envelope_corr': 0.0, 'temporal_similarity': 0.0}
+    temporal = _empty_temporal()
     try:
         bpm_o = float(results['original']['rhythm']['tempo'])
+        hop = TEMPORAL_HOP
+        beat_s, bpb = None, None
         if not np.isfinite(bpm_o) or bpm_o <= 0:
             log("  WARNING: no valid original tempo, aligning with lag 0 only")
             max_lag_s = 0.0
         else:
-            max_lag_s = 4 * 60.0 / bpm_o   # one 4/4 bar
-        orig_a, rend_a, lag_s = _align_by_onset_envelope(original, rendered, 22050, max_lag_s)
-        temporal_frames = compute_temporal_frames(orig_a, rend_a)
-        temporal = {'lag_seconds': lag_s, **temporal_components(temporal_frames)}
+            beat_s = 60.0 / bpm_o
+            bpb = _beats_per_bar(librosa.onset.onset_strength(y=original, sr=22050, hop_length=hop),
+                                 beat_s * 22050 / hop)
+            max_lag_s = bpb * beat_s   # one bar, beats per bar measured from the onset periodicity
+        chroma_full = (librosa.feature.chroma_cqt(y=original, sr=22050, hop_length=hop),
+                       librosa.feature.chroma_cqt(y=rendered, sr=22050, hop_length=hop))
+        orig_a, rend_a, lag_s, lag_cands = _align_by_onset_envelope(
+            original, rendered, 22050, max_lag_s, return_info=True, beat_s=beat_s, chroma=chroma_full,
+            beats_per_bar=bpb)
+        chroma_a = _slice_chroma(chroma_full, int(round(lag_s * 22050 / hop)), min(len(orig_a), len(rend_a)), hop)
+        temporal_frames = compute_temporal_frames(orig_a, rend_a, chroma=chroma_a)
+        temporal = {'lag_seconds': lag_s, 'lag_candidates': lag_cands, **temporal_components(temporal_frames)}
     except Exception as _e:
         # A measurement failure is never silently scored: overall falls back to the static score alone, the
         # failure is written into the result, and eval/gate.py FAILS any comparison carrying temporal_failed.
@@ -839,6 +1024,8 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
                 'overall': cc['overall_similarity'],
                 'section_aware': cc.get('section_aware_similarity'),
                 'temporal': cc['temporal']['temporal_similarity'],
+                'lag_seconds': cc['temporal'].get('lag_seconds'),
+                'lag_candidates': cc['temporal'].get('lag_candidates'),
                 **({'temporal_failed': True} if cc.get('temporal_failed') else {}),
             }
             results['comparison']['margin_over_chance'] = float(
