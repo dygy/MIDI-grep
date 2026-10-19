@@ -1,4 +1,5 @@
 /** Pure helpers for the offline Strudel renderer (no side effects on import). */
+import * as fsSync from 'fs';
 
 export interface WavInfo {
   sampleRate: number; channels: number; bitsPerSample: number; format: number;
@@ -120,4 +121,46 @@ export async function closeAllWithin(items: Closable[], graceMs: number): Promis
     if (!ok) { killed++; try { it.kill(); } catch { /* already gone */ } }
   }));
   return killed;
+}
+
+/**
+ * superdough arguments for one hap. `t` is the trigger time inside the (chunk) context whose frame 0 is
+ * `ctxStartSec` of the song; `cycle` is the hap's ABSOLUTE start cycle, exactly what the live REPL passes
+ * (LFO / tremolo phase derives from it, so it must not restart per chunk). This function's source is also
+ * injected into the render page, so it must stay self-contained.
+ */
+export function triggerArgs(beginCycle: number, cps: number, ctxStartSec: number): { t: number; cycle: number } {
+  return { t: beginCycle / cps - ctxStartSec, cycle: beginCycle };
+}
+
+/**
+ * Pre-roll geometry for chunk starting at cycle `b`: haps with onsets in [preCycle, b) are re-triggered
+ * (audio discarded) so cut groups / orbit ducking see the previous chunk's still-ringing voices.
+ * `preFrames` = frames between the context origin and the chunk's startFrame (integer, 0 for the first chunk).
+ */
+export function prerollPlan(b: number, startFrame: number, cps: number, sampleRate: number, prerollSeconds: number): { preCycle: number; preFrames: number } {
+  const preCycle = Math.max(0, b - prerollSeconds * cps);
+  const preFrames = Math.max(0, startFrame - Math.max(0, Math.floor((preCycle / cps) * sampleRate)));
+  return { preCycle, preFrames };
+}
+
+/** From planar [L(len), R(len)] context audio keep `keep` frames after skipping `skip`, planar again. */
+export function trimChunk(f: Float32Array, len: number, skip: number, keep: number): Float32Array {
+  const n = Math.max(0, Math.min(keep, len - skip)), out = new Float32Array(n * 2);
+  out.set(f.subarray(skip, skip + n), 0); out.set(f.subarray(len + skip, len + skip + n), n);
+  return out;
+}
+
+/** Remove a leftover output from an earlier run so a stale file can never be mistaken for this render. */
+export function removeStaleOutput(target: string): void {
+  try { fsSync.rmSync(target, { force: true }); } catch { /* nothing to remove */ }
+}
+export function tempOutputPath(target: string): string { return `${target}.tmp-${process.pid}`; }
+/** Publish `wav` at `target` only if `ok`: written to a temp file beside it, then atomically renamed; else nothing is left behind. */
+export function commitOutput(target: string, wav: Uint8Array, ok: () => boolean): boolean {
+  const tmp = tempOutputPath(target);
+  fsSync.writeFileSync(tmp, wav);
+  if (!ok()) { fsSync.rmSync(tmp, { force: true }); return false; }
+  fsSync.renameSync(tmp, target);
+  return true;
 }

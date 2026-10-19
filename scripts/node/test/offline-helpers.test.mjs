@@ -76,3 +76,39 @@ test('closeAllWithin: hung/rejecting close() is killed within the grace, good on
   ], 100);
   assert.equal(n, 2); assert.deepEqual(killed.sort(), ['hang', 'reject']); assert.ok(Date.now() - t0 < 1000);
 });
+
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput } from '../dist/offline-helpers.js';
+
+test('triggerArgs: cycle is the hap ABSOLUTE cycle in every chunk, t is chunk-relative', () => {
+  const cps = 0.5, sr = 44100;
+  // hap at cycle 10.25 in a chunk whose context starts at cycle 8 (= 16 s)
+  const a = triggerArgs(10.25, cps, 8 / cps);
+  assert.equal(a.cycle, 10.25);               // old code passed t (= 4.5 s) here
+  assert.ok(Math.abs(a.t - 4.5) < 1e-12);
+  assert.notEqual(a.cycle, a.t);
+  assert.equal(triggerArgs(0.5, cps, 0).cycle, 0.5);
+});
+test('prerollPlan: none for the first chunk, whole-frame window before later chunks', () => {
+  assert.deepEqual(prerollPlan(0, 0, 0.5, 44100, 4), { preCycle: 0, preFrames: 0 });
+  const p = prerollPlan(10, 20 * 44100, 0.5, 44100, 4); // 4 s = 2 cycles
+  assert.equal(p.preCycle, 8); assert.equal(p.preFrames, 4 * 44100);
+  assert.equal(prerollPlan(1, 2 * 44100, 0.5, 44100, 4).preFrames, 2 * 44100); // clamped at song start
+});
+test('trimChunk drops pre-roll and tail, keeps planar layout', () => {
+  const len = 6, f = Float32Array.from([0, 1, 2, 3, 4, 5, 10, 11, 12, 13, 14, 15]);
+  assert.deepEqual([...trimChunk(f, len, 2, 3)], [2, 3, 4, 12, 13, 14]);
+  assert.deepEqual([...trimChunk(f, len, 4, 99)], [4, 5, 14, 15]);
+});
+test('commitOutput: failed checks leave NO file, passing checks rename atomically', () => {
+  const d = fs.mkdtempSync(path.join(os.tmpdir(), 'commit-')), t = path.join(d, 'out.wav');
+  fs.writeFileSync(t, 'stale'); removeStaleOutput(t); assert.equal(fs.existsSync(t), false);
+  assert.equal(commitOutput(t, new Uint8Array([1, 2, 3]), () => false), false);
+  assert.deepEqual(fs.readdirSync(d), []);                       // no target, no temp
+  assert.equal(commitOutput(t, new Uint8Array([1, 2, 3]), () => true), true);
+  assert.deepEqual(fs.readdirSync(d), ['out.wav']);
+  assert.deepEqual([...fs.readFileSync(t)], [1, 2, 3]);
+  fs.rmSync(d, { recursive: true });
+});

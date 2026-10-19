@@ -265,6 +265,11 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 					if cached.CacheKey != "" {
 						cacheKey = cached.CacheKey
 					}
+					// Like a cache hit: later stages (AI comparison) read the cached copy next to the stems,
+					// not the user's input path (a YouTube download lives in the workspace and is deleted).
+					if cached.OriginalPath != "" {
+						cfg.InputPath = cached.OriginalPath
+					}
 					displayKey := cacheKey
 					if cached.TrackName != "" {
 						displayKey = cached.TrackName

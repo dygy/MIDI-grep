@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { createRequire } from 'module';
-import { analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures } from './offline-helpers.js';
+import { analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures, triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput } from './offline-helpers.js';
 
 const SHIM = `const S = window.strudel;
 export const { noteToMidi, freqToMidi, getSoundIndex, getAudioContext, registerSound, getParamADSR, getADSRValues, getPitchEnvelope, getVibratoOscillator } = S;`;
@@ -25,6 +25,7 @@ const SITE = 'https://strudel.dygy.app'; // same hosted sample maps the REPL pre
 const PAGE_HTML = String.raw`<!doctype html><meta charset="utf-8"><title>offline</title>
 <script src="/strudel.js"></script>
 <script>
+window.__triggerArgs = ${triggerArgs.toString()};
 window.__fontsP = import("/fontloader.mjs").then(m => m.registerSoundfonts);
 
 window.__logs = [];
@@ -81,23 +82,28 @@ window.__single = async (cycles, sampleRate, poly) => {
   return { bytes: window.__bytes.length, onsets, logs: window.__logs.slice(), errs: [] };
 };
 // 2b) one chunk: onsets from cycles [b,e) only, context extended by len frames (tail), same engine
-// path as renderPatternAudio. Trigger times are relative to the integer sample startFrame.
-window.__chunk = async (b, e, sampleRate, startFrame, len, poly) => {
+// path as renderPatternAudio. The context's frame 0 is song frame startFrame-preFrames: haps with onsets in
+// [preCycle,b) are PRE-ROLL — triggered so cut groups / orbit ducking see the previous chunk's ringing voices —
+// and their audio (the first preFrames) is discarded by the caller. cycle is the hap's absolute cycle.
+window.__chunk = async (b, e, sampleRate, startFrame, len, poly, preFrames, preCycle) => {
   const S = strudel, cps = window.__cps, pattern = window.__pattern;
   const Ctrl = S.getSuperdoughAudioController().constructor; // class is not exported; reuse the live one's constructor
   const hap2value = h => { h.ensureObjectValue(); return h.value; };
-  const startSec = startFrame / sampleRate;
+  const ctxStartSec = (startFrame - preFrames) / sampleRate;
   try { await S.getAudioContext().close(); } catch (_) {}
   const off = new OfflineAudioContext(2, len, sampleRate);
   S.setAudioContext(off); S.setSuperdoughAudioController(new Ctrl(off));
   await S.initAudio({ maxPolyphony: poly, multiChannelOrbits: false });
-  const haps = pattern.queryArc(b, e, { _cps: cps }).sort((x, y) => x.whole.begin.valueOf() - y.whole.begin.valueOf());
+  const byBegin = (x, y) => x.whole.begin.valueOf() - y.whole.begin.valueOf();
+  const pre = preFrames > 0 ? pattern.queryArc(preCycle, b, { _cps: cps }).filter(h => h.hasOnset() && h.whole.begin.valueOf() < b).sort(byBegin) : [];
+  const haps = pattern.queryArc(b, e, { _cps: cps }).sort(byBegin);
   let onsets = 0; const errs = [];
-  for (const hap of haps) {
+  for (const hap of pre.concat(haps)) {
     if (!hap.hasOnset()) continue;
-    onsets++;
-    const t = hap.whole.begin.valueOf() / cps - startSec;
-    try { await S.superdough(hap2value(hap), t, hap.duration / cps, cps, t); }
+    const isMain = hap.whole.begin.valueOf() >= b;
+    if (isMain) onsets++;
+    const a = window.__triggerArgs(hap.whole.begin.valueOf(), cps, ctxStartSec);
+    try { await S.superdough(hap2value(hap), a.t, hap.duration / cps, cps, a.cycle); }
     catch (err) { const m = 'error: ' + (err && err.message || err) + ' hap=' + JSON.stringify(hap.value).slice(0, 160); window.__logs.push(m); if (errs.length < 2) errs.push(m); }
   }
   const buf = await off.startRendering();
@@ -110,7 +116,7 @@ window.__chunk = async (b, e, sampleRate, startFrame, len, poly) => {
 async function main() {
   const args = process.argv.slice(2);
   let input = '', outputPath = 'offline.wav', duration = 30, sampleRate = 44100, allowFailures = false;
-  let chunkSeconds = 20, maxChunkOnsets = 1200, tailSeconds = 4, maxPolyphony = 4096; // NOT the REPL's 128: offline, currentTime is 0 while every hap is scheduled, so the cap counts ALL voices and drops most of the music (measured rms 0.050 at 128 vs 0.099 at 4096 on 40 s of v004; BlackHole live = 0.100) // chunkSeconds 0 = single pass (reference)
+  let chunkSeconds = 20, prerollSeconds = -1, maxChunkOnsets = 1200, tailSeconds = 4, maxPolyphony = 4096; // NOT the REPL's 128: offline, currentTime is 0 while every hap is scheduled, so the cap counts ALL voices and drops most of the music (measured rms 0.050 at 128 vs 0.099 at 4096 on 40 s of v004; BlackHole live = 0.100) // chunkSeconds 0 = single pass (reference)
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '-o') outputPath = args[++i];
     else if (args[i] === '-d') duration = parseFloat(args[++i]);
@@ -119,11 +125,14 @@ async function main() {
     else if (args[i] === '--max-chunk-onsets') maxChunkOnsets = parseInt(args[++i], 10);
     else if (args[i] === '--max-polyphony') maxPolyphony = parseInt(args[++i], 10);
     else if (args[i] === '--tail-seconds') tailSeconds = parseFloat(args[++i]);
+    else if (args[i] === '--preroll-seconds') prerollSeconds = parseFloat(args[++i]);
     else if (args[i] === '--allow-failed-samples') allowFailures = true;
     else if (!input) input = args[i];
   }
   if (!input || !fs.existsSync(input)) { console.error('Usage: render-strudel-offline <file.strudel> -o out.wav -d <seconds>'); process.exit(2); }
   if (!(duration > 0)) { console.error('ERROR: -d must be > 0'); process.exit(2); }
+  if (prerollSeconds < 0) prerollSeconds = tailSeconds; // pre-roll covers the same window the tail margin does
+  removeStaleOutput(outputPath); // a file from an earlier render must never survive a failed one
   const code = fs.readFileSync(input, 'utf8');
   const require = createRequire(import.meta.url);
   const bundlePath = path.join(path.dirname(require.resolve('@strudel/web/package.json')), 'dist', 'index.js');
@@ -202,32 +211,34 @@ async function main() {
       // context"); a new page also frees all decoded buffers/graphs (page memory grew ~1.1 GB for 150 s).
       const density: number[] = await page.evaluate((cy) => (window as any).__density(cy), cycles);
       const wins = planChunks(density, cycles, Math.max(1, Math.round(chunkSeconds * cps)), maxChunkOnsets);
-      console.log(`Rendering ${duration} s offline at ${sampleRate} Hz (chunked: ${wins.length} windows, <= ${Math.max(1, Math.round(chunkSeconds * cps))} cycles and <= ${maxChunkOnsets} onsets each, ${tailSeconds} s tail overlap-add, fresh page each) ...`);
+      console.log(`Rendering ${duration} s offline at ${sampleRate} Hz (chunked: ${wins.length} windows, <= ${Math.max(1, Math.round(chunkSeconds * cps))} cycles and <= ${maxChunkOnsets} onsets each, ${tailSeconds} s tail margin, ${prerollSeconds} s pre-roll, fresh page each) ...`);
       const L = new Float32Array(total), R = new Float32Array(total);
       for (let ci = 0; ci < wins.length; ci++) {
         const [b, e] = wins[ci];
         const startFrame = Math.floor((b / cps) * sampleRate);
-        const len = Math.max(1, Math.round(((e - b) / cps) * sampleRate + tailSeconds * sampleRate));
+        const { preCycle, preFrames } = prerollPlan(b, startFrame, cps, sampleRate, prerollSeconds);
+        const nextStart = ci + 1 < wins.length ? Math.floor((wins[ci + 1][0] / cps) * sampleRate) : total;
+        const keep = nextStart - startFrame; // this chunk owns [startFrame, nextStart); later chunks re-trigger its ringing voices as pre-roll
+        const len = preFrames + Math.max(1, Math.round(((e - b) / cps) * sampleRate + tailSeconds * sampleRate));
         const held = `${density.slice(b, Math.ceil(e)).reduce((x, y) => x + y, 0)} haps over cycles [${b.toFixed(2)}, ${e.toFixed(2)}), ctx ${len} frames`;
         let heapMb = 0;
         const { r, raw } = await attempt(`chunk ${ci + 1}/${wins.length}`, held, async () => {
           await quickClose(page); page = await openPage();
           await page.evaluate((c, site) => (window as any).__init(c, site), code, SITE);
-          const rr: any = await page.evaluate((b0, e0, sr, sf, ln, po) => (window as any).__chunk(b0, e0, sr, sf, ln, po), b, e, sampleRate, startFrame, len, maxPolyphony);
+          const rr: any = await page.evaluate((b0, e0, sr, sf, ln, po, pf, pc) => (window as any).__chunk(b0, e0, sr, sf, ln, po, pf, pc), b, e, sampleRate, startFrame, len, maxPolyphony, preFrames, preCycle);
           const bytes = await fetchBytes(page, rr.bytes);
           try { heapMb = (await page.metrics()).JSHeapUsedSize! / 1048576; } catch { /* page gone */ }
           return { r: rr, raw: bytes };
         });
         const f = new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
-        // tail-truncation check: peak over the last 0.25 s of this chunk's tail margin (skip the last chunk: file ends there)
+        // tail-truncation check: peak over the last 0.25 s of this chunk's tail margin (skip the last chunk: file ends there); measured on the context before trimming
         if (ci < wins.length - 1) for (let i = Math.max(0, len - Math.round(0.25 * sampleRate)); i < len; i++) tailEndPeak = Math.max(tailEndPeak, Math.abs(f[i]), Math.abs(f[len + i]));
-        overlapAdd(L, R, f, startFrame);
+        overlapAdd(L, R, trimChunk(f, len, preFrames, keep), startFrame);
         onsets += r.onsets; logs.push(...r.logs); errs.push(...r.errs); chunks++;
         console.log(`  chunk ${ci + 1}/${wins.length} cycles [${b.toFixed(2)}, ${e.toFixed(2)}) ${r.onsets} onsets, js heap ${heapMb.toFixed(0)} MB (${((Date.now() - t0) / 1000).toFixed(1)} s elapsed)`);
       }
       wav = floatToWav16(L, R, sampleRate);
     }
-    fs.writeFileSync(outputPath, wav);
     const info = analyzeWav(new Uint8Array(wav));
     const failures = sampleFailures(logs);
     const exp = expectedFrames(cycles, cps, sampleRate);
@@ -241,7 +252,8 @@ async function main() {
     if (onsets !== expectedOnsets) { chk.problems.push(`triggered ${onsets} onsets but the pattern has ${expectedOnsets} in range (chunk boundary loss?)`); chk.ok = false; }
     if (onsets === 0) { chk.problems.push('pattern has 0 onsets in range'); chk.ok = false; }
     console.log(`Wall time: ${((Date.now() - t0) / 1000).toFixed(1)} s for ${duration} s of audio`);
-    if (!chk.ok) { console.error(`ERROR: offline render failed checks: ${chk.problems.join('; ')}`); exit = 1; }
+    // temp file beside the target, renamed only if every check passed; a failed render leaves NO file
+    if (!commitOutput(outputPath, wav, () => chk.ok)) { console.error(`ERROR: offline render failed checks: ${chk.problems.join('; ')}; no output written`); exit = 1; }
     else console.log('OK');
   } catch (e: any) {
     console.error(`ERROR: ${e.message}`); exit = 1;

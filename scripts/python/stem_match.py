@@ -298,11 +298,16 @@ def _render_solo_drums(track_dir: Path, version_dir: Path) -> Path | None:
     except Exception:  # noqa: BLE001
         dur = 170
     print(f"  [solo-drums] rendering drum voice alone ({dur}s) via BlackHole…", file=sys.stderr)
+    out.unlink(missing_ok=True)   # never score a file an earlier run left behind
     try:
-        subprocess.run(["node", str(recorder), str(solo_strudel), "-o", str(out), "-d", str(dur)],
-                       check=False, capture_output=True, text=True, timeout=dur + 120)
+        proc = subprocess.run(["node", str(recorder), str(solo_strudel), "-o", str(out), "-d", str(dur)],
+                              check=False, capture_output=True, text=True, timeout=dur + 120)
     except Exception as e:  # noqa: BLE001
         print(f"  [solo-drums] render failed: {e}", file=sys.stderr)
+        return None
+    if proc.returncode != 0:   # the renderer's own checks failed: whatever it left is not a valid render
+        print(f"  [solo-drums] render failed (rc={proc.returncode}): {proc.stderr[-200:]}", file=sys.stderr)
+        out.unlink(missing_ok=True)
         return None
     return out if out.exists() else None
 

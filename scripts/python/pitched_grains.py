@@ -14,6 +14,7 @@ Every length / threshold below is derived from the audio, the transcription, or 
 from __future__ import annotations
 
 import math
+from bisect import bisect_right
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -228,7 +229,8 @@ def note_segments(notes: list[Note], total_s: float) -> list[tuple[Note, float, 
     onsets = sorted({round(n.start, 4) for n in notes})
     out = []
     for n in notes:
-        nxt = next((o for o in onsets if o > round(n.start, 4) + 1e-4), None)
+        i = bisect_right(onsets, round(n.start, 4) + 1e-4)   # first onset strictly later than this note's (O(log N))
+        nxt = onsets[i] if i < len(onsets) else None
         end = min(n.end, nxt if nxt is not None else n.end, total_s)
         if end > n.start:
             out.append((n, float(n.start), float(end)))

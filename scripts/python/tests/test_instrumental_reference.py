@@ -62,7 +62,7 @@ def test_every_scorer_uses_the_instrumental_not_original_wav() -> None:
     src = (SCRIPTS / "pipeline_helpers.py").read_text()
     assert "original = write_instrumental(track_dir)" in src                       # stage 10 report
     imp = (SCRIPTS / "ai_improver.py").read_text()
-    assert "from pipeline_helpers import write_instrumental" in imp                # ai_improver compare
+    assert "pipeline_helpers.write_instrumental(" in imp                # ai_improver compare
 
 
 def test_generator_and_pack_have_no_vocal_surface() -> None:

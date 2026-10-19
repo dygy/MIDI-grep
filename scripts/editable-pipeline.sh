@@ -47,12 +47,10 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PY="$ROOT/scripts/python/.venv/bin/python"
 SP="$ROOT/scripts/python"
 PH=("$PY" "$SP/pipeline_helpers.py")
-RENDERER="${MIDIGREP_RENDERER:-offline}"   # offline (default) | blackhole
-case "$RENDERER" in
-  offline)   REC="$ROOT/scripts/node/dist/render-strudel-offline.js" ;;
-  blackhole) REC="$ROOT/scripts/node/dist/record-strudel-blackhole.js" ;;
-  *) echo "MIDIGREP_RENDERER=$RENDERER: expected offline|blackhole" >&2; exit 2 ;;
-esac
+RENDERER_PY="$SP/renderer.py"   # the one place that reads MIDIGREP_RENDERER (default offline | blackhole); bad value -> exit 2
+RENDERER="$("$PY" "$RENDERER_PY" name)" || exit 2
+REC="$("$PY" "$RENDERER_PY" script)" || exit 2
+BUSY_PATTERN="$("$PY" "$RENDERER_PY" busy-pattern)" || exit 2
 GATE="$ROOT/eval/gate.py"
 CACHE="$ROOT/.cache/stems"
 R2_BUCKET_NAME="4cast"
@@ -98,6 +96,15 @@ modes() { if [ "$MODE" = both ]; then echo "sample-instrument synth"; else echo 
 # stage_done <file...>: true when every file exists and --force was not given
 stage_done() { [ -z "$FORCE" ] || return 1; local f; for f in "$@"; do [ -s "$f" ] || return 1; done; }
 jget() { "$PY" -c "import json,sys;d=json.load(open(sys.argv[1]));v=d.get(sys.argv[2]);print('' if v is None else v)" "$1" "$2"; }
+# built_at <stamp>: the bpm the stage output was built with (recorded in $PW/<stage>.bpm) equals the track's CURRENT bpm.
+# A forced re-stamp (stage 1b) can change the bpm; outputs built at another one - or with no record - are rebuilt.
+built_at() { [ "$(cat "$1" 2>/dev/null)" = "$BPM" ]; }
+# fresh <stamp> <path...>: nothing under the paths is newer than the stamp file (pipeline_helpers.py newer)
+fresh() { [ "$("${PH[@]}" newer "$@" 2>/dev/null)" = fresh ]; }
+# params_ok <best.params>: in the CURRENT calibration format (6-8 fields). A pre-"no vocals" best.params has 9 (a removed
+# CV field) and makes `auto-calibrate.sh --start` exit 64; it is STALE, not migrated: the best.wav/comparison beside it
+# came from the old recorder and the old score, so dropping the CV field would only keep a result nobody can trust.
+params_ok() { [ "$("${PH[@]}" params-valid "$1" 2>/dev/null)" = ok ]; }
 # base_ok <samples.json> <expected-base>: the baked _base matches the hosting we are about to use
 base_ok() { [ -s "$1" ] && [ "$("$PY" -c "import json,sys;print(json.load(open(sys.argv[1])).get('_base',''))" "$1")" = "$2" ]; }
 
@@ -183,20 +190,25 @@ for pair in "bass.wav:bass.mid" "melodic.wav:melodic.mid"; do
 done
 
 # ---------------------------------------------------------------- stage 3: drum onsets
-if stage_done "$PACK/drums_bands.json"; then log "stage 3 skip: drums_bands.json exists"; else
-  log "stage 3: drum band onsets"
+if stage_done "$PACK/drums_bands.json" && built_at "$PW/drums_bands.bpm"; then log "stage 3 skip: drums_bands.json exists (built at bpm $BPM)"; else
+  log "stage 3: drum band onsets (bpm $BPM)"
+  rm -f "$PW/drums_bands.bpm"
   "$PY" "$SP/detect_drums_bands.py" "$TRACK/drums.wav" --bpm "$BPM" --out "$PACK/drums_bands.json" >&2 \
     || die "stage 3 detect_drums_bands failed"
+  echo "$BPM" > "$PW/drums_bands.bpm"
 fi
 
 # ---------------------------------------------------------------- stage 4: sample pack
-if stage_done "$PACK/pack.json" "$PACK/samples.json" "$PACK/strudel.json" && base_ok "$PACK/samples.json" "$BASE/"; then
-  log "stage 4 skip: sample pack exists for $BASE/"
+if stage_done "$PACK/pack.json" "$PACK/samples.json" "$PACK/strudel.json" && base_ok "$PACK/samples.json" "$BASE/" \
+   && built_at "$PW/pack.bpm"; then
+  log "stage 4 skip: sample pack exists for $BASE/ (built at bpm $BPM)"
 else
-  log "stage 4: build sample pack"
+  log "stage 4: build sample pack (bpm $BPM)"
+  rm -f "$PW/pack.bpm"
   key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
   "$PY" "$SP/build_sample_pack.py" --stems-dir "$TRACK" --out "$PACK" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} \
     --prefix "$SND" --base-url "$BASE/" >&2 || die "stage 4 build_sample_pack failed"   # SND: sound names never carry '-' 
+  echo "$BPM" > "$PW/pack.bpm"
 fi
 [ -s "$PACK/drums/bd.wav" ] || die "stage 4 pack has no drums/ one-shots in $PACK/drums"
 
@@ -212,7 +224,9 @@ for pair in "bass:bass.wav" "lead:melodic.wav"; do
       --midi "$midi" --output "$ROOT/models") >&2 \
     || die "stage 5 train ${SND}_$role failed"
 done
-if stage_done "$PACK/instruments/samples.json" "$PACK/instruments/verification.json" && base_ok "$PACK/instruments/samples.json" "$INST_BASE"; then
+# the manifest is rebuilt when its inputs (the drum kit from stage 4, the models trained above) are newer than it
+if stage_done "$PACK/instruments/samples.json" "$PACK/instruments/verification.json" && base_ok "$PACK/instruments/samples.json" "$INST_BASE" \
+   && fresh "$PACK/instruments/samples.json" "$PACK/drums" "$ROOT/models/${SND}_bass" "$ROOT/models/${SND}_lead"; then
   log "stage 5 skip: instruments/samples.json exists for $INST_BASE"
 else
   log "stage 5: assemble instruments manifest"
@@ -226,7 +240,9 @@ SRV_PID=""
 cleanup() { [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; [ -n "${SERVE_ROOT:-}" ] && rm -rf "$SERVE_ROOT"; }
 trap cleanup EXIT
 if [ "$HOSTING" = r2 ]; then
-  if stage_done "$PACK/.uploaded" && [ "$(cat "$PACK/.uploaded")" = "$BASE" ] \
+  # skip only when the hosted copy is current: .uploaded names this base AND nothing in the pack (e.g. instruments
+  # stage 5 just rebuilt) is newer than the upload - otherwise R2 would keep serving the stale files
+  if stage_done "$PACK/.uploaded" && [ "$(cat "$PACK/.uploaded")" = "$BASE" ] && fresh "$PACK/.uploaded" "$PACK" \
      && curl -fsI -o /dev/null "$INST_BASE""samples.json"; then
     log "stage 6 skip: already hosted at $BASE"
   else
@@ -271,7 +287,7 @@ probe_blackhole() {  # 3 s capture, 20 s hard watchdog (no pkill -9), abort with
   log "BlackHole probe OK ($(wc -c < "$out" | tr -d ' ') bytes)"
 }
 guard_no_recorder() {
-  local p; p="$(pgrep -f "node .*record-strudel-blackhole\.js|ffmpeg .* -f avfoundation" || true)"
+  local p; p="$(pgrep -f "$BUSY_PATTERN" || true)"
   [ -z "$p" ] || die "another record-strudel-blackhole process is running (pid $p); one render at a time"
 }
 preflight_render() {
@@ -283,8 +299,10 @@ preflight_render() {
 # ---------------------------------------------------------------- stage 7: generate + calibrate
 run_sample_instrument() {
   local W="$PW/sample-instrument"; mkdir -p "$W"
-  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params"; then
+  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params"; then
     log "stage 7 skip (sample-instrument): best render exists in $W"; return 0; fi
+  [ ! -s "$W/best.params" ] || params_ok "$W/best.params" || log "stage 7: $W/best.params is in the old (CV) format - stale, rerunning"
+  rm -f "$W/result.json"   # a rerun invalidates what stages 8-9 derived from the old best render
   preflight_render
   log "stage 7: auto-calibrate sample-instrument (iters=$ITERS)"
   key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
@@ -303,14 +321,16 @@ run_sample_instrument() {
 
 run_synth() {
   local W="$PW/synth"; mkdir -p "$W"
-  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params"; then
+  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params"; then
     log "stage 7 skip (synth): best render exists in $W"; return 0; fi
+  [ ! -s "$W/best.params" ] || params_ok "$W/best.params" || log "stage 7: $W/best.params is in the old (CV) format - stale, rerunning"
+  rm -f "$W/result.json"
   preflight_render
   # Start from the sample-instrument BEST knobs when present (6, 7 or 8 fields, passed to --start UNSPLIT);
   # otherwise the calibrator's cold-start defaults. The synth pass then runs its own calibration loop
   # (knobs + per-bar env correction measured on SYNTH renders), writing $W/best.env.json for stage 9.
   local start_arg=() knobs=""
-  if [ -s "$PW/sample-instrument/best.params" ]; then
+  if [ -s "$PW/sample-instrument/best.params" ] && params_ok "$PW/sample-instrument/best.params"; then
     knobs="$(cat "$PW/sample-instrument/best.params")"
     start_arg=(--start "$knobs")
     log "stage 7: synth calibration starts from the sample-instrument knobs: $knobs"

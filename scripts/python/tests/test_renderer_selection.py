@@ -43,14 +43,15 @@ def test_probe_does_not_wait_for_a_capture_device_when_offline() -> None:
 
 
 @pytest.mark.parametrize("sh", ["scripts/auto-calibrate.sh", "scripts/editable-pipeline.sh", "scripts/sample-pipeline.sh"])
-def test_shell_scripts_parse_and_default_to_offline(sh: str) -> None:
+def test_shell_scripts_parse_and_ask_renderer_py(sh: str) -> None:
     assert subprocess.run(["bash", "-n", str(ROOT / sh)]).returncode == 0
     text = (ROOT / sh).read_text()
-    assert 'MIDIGREP_RENDERER:-offline' in text and "render-strudel-offline.js" in text
+    assert "renderer.py" in text and "MIDIGREP_RENDERER:-" not in text      # one switch, read in renderer.py only
 
 
-def test_loop_server_defaults_to_offline() -> None:
+def test_loop_server_defaults_to_offline(monkeypatch: pytest.MonkeyPatch) -> None:
     sys.path.insert(0, str(ROOT))
     pytest.importorskip("fastmcp")
     from mcp_servers.loop import server
-    assert server.RENDERER == "offline" and server._renderer_script() == server.NODE_OFFLINE
+    monkeypatch.delenv("MIDIGREP_RENDERER", raising=False)
+    assert server.renderer_script() == renderer.renderer_script({}) and server.renderer_script().name == "render-strudel-offline.js"

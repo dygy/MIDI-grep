@@ -64,6 +64,11 @@ class RunMetadata(BaseModel):
     frequency_balance: float | None
     tempo_similarity: float | None
     env_correction: str | None = None
+    # Measured from the piece itself (strudel header written by generate_dynamic_strudel.py); omitted when absent.
+    bpm: float | None = None
+    genre: str | None = None
+    notes: int | None = None
+    drum_hits: int | None = None
     # Stage 10 (build_report) adds report / render_stems / stem_comparison / iterations to the file later.
 
 
@@ -105,6 +110,20 @@ def _score(comparison: dict[str, object]) -> dict[str, float | None]:
 
 
 ENV_CORRECTION_FILE = "env_correction.json"
+
+
+def strudel_header_facts(code: str) -> dict[str, float | int | str]:
+    """``bpm`` / ``genre`` / ``notes`` / ``drum_hits`` from the generator's header comments (only those present)."""
+    out: dict[str, float | int | str] = {}
+    if m := re.search(r"^//\s*BPM:\s*(\d+(?:\.\d+)?)", code, re.M):
+        out["bpm"] = float(m.group(1))
+    if m := re.search(r"^//\s*Genre:\s*(\S[^\n]*)", code, re.M):
+        out["genre"] = m.group(1).strip()
+    if m := re.search(r"^//\s*Notes:\s*(\d+)", code, re.M):
+        out["notes"] = int(m.group(1))
+    if m := re.search(r"^//\s*Drums:\s*(\d+)\s*hits", code, re.M):
+        out["drum_hits"] = int(m.group(1))
+    return out
 
 
 def promote_run(track_dir: Path, mode: str, strudel: Path, wav: Path, comparison: Path, meta: RunMeta,
@@ -151,8 +170,12 @@ def promote_run(track_dir: Path, mode: str, strudel: Path, wav: Path, comparison
         frequency_balance=score["freq"],
         tempo_similarity=score["tempo"],
         env_correction=ENV_CORRECTION_FILE if env_correction is not None else None,
+        **strudel_header_facts(strudel.read_text(encoding="utf-8")),
     )
-    (vdir / "metadata.json").write_text(doc.model_dump_json(indent=2) + "\n", encoding="utf-8")
+    optional = ("bpm", "genre", "notes", "drum_hits")   # keys the header did not supply are left out, not null
+    (vdir / "metadata.json").write_text(
+        doc.model_dump_json(indent=2, exclude={k for k in optional if getattr(doc, k) is None}) + "\n",
+        encoding="utf-8")
     return vdir
 
 
@@ -605,6 +628,28 @@ def write_instrumental(track_dir: Path, *, force: bool = False) -> Path:
     return out
 
 
+def _has_instrumental_stems(d: Path) -> bool:
+    return all((d / f"{s}.wav").is_file() for s in ("bass", "drums")) and any(
+        (d / f"{s}.wav").is_file() for s in ("melodic", "piano"))
+
+
+def resolve_stem_dir(original_audio: str | Path, output_dir: str | Path | None = None) -> Path:
+    """The directory that holds the track's separated stems (bass/drums/melodic.wav).
+
+    That is the stem-cache dir ``.cache/stems/<key>/``: the parent of ``original_audio`` when the pipeline passes
+    the cached copy, otherwise (a cache miss hands over the user's own input file, whose folder has no stems)
+    the version dir ``output_dir`` or its parent. Raises FileNotFoundError, naming what was searched, when none
+    of them has the stems."""
+    candidates = [Path(original_audio).resolve().parent]
+    if output_dir:
+        out = Path(output_dir).resolve()
+        candidates += [out, out.parent]
+    for d in candidates:
+        if _has_instrumental_stems(d):
+            return d
+    raise FileNotFoundError("no bass/drums/melodic stems in any of: " + ", ".join(str(c) for c in candidates))
+
+
 def instrumental_path(track_dir: Path) -> Path:
     """The scoring reference of a track (built on demand from its stems)."""
     return write_instrumental(track_dir)
@@ -616,19 +661,66 @@ CONTROL_NONE_EXIT = 3   # `control`: lookup worked, there is simply no other sam
 def control_track_path(genre: str, exclude_key: str, repo_root: Path | None = None) -> Path | None:
     """``instrumental.wav`` of the first ``eval/datasets/reference_tracks.yaml`` track with the same genre and a
     different cache_key - the chance-control song for ``compare_audio.py --control``. It is the control's
-    INSTRUMENTAL (built from its stems on demand), because the scored reference is an instrumental too."""
+    INSTRUMENTAL (built from its stems on demand), because the scored reference is an instrumental too.
+    A candidate with an ``original.wav`` but no complete stems is skipped (the next one is tried); the lookup raises
+    ``FileNotFoundError`` only when such candidates exist and none of them has stems."""
     import yaml  # local: only this subcommand needs it
 
     root = repo_root or Path(__file__).resolve().parents[2]
     doc = yaml.safe_load((root / "eval" / "datasets" / "reference_tracks.yaml").read_text(encoding="utf-8")) or {}
+    unusable: list[str] = []
     for track in doc.get("tracks") or []:
         key = track.get("cache_key")
         if not key or key == exclude_key or track.get("genre") != genre:
             continue
         d = root / ".cache" / "stems" / key
-        if (d / "original.wav").is_file():
+        if not (d / "original.wav").is_file():
+            continue
+        try:
             return instrumental_path(d)
+        except FileNotFoundError as exc:   # original.wav but no (complete) stems: try the next candidate
+            unusable.append(f"{key}: {exc}")
+    if unusable:
+        raise FileNotFoundError("every same-genre candidate lacks its stems - " + "; ".join(unusable))
     return None
+
+
+CALIBRATION_FIELDS = (6, 8)   # auto-calibrate.sh --start / BEST params: "BM SG CL LLPF HG MG [BL [LH]]"
+
+
+def params_valid(text: str) -> bool:
+    """True when ``text`` is a best.params line in the CURRENT calibration format: 6 to 8 numeric fields.
+
+    The pre-"no vocals" format carried a removed CV (cal-vocal) field and always had 9; ``auto-calibrate.sh
+    --start`` rejects it (exit 64). Such a file is stale, not migratable: the best.wav / comparison next to it
+    were rendered by the old recorder and scored on the old scale, so the whole stage is rerun."""
+    fields = text.split()
+    if not CALIBRATION_FIELDS[0] <= len(fields) <= CALIBRATION_FIELDS[1]:
+        return False
+    try:
+        for f in fields:
+            float(f)
+    except ValueError:
+        return False
+    return True
+
+
+def newer_than(stamp: Path, *roots: Path) -> bool:
+    """True when ``stamp`` is missing or any regular file under ``roots`` (other than ``stamp``) is newer than it.
+
+    Stage 6 uses it to decide whether the hosted copy of the pack is still current: ``.uploaded`` is written
+    after an upload, so anything a later stage rebuilt in the pack has a newer mtime."""
+    stamp = Path(stamp)
+    if not stamp.is_file():
+        return True
+    ref = stamp.stat().st_mtime_ns
+    for root in roots:
+        root = Path(root)
+        files = [root] if root.is_file() else sorted(root.rglob("*")) if root.is_dir() else []
+        for f in files:
+            if f.is_file() and f.resolve() != stamp.resolve() and f.stat().st_mtime_ns > ref:
+                return True
+    return False
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -642,6 +734,11 @@ def main(argv: list[str] | None = None) -> int:
     ct = sub.add_parser("control", help="instrumental.wav of another same-genre reference track (chance control)")
     ct.add_argument("--genre", required=True)
     ct.add_argument("--exclude-key", required=True, help="cache_key of the track being scored")
+    pv = sub.add_parser("params-valid", help="print ok|stale: is this best.params in the current calibration format")
+    pv.add_argument("file", type=Path)
+    nw = sub.add_parser("newer", help="print stale|fresh: is any file under PATH newer than STAMP (or STAMP missing)")
+    nw.add_argument("stamp", type=Path)
+    nw.add_argument("paths", nargs="+", type=Path)
     ins = sub.add_parser("instrumental", help="write <track>/instrumental.wav (bass+drums+melodic) and print its path")
     ins.add_argument("track_dir", type=Path)
     ins.add_argument("--force", action="store_true")
@@ -699,6 +796,11 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({k: m.get(k) for k in ("bpm", "key", "genre", "genre_detected", "genre_confidence", "genre_override", "duration", "style_heuristic")}))
         elif args.cmd == "instrumental":
             print(write_instrumental(args.track_dir, force=args.force))
+        elif args.cmd == "params-valid":
+            ok = args.file.is_file() and params_valid(args.file.read_text())
+            print("ok" if ok else "stale")
+        elif args.cmd == "newer":
+            print("stale" if newer_than(args.stamp, *args.paths) else "fresh")
         elif args.cmd == "control":
             # exit 0 + path: control found; exit 3: legitimately none (no other same-genre reference track with an
             # original.wav); exit 1 (the generic handler below): the lookup itself failed (bad/missing yaml, ...)

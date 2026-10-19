@@ -40,12 +40,12 @@ GEN="${AC_GEN:-$ROOT/scripts/python/generate_dynamic_strudel.py}"
 CAL="${AC_CAL:-$ROOT/scripts/python/calibrate_dynamic.py}"
 CMP="${AC_CMP:-$ROOT/scripts/python/compare_audio.py}"
 GATE="${AC_GATE:-$ROOT/scripts/python/gate_margin.py}"
-RENDERER="${MIDIGREP_RENDERER:-offline}"   # offline (default): exact Strudel OfflineAudioContext render; blackhole: real-time capture
-case "$RENDERER" in
-  offline)   REC="${AC_REC:-$ROOT/scripts/node/dist/render-strudel-offline.js}" ;;
-  blackhole) REC="${AC_REC:-$ROOT/scripts/node/dist/record-strudel-blackhole.js}" ;;
-  *) echo "MIDIGREP_RENDERER=$RENDERER: expected offline|blackhole" >&2; exit 2 ;;
-esac
+# Renderer selection lives in ONE place (scripts/python/renderer.py: MIDIGREP_RENDERER, default offline = exact
+# Strudel OfflineAudioContext render; blackhole = real-time capture). A bad value exits 2 there.
+RENDERER_PY="${AC_RENDERER_PY:-$ROOT/scripts/python/renderer.py}"
+RENDERER="$("$PY" "$RENDERER_PY" name)" || exit 2
+REC="${AC_REC:-$("$PY" "$RENDERER_PY" script)}" || exit 2
+BUSY_PATTERN="$("$PY" "$RENDERER_PY" busy-pattern)" || exit 2
 NODE_BIN="${AC_NODE:-node}"; SETTLE="${AC_SETTLE_S:-3}"
 PGREP="${AC_PGREP:-pgrep}"; WAIT_MAX="${AC_RECORDER_WAIT_S:-120}"   # tests: AC_PGREP=false, AC_RECORDER_WAIT_S=0
 RC=0   # exit status: 70 when any iteration failed (GEN/RENDER/CMP FAILED, recorder wait abort); BEST is still printed
@@ -132,13 +132,18 @@ for i in $(seq 1 "$ITERS"); do
   # actual invocations (not any process whose command line mentions the file name).
   if [ "$RENDERER" = blackhole ]; then   # the offline renderer has no capture device to wait for
     waited=0
-    while "$PGREP" -f "node .*record-strudel-blackhole\.js|ffmpeg .* -f avfoundation" >/dev/null; do
+    while "$PGREP" -f "$BUSY_PATTERN" >/dev/null; do
       [ "$waited" -ge "$WAIT_MAX" ] && { echo "[$TAG] a recorder/capture has been running for ${WAIT_MAX} s — stale? (pgrep -fl 'record-strudel|avfoundation'); aborting"; RC=70; break 2; }
       sleep 2; waited=$((waited+2))
     done; sleep "$SETTLE"
   fi
-  "$NODE_BIN" "$REC" "$STRU" -o "$WAV" -d "$DUR" >"$WORK/$TAG.render.log" 2>&1
-  [ -f "$WAV" ] || { echo "[$TAG] RENDER FAILED (see $WORK/$TAG.render.log)"; RC=70; break; }
+  # The renderer's EXIT STATUS decides, not the file's existence: a non-zero exit means its own checks failed
+  # (silence, missing sounds, truncated tail ...), so whatever is at $WAV must never be scored.
+  rm -f "$WAV"
+  rrc=0; "$NODE_BIN" "$REC" "$STRU" -o "$WAV" -d "$DUR" >"$WORK/$TAG.render.log" 2>&1 || rrc=$?
+  if [ "$rrc" -ne 0 ] || [ ! -f "$WAV" ]; then
+    rm -f "$WAV"; echo "[$TAG] RENDER FAILED (rc=$rrc, see $WORK/$TAG.render.log)"; RC=70; break
+  fi
 
   "$PY" "$CMP" "$ORIG" "$WAV" -d 135 -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$CJ" 2>/dev/null || { echo "[$TAG] CMP FAILED"; RC=70; break; }
   read -r OVER SECT < <("$PY" -c "import json,sys;d=json.load(open('$CJ'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")

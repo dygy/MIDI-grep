@@ -20,6 +20,9 @@ from datetime import datetime
 from typing import Optional, Dict, Any, List
 import uuid
 
+import pipeline_helpers
+from renderer import renderer_name, renderer_script   # MIDIGREP_RENDERER: offline (default) | blackhole
+
 # Deterministic kick-ducks-bass injection (prompt-based sidechain is unreliable)
 try:
     from synth_profiles import apply_sidechain_to_code, get_sidechain_depth
@@ -269,8 +272,7 @@ def _control_args(genre: str, original_audio: str) -> list:
     A failing lookup (bad yaml, ...) raises: the chance check must not be silently skipped."""
     if not HAS_GATE or not genre:
         return []
-    from pipeline_helpers import control_track_path
-    found = control_track_path(genre, Path(original_audio).resolve().parent.name)
+    found = pipeline_helpers.control_track_path(genre, Path(original_audio).resolve().parent.name)
     if found is None:
         print(f"[gate] no control track for genre '{genre}' (chance check skipped, logged)")
         return []
@@ -278,13 +280,32 @@ def _control_args(genre: str, original_audio: str) -> list:
 
 
 def build_instrumental_reference(original_audio: str, output_dir: str) -> str:
-    """The scoring reference: ``<track>/instrumental.wav`` = bass+drums+melodic (NO vocals; a singer is never
-    generated), built by ``pipeline_helpers.write_instrumental``. Raises when the stems are missing - the loop
-    must not silently fall back to scoring against the full mix."""
-    from pipeline_helpers import write_instrumental
-    out = write_instrumental(Path(original_audio).parent)
+    """The scoring reference: ``<stem dir>/instrumental.wav`` = bass+drums+melodic (NO vocals; a singer is never
+    generated), built by ``pipeline_helpers.write_instrumental``.
+
+    ``original_audio`` is not necessarily next to the stems (on a stem-cache miss it can be the user's own input
+    file), so the stem directory is found by :func:`pipeline_helpers.resolve_stem_dir` - never created beside the
+    input. Raises FileNotFoundError when no stems exist anywhere: the loop must not silently fall back to
+    scoring against the full mix."""
+    out = pipeline_helpers.write_instrumental(pipeline_helpers.resolve_stem_dir(original_audio, output_dir))
     print(f"Instrumental reference (bass+drums+melodic, no vocals): {out}")
     return str(out)
+
+
+def _render_candidate(recorder: Path, strudel: Path, render_path: Path, duration: float, node: str = "node") -> bool:
+    """Render ``strudel`` to ``render_path``; True only when the renderer exited 0 AND left the file.
+
+    The exit status decides, not the file's existence: a non-zero exit means the renderer's own checks failed
+    (silence, missing sounds, truncated tail ...), so whatever it left behind is deleted and never scored. A file
+    from an earlier attempt is removed first for the same reason."""
+    render_path.unlink(missing_ok=True)
+    result = subprocess.run([node, str(recorder), str(strudel), "-o", str(render_path), "-d", f"{duration:.0f}"],
+                            capture_output=True, text=True)
+    if result.returncode != 0:
+        print(f"       {renderer_name()} render failed (rc={result.returncode}): {result.stderr[-200:]}")
+        render_path.unlink(missing_ok=True)
+        return False
+    return render_path.exists()
 
 
 def get_audio_duration(audio_path: str) -> float:
@@ -397,6 +418,9 @@ def improve_strudel(
     # Ensure output directory exists
     Path(output_dir).mkdir(parents=True, exist_ok=True)
 
+    # Where the stems really are (cache dir): fail loudly now, not 15 minutes in, if they do not exist.
+    stem_dir = pipeline_helpers.resolve_stem_dir(original_audio, output_dir)
+
     # PHASE 1: Analyze original audio to extract synthesis parameters
     print(f"\n--- Phase 1: Analyzing original audio ---")
     synth_config = analyze_original_audio(original_audio, output_dir, genre=metadata.get("genre", ""))
@@ -448,7 +472,7 @@ def improve_strudel(
     gate_floor_achieved = False  # flips True once any iteration clears the floor(s)
     best_gate_passed = False     # the eval gate's verdict on the BEST render's own comparison (a carried-over
                                  # previous best has no comparison here, so it is not claimed to pass)
-    control_args = _control_args(genre, original_audio)
+    control_args = _control_args(genre, str(stem_dir / "original.wav"))   # excludes THIS track by its stem-dir name
     if gate_floor is not None:
         sa_txt = f", section-aware {sa_floor*100:.0f}%" if sa_floor is not None else ""
         mode_txt = f" mode '{generation_mode}' ({floor_source})" if generation_mode else f" ({floor_source})"
@@ -608,9 +632,7 @@ def improve_strudel(
         # Node.js renderer was deleted and Python renderer can't parse arrange() format
         # BlackHole gives real audio - use full duration to compare the whole track
         render_path = Path(output_dir) / f"render_v{current_version:03d}.wav"
-        sys.path.insert(0, str(Path(__file__).resolve().parent)) if str(Path(__file__).resolve().parent) not in sys.path else None
-        from renderer import renderer_name, renderer_script
-        blackhole_recorder = renderer_script()   # MIDIGREP_RENDERER: offline (default) | blackhole
+        blackhole_recorder = renderer_script()
         iter_duration = exact_duration
 
         # Deterministically wire kick-ducks-bass before rendering (idempotent).
@@ -671,17 +693,10 @@ def improve_strudel(
             break
 
         if blackhole_recorder.exists():
-            render_cmd = [
-                "node", str(blackhole_recorder),
-                str(iter_strudel),
-                "-o", str(render_path),
-                "-d", f"{iter_duration:.0f}"
-            ]
             print(f"       Rendering {iter_duration:.0f}s via {renderer_name()}...")
-            result = subprocess.run(render_cmd, capture_output=True, text=True)
-            if result.returncode != 0:
-                print(f"       {renderer_name()} render failed: {result.stderr[:200]}")
+            _render_candidate(blackhole_recorder, iter_strudel, render_path, iter_duration)
         else:
+            render_path.unlink(missing_ok=True)
             print(f"       {renderer_name()} renderer not found ({blackhole_recorder}), skipping render")
 
         # Silent-render guard: a Strudel runtime error (e.g. a `"...".slow()` method-on-string crash)
@@ -701,7 +716,7 @@ def improve_strudel(
             except Exception as _e:  # noqa: BLE001
                 print(f"       render silence-check skipped: {_e}")
 
-        # 2. Compare to original (only if render succeeded)
+        # 2. Compare to original (only if a usable render exists)
         if render_path.exists():
             compare_cmd = [
                 sys.executable,
@@ -730,14 +745,10 @@ def improve_strudel(
                 print("       Comparison failed, using initial data")
                 comparison = {"comparison": {}, "original": {}, "rendered": {}}
         else:
-            # Render failed — fall back to initial BlackHole comparison
-            print("       Render failed, using initial comparison data")
-            initial_comparison_path = Path(output_dir) / "comparison.json"
-            if initial_comparison_path.exists():
-                with open(initial_comparison_path) as f:
-                    comparison = json.load(f)
-            else:
-                comparison = {"comparison": {}, "original": {}, "rendered": {}}
+            # No usable render (failed, silent or no renderer): the candidate has NO score. It must not inherit the
+            # initial run's comparison, or code that never rendered could become `best`.
+            print("       No usable render - this candidate is scored as a failed iteration")
+            comparison = {"comparison": {}, "original": {}, "rendered": {}}
 
         # Extract similarity from comparison
         comp_scores = comparison.get("comparison", {})

@@ -693,8 +693,15 @@ def render(strudel: Path, wav: Path, seconds: float, *, recorder: Path = RECORDE
             while time.time() < deadline:
                 rc = proc.poll()
                 text = log_path.read_text(errors="replace") if log_path.exists() else ""
+                if rc is not None and rc != 0:   # the renderer's own checks failed: never accept its file
+                    break
                 if ("Saved:" in text or text.rstrip().endswith("OK")) and wav.exists():   # BlackHole recorder / offline renderer
-                    saved = True
+                    # Give the process the same 10 s it gets after SIGTERM to report its status: a non-zero exit
+                    # rejects the file; one that is still alive then is the lingering-children quirk above.
+                    try:
+                        saved = proc.wait(timeout=10) == 0
+                    except subprocess.TimeoutExpired:
+                        saved = True
                     break
                 if rc is not None:
                     break
@@ -710,6 +717,7 @@ def render(strudel: Path, wav: Path, seconds: float, *, recorder: Path = RECORDE
                     pass
         if saved:
             return
+        wav.unlink(missing_ok=True)   # a failed render's file must not be mistaken for a result on the retry
         tail = log_path.read_text(errors="replace")[-1500:] if log_path.exists() else ""
         last_err = f"render failed ({proc.returncode}): {tail}"
     raise RuntimeError(last_err)

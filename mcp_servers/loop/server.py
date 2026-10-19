@@ -28,7 +28,6 @@ Requires: fastmcp (`scripts/python/.venv/bin/pip install fastmcp`). Registered i
 from __future__ import annotations
 
 import json
-import os
 import subprocess
 import sys
 from pathlib import Path
@@ -40,10 +39,6 @@ VENV_PY = REPO_ROOT / "scripts" / "python" / ".venv" / "bin" / "python"
 COMPARE = REPO_ROOT / "scripts" / "python" / "compare_audio.py"
 NODE_DIR = REPO_ROOT / "scripts" / "node"
 NODE_MODULES = NODE_DIR / "node_modules"
-NODE_BLACKHOLE = NODE_DIR / "dist" / "record-strudel-blackhole.js"
-NODE_OFFLINE = NODE_DIR / "dist" / "render-strudel-offline.js"
-# offline (default): exact-timing/pitch OfflineAudioContext render; blackhole: real-time capture (lossy, needs the device)
-RENDERER = os.environ.get("MIDIGREP_RENDERER", "offline")
 
 # compare_audio.py exit code when the editability detector refuses to score (spec 003)
 EXIT_EDITABILITY_FAIL = 3
@@ -53,6 +48,7 @@ sys.path.insert(0, str(REPO_ROOT))
 # is imported as a top-level module from that directory, like the pytest suite does).
 sys.path.insert(1, str(REPO_ROOT / "scripts" / "python"))
 from eval.gate import evaluate_comparison, load_thresholds  # noqa: E402
+from renderer import renderer_name, renderer_script  # noqa: E402
 from editability_check import (  # noqa: E402
     ParseError,
     check_editability,
@@ -104,12 +100,6 @@ def _editability(strudel_path: str) -> dict:
         }
 
 
-def _renderer_script() -> Path:
-    if RENDERER not in ("offline", "blackhole"):
-        raise ValueError(f"MIDIGREP_RENDERER={RENDERER!r}: expected offline|blackhole")
-    return NODE_OFFLINE if RENDERER == "offline" else NODE_BLACKHOLE
-
-
 def scoring_reference(original: str) -> str:
     """The scoring REFERENCE is the track's INSTRUMENTAL (bass+drums+melodic): vocals are never generated.
 
@@ -133,7 +123,10 @@ def _recorder_preflight() -> str | None:
             f"scripts/node/node_modules missing ({NODE_MODULES}) — run "
             "`cd scripts/node && npm install && npm run build`."
         )
-    script = _renderer_script()
+    try:
+        script = renderer_script()    # MIDIGREP_RENDERER (read at call time): offline (default) | blackhole
+    except ValueError as exc:
+        return str(exc)
     if not script.exists():
         return f"renderer not built: {script}. Run `cd scripts/node && npm run build`."
     return None
@@ -172,7 +165,8 @@ def render_strudel(
     err = _recorder_preflight()
     if err:
         return {"ok": False, "error": err}
-    cmd = ["node", str(_renderer_script()), strudel_path, "-o", output_wav, "-d", str(duration)]
+    cmd = ["node", str(renderer_script()), strudel_path, "-o", output_wav, "-d", str(duration)]
+    Path(output_wav).unlink(missing_ok=True)   # a failed render must not leave an older file to be scored
     try:
         proc = _run(cmd, timeout=duration + 120)
     except subprocess.TimeoutExpired:
@@ -180,7 +174,7 @@ def render_strudel(
     ok = proc.returncode == 0 and Path(output_wav).exists()
     return {
         "ok": ok,
-        "recorder": RENDERER,
+        "recorder": renderer_name(),
         "output_wav": output_wav,
         "returncode": proc.returncode,
         "stderr_tail": proc.stderr[-1000:] if proc.stderr else "",

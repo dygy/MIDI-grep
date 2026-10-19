@@ -43,10 +43,11 @@ def audition(bank: str, secs: int) -> dict | None:
         strudel = tf.name
     out = tempfile.mktemp(suffix=".wav")
     try:
-        subprocess.run(["node", str(RECORDER), strudel, "-o", out, "-d", str(secs)],
-                       check=False, capture_output=True, text=True, timeout=secs + 120)
-        if not Path(out).exists():
-            print(f"  {bank}: render produced no file", file=sys.stderr)
+        proc = subprocess.run(["node", str(RECORDER), strudel, "-o", out, "-d", str(secs)],
+                              check=False, capture_output=True, text=True, timeout=secs + 120)
+        if proc.returncode != 0 or not Path(out).exists():   # exit status first: a failed render's file is not analysed
+            print(f"  {bank}: render failed (rc={proc.returncode}, file={Path(out).exists()}): {proc.stderr[-200:]}",
+                  file=sys.stderr)
             return None
         t = analyze_stem_timbre(out)
         return {k: round(v, 4) for k, v in t.items()}

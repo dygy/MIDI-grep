@@ -105,11 +105,17 @@ curl -fs -o /dev/null "$BASE_URL/samples.json" || {
 
 OUT="$PACK/output_${MODE}.strudel"
 REND="$PACK/render_${MODE}.wav"
-RENDERER="${MIDIGREP_RENDERER:-offline}"   # offline (default) | blackhole
-if [[ "$RENDERER" = blackhole ]]; then REC_JS="$ROOT/scripts/node/dist/record-strudel-blackhole.js"; else REC_JS="$ROOT/scripts/node/dist/render-strudel-offline.js"; fi
+RENDERER="$("$PY" "$ROOT/scripts/python/renderer.py" name)"        # MIDIGREP_RENDERER: offline (default) | blackhole
+REC_JS="$("$PY" "$ROOT/scripts/python/renderer.py" script)"
 if [[ -f "$REC_JS" && -d "$ROOT/scripts/node/node_modules/puppeteer" ]]; then
   echo "==> Rendering ($RENDERER)"
-  node "$REC_JS" "$OUT" -o "$REND" -d 30 2>&1 | grep -iE "saved|NET FAIL" | head -3 || true
+  # The renderer's exit status decides: non-zero = its own checks failed, so the file (if any) is never scored.
+  rm -f "$REND"; REND_LOG="$PACK/render_${MODE}.log"; rrc=0
+  node "$REC_JS" "$OUT" -o "$REND" -d 30 >"$REND_LOG" 2>&1 || rrc=$?
+  { grep -iE "saved|NET FAIL" "$REND_LOG" | head -3; } || true
+  if [[ "$rrc" -ne 0 || ! -s "$REND" ]]; then
+    rm -f "$REND"; echo "ERROR: render failed (rc=$rrc) - not scoring. Log: $REND_LOG" >&2; exit 1
+  fi
   echo "==> Similarity vs original:"
   "$PY" "$ROOT/scripts/python/compare_audio.py" "$("$PY" "$ROOT/scripts/python/pipeline_helpers.py" instrumental "$STEMS_DIR")" "$REND" -d 25 -j 2>/dev/null \
     | "$PY" -c 'import sys,json;c=json.load(sys.stdin)["comparison"];print("   overall %.1f%%  (mfcc %.2f, chroma %.2f, freq %.2f)"%(c["overall_similarity"]*100,c.get("mfcc_similarity",0),c.get("chroma_similarity",0),c.get("frequency_balance_similarity",0)))'
