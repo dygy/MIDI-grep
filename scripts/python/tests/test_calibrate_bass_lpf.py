@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -157,8 +158,9 @@ def test_auto_calibrate_parse_step_round_trip():
     "0.4 0.7 1.0 5000 0.1 0.6 1.0 422",         # old 8-field (… MG CV BL)
 ])
 def test_start_in_the_old_cv_format_fails_loudly(old_start):
+    # AC_PY: the script resolves the renderer through Python before parsing args; CI has no repo venv
     r = subprocess.run(["bash", str(AUTO), "--stems", "x", "--base", "y", "--start", old_start],
-                       capture_output=True, text=True)
+                       capture_output=True, text=True, env={**os.environ, "AC_PY": sys.executable})
     assert r.returncode == 64 and "--start" in r.stderr and "CV" in r.stderr, r.stderr
 
 
