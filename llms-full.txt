@@ -91,7 +91,7 @@ Generative flags: `--mode granular|rave`, `--models`, `--github`, `--threshold`,
 
 ## 5. Node/TypeScript renderers (`scripts/node/src/`)
 
-- `render-strudel-offline.ts` — **default** (2026-10-19). @strudel/web 1.3.0 (core 1.2.6, webaudio 1.3.0, superdough 1.3.0) + @strudel/soundfonts 1.2.6, headless Chromium, chunked ~20 s / ≤1200-onset whole-cycle windows in fresh pages with 4 s tail overlap-add, polyphony 4096, retries crashed pages ×3, loud failures. `MIDIGREP_RENDERER` selects (`scripts/python/renderer.py`).
+- `render-strudel-offline.ts` — **default** (2026-10-19). @strudel/web 1.3.0 (core 1.2.6, webaudio 1.3.0, superdough 1.3.0) + @strudel/soundfonts 1.2.6, headless Chromium, chunked ~20 s / ≤1200-onset whole-cycle windows in fresh pages, each with a discarded pre-roll of the previous tail-length of haps (cut/duck/tails cross boundaries) and absolute hap cycles, polyphony 4096, retries crashed pages ×3, loud failures; output written atomically only after all checks pass. Callers treat a non-zero exit as failure. `MIDIGREP_RENDERER` selects (`scripts/python/renderer.py`).
 - `record-strudel-blackhole.ts` — cross-check only (raw capture drops ~12% samples; the asetrate relabel lowers pitch ~2.3–2.7 st; rate now from steady-state file growth, `capture-rate.ts`). Records real Strudel from `strudel.dygy.app/embed`
   via BlackHole + ffmpeg, browser hidden offscreen. ~100% accurate. Key gotchas: insert code via
   CodeMirror `cmView.view.dispatch` (not textContent); call `setSinkId()` on AudioContext AFTER
@@ -132,7 +132,7 @@ margin. `pipeline_helpers.py control --genre G --exclude-key K` picks the contro
 Regime v026 0.6967/0.6736 (+0.120), v027 synth 0.5589/0.5525 (−0.018, FAIL), VAGABUNDO v004 0.6626/0.6223
 (+0.086), v007 synth 0.6627/0.5860 (+0.086); mode floors sample-instrument 0.64/0.60, synth 0.54/0.53.
 2026-10-19 re-baseline (offline renderer, refined tempo, note-aligned verified instruments, no vocals,
-scored vs instrumental.wav): sample-instrument VAGABUNDO v010 0.7217/0.7074, Regime v029 0.7793/0.7746 → floors 0.70/0.69; synth Regime v030 0.6705/0.6519, VAGABUNDO v011 0.7393/0.6907 → floors 0.65/0.63; margins +0.096 to +0.204.
+scored vs instrumental.wav): sample-instrument VAGABUNDO v013 0.7170/0.7073, Regime v031 0.7794/0.7744 → floors 0.70/0.69; synth Regime v032 0.6709/0.6523, VAGABUNDO v014 0.7240/0.7007 → floors 0.65/0.63; margins +0.096 to +0.204.
 Target: 80%+ across genres via AI learning, not hardcoding.
 Tempo estimate (Oct 2026): `estimate_tempo()` keeps the full-band `beat_track` read and adds a low-band (30-200 Hz STFT-flux) `librosa.feature.tempo` candidate (original's BPM only as `start_bpm`); the candidate with stronger onset-envelope autocorrelation support wins. Both candidates + `tempo_method` are written to `comparison.json` (`tempo_candidates`, `tempo_method`); weights unchanged.
 

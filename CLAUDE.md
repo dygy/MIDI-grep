@@ -123,9 +123,9 @@ enters `samples.json` (`instruments/verification.json`). **Vocals are never gene
 singing are not part of the music) — no vocal voice/instrument/knob; every score is against `instrumental.wav`
 (bass + drums + melodic stems; `pipeline_helpers.py instrumental`), incl. the different-song control.
 **Honest state after this fix** (offline renders, instrumental target, `eval/thresholds.yaml` `modes.*.measured`):
-sample-instrument VAGABUNDO v010 **72.2% / 70.7%**, Regime v029 **77.9% / 77.5%**; synth VAGABUNDO v011
-**73.9% / 69.1%**, Regime v030 **67.1% / 65.2%** — all four beat the different-song control (≈57.5%) by +0.096 to
-+0.204. Time-aligned chroma rose from ≈0 to 0.22–0.57. Floors: sample-instrument 0.70/0.69, synth 0.65/0.63.
+sample-instrument VAGABUNDO v013 **71.7% / 70.7%**, Regime v031 **77.9% / 77.4%**; synth VAGABUNDO v014
+**72.4% / 70.1%**, Regime v032 **67.1% / 65.2%** — all four beat the different-song control (≈57.5%) by +0.096 to
++0.204. Time-aligned chroma rose from ≈0 to 0.22–0.56. Floors: sample-instrument 0.70/0.69, synth 0.65/0.63.
 
 **Previous achievement (old scale, contract-passing):** editable dynamic-Strudel with ALL voices as
 editable data — transcribed bass/lead/VOCAL notes on stem-derived sample-instruments + extracted drum
@@ -338,8 +338,10 @@ emulating Strudel sounds, ~16% similarity vs the real engine) was deleted. Dead 
   150 s renders in ~20–35 s. Same CLI as the recorder: `node dist/render-strudel-offline.js in.strudel -o out.wav -d 150`.
 - Non-obvious rules baked in: polyphony 4096 (the realtime cap of 128 silently drops most haps offline,
   where `currentTime` stays 0); chunked whole-cycle ~20 s / ≤1200-onset windows, each in a FRESH page
-  (superdough pools nodes at module level, so a second OfflineAudioContext in one page fails) with 4 s
-  tails overlap-added; `samples("url")` rewritten to single quotes (this bundle's transpiler turns "…"
+  (superdough pools nodes at module level, so a second OfflineAudioContext in one page fails); each chunk
+  re-triggers the previous tail-length of haps as a discarded PRE-ROLL, so ringing tails, `cut` chokes and
+  ducking cross the boundary like real playback, and haps get their ABSOLUTE cycle (LFO phase); the WAV is
+  written atomically only after every check passes (a failed render leaves no file); `samples("url")` rewritten to single quotes (this bundle's transpiler turns "…"
   into mini-notation); crashed pages retried ×3; fails loudly on unloaded sounds, silence, frame/onset
   count mismatch, truncated tails.
 - Selected everywhere by `MIDIGREP_RENDERER` (default `offline`; `blackhole` = the recorder below) —

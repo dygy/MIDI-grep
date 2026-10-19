@@ -139,7 +139,7 @@ code** — all codegen is Python/LLM.*
 ### Audio Rendering (default: offline Strudel render; BlackHole = cross-check)
 
 **Since 2026-10-19 the default is `render-strudel-offline.ts`:** the same superdough engine rendered into
-OfflineAudioContexts in ~20 s whole-cycle chunks (fresh page each, 4 s tail overlap-add, polyphony 4096) — sample-exact
+OfflineAudioContexts in ~20 s whole-cycle chunks (fresh page each, discarded pre-roll of the previous tail so cut/duck/tails cross boundaries, polyphony 4096) — sample-exact
 timing and pitch, no audio device, ~5x faster than real time. The BlackHole recorder described below was found to
 lose ~12% of the captured samples; its rate relabel restored duration but lowered every pitch by ~2.3–2.7 semitones,
 so every BlackHole-scored number since Oct 2026 was on pitch-shifted audio. It stays as a cross-check of live

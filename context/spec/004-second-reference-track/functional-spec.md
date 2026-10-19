@@ -185,5 +185,5 @@ the pipeline broke on the new song was fixed in the pipeline rather than patched
   that cite a vocal block / vocal instrument describe the behaviour at that time and are superseded. Same run:
   the recorder was found to pitch-shift renders by about −2.3 semitones (sample loss + rate relabel) and is
   replaced by an offline Strudel render as the default; the "tempo matches the song" criterion (§2.2) is
-  re-verified with sample-exact timing. Re-measured on the instrumental target: sample-instrument VAGABUNDO v010 0.7217/0.7074, Regime v029 0.7793/0.7746 → floors 0.70/0.69; synth Regime v030 0.6705/0.6519, VAGABUNDO v011 0.7393/0.6907 → floors 0.65/0.63;
-  the dataset now points at v010 / v011 (VAGABUNDO) and v029 / v030 (Regime), all `expected: pass`.
+  re-verified with sample-exact timing. Re-measured on the instrumental target: sample-instrument VAGABUNDO v013 0.7170/0.7073, Regime v031 0.7794/0.7744 → floors 0.70/0.69; synth Regime v032 0.6709/0.6523, VAGABUNDO v014 0.7240/0.7007 → floors 0.65/0.63;
+  the dataset now points at v013 / v014 (VAGABUNDO) and v031 / v032 (Regime), all `expected: pass`.

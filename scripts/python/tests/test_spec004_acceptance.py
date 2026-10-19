@@ -7,7 +7,7 @@ The per-slice suites (test_build_instruments, test_pipeline_helpers, test_simila
 internal/audio/youtube_test.go, cmd/midi-grep/main_test.go) prove each component. This file proves the
 feature's contract on whole deliverables: the CURRENT cached runs (2026-10-19 re-baseline: refined tempo,
 note-aligned pitch-verified instruments, offline renderer, no vocal voice, scored against instrumental.wav) -
-"VAGABUNDO NAO NAMORA" v010 (sample-instrument) / v011 (synth) and Regime CLT v029 / v030 - the reference dataset,
+"VAGABUNDO NAO NAMORA" v013 (sample-instrument) / v014 (synth) and Regime CLT v031 / v032 - the reference dataset,
 the floors, the docs and the general (not per-track) shape of the defect fixes. Older runs (v002/v004/v007 and the
 BlackHole-era Regime v026/v027) are history; only the fix #10 history check still reads v002/v004 when cached.
 
@@ -107,8 +107,8 @@ STAMP_KEYS = {"editability", "generation_mode", "editability_violations", "edita
 NOTE_RE = re.compile(r"^[a-g][#s]?\d$")   # Strudel accepts both c#3 and cs3 spellings
 
 # the current runs under test (dataset + thresholds point at them; see eval/datasets/reference_tracks.yaml)
-SAMPLE_RUN, SYNTH_RUN = "v010", "v011"
-REGIME_RUNS = ("v029", "v030")
+SAMPLE_RUN, SYNTH_RUN = "v013", "v014"
+REGIME_RUNS = ("v031", "v032")
 
 needs_track = pytest.mark.skipif(not (TRACK / SAMPLE_RUN).is_dir(), reason=f"cached track {TRACK_KEY!r} absent")
 
@@ -886,7 +886,7 @@ def test_25_cached_track_metadata_carries_provenance():
         assert _setcps_error(_read(TRACK / version / "output.strudel"), meta["bpm"]) is None
 
 
-# The Regime CLT references (2026-10-19 re-baseline): v029 sample-instrument, v030 synth - both pass the mode floors AND
+# The Regime CLT references (2026-10-19 re-baseline): v031 sample-instrument, v032 synth - both pass the mode floors AND
 # the chance margin. (v027, the BlackHole-era synth run that failed the margin, is history only.)
 @pytest.mark.parametrize("version", REGIME_RUNS)
 def test_25_regime_clt_references_still_clear_their_floors(version):

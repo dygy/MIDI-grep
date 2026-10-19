@@ -20,7 +20,7 @@ import (
 type ReportData struct {
 	TrackName   string
 	Version     int
-	BPM         int
+	BPM         float64
 	Key         string
 	Style       string
 	Genre       string
@@ -200,7 +200,7 @@ func (g *Generator) LoadData() (*ReportData, error) {
 				data.Version = int(v)
 			}
 			if v, ok := meta["bpm"].(float64); ok {
-				data.BPM = int(v)
+				data.BPM = v
 			}
 			if v, ok := meta["key"].(string); ok {
 				data.Key = v
@@ -296,16 +296,41 @@ func cleanTrackName(name string) string {
 	return re.ReplaceAllString(name, "")
 }
 
+var (
+	bpmHeaderRe   = regexp.MustCompile(`BPM:\s*(\d+(?:\.\d+)?)`)
+	genreHeaderRe = regexp.MustCompile(`Genre:\s*(\w+)`)
+)
+
+// formatBPM shows the BPM with the precision given (129.989 stays 129.989, 136 stays 136).
+func formatBPM(v float64, fallback string) string {
+	if v > 0 {
+		return strconv.FormatFloat(math.Round(v*1000)/1000, 'f', -1, 64)
+	}
+	return fallback
+}
+
+// resolveStyle returns the style, falling back to genre when style is empty, "N/A" or "auto".
+func resolveStyle(style, genre string) string {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "", "n/a", "auto":
+		return formatStringValue(genre, "N/A")
+	}
+	return style
+}
+
 func extractStrudelInfo(data *ReportData) {
 	code := data.StrudelCode
 
 	// BPM
-	if re := regexp.MustCompile(`BPM:\s*(\d+)`); re.MatchString(code) {
-		if m := re.FindStringSubmatch(code); len(m) > 1 {
-			if v, _ := strconv.Atoi(m[1]); v > 0 && data.BPM == 0 {
-				data.BPM = v
-			}
+	if m := bpmHeaderRe.FindStringSubmatch(code); len(m) > 1 {
+		if v, err := strconv.ParseFloat(m[1], 64); err == nil && v > 0 && data.BPM == 0 {
+			data.BPM = v
 		}
+	}
+
+	// Genre (fallback when metadata.json lacks it)
+	if m := genreHeaderRe.FindStringSubmatch(code); len(m) > 1 && data.Genre == "" {
+		data.Genre = m[1]
 	}
 
 	// Key
@@ -761,9 +786,9 @@ func generateHTML(data *ReportData) string {
 
 	// Format values
 	trackName := html.EscapeString(data.TrackName)
-	bpm := formatValue(data.BPM, "N/A")
+	bpm := formatBPM(data.BPM, "N/A")
 	key := formatStringValue(data.Key, "N/A")
-	style := formatStringValue(data.Style, formatStringValue(data.Genre, "N/A"))
+	style := resolveStyle(data.Style, data.Genre)
 	notes := formatValue(data.Notes, "N/A")
 	drumHits := formatValue(data.DrumHits, "N/A")
 

@@ -179,6 +179,38 @@ def onset_driven_bars(stem_path: Path, midi_path: Path, bpm: float, nbars: int, 
     return bars
 
 
+def fmt_bpm(bpm: float) -> str:
+    """BPM with the precision of the value ``cps`` is derived from (4 decimals, trailing zeros trimmed)."""
+    return f"{bpm:.4f}".rstrip("0").rstrip(".")
+
+
+def count_note_events(*voices: list[str] | None) -> int:
+    """Note events the bar arrays actually play: every non-rest token across all bars of all voices."""
+    return sum(1 for bars in voices for bar in (bars or []) for tok in bar.split() if tok != "~")
+
+
+_DRUM_STEP_RE = re.compile(r's\("([^"]*)"\)')
+
+
+def count_drum_hits(drum_voices: list[str] | None) -> int:
+    """Drum hits in the detected drum pattern lines (``cat(s("bd ~ ..."), ...)`` per drum type): non-rest
+    tokens inside each ``s("...")`` bar. Steady layers added outside the detected pattern are not counted."""
+    return sum(1 for line in (drum_voices or []) for bar in _DRUM_STEP_RE.findall(line)
+               for tok in bar.split() if tok != "~")
+
+
+def count_header_lines(genre: str, notes: int, drum_hits: int) -> list[str]:
+    """Header comments the report parsers read (generate_report.py ``extract_info_from_strudel`` and
+    internal/report ``extractStrudelInfo``): ``Notes: N``, ``Drums: N hits``, ``Genre: x``. A zero count is
+    omitted (reports show N/A rather than a false 0)."""
+    out = [f"// Genre: {genre}"]
+    if notes > 0:
+        out.append(f"// Notes: {notes}")
+    if drum_hits > 0:
+        out.append(f"// Drums: {drum_hits} hits")
+    return out
+
+
 def js_array(name: str, bars: list[str]) -> str:
     items = ",\n  ".join(f'"{b}"' for b in bars)
     return f"let {name} = [\n  {items}\n]"
@@ -617,10 +649,10 @@ def main() -> int:
         f"// generation_mode: {generation_mode}",
         "// editability: checked-by editability_check.py",
         *([f"// env_correction: {args.env_correction.name}"] if args.env_correction else []),
-        f"// BPM: {args.bpm:.0f}",
+        f"// BPM: {fmt_bpm(args.bpm)}",
         f"// Key: {args.key}",
         f"// Bars: {nbars}  Duration: {dur:.0f}s",
-        f"const cps = {cps:.6f}   // {args.bpm:.0f} BPM, 4 beats/bar",
+        f"const cps = {cps:.6f}   // {fmt_bpm(args.bpm)} BPM, 4 beats/bar",
         "setcps(cps)",
     ]
     if needs_samples:
@@ -784,6 +816,9 @@ def main() -> int:
     # `marker` is a comment token the detector reads (only `// texture` today).
     def assemble(chs: list[tuple]) -> str:
         lines = list(L)
+        # counts of what THIS piece plays (bars / detected drum pattern are final by now)
+        lines[2:2] = count_header_lines(args.genre, count_note_events(bass_bars, lead_bars),
+                                        count_drum_hits(detected if isinstance(detected, list) else None))
         if args.dj_flow:
             # --- Performance header: arrangement map + how to play it live ---
             spark, sections = section_map(args.stems_dir / "instrumental.wav" if (args.stems_dir / "instrumental.wav").exists()
