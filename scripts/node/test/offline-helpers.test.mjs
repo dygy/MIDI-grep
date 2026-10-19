@@ -47,3 +47,19 @@ test('chunk windows tile [0,cycles) exactly; wav roundtrip', () => {
   const i = analyzeWav(new Uint8Array(floatToWav16(L, R, 44100)));
   assert.equal(i.frames, 3); assert.equal(i.channels, 2); assert.ok(i.peak > 0.99);
 });
+
+import { planChunks } from '../dist/offline-helpers.js';
+test('planChunks: time cap, onset cap, min one cycle, exact tiling', () => {
+  const flat = Array(25).fill(10);
+  assert.deepEqual(planChunks(flat, 24.5, 11, 1e9), [[0, 11], [11, 22], [22, 24.5]]);
+  // onset cap: 10/cycle, cap 35 -> 3 cycles per window
+  const w = planChunks(flat, 25, 11, 35);
+  assert.ok(w.every(([b, e]) => (e - b) <= 3) && w[0][0] === 0 && w.at(-1)[1] === 25);
+  for (let i = 1; i < w.length; i++) assert.equal(w[i][0], w[i - 1][1]);
+  // one dense cycle still gets its own window (never empty / never split below a cycle)
+  const dense = [5, 5, 5000, 5, 5];
+  assert.deepEqual(planChunks(dense, 5, 11, 100), [[0, 2], [2, 3], [3, 5]]);
+  // the onsets of every window respect the cap unless it is a single cycle
+  const d2 = [300, 400, 600, 700, 100, 100, 100];
+  for (const [b, e] of planChunks(d2, 7, 11, 1000)) assert.ok(e - b === 1 || d2.slice(b, e).reduce((x, y) => x + y, 0) <= 1000);
+});

@@ -84,3 +84,21 @@ export function chunkWindows(cycles: number, chunkCycles: number): Array<[number
   for (let b = 0; b < cycles - 1e-9; b += chunkCycles) w.push([b, Math.min(b + chunkCycles, cycles)]);
   return w;
 }
+
+/**
+ * Chunk plan bounded in BOTH time and work: greedy windows of whole cycles, closing a window when it
+ * reaches `maxCycles` cycles or adding the next cycle would push it past `maxOnsets` triggered haps
+ * (a window always holds at least one cycle). `onsetsPerCycle[c]` = haps starting in cycle c.
+ */
+export function planChunks(onsetsPerCycle: number[], cycles: number, maxCycles: number, maxOnsets: number): Array<[number, number]> {
+  const out: Array<[number, number]> = [];
+  const n = Math.ceil(cycles - 1e-9);
+  let b = 0, acc = 0;
+  for (let c = 0; c < n; c++) {
+    const k = onsetsPerCycle[c] ?? 0;
+    if (c > b && (c - b >= maxCycles || acc + k > maxOnsets)) { out.push([b, c]); b = c; acc = 0; }
+    acc += k;
+  }
+  if (n > b) out.push([b, Math.min(n, cycles)]);
+  return out;
+}

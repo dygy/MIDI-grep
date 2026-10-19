@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { createRequire } from 'module';
-import { analyzeWav, checkRender, chunkWindows, expectedFrames, floatToWav16, overlapAdd, sampleFailures } from './offline-helpers.js';
+import { analyzeWav, checkRender, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures } from './offline-helpers.js';
 
 const SHIM = `const S = window.strudel;
 export const { noteToMidi, freqToMidi, getSoundIndex, getAudioContext, registerSound, getParamADSR, getADSRValues, getPitchEnvelope, getVibratoOscillator } = S;`;
@@ -38,6 +38,7 @@ window.__getSlice = (i, n) => {
 };
 // 1) init: engine + prebake + evaluate. Returns cps. The pattern stays in this page.
 window.__count = (cycles) => window.__pattern.queryArc(0, cycles, { _cps: window.__cps }).filter(h => h.hasOnset()).length;
+window.__density = (cycles) => { const n = Math.ceil(cycles - 1e-9), d = new Array(n).fill(0); for (const h of window.__pattern.queryArc(0, cycles, { _cps: window.__cps })) if (h.hasOnset()) { const c = Math.floor(h.whole.begin.valueOf() + 1e-9); if (c >= 0 && c < n) d[c]++; } return d; };
 window.__init = async (code, site) => {
   const S = strudel;
   const prebake = async () => {
@@ -109,12 +110,13 @@ window.__chunk = async (b, e, sampleRate, startFrame, len, poly) => {
 async function main() {
   const args = process.argv.slice(2);
   let input = '', outputPath = 'offline.wav', duration = 30, sampleRate = 44100, allowFailures = false;
-  let chunkSeconds = 20, tailSeconds = 4, maxPolyphony = 4096; // NOT the REPL's 128: offline, currentTime is 0 while every hap is scheduled, so the cap counts ALL voices and drops most of the music (measured rms 0.050 at 128 vs 0.099 at 4096 on 40 s of v004; BlackHole live = 0.100) // chunkSeconds 0 = single pass (reference)
+  let chunkSeconds = 20, maxChunkOnsets = 1200, tailSeconds = 4, maxPolyphony = 4096; // NOT the REPL's 128: offline, currentTime is 0 while every hap is scheduled, so the cap counts ALL voices and drops most of the music (measured rms 0.050 at 128 vs 0.099 at 4096 on 40 s of v004; BlackHole live = 0.100) // chunkSeconds 0 = single pass (reference)
   for (let i = 0; i < args.length; i++) {
     if (args[i] === '-o') outputPath = args[++i];
     else if (args[i] === '-d') duration = parseFloat(args[++i]);
     else if (args[i] === '--sample-rate') sampleRate = parseInt(args[++i], 10);
     else if (args[i] === '--chunk-seconds') chunkSeconds = parseFloat(args[++i]);
+    else if (args[i] === '--max-chunk-onsets') maxChunkOnsets = parseInt(args[++i], 10);
     else if (args[i] === '--max-polyphony') maxPolyphony = parseInt(args[++i], 10);
     else if (args[i] === '--tail-seconds') tailSeconds = parseFloat(args[++i]);
     else if (args[i] === '--allow-failed-samples') allowFailures = true;
@@ -143,8 +145,22 @@ async function main() {
   const port = (server.address() as any).port;
 
   const t0 = Date.now();
-  const browser = await puppeteer.launch({ headless: true, protocolTimeout: 3600000, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--disable-web-security'] });
+  const launch = () => puppeteer.launch({ headless: true, protocolTimeout: 3600000, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--disable-web-security'] });
+  let browser = await launch();
   let exit = 0;
+  // A render step that dies with the page/browser ("Target closed") is retried on a fresh page (and a fresh
+  // browser if it is gone). Every attempt is reported with WHAT it held; after MAX_ATTEMPTS it fails loudly.
+  const MAX_ATTEMPTS = 3;
+  const attempt = async <T>(label: string, held: string, fn: () => Promise<T>): Promise<T> => {
+    for (let k = 1; ; k++) {
+      try { return await fn(); }
+      catch (err: any) {
+        console.log(`[CRASH] ${label} (${held}) attempt ${k}/${MAX_ATTEMPTS}: ${err.message}; browser ${browser.connected ? 'alive' : 'gone'}`);
+        if (k >= MAX_ATTEMPTS) throw new Error(`${label} failed ${MAX_ATTEMPTS}x (${held}): ${err.message}`);
+        if (!browser.connected) browser = await launch();
+      }
+    }
+  };
   const openPage = async () => {
     const page = await browser.newPage();
     page.on('error', e => console.log(`[PAGE CRASH] ${e.message}`));
@@ -160,7 +176,8 @@ async function main() {
   };
   try {
     let page = await openPage();
-    const init: any = await page.evaluate((c, site) => (window as any).__init(c, site), code, SITE);
+    let initTry = 0;
+    const init: any = await attempt('init', 'first page', async () => { if (initTry++ > 0) { await page.close().catch(() => {}); page = await openPage(); } return page.evaluate((c, site) => (window as any).__init(c, site), code, SITE); });
     const cps: number = init.cps, cycles = duration * cps;
     const total = Math.floor((cycles / cps) * sampleRate);
     console.log(`samples("url") rewritten to single quotes: ${init.rewrites}`);
@@ -177,23 +194,30 @@ async function main() {
       // them keyed without regard to context, so a second OfflineAudioContext in the same page
       // reuses nodes of the first ("cannot connect to an AudioNode belonging to a different audio
       // context"); a new page also frees all decoded buffers/graphs (page memory grew ~1.1 GB for 150 s).
-      const wins = chunkWindows(cycles, Math.max(1, Math.round(chunkSeconds * cps)));
-      console.log(`Rendering ${duration} s offline at ${sampleRate} Hz (chunked: ${wins.length} windows of ${Math.max(1, Math.round(chunkSeconds * cps))} cycles, ${tailSeconds} s tail overlap-add, fresh page each) ...`);
+      const density: number[] = await page.evaluate((cy) => (window as any).__density(cy), cycles);
+      const wins = planChunks(density, cycles, Math.max(1, Math.round(chunkSeconds * cps)), maxChunkOnsets);
+      console.log(`Rendering ${duration} s offline at ${sampleRate} Hz (chunked: ${wins.length} windows, <= ${Math.max(1, Math.round(chunkSeconds * cps))} cycles and <= ${maxChunkOnsets} onsets each, ${tailSeconds} s tail overlap-add, fresh page each) ...`);
       const L = new Float32Array(total), R = new Float32Array(total);
       for (let ci = 0; ci < wins.length; ci++) {
         const [b, e] = wins[ci];
-        if (ci > 0) { await page.close(); page = await openPage(); await page.evaluate((c, site) => (window as any).__init(c, site), code, SITE); }
-        // floor (not round): a start AFTER b/cps would give the boundary hap a slightly negative time and superdough drops it
         const startFrame = Math.floor((b / cps) * sampleRate);
         const len = Math.max(1, Math.round(((e - b) / cps) * sampleRate + tailSeconds * sampleRate));
-        const r: any = await page.evaluate((b0, e0, sr, sf, ln, po) => (window as any).__chunk(b0, e0, sr, sf, ln, po), b, e, sampleRate, startFrame, len, maxPolyphony);
-        const raw = await fetchBytes(page, r.bytes);
+        const held = `${density.slice(b, Math.ceil(e)).reduce((x, y) => x + y, 0)} haps over cycles [${b.toFixed(2)}, ${e.toFixed(2)}), ctx ${len} frames`;
+        let heapMb = 0;
+        const { r, raw } = await attempt(`chunk ${ci + 1}/${wins.length}`, held, async () => {
+          await page.close().catch(() => {}); page = await openPage();
+          await page.evaluate((c, site) => (window as any).__init(c, site), code, SITE);
+          const rr: any = await page.evaluate((b0, e0, sr, sf, ln, po) => (window as any).__chunk(b0, e0, sr, sf, ln, po), b, e, sampleRate, startFrame, len, maxPolyphony);
+          const bytes = await fetchBytes(page, rr.bytes);
+          try { heapMb = (await page.metrics()).JSHeapUsedSize! / 1048576; } catch { /* page gone */ }
+          return { r: rr, raw: bytes };
+        });
         const f = new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
         // tail-truncation check: peak over the last 0.25 s of this chunk's tail margin (skip the last chunk: file ends there)
         if (ci < wins.length - 1) for (let i = Math.max(0, len - Math.round(0.25 * sampleRate)); i < len; i++) tailEndPeak = Math.max(tailEndPeak, Math.abs(f[i]), Math.abs(f[len + i]));
         overlapAdd(L, R, f, startFrame);
         onsets += r.onsets; logs.push(...r.logs); errs.push(...r.errs); chunks++;
-        console.log(`  chunk ${ci + 1}/${wins.length} cycles [${b.toFixed(2)}, ${e.toFixed(2)}) ${r.onsets} onsets (${((Date.now() - t0) / 1000).toFixed(1)} s elapsed)`);
+        console.log(`  chunk ${ci + 1}/${wins.length} cycles [${b.toFixed(2)}, ${e.toFixed(2)}) ${r.onsets} onsets, js heap ${heapMb.toFixed(0)} MB (${((Date.now() - t0) / 1000).toFixed(1)} s elapsed)`);
       }
       wav = floatToWav16(L, R, sampleRate);
     }
