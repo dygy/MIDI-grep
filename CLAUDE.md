@@ -42,7 +42,7 @@ Before any long-running run (extraction, `--iterate`, rendering, comparison) ver
 - Node recorder built: `scripts/node/node_modules` present (`cd scripts/node && npm install`) and
   `scripts/node/dist/record-strudel-blackhole.js` exists (`npm run build`) — without them every render fails
 - ML models are present (first run downloads ~1GB)
-- For BlackHole recording: the BlackHole device exists and a Multi-Output Device is selected (`node dist/record-strudel-blackhole.js` will silently produce empty audio otherwise)
+- Renders default to the offline renderer (`scripts/node/dist/render-strudel-offline.js`, needs only the Node build + Chromium from puppeteer). Only for `MIDIGREP_RENDERER=blackhole` cross-checks: the BlackHole device exists and a Multi-Output Device is selected (`node dist/record-strudel-blackhole.js` will silently produce empty audio otherwise)
 - For Ollama runs: `ollama serve` is up and the model is pulled
 Surface a missing dependency immediately rather than letting the run fail partway through.
 
@@ -112,6 +112,20 @@ synth VAGABUNDO v007 **66.3% / 58.6%**, Regime v027 **55.9% / 55.3% — FAILS: a
 higher** (margin −0.018). Different-song control ≈ 57.7%. Which-notes-sound-when (chroma in time) is ≈0
 on three of the four renders — the main gap; the next suspect is the sample instruments (100 ms grains,
 wrong pitch labels). Floors reset: sample-instrument 0.64/0.60, synth 0.54/0.53.
+
+**2026-10-19 — three defects under the score, and vocals out (fix `instruments-short-grains-wrong-labels`):**
+(1) the tempo was a librosa tempogram BIN (129.199 / 135.999) — now refined by phase coherence on the drums
+stem (`tempo_refine.py`): VAGABUNDO **129.989**, Regime **135.017**; (2) BlackHole renders were ~2.5 semitones
+flat (see the renderer section) — the offline renderer is the default; (3) the stem instruments were 100 ms
+grains with wrong pitch labels — now one grain per transcribed note (`pitched_grains.py`, `--midi`), every
+sample re-measured (pyin, harmonic-salience fallback for polyphonic stems, explicit octave rejection) before it
+enters `samples.json` (`instruments/verification.json`). **Vocals are never generated** (owner decision: people
+singing are not part of the music) — no vocal voice/instrument/knob; every score is against `instrumental.wav`
+(bass + drums + melodic stems; `pipeline_helpers.py instrumental`), incl. the different-song control.
+**Honest state after this fix** (offline renders, instrumental target, `eval/thresholds.yaml` `modes.*.measured`):
+sample-instrument VAGABUNDO v013 **71.7% / 70.7%**, Regime v031 **77.9% / 77.4%**; synth VAGABUNDO v014
+**72.4% / 70.1%**, Regime v032 **67.1% / 65.2%** — all four beat the different-song control (≈57.5%) by +0.096 to
++0.204. Time-aligned chroma rose from ≈0 to 0.22–0.56. Floors: sample-instrument 0.70/0.69, synth 0.65/0.63.
 
 **Previous achievement (old scale, contract-passing):** editable dynamic-Strudel with ALL voices as
 editable data — transcribed bass/lead/VOCAL notes on stem-derived sample-instruments + extracted drum
@@ -312,12 +326,33 @@ The `--render` flag synthesizes WAV audio from patterns:
 - Lead: Triangle wave with vibrato
 
 **Node.js Strudel Renderer — REMOVED (Jun 2026):** `render-strudel-node.ts` (offline synthesis
-emulating Strudel sounds, ~16% similarity vs the real engine) was deleted. The BlackHole recorder
-below is the only render path. Dead references to `render-strudel-node.js` still exist in
-`cmd/midi-grep/main.go`, `mcp_servers/loop/server.py` (recorder='node'), `synth_profiles.py` and
-`ai_learning_optimizer.py` — tracked in spec 003 tasks.
+emulating Strudel sounds, ~16% similarity vs the real engine) was deleted. Dead references to
+`render-strudel-node.js` still exist in `cmd/midi-grep/main.go`, `mcp_servers/loop/server.py`
+(recorder='node'), `synth_profiles.py` and `ai_learning_optimizer.py` — tracked in spec 003 tasks.
 
-**Puppeteer BlackHole Recorder (`scripts/node/src/record-strudel-blackhole.ts`):** *(RECOMMENDED)*
+**Offline Strudel Renderer (`scripts/node/src/render-strudel-offline.ts`) — DEFAULT since 2026-10-19:**
+- Strudel's OWN export path (`renderPatternAudio` → `OfflineAudioContext`), i.e. the real superdough
+  engine, not an emulation: `@strudel/web@1.3.0` (core 1.2.6, webaudio 1.3.0, superdough 1.3.0) +
+  `@strudel/soundfonts@1.2.6` GM prebake + the site's sample maps, in headless Chromium.
+- Sample-exact timing AND pitch (170 s click: period 0.4412 s exact, IOI std 0.0 ms), no audio device,
+  150 s renders in ~20–35 s. Same CLI as the recorder: `node dist/render-strudel-offline.js in.strudel -o out.wav -d 150`.
+- Non-obvious rules baked in: polyphony 4096 (the realtime cap of 128 silently drops most haps offline,
+  where `currentTime` stays 0); chunked whole-cycle ~20 s / ≤1200-onset windows, each in a FRESH page
+  (superdough pools nodes at module level, so a second OfflineAudioContext in one page fails); each chunk
+  re-triggers the previous tail-length of haps as a discarded PRE-ROLL, so ringing tails, `cut` chokes and
+  ducking cross the boundary like real playback, and haps get their ABSOLUTE cycle (LFO phase); the WAV is
+  written atomically only after every check passes (a failed render leaves no file); `samples("url")` rewritten to single quotes (this bundle's transpiler turns "…"
+  into mini-notation); crashed pages retried ×3; fails loudly on unloaded sounds, silence, frame/onset
+  count mismatch, truncated tails.
+- Selected everywhere by `MIDIGREP_RENDERER` (default `offline`; `blackhole` = the recorder below) —
+  `scripts/python/renderer.py`, the shell drivers, the `loop` MCP server.
+
+**Puppeteer BlackHole Recorder (`scripts/node/src/record-strudel-blackhole.ts`):** *(cross-check only —
+KNOWN DEFECT: its raw capture loses ~12% of samples and the rate relabel that restores duration lowers
+every pitch by ~2.3–2.7 semitones; sine probe: 59.25 Hz recorded for a written C#2 = 69.30 Hz. Every
+BlackHole-scored number since Oct 2026 was on pitch-shifted audio. Its rate is now measured from
+steady-state file growth (`capture-rate.ts`), which fixes the mean tempo but not the pitch or the ~5%
+in-run drift.)*
 - Records REAL Strudel playback using BlackHole virtual audio device
 - Opens `https://strudel.dygy.app/embed` in browser, loads code, plays, records via ffmpeg
 - **Runs invisibly** - browser hidden offscreen, doesn't steal focus
@@ -529,7 +564,8 @@ midi-grep/
 │   ├── extract-youtube.sh      # Quick YouTube extraction
 │   ├── node/                   # TypeScript audio rendering
 │   │   ├── src/
-│   │   │   └── record-strudel-blackhole.ts  # Puppeteer + BlackHole recorder (only render path)
+│   │   │   ├── render-strudel-offline.ts    # DEFAULT renderer: Strudel renderPatternAudio, OfflineAudioContext
+│   │   │   └── record-strudel-blackhole.ts  # Puppeteer + BlackHole recorder (cross-check; pitch-shift defect)
 │   │   ├── dist/               # Compiled JavaScript output
 │   │   ├── package.json        # Node.js dependencies
 │   │   └── tsconfig.json       # TypeScript configuration
@@ -642,7 +678,7 @@ defer ws.Cleanup()
 The architecture is:
 1. **Go Pipeline** (`internal/pipeline/orchestrator.go`): Stem separation, BPM/key analysis
 2. **Python AI Generator** (`scripts/python/ai_code_generator.py`): Generates ALL Strudel code
-3. **BlackHole Recorder** (`scripts/node/src/record-strudel-blackhole.ts`): Renders for verification
+3. **Offline Strudel Renderer** (`scripts/node/src/render-strudel-offline.ts`): Renders for verification (BlackHole recorder = cross-check)
 
 **Why LLM-First?**
 - Hardcoded Go patterns don't generalize across genres
@@ -955,7 +991,8 @@ The `generative` command (aliases: `gen`, `rave`) provides neural synthesizer tr
 | `--github` | GitHub repo for sync (e.g., `user/midi-grep-sounds`) |
 | `--threshold` | Similarity threshold for reusing models (0.0-1.0, default: 0.88) |
 | `--epochs` | Training epochs for RAVE mode (default: 500) |
-| `--grain-ms` | Grain duration for granular mode (default: 100ms) |
+| `--midi` | Transcribed stem (.mid): cut one note-aligned grain per note (granular mode) — what the pipeline uses |
+| `--grain-ms` | Fixed grain duration in ms (granular mode); only passed when set — otherwise the length is derived from the music (note boundaries with `--midi`, else the stem's inter-onset intervals) |
 
 ## Genre Auto-Detection
 

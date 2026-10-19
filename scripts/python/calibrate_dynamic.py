@@ -15,14 +15,6 @@ Levers (all multiply the *current* value, sqrt-damped + clamped to avoid oscilla
   bass-mult  <- bass band       (60-250 Hz body of the pitched bass sample)
   cal-lead   <- low_mid+mid     (lead/melodic body; the usual deficit)
   lead-lpf   <- high+high_mid   (excess brightness -> lower the cutoff)
-  cal-vocal  <- vocal stem RMS  (spec 003 Slice 3: the editable vocal voice is balanced by
-                                 measurement. Primary source: ``stems.vocals`` in the sibling
-                                 ``stem_comparison.json`` (original vs rendered rms_mean).
-                                 compare_audio.py does not pair a vocals stem yet, so until it
-                                 does the lever falls back to the full-mix ``high_mid`` band
-                                 ratio — the band the vocal's presence region dominates once
-                                 lead/hats are driven by their own levers — with a wide
-                                 dead-band and a gentler step because it is a proxy.)
   bass-lpf   <- low_mid/bass share (synth mode: a sawtooth bass puts harmonics 2-5 in
                                  250-500 Hz = low_mid while the bass band drains. Rendered
                                  low_mid-per-bass too high -> lower the bass cutoff, too low ->
@@ -33,7 +25,7 @@ Levers (all multiply the *current* value, sqrt-damped + clamped to avoid oscilla
 Usage:
   python calibrate_dynamic.py --comparison <comparison.json> \
       [--bass-mult 0.62 --sub-gain 0.5 --lead-lpf 6500 --master-gain 0.6 --cal-lead 1.0 \
-       --cal-vocal 1.0 --bass-lpf <effective Hz> --bass-lpf-max <analysis Hz> \
+       --bass-lpf <effective Hz> --bass-lpf-max <analysis Hz> \
        --bass-note-max-hz <Hz>] [--stem-comparison <stem_comparison.json>] \
       [--state <prev_params.json>] [--out <next_params.json>]
 
@@ -190,7 +182,6 @@ def main() -> int:
     ap.add_argument("--bass-note-max-hz", type=float, default=0.0,
                     help="highest bass fundamental (summary 'bass_note_max_hz'); sets the lever's "
                          "floor. 0 = unknown -> lever stays off")
-    ap.add_argument("--cal-vocal", type=float, default=1.0)
     ap.add_argument("--stem-comparison", type=Path, default=None,
                     help="per-stem comparison JSON (compare_audio.py --stems). Default: a "
                          "stem_comparison.json next to --comparison when present")
@@ -216,7 +207,6 @@ def main() -> int:
         "lead_lpf": float(args.lead_lpf),
         "hat_gain": args.hat_gain,
         "master_gain": args.master_gain,
-        "cal_vocal": args.cal_vocal,
         "bass_lpf": float(args.bass_lpf),
         "lead_hpf": float(args.lead_hpf),
     }
@@ -269,13 +259,12 @@ def main() -> int:
             sc_stems = {}
     nxt["bass_lpf"], nxt["lead_hpf"] = cur_blpf, cur_lhpf
 
-    # low_mid-per-mid placement ratio, needed by the lead-hpf lever AND the vocal-gain hold below
+    # low_mid-per-mid placement ratio, needed by the lead-hpf lever
     r_lm_mid = share_ratio("low_mid", "mid") if synth else float("nan")
 
     # --- lead high-pass: place the lead's energy in mid instead of low_mid (synth only) -----
     # Measured on VAGABUNDO synth cal1-3: lowering the bass cutoff 603->295 Hz moved low_mid only
-    # 36->33% while it stayed 4x the original's (7.5%) and mid sat at half; in 10-44 s the vocal is
-    # silent and the bass share is low, yet render low_mid is 51-63% => the saw LEAD's 130-500 Hz
+    # 36->33% while it stayed 4x the original's (7.5%) and mid sat at half; the bass share is low, yet render low_mid is 51-63% => the saw LEAD's 130-500 Hz
     # fundamentals (median 330 Hz) carry it. A gain lever cannot move spectral placement, a high-pass
     # can. Driver: low_mid-per-mid share ratio (orig/rend); render too heavy in low_mid -> raise hpf.
     # Bounds from the material/bands: floor = lowest lead fundamental (a cutoff below it filters
@@ -330,7 +319,7 @@ def main() -> int:
     r_high = ratio(["high"])
     # Two evidence levels. (1) The drums STEM's own `high` (stem_comparison.json): isolates the hats, so it
     # may act freely. The auto-calibrate loop does not produce that file, so (2) there the only evidence is
-    # the FULL-MIX `high` (which also contains a lead opened toward 9 kHz and the vocal): a proxy, so it may
+    # the FULL-MIX `high` (which also contains a lead opened toward 9 kHz ): a proxy, so it may
     # shrink the hat layer only on a step where lead-lpf did NOT move (one brightness lever per step -
     # otherwise the two would fight over the same band).
     try:
@@ -377,33 +366,6 @@ def main() -> int:
     else:
         nxt["hat_gain"] = round(cur["hat_gain"], 3)
 
-    # --- vocal: balance the editable vocal voice by measurement ----------------------------
-    # Primary: the vocal stem's own RMS ratio from stem_comparison.json (demucs re-separation
-    # of the render vs the original vocal stem). Fallback: full-mix high_mid band ratio —
-    # a proxy, so dead-banded (+-15%) and damped harder (0.35) with a narrower step clamp.
-    voc_stem = sc_stems.get("vocals")
-    try:
-        o_v = voc_stem["original"]["spectral"]["rms_mean"]
-        r_v = voc_stem["rendered"]["spectral"]["rms_mean"]
-        r_vocal = (o_v + eps) / (r_v + eps)
-        vocal_src = f"vocal stem rms ({sc_path.name})"
-        nxt["cal_vocal"] = round(clamp(cur["cal_vocal"] * damp(r_vocal, hi=1.6), 0.3, 3.0), 3)
-    except (TypeError, KeyError):
-        r_vocal = ratio(["high_mid"])
-        vocal_src = "high_mid band proxy (no stems.vocals in stem_comparison.json)"
-        if r_vocal > 1.15 or r_vocal < 0.85:
-            nxt["cal_vocal"] = round(clamp(cur["cal_vocal"] * damp(r_vocal, strength=0.35, lo=0.85, hi=1.2),
-                                           0.3, 3.0), 3)
-        else:
-            nxt["cal_vocal"] = round(cur["cal_vocal"], 3)
-
-    if synth and r_lm_mid < 1 / SHARE_DEAD_BAND:
-        # (both the stem-RMS and the proxy branch) The render's low_mid-per-mid is too heavy: the sung line
-        # sits a band too low (fundamentals in 250-500 Hz), so MORE vocal gain adds low_mid, not the
-        # missing mid/high_mid (VAGABUNDO synth: cal_vocal 1.0 -> 1.47 while low_mid stayed ~50%).
-        # Gain cannot fix placement: hold or cut, never raise.
-        nxt["cal_vocal"] = round(min(nxt["cal_vocal"], cur["cal_vocal"]), 3)
-
     # --- master gain: gentle nudge toward energy parity, capped to keep the recorder's -----
     # 0 dBFS limiter out of it (clipping destroys the band balance we just fixed). -----------
     rms_ratio = comp.get("raw_rms_ratio", 1.0)
@@ -425,11 +387,10 @@ def main() -> int:
           f"rms_ratio {rms_ratio:.2f}", file=sys.stderr)
     print(f"   centroid orig {cent_o:.0f} vs rend {cent_r:.0f} "
           f"(bright {comp.get('brightness_similarity',0)*100:.0f}%)", file=sys.stderr)
-    print(f"   vocal ratio {r_vocal:.2f} from {vocal_src}", file=sys.stderr)
     print("== knob deltas ==", file=sys.stderr)
     print(f"   low_mid/bass share ratio {r_lm_bass:.2f}, low_mid/mid {r_lm_mid:.2f} "
           f"(orig/rend; nan = lever off)", file=sys.stderr)
-    for k in ["sub_gain", "bass_mult", "cal_lead", "lead_lpf", "hat_gain", "master_gain", "cal_vocal",
+    for k in ["sub_gain", "bass_mult", "cal_lead", "lead_lpf", "hat_gain", "master_gain",
               "bass_lpf", "lead_hpf"]:
         a, b = cur[k], nxt[k]
         arrow = "->" if a != b else "=="
@@ -437,8 +398,7 @@ def main() -> int:
 
     cli = (f"--bass-mult {nxt['bass_mult']} --sub-gain {nxt['sub_gain']} "
            f"--cal-lead {nxt['cal_lead']} --lead-lpf {nxt['lead_lpf']} "
-           f"--hat-gain {nxt['hat_gain']} --master-gain {nxt['master_gain']} "
-           f"--cal-vocal {nxt['cal_vocal']}")
+           f"--hat-gain {nxt['hat_gain']} --master-gain {nxt['master_gain']}")
     if cur_blpf > 0 and nxt["bass_lpf"] != cur_blpf:
         cli += f" --bass-lpf {nxt['bass_lpf']}"
     if cur_lhpf > 0 and nxt["lead_hpf"] != cur_lhpf:

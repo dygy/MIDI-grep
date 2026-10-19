@@ -58,9 +58,9 @@ def extract_info_from_strudel(code):
     info = {}
 
     # Extract BPM
-    bpm_match = re.search(r'BPM:\s*(\d+)', code)
+    bpm_match = re.search(r'BPM:\s*(\d+(?:\.\d+)?)', code)
     if bpm_match:
-        info['bpm'] = int(bpm_match.group(1))
+        info['bpm'] = float(bpm_match.group(1))
 
     # Extract key
     key_match = re.search(r'Key:\s*([A-G][#b]?\s*(?:major|minor)?)', code, re.IGNORECASE)
@@ -398,7 +398,7 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
         ('melodic', 'Melodic', '#3fb950', melodic_data),
         ('drums', 'Drums', '#58a6ff', drums_data),
         ('bass', 'Bass', '#f85149', bass_data),
-        ('vocals', 'Vocals', '#d29922', vocals_data),
+        ('vocals', 'Vocals <small>(not generated)</small>', '#d29922', vocals_data),
     ]
 
     for stem_id, label, color, data in track_configs:
@@ -407,7 +407,7 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
                 <div class="daw-track" data-stem="{stem_id}">
                     <div class="track-header" style="--track-color: {color};">
                         <div class="track-name">{label}</div>
-                        <button class="track-mute-btn" onclick="toggleStemMute('{stem_id}')" title="Mute/Unmute">M</button>
+                        <button class="track-mute-btn{' muted' if stem_id == 'vocals' else ''}" onclick="toggleStemMute('{stem_id}')" title="{'Not generated and not part of the scored target (the instrumental) - unmute to listen' if stem_id == 'vocals' else 'Mute/Unmute'}">M</button>
                     </div>
                     <div class="track-waveform" onclick="seekAudio(event)">
                         <canvas class="track-canvas" data-stem="{stem_id}" data-color="{color}"></canvas>
@@ -1507,14 +1507,15 @@ def generate_report(cache_dir, version_dir, output_path=None, iterations_file=No
 
     # Format BPM (round to integer) - use strudel_info as fallback
     bpm_raw = metadata.get('bpm') or strudel_info.get('bpm', 0)
-    bpm = round(bpm_raw) if isinstance(bpm_raw, (int, float)) and bpm_raw > 0 else 'N/A'
+    # keep the refined tempo's precision (129.989), not the rounded grid value (130)
+    bpm = f"{round(bpm_raw, 3):g}" if isinstance(bpm_raw, (int, float)) and bpm_raw > 0 else 'N/A'
 
     key_raw = metadata.get('key') or strudel_info.get('key', 'N/A') or 'N/A'
     key = html.escape(str(key_raw))
-    style_raw = metadata.get('style') or strudel_info.get('style', 'N/A') or 'N/A'
-    # Use genre when style is "auto"
+    style_raw = metadata.get('style') or strudel_info.get('style') or 'N/A'
+    # Use genre when style is "auto" or absent (editable pieces have no separate style concept)
     genre_raw = metadata.get('genre') or strudel_info.get('genre', '') or ''
-    if style_raw.lower() == 'auto' and genre_raw:
+    if str(style_raw).lower() in ('auto', 'n/a') and genre_raw:
         style = html.escape(str(genre_raw).replace('_', ' ').title())
     else:
         style = html.escape(str(style_raw))
@@ -2369,7 +2370,7 @@ def generate_report(cache_dir, version_dir, output_path=None, iterations_file=No
             melodic: {{ muted: false, solo: false }},
             drums: {{ muted: false, solo: false }},
             bass: {{ muted: false, solo: false }},
-            vocals: {{ muted: false, solo: false }},
+            vocals: {{ muted: true, solo: false }},   // not generated, not in the scored instrumental target: listen-only
             'render-melodic': {{ muted: false, solo: false }},
             'render-drums': {{ muted: false, solo: false }},
             'render-bass': {{ muted: false, solo: false }}

@@ -44,6 +44,13 @@ def main():
 
         bpm = correct_octave(bpm)
 
+        # beat_track's value sits on the tempogram lag grid (60*sr/hop/k, ~6 BPM apart near 130):
+        # refine it to the phase-coherence peak within one bin (tempo_refine.py).
+        from tempo_refine import refine_bpm
+        refined = refine_bpm(y, sr, bpm)
+        bpm_coarse, bpm_method, bpm_refine_confidence = bpm, refined["method"], refined["confidence"]
+        bpm = refined["bpm"]
+
         # Estimate BPM confidence based on beat strength
         onset_env = librosa.onset.onset_strength(y=y, sr=sr)
         pulse = librosa.beat.plp(onset_envelope=onset_env, sr=sr)
@@ -103,6 +110,9 @@ def main():
         result = {
             "bpm": bpm,
             "bpm_confidence": bpm_confidence,
+            "bpm_coarse": bpm_coarse,
+            "bpm_method": bpm_method,
+            "bpm_refine_confidence": bpm_refine_confidence,
             "bpm_candidates": bpm_candidates[:3],
             "key": detected_key,
             "key_confidence": key_confidence,

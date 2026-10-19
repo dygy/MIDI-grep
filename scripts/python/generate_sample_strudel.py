@@ -40,16 +40,15 @@ def build_sample_map(sm: dict, mode: str) -> dict:
     ``build_sample_pack.py`` wrote. The base URL is applied by Strudel at load time.
 
     The result is a SUPERSET of the pack manifest: every key of ``strudel.json`` is
-    carried through (spec 003 Slice 3 found the rewrite dropping ``<prefix>_vocal`` and
-    the ``vox<N>`` chops, which silenced ``generate_dynamic_strudel.py``'s editable vocal
-    voice), so one hosted ``samples.json`` serves every generator.
+    carried through, so one hosted ``samples.json`` serves every generator. Vocal entries (a singer is never
+    generated) are never carried: ``vocals*`` loops, ``*_vocal`` maps, ``vox<N>`` chops.
     """
     out: dict[str, object] = {}
-    handled = {"drumsloop", "bassloop", "melodicloop", "vocalsloop", "bd", "sd", "hh", "oh",
+    handled = {"drumsloop", "bassloop", "melodicloop", "bd", "sd", "hh", "oh",
                "trackbass", "tracklead"}
 
     # Loops are arrays already — keep the ones that exist.
-    for name in ("drumsloop", "bassloop", "melodicloop", "vocalsloop"):
+    for name in ("drumsloop", "bassloop", "melodicloop"):
         if isinstance(sm.get(name), list) and sm[name]:
             out[name] = sm[name]
 
@@ -65,11 +64,12 @@ def build_sample_map(sm: dict, mode: str) -> dict:
             if rep:
                 out[voice] = [rep]
 
-    # Everything else the builder wrote — the pitched vocal map (``<prefix>_vocal``), the
-    # vocal chops (``vox<N>``) and any future section — passes through in a samples()-legal
+    # Everything else the builder wrote (any future section) passes through in a samples()-legal
     # shape: dict (note-keyed map) and non-empty lists verbatim, a bare path as a 1-element array.
     for name, value in sm.items():
         if name in handled or name.startswith("_") or name in out:
+            continue
+        if name.endswith("_vocal") or name.startswith("vocals") or (name.startswith("vox") and name[3:].isdigit()):
             continue
         if isinstance(value, dict) and value:
             out[name] = value

@@ -58,7 +58,7 @@ def kit(tmp_path: Path) -> Path:
 
 def test_legacy_model_uses_pitch_class_medians_and_sharp_keys(legacy_model: Path, kit: Path, tmp_path: Path) -> None:
     out = tmp_path / "out"
-    build_instruments([legacy_model], kit, out, BASE)
+    build_instruments([legacy_model], kit, out, BASE, verify=False)
     doc = json.loads((out / "samples.json").read_text())
     assert doc["demo_bass"] == {
         "g1": "demo_bass/g1.wav",
@@ -70,20 +70,20 @@ def test_legacy_model_uses_pitch_class_medians_and_sharp_keys(legacy_model: Path
 
 def test_pitched_map_model_keys_come_from_the_map(mapped_model: Path, kit: Path, tmp_path: Path) -> None:
     out = tmp_path / "out"
-    build_instruments([mapped_model], kit, out, BASE)
+    build_instruments([mapped_model], kit, out, BASE, verify=False)
     doc = json.loads((out / "samples.json").read_text())
     assert doc["demo_lead"] == {"e3": "demo_lead/e3.wav", "f#3": "demo_lead/f_sharp_3.wav"}
 
 
 def test_base_is_absolute_with_trailing_slash(legacy_model: Path, kit: Path, tmp_path: Path) -> None:
     out = tmp_path / "out"
-    build_instruments([legacy_model], kit, out, "https://example.test/x/instruments")
+    build_instruments([legacy_model], kit, out, "https://example.test/x/instruments", verify=False)
     assert json.loads((out / "samples.json").read_text())["_base"] == BASE
 
 
 def test_kit_entries_are_single_element_arrays(legacy_model: Path, kit: Path, tmp_path: Path) -> None:
     out = tmp_path / "out"
-    build_instruments([legacy_model], kit, out, BASE)
+    build_instruments([legacy_model], kit, out, BASE, verify=False)
     doc = json.loads((out / "samples.json").read_text())
     for s in KIT_SOUNDS:
         assert doc[s] == [f"kit/{s}.wav"]
@@ -92,7 +92,7 @@ def test_kit_entries_are_single_element_arrays(legacy_model: Path, kit: Path, tm
 
 def test_every_manifest_path_exists_under_out(legacy_model: Path, mapped_model: Path, kit: Path, tmp_path: Path) -> None:
     out = tmp_path / "out"
-    build_instruments([legacy_model, mapped_model], kit, out, BASE)
+    build_instruments([legacy_model, mapped_model], kit, out, BASE, verify=False)
     doc = json.loads((out / "samples.json").read_text())
     for key, val in doc.items():
         if key == "_base":
@@ -105,18 +105,18 @@ def test_missing_kit_one_shot_is_a_clear_error_and_writes_nothing(legacy_model: 
     (kit / "oh.wav").unlink()
     out = tmp_path / "out"
     with pytest.raises(FileNotFoundError, match=r"missing one-shot.*oh\.wav"):
-        build_instruments([legacy_model], kit, out, BASE)
+        build_instruments([legacy_model], kit, out, BASE, verify=False)
     assert not out.exists()
 
 
 def test_relative_base_url_rejected(legacy_model: Path, kit: Path, tmp_path: Path) -> None:
     with pytest.raises(ValueError, match="absolute"):
-        build_instruments([legacy_model], kit, tmp_path / "out", "instruments/")
+        build_instruments([legacy_model], kit, tmp_path / "out", "instruments/", verify=False)
 
 
 def test_cli_missing_kit_exits_1(legacy_model: Path, kit: Path, tmp_path: Path, capsys: pytest.CaptureFixture[str]) -> None:
     (kit / "bd.wav").unlink()
-    rc = main(["--models", str(legacy_model), "--kit", str(kit), "--out", str(tmp_path / "o"), "--base-url", BASE])
+    rc = main(["--models", str(legacy_model), "--kit", str(kit), "--out", str(tmp_path / "o"), "--base-url", BASE, "--no-verify"])
     assert rc == 1
     assert "bd.wav" in capsys.readouterr().err
 
@@ -137,3 +137,41 @@ def test_legacy_median_snaps_to_the_files_pitch_class(tmp_path):
     notes = resolve_notes(model, meta)
     assert set(notes) == {"c2", "f#2"} or set(notes) == {"c3", "f#2"}, notes   # c stays a C; f# stays an F#
     assert notes[[n for n in notes if n.startswith("c")][0]].name == "c.wav"
+
+
+# ---- spec 003 §2.3b: every sample is re-measured before it enters the manifest ---------------------------
+
+def _wav_model(tmp_path: Path, labelled: dict[str, int | None]) -> Path:
+    """Model whose sample labelled `note` is a real tone at MIDI `actual` (None = noise)."""
+    import numpy as np
+    import soundfile as sf
+    sr, model = 44100, tmp_path / "models" / "tone_bass"
+    (model / "pitched").mkdir(parents=True)
+    pmap = {}
+    for note, actual in labelled.items():
+        t = np.arange(int(0.4 * sr)) / sr
+        if actual is None:
+            y = np.random.default_rng(0).standard_normal(len(t)) * 0.3
+        else:
+            f = 440 * 2 ** ((actual - 69) / 12)
+            y = sum(np.sin(2 * np.pi * f * h * t) / h for h in (1, 2, 3)) * 0.3
+        fn = note.replace("#", "_sharp_") + ".wav"
+        sf.write(str(model / "pitched" / fn), y.astype("float32"), sr)
+        pmap[note] = f"pitched/{fn}"
+    (model / "metadata.json").write_text(json.dumps({"name": "tone_bass", "pitched_map": pmap, "grains": []}))
+    return model
+
+
+def test_verification_keeps_relabels_and_drops_mislabelled_samples(tmp_path: Path, kit: Path) -> None:
+    pytest.importorskip("soundfile"); pytest.importorskip("librosa")
+    # a2 is right; "g2" is really D3 (relabel: d3 uncovered); "a#2" is really A2 (drop: a2 already covered);
+    # "f2" is noise (drop: unvoiced)
+    model = _wav_model(tmp_path, {"a2": 45, "g2": 50, "a#2": 45, "f2": None})
+    out = tmp_path / "out"
+    manifest = build_instruments([model], kit, out, BASE)
+    assert sorted(manifest.instruments["tone_bass"]) == ["a2", "d3"]
+    rep = json.loads((out / "verification.json").read_text())
+    acts = {r["label"]: r["action"] for r in rep["samples"]["tone_bass"]}
+    assert acts == {"a2": "kept", "g2": "relabelled", "a#2": "dropped", "f2": "dropped"}
+    assert rep["summary"]["tone_bass"] == {"kept": 1, "relabelled": 1, "dropped": 2}
+    assert not (out / "tone_bass" / "g2.wav").exists() and (out / "tone_bass" / "d3.wav").is_file()

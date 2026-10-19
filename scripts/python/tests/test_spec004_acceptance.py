@@ -5,9 +5,11 @@
 
 The per-slice suites (test_build_instruments, test_pipeline_helpers, test_similarity_gate,
 internal/audio/youtube_test.go, cmd/midi-grep/main_test.go) prove each component. This file proves the
-feature's contract on whole deliverables: the cached v002 / v007 runs of "VAGABUNDO NAO NAMORA" (v003 was the first,
-shortfall synth run; fix #11 re-calibrated synth mode as v007), the
-reference dataset, the floors, the docs and the general (not per-track) shape of the defect fixes.
+feature's contract on whole deliverables: the CURRENT cached runs (2026-10-19 re-baseline: refined tempo,
+note-aligned pitch-verified instruments, offline renderer, no vocal voice, scored against instrumental.wav) -
+"VAGABUNDO NAO NAMORA" v013 (sample-instrument) / v014 (synth) and Regime CLT v031 / v032 - the reference dataset,
+the floors, the docs and the general (not per-track) shape of the defect fixes. Older runs (v002/v004/v007 and the
+BlackHole-era Regime v026/v027) are history; only the fix #10 history check still reads v002/v004 when cached.
 
 E2E renders (BlackHole) are out of CI scope: cases that need the cached track SKIP when
 `.cache/stems/VAGABUNDO NÃO NAMORA/` is absent. Static/negative cases run everywhere. Nothing here
@@ -15,7 +17,7 @@ touches the network, Demucs, Ollama, yt-dlp or the recorder.
 
 Criterion -> test map
   2.1 two editable pieces       test_21_sample_instrument_piece_has_separate_editable_voice_blocks
-                                test_21_vocal_is_notes_on_the_slug_vocal_instrument_not_a_stem_replay
+                                test_21_no_vocal_voice_is_generated_in_either_piece
                                 test_21_vocal_replay_and_loop_pieces_are_not_editable          (negative)
                                 test_21_synth_piece_uses_only_builtin_sounds_and_no_song_audio
                                 test_21_a_sampled_piece_is_not_a_synth_piece                   (negative)
@@ -104,7 +106,11 @@ THRESHOLDS = REPO / "eval" / "thresholds.yaml"
 STAMP_KEYS = {"editability", "generation_mode", "editability_violations", "editable_voice_count", "texture_voice_count"}
 NOTE_RE = re.compile(r"^[a-g][#s]?\d$")   # Strudel accepts both c#3 and cs3 spellings
 
-needs_track = pytest.mark.skipif(not (TRACK / "v002").is_dir(), reason=f"cached track {TRACK_KEY!r} absent")
+# the current runs under test (dataset + thresholds point at them; see eval/datasets/reference_tracks.yaml)
+SAMPLE_RUN, SYNTH_RUN = "v013", "v014"
+REGIME_RUNS = ("v031", "v032")
+
+needs_track = pytest.mark.skipif(not (TRACK / SAMPLE_RUN).is_dir(), reason=f"cached track {TRACK_KEY!r} absent")
 
 
 def _read(path: Path) -> str:
@@ -116,11 +122,11 @@ def _json(path: Path) -> dict:
 
 
 def _sample_piece() -> str:
-    return _read(TRACK / "v002" / "output.strudel")
+    return _read(TRACK / SAMPLE_RUN / "output.strudel")
 
 
 def _synth_piece() -> str:
-    return _read(TRACK / "v007" / "output.strudel")
+    return _read(TRACK / SYNTH_RUN / "output.strudel")
 
 
 def _comparison(version: str) -> dict:
@@ -148,23 +154,22 @@ def _playing_sounds(code: str) -> list[str]:
 @needs_track
 def test_21_sample_instrument_piece_has_separate_editable_voice_blocks():
     code = _sample_piece()
-    # bass / lead / vocal are separate, named bar arrays (separate editable blocks of notes) ...
-    assert {"bass", "lead", "vocal"} <= _let_blocks(code)
+    # bass / lead are separate, named bar arrays (separate editable blocks of notes); vocals are never generated
+    assert {"bass", "lead"} <= _let_blocks(code) and "vocal" not in _let_blocks(code)
     res = check_editability(code)
     labels = {v.label for v in res.editable_voices}
     # ... and the drums are their own editable pattern voices (bd / sd / hh)
-    assert {"bass", "lead", "vocal"} <= labels
+    assert {"bass", "lead"} <= labels and "vocal" not in labels
     assert {"bd", "sd", "hh"} <= labels
 
 
 @needs_track
-def test_21_vocal_is_notes_on_the_slug_vocal_instrument_not_a_stem_replay():
-    code = _sample_piece()
-    body = _code_lines(code)
-    assert re.search(rf"note\(cat\(\.\.\.vocal\)\)\.s\(\"{SOUND}_vocal\"\)", body)
-    assert not re.search(r"vocalsfull|originalfull|origseg|loopAt\(|\.slice\(", body)
-    voice = next(v for v in check_editability(code).editable_voices if v.label == "vocal")
-    assert voice.sounds == [f"{SOUND}_vocal"] and voice.arrays == ["vocal"]
+def test_21_no_vocal_voice_is_generated_in_either_piece():
+    """Product decision: a vocal is a person singing and is never part of the generated music."""
+    for code in (_sample_piece(), _synth_piece()):
+        body = _code_lines(code)
+        assert not re.search(r"\bvocal\b|_vocal\b|\bvox\d|vocalsfull", body), "a vocal voice was generated"
+        assert {v.label for v in check_editability(code).editable_voices} >= {"bass", "lead"}
 
 
 def test_21_vocal_replay_and_loop_pieces_are_not_editable():
@@ -173,9 +178,9 @@ def test_21_vocal_replay_and_loop_pieces_are_not_editable():
         res = check_editability(_read(FIX / name))
         assert not res.passed, f"{name} must not pass the editability check"
         assert to_json_fields(res)["editability"] == "fail"
-    # and a tampered copy of the real piece (vocal swapped for a stem replay) fails
-    if (TRACK / "v002").is_dir():
-        tampered = re.sub(rf'\.s\("{SOUND}_vocal"\)', '.s("vocalsfull")', _sample_piece())
+    # and a tampered copy of the real piece (a vocal stem replay appended) fails
+    if (TRACK / SAMPLE_RUN).is_dir():
+        tampered = _sample_piece() + '\n$: s("vocalsfull").slice(16, run(16)).slow(16).clip(1)\n'
         assert not check_editability(tampered).passed
 
 
@@ -206,7 +211,7 @@ def test_21_a_sampled_piece_is_not_a_synth_piece():
 
 
 @needs_track
-@pytest.mark.parametrize("version,mode", [("v002", "sample-instrument"), ("v007", "synth")])
+@pytest.mark.parametrize("version,mode", [(SAMPLE_RUN, "sample-instrument"), (SYNTH_RUN, "synth")])
 def test_21_both_pieces_pass_the_editability_check(version, mode):
     code = _read(TRACK / version / "output.strudel")
     res = check_editability(code)
@@ -229,7 +234,7 @@ def _setcps_error(code: str, bpm: float) -> str | None:
 
 
 @needs_track
-@pytest.mark.parametrize("version", ["v002", "v007"])
+@pytest.mark.parametrize("version", [SAMPLE_RUN, SYNTH_RUN])
 def test_21_tempo_is_set_from_the_song_bpm(version):
     bpm = _json(TRACK / "metadata.json")["bpm"]
     assert _setcps_error(_read(TRACK / version / "output.strudel"), bpm) is None
@@ -266,7 +271,7 @@ def _stamp_problems(doc: dict, expected_mode: str) -> list[str]:
 
 
 @needs_track
-@pytest.mark.parametrize("version,mode", [("v002", "sample-instrument"), ("v007", "synth")])
+@pytest.mark.parametrize("version,mode", [(SAMPLE_RUN, "sample-instrument"), (SYNTH_RUN, "synth")])
 def test_22_comparisons_state_mode_editability_and_both_similarities(version, mode):
     doc = _comparison(version)
     assert _stamp_problems(doc, mode) == []
@@ -292,7 +297,7 @@ def _tempo_error_fraction(comp: dict, bpm: float) -> float:
 
 
 @needs_track
-@pytest.mark.parametrize("version", ["v002", "v007"])
+@pytest.mark.parametrize("version", [SAMPLE_RUN, SYNTH_RUN])
 def test_22_tempo_is_within_half_a_percent_of_the_song(version):
     comp = _comparison(version)["comparison"]
     bpm = _json(TRACK / "metadata.json")["bpm"]
@@ -308,7 +313,7 @@ def test_22_a_sped_up_recording_is_detected():
 
 
 @needs_track
-@pytest.mark.parametrize("version", ["v002", "v007"])
+@pytest.mark.parametrize("version", [SAMPLE_RUN, SYNTH_RUN])
 def test_22_promoted_run_metadata_matches_its_comparison(version):
     meta, doc = _json(TRACK / version / "metadata.json"), _comparison(version)
     comp = doc["comparison"]
@@ -317,7 +322,7 @@ def test_22_promoted_run_metadata_matches_its_comparison(version):
     assert meta["similarity_overall"] == pytest.approx(comp["overall_similarity"], abs=5e-4)
     assert meta["similarity_section_aware"] == pytest.approx(comp["section_aware_similarity"], abs=5e-4)
     assert meta["tempo_similarity"] == pytest.approx(comp["tempo_similarity"], abs=5e-4)
-    assert "RAW capture" in meta["render"] and "--strudel" in meta["compare"]
+    assert "render-strudel-offline" in meta["render"] and "--strudel" in meta["compare"]   # offline renderer is the default
 
 
 # compare_audio.py end to end on tiny synthetic audio: the real CLI, the real detector.
@@ -389,9 +394,8 @@ def _dataset_problems(entries: list[dict], runs: dict[str, str]) -> list[str]:
     return problems
 
 
-# v002 was the sample-instrument run spec 004 recorded (shortfall 0.9282 / 0.8721); fix #10 re-rendered the same
-# knobs with the measured per-bar correction as v004 (0.9320 / 0.9216, PASS), which the dataset now points at.
-RUNS = {"sample-instrument": "v004", "synth": "v007"}
+# The dataset points at the 2026-10-19 re-baseline runs (history: v002 shortfall -> v004 via fix #10; synth v007).
+RUNS = {"sample-instrument": SAMPLE_RUN, "synth": SYNTH_RUN}
 
 
 def test_23_dataset_has_both_modes_pointing_at_the_recorded_runs():
@@ -402,6 +406,11 @@ def test_23_dataset_has_both_modes_pointing_at_the_recorded_runs():
         path = STEMS / e["cache_key"] / e["version"] / "comparison.json"
         if path.exists():
             assert _json(path)["generation_mode"] == e["mode"]
+    # ... and every run the dataset points at is a measured track of its mode's floor in thresholds.yaml
+    th = yaml.safe_load(_read(THRESHOLDS))
+    for e in entries:
+        tracks = th["modes"][e["mode"].replace("-", "_")]["measured"][e["genre"]]["tracks"]
+        assert f"{TRACK_KEY}/{e['version']}" in [t["run"] for t in tracks], e
 
 
 def test_23_dataset_entry_missing_a_mode_or_run_is_detected():
@@ -412,12 +421,12 @@ def test_23_dataset_entry_missing_a_mode_or_run_is_detected():
     assert _dataset_problems([], RUNS)
 
 
-# Mode floors after the 2026-10-18 rescale (overall = 0.5 static + 0.5 temporal; each = round(min over the mode's
-# reference tracks - 0.02, 2)); "never lowered" == these exact values hold. They replaced the static-only
-# 0.88/0.90 (sample-instrument) and 0.77/0.81 (synth), recorded in thresholds.yaml.
+# Mode floors after the 2026-10-19 re-baseline (overall = 0.5 static + 0.5 temporal, vs instrumental.wav; each =
+# round(min over the mode's reference tracks - 0.02, 2)); "never lowered" == these exact values hold. History:
+# 0.64/0.60 and 0.54/0.53 (2026-10-18, BlackHole, full-mix reference), 0.88/0.90 and 0.77/0.81 (static-only scale).
 REGIME_FLOORS = {
-    "sample_instrument": {"genres": 0.64, "section_aware": 0.60},
-    "synth": {"genres": 0.54, "section_aware": 0.53},
+    "sample_instrument": {"genres": 0.70, "section_aware": 0.69},
+    "synth": {"genres": 0.65, "section_aware": 0.63},
 }
 OLD_STATIC_SA_FLOOR = 0.90      # pre-rescale sample-instrument section-aware floor (static scale), for fix #10's history
 
@@ -464,9 +473,9 @@ def _shortfall_problems(entry: dict, comparison: dict, th: dict) -> list[str]:
 
 
 @needs_track
-# v003 (the first synth run, 0.7209 / 0.7520) stays on record in the dataset comment, thresholds note and CLAUDE.md;
-# the dataset points synth at v007 (fix #11), so only the current runs are asserted here.
-@pytest.mark.parametrize("version,expected", [("v004", "pass"), ("v007", "pass")])
+# Older runs (v003 synth shortfall, v004/v007 BlackHole) stay on record as history in the dataset comments, the
+# thresholds notes and CLAUDE.md; only the current runs are asserted here.
+@pytest.mark.parametrize("version,expected", [(SAMPLE_RUN, "pass"), (SYNTH_RUN, "pass")])
 def test_23_shortfall_records_equal_the_run_and_floors_are_untouched(version, expected):
     th = yaml.safe_load(_read(THRESHOLDS))
     assert _floor_problems(th) == []
@@ -510,17 +519,20 @@ def test_23_a_tampered_record_or_lowered_floor_is_detected():
     notmin["modes"]["synth"]["measured"]["brazilian_funk"]["overall"] = 0.99   # a floor source that is not the lowest track
     assert any("not the lowest-scoring" in p for p in _floor_problems(notmin))
 
-    # an overall-ok / section-aware-below-floor run on the current (rescaled) floors: 0.60 section floor, 0.55 measured
-    comp = {"comparison": {"overall_similarity": 0.70, "section_aware_similarity": 0.55, "worst_band_diff": 5.0}}  # percent
-    ok = {"mode": "sample-instrument", "expected": "shortfall", "measured": {"overall": 0.70, "section_aware": 0.55}}
+    # an overall-ok / section-aware-below-floor run on the current floors (0.70 overall, 0.69 section-aware)
+    comp = {"comparison": {"overall_similarity": 0.75, "section_aware_similarity": 0.55, "worst_band_diff": 5.0}}  # percent
+    ok = {"mode": "sample-instrument", "expected": "shortfall", "measured": {"overall": 0.75, "section_aware": 0.55}}
     assert _shortfall_problems(ok, comp, th) == []
     assert "recorded overall != run" in _shortfall_problems({**ok, "measured": {"overall": 0.95}}, comp, th)
     assert "recorded as shortfall but clears every floor" in _shortfall_problems(
         ok, {"comparison": {**comp["comparison"], "section_aware_similarity": 0.95}}, th)
     assert "below a floor but not recorded as a shortfall" in _shortfall_problems({**ok, "expected": "pass"}, comp, th)
-    good = {"comparison": {"overall_similarity": 0.6626, "section_aware_similarity": 0.6242, "worst_band_diff": 2.54}}
+    floor = th["modes"]["sample_instrument"]["genres"]["brazilian_funk"]
+    sa_floor = th["modes"]["sample_instrument"]["section_aware"]["brazilian_funk"]
+    over, sa = round(floor + 0.02, 4), round(sa_floor + 0.02, 4)       # a run that clears both floors
+    good = {"comparison": {"overall_similarity": over, "section_aware_similarity": sa, "worst_band_diff": 2.54}}
     assert _shortfall_problems({"mode": "sample-instrument", "expected": "pass",
-                                "measured": {"overall": 0.6626, "section_aware": 0.6242}}, good, th) == []
+                                "measured": {"overall": over, "section_aware": sa}}, good, th) == []
 
 
 def test_23_floors_are_derived_from_the_measured_run_minus_margin():
@@ -586,7 +598,9 @@ def test_24_manifests_are_host_resolved_and_shaped_for_strudel_samples():
     assert inst["_base"] == f"{R2_BASE}instruments/"
     assert all(len(inst[k]) == 1 for k in ("bd", "sd", "hh", "oh")), "kit entries are single-element arrays"
     main = _json(pack / "samples.json")
-    assert _manifest_problems(main, expect_notes={f"{SOUND}_vocal"}, expect_arrays={"vox0"}) == []
+    assert _manifest_problems(main, expect_notes=set(), expect_arrays=set()) == []
+    assert not [k for k in main if k.endswith("_vocal") or k.startswith("vox") or k.startswith("vocals")], \
+        "the pack manifest carries no vocal entries (vocals are never generated)"
     assert main["_base"] == R2_BASE
 
 
@@ -621,7 +635,7 @@ def test_24_build_instruments_emits_a_host_resolved_manifest(tmp_path):
     for s in KIT_SOUNDS:
         (kit / f"{s}.wav").write_bytes(b"k")
     out = tmp_path / "out"
-    build_instruments([model], kit, out, "https://h.test/midi-grep/demo/instruments")   # no trailing slash on input
+    build_instruments([model], kit, out, "https://h.test/midi-grep/demo/instruments", verify=False)   # no trailing slash on input
     doc = json.loads((out / "samples.json").read_text())
     assert _manifest_problems(doc, expect_notes={"demo_bass"}, expect_arrays=set(KIT_SOUNDS)) == []
     assert doc["_base"] == "https://h.test/midi-grep/demo/instruments/"
@@ -647,7 +661,8 @@ def test_24_every_sound_the_piece_plays_resolves_in_a_hosted_manifest():
     assert _unresolved_sounds(_sample_piece(), manifests, set(VALID_SOUNDS)) == []
     # the four required instrument families are all hosted
     hosted = {k for m in manifests for k in m}
-    assert {f"{SOUND}_bass", f"{SOUND}_lead", f"{SOUND}_vocal", "bd", "sd", "hh"} <= hosted
+    assert {f"{SOUND}_bass", f"{SOUND}_lead", "bd", "sd", "hh"} <= hosted
+    assert not [k for k in hosted if k.endswith("_vocal")]
 
 
 @needs_track
@@ -655,8 +670,8 @@ def test_24_a_sound_missing_from_the_manifests_is_detected():
     from strudel_validation import VALID_SOUNDS
     pack = TRACK / "sample_pack"
     manifests = [_json(pack / "instruments" / "samples.json"), _json(pack / "samples.json")]
-    broken = [{k: v for k, v in m.items() if k != f"{SOUND}_vocal"} for m in manifests]
-    assert f"{SOUND}_vocal" in _unresolved_sounds(_sample_piece(), broken, set(VALID_SOUNDS))
+    broken = [{k: v for k, v in m.items() if k != f"{SOUND}_lead"} for m in manifests]
+    assert f"{SOUND}_lead" in _unresolved_sounds(_sample_piece(), broken, set(VALID_SOUNDS))
     ghost = _sample_piece().replace(f'.s("{SOUND}_lead")', '.s("ghost_lead")')
     assert "ghost_lead" in _unresolved_sounds(ghost, manifests, set(VALID_SOUNDS))
 
@@ -667,8 +682,8 @@ def _sample_urls(code: str) -> list[str]:
 
 def _url_problems(urls: list[str], slug: str, host: str) -> list[str]:
     problems = []
-    if len(urls) < 2:
-        problems.append("expected an instruments manifest and a pack manifest")
+    if not urls:     # the instruments manifest is the only one a vocal-free piece loads (the pack manifest only served vocals)
+        problems.append("expected the instruments manifest to be loaded")
     for u in urls:
         p = urlparse(u)
         if p.scheme != "https" or f"{p.scheme}://{p.netloc}" != host:
@@ -682,9 +697,9 @@ def _url_problems(urls: list[str], slug: str, host: str) -> list[str]:
 def test_24_piece_loads_the_public_r2_urls_under_the_tracks_own_folder():
     urls = _sample_urls(_sample_piece())
     assert _url_problems(urls, SLUG, R2_HOST) == []
-    assert set(urls) == {f"{R2_BASE}instruments/samples.json", f"{R2_BASE}samples.json"}
+    assert set(urls) == {f"{R2_BASE}instruments/samples.json"}
     # the first track lives next to it on the same host (siblings under midi-grep/)
-    regime = STEMS / REGIME_KEY / "v026" / "output.strudel"
+    regime = STEMS / REGIME_KEY / REGIME_RUNS[0] / "output.strudel"
     if regime.exists():
         regime_urls = _sample_urls(_read(regime))
         assert regime_urls and {urlparse(u).netloc for u in regime_urls} == {urlparse(u).netloc for u in urls}
@@ -698,7 +713,7 @@ def test_24_local_or_foreign_urls_are_detected():
     assert _url_problems(["http://localhost:5555/vagabundo-nao-namora/samples.json", ok[1]], SLUG, R2_HOST)
     assert _url_problems([ok[0], f"{R2_HOST}/midi-grep/regime-clt/samples.json"], SLUG, R2_HOST)
     assert _url_problems([ok[0], "https://evil.test/midi-grep/vagabundo-nao-namora/samples.json"], SLUG, R2_HOST)
-    assert _url_problems(ok[:1], SLUG, R2_HOST)       # only one manifest loaded
+    assert _url_problems([], SLUG, R2_HOST)           # no manifest loaded at all
 
 
 # =========================================================================================================
@@ -762,12 +777,13 @@ def test_25_pipeline_code_has_no_per_track_constants(path):
 
 def test_25_a_per_track_constant_would_be_caught():
     sh = PIPELINE_CODE[0]
-    assert _literal_hits(sh, "BPM=129.2\n")
+    live = FALLBACK_META["bpm"] if not (TRACK / "metadata.json").exists() else _json(TRACK / "metadata.json")["bpm"]
+    assert _literal_hits(sh, f"BPM={live}\n")
     assert _literal_hits(sh, 'KEY="C# minor"\n')
     assert _literal_hits(sh, 'SLUG=vagabundo-nao-namora\n')
     assert _literal_hits(sh, "URL=https://youtu.be/SKjOR5EOR8Y\n")
     py = PIPELINE_CODE[1]
-    assert _literal_hits(py, "BPM = 129\n")
+    assert _literal_hits(py, f"BPM = {round(live)}\n")
     assert _literal_hits(py, 'NAME = "VAGABUNDO NÃO NAMORA"\n')
     # prose is not code: comments and docstrings do not count
     assert _literal_hits(py, '"""e.g. VAGABUNDO NÃO NAMORA at 129 BPM"""\nx = 1  # 129\n') == []
@@ -866,21 +882,20 @@ def test_25_cached_track_metadata_carries_provenance():
     assert meta["genre_override"] is True and meta["genre"] != meta["style_heuristic"] or "genre_override_note" in meta
     assert "genre_override_note" in meta and str(meta["genre_detected"]) in meta["genre_override_note"]
     # the bpm in every piece's cps is this analysed bpm (stage 1b feeds the driver)
-    for version in ("v002", "v003"):
+    for version in (SAMPLE_RUN, SYNTH_RUN):
         assert _setcps_error(_read(TRACK / version / "output.strudel"), meta["bpm"]) is None
 
 
-# v027 (synth) clears its overall / section floors but FAILS the chance margin (-0.018 < 0.02): a different song
-# scores higher against the Regime original than the render does. It is a recorded shortfall.
-@pytest.mark.parametrize("version,floor_ok", [("v026", True), ("v027", False)])
-def test_25_regime_clt_references_still_clear_their_floors(version, floor_ok):
+# The Regime CLT references (2026-10-19 re-baseline): v031 sample-instrument, v032 synth - both pass the mode floors AND
+# the chance margin. (v027, the BlackHole-era synth run that failed the margin, is history only.)
+@pytest.mark.parametrize("version", REGIME_RUNS)
+def test_25_regime_clt_references_still_clear_their_floors(version):
     path = STEMS / REGIME_KEY / version / "comparison.json"
     if not path.exists():
         pytest.skip(f"{REGIME_KEY}/{version} cache absent")
     res = evaluate_comparison(path, genre="brazilian_funk", thresholds=load_thresholds())
-    assert res.passed is floor_ok, res.message
-    if not floor_ok:
-        assert res.chance_passed is False and "margin over chance" in res.message
+    assert res.passed, res.message
+    assert res.chance_passed is True
     # negative: the same record with its section-aware score knocked below the floor must fail
     doc = _json(path)
     doc["comparison"]["section_aware_similarity"] = 0.10

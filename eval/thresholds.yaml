@@ -112,50 +112,53 @@ modes:
   #   compare_audio.py <track>/original.wav <vNNN>/render.wav -d 135 -j --strudel <vNNN>/output.strudel \
   #       --control <other track>/original.wav
   # (`static` reproduces the old score exactly; `margin_over_chance` = overall - the control song's overall).
+  # 2026-10-19 RE-BASELINE (fix instruments-short-grains-wrong-labels): refined tempo, note-aligned pitch-verified
+  # instruments, OFFLINE renderer (BlackHole was ~2.5 semitones flat), no vocal voice, every score against
+  # <track>/instrumental.wav (bass+drums+melodic) with the other track's instrumental.wav as --control.
+  # Previous (2026-10-18, BlackHole, full-mix reference): sample_instrument 0.64/0.60 (VAGABUNDO v004 0.6626/0.6223),
+  # synth 0.54/0.53 (Regime v027 0.5589/0.5525, margin -0.0182 FAIL).
   sample_instrument:
     genres:
-      brazilian_funk: 0.64
+      brazilian_funk: 0.70
     section_aware:
-      brazilian_funk: 0.60
+      brazilian_funk: 0.69
     measured:
       brazilian_funk:
-        overall: 0.6626            # binding track: VAGABUNDO v004 (Regime v026: 0.6967)
-        section_aware: 0.6223      # binding track: VAGABUNDO v004 (Regime v026: 0.6736)
-        static: 0.9320
-        temporal: 0.3933
-        margin_over_chance: 0.0860
-        frequency_balance: 0.9163  # Regime v026, pre-rescale (band shares are unchanged by the rescale)
-        tempo_similarity: 1.0000   # rendered tempo 136.0 (v024's 0.365 was recorder capture jitter, fixed)
-        run: "VAGABUNDO NÃO NAMORA/v004"
+        overall: 0.7170            # binding track: VAGABUNDO v013 (Regime v031: 0.7794)
+        section_aware: 0.7073      # binding track: VAGABUNDO v013 (Regime v031: 0.7744)
+        static: 0.8408
+        temporal: 0.5932
+        margin_over_chance: 0.1422
+        frequency_balance: 0.7248
+        tempo_similarity: 1.0000
+        run: "VAGABUNDO NÃO NAMORA/v013"
         margin: 0.02
         editability: pass
-        vocal_mode: instrument
         tracks:
-          - { run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v026", overall: 0.6967, section_aware: 0.6736, static: 0.9009, temporal: 0.4925, margin_over_chance: 0.1196 }
-          - { run: "VAGABUNDO NÃO NAMORA/v004", overall: 0.6626, section_aware: 0.6223, static: 0.9320, temporal: 0.3933, margin_over_chance: 0.0860 }
+          - { run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v031", overall: 0.7794, section_aware: 0.7744, static: 0.8747, temporal: 0.6841, margin_over_chance: 0.2044 }
+          - { run: "VAGABUNDO NÃO NAMORA/v013", overall: 0.7170, section_aware: 0.7073, static: 0.8408, temporal: 0.5932, margin_over_chance: 0.1422 }
     # 2026-10-10 history (static scale) - VAGABUNDO v002 fell short on section-aware (0.8721 < 0.90); fix #10 (per-bar
     # bass/lead/master correction from the comparison's section_windows) -> v004.
   synth:
     # Pure palette synthesis (no stem samples) - inherently further from the master.
     genres:
-      brazilian_funk: 0.54
+      brazilian_funk: 0.65
     section_aware:
-      brazilian_funk: 0.53
+      brazilian_funk: 0.63
     measured:
       brazilian_funk:
-        overall: 0.5589            # binding track: Regime CLT v027 (VAGABUNDO v007: 0.6627)
-        section_aware: 0.5525      # binding track: Regime CLT v027 (VAGABUNDO v007: 0.5860)
-        static: 0.7879
-        temporal: 0.3298
-        margin_over_chance: -0.0182   # FAILS chance: a different song scores higher than this render (recorded shortfall)
-        frequency_balance: 0.6424
-        tempo_similarity: 0.4624   # beat tracker reads ~125 on the 808-bank synth drums (content-level); playback verified at 136
-        run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v027"
+        overall: 0.6709            # binding track: Regime CLT v032 (VAGABUNDO v014: 0.7240)
+        section_aware: 0.6523      # binding track: Regime CLT v032 (VAGABUNDO v014: 0.7007)
+        static: 0.8815
+        temporal: 0.4603
+        margin_over_chance: 0.0959
+        frequency_balance: 0.8685
+        tempo_similarity: 0.8830
+        run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v032"
         margin: 0.02
         editability: pass
-        vocal_mode: instrument
         tracks:
-          - { run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v027", overall: 0.5589, section_aware: 0.5525, static: 0.7879, temporal: 0.3298, margin_over_chance: -0.0182 }
-          - { run: "VAGABUNDO NÃO NAMORA/v007", overall: 0.6627, section_aware: 0.5860, static: 0.9393, temporal: 0.3862, margin_over_chance: 0.0861 }
+          - { run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v032", overall: 0.6709, section_aware: 0.6523, static: 0.8815, temporal: 0.4603, margin_over_chance: 0.0959 }
+          - { run: "VAGABUNDO NÃO NAMORA/v014", overall: 0.7240, section_aware: 0.7007, static: 0.8352, temporal: 0.6128, margin_over_chance: 0.1492 }
     # 2026-10-10 history (static scale) - VAGABUNDO v003 (sample-instrument knobs on synth) 0.7209 / 0.7520, worst band 30.07%;
     # fix #11 (own synth calibration pass) -> v007.

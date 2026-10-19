@@ -14,7 +14,7 @@ Slice 1 detector (``editability_check.py``):
     --mode sample-instrument  → unchanged behaviour: pitched pack instruments, PASS,
                                 header ``// generation_mode: sample-instrument``
 
-Skipped when the Regime CLT ``sample_pack/`` is absent (same pattern as test_vocal_modes.py).
+Skipped when the Regime CLT ``sample_pack/`` is absent (same pattern as the other generator tests).
 
 Run: scripts/python/.venv/bin/python -m pytest scripts/python/tests/test_generation_modes.py -q
 """
@@ -42,8 +42,8 @@ BASE = "https://pub-56831423fee34641805da07cfdaf6812.r2.dev/midi-grep/regime-clt
 GENRE = "brazilian_funk"
 
 _REQUIRED = [
-    STEMS / "vocals.wav", STEMS / "bass.wav", STEMS / "melodic.wav", STEMS / "drums.wav",
-    PACK / "bass.mid", PACK / "melodic.mid", PACK / "drums_bands.json", PACK / "vocals.mid",
+    STEMS / "bass.wav", STEMS / "melodic.wav", STEMS / "drums.wav",
+    PACK / "bass.mid", PACK / "melodic.mid", PACK / "drums_bands.json",
     PACK / "strudel.json",
 ]
 pytestmark = pytest.mark.skipif(
@@ -123,15 +123,13 @@ def test_synth_header_and_detector_verdict(outputs):
     res = check_editability(code)
     assert res.passed, res.violations
     assert res.generation_mode == "synth"
-    assert len(res.editable_voices) >= 3   # bass, lead, drums (+ vocal)
+    assert len(res.editable_voices) >= 3   # bass, lead, drums
 
 
 def test_synth_sounds_come_from_the_genre_palette(outputs):
     _, code, summary = outputs["synth"]
     palette = _palette_sounds(GENRE)
     picks = [summary["bass_sound"], summary["lead_sound"]]
-    if summary.get("vocal_sound"):
-        picks.append(summary["vocal_sound"])
     assert picks and all(p in palette for p in picks), (picks, sorted(palette))
     # every chained instrument in the code is a palette sound or a built-in oscillator (the
     # sub-sine reinforcement layer); no sample-pack name sneaks through
@@ -152,11 +150,16 @@ def test_synth_forces_the_bank_drum_path_and_keeps_editable_bar_arrays(outputs):
     assert ".gain(" in code                          # envelopes still baked in
 
 
-def test_synth_vocal_is_a_palette_instrument_line(outputs):
-    _, code, summary = outputs["synth"]
-    assert summary["vocal_mode"] == "instrument"
-    assert re.search(r"^let vocal = \[", code, re.M)
-    assert summary["vocal_sound"] in _palette_sounds(GENRE)
+@pytest.mark.parametrize("which", ["synth", "sample", "default"])
+def test_no_vocal_voice_is_ever_generated(outputs, which):
+    """Product decision: vocals are people singing and are never part of the generated music (both modes)."""
+    _, code, summary = outputs[which]
+    assert not re.search(r"^let (vocal|vox)\b", code, re.M), "no `let vocal` / `let vox` data"
+    assert "VOCAL" not in code and "vocal" not in code.lower() and "vox" not in code
+    assert not [k for k in summary if "vocal" in k], [k for k in summary if "vocal" in k]
+    assert check_editability(code).passed and summary["editability"] == "pass"
+    voices = check_editability(code).editable_voices
+    assert len(voices) >= 3, voices                    # bass, lead, drums remain editable
 
 
 # ── sample-instrument ─────────────────────────────────────────────────────────────────────

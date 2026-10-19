@@ -300,15 +300,54 @@ def test_window_halves_cover_the_same_aligned_audio(tmp_path, monkeypatch):
 import pipeline_helpers  # noqa: E402
 
 
+def _write_stems(d, n=4410):
+    import numpy as np
+    import soundfile as sf
+    for name, amp in (("original", 0.5), ("bass", 0.2), ("drums", 0.2), ("melodic", 0.2), ("vocals", 0.2)):
+        sf.write(str(d / f"{name}.wav"), (amp * np.ones((n, 2))).astype("float32"), 44100)
+
+
+def test_instrumental_is_the_plain_sum_of_bass_drums_melodic_without_vocals(tmp_path):
+    import numpy as np
+    import soundfile as sf
+    _write_stems(tmp_path)
+    out = pipeline_helpers.write_instrumental(tmp_path)
+    y, sr = sf.read(str(out), always_2d=True)
+    assert out.name == "instrumental.wav" and sr == 44100 and y.shape == (4410, 2)
+    assert np.allclose(y, 0.6, atol=1e-3)                  # 0.2 + 0.2 + 0.2: no vocals, no normalisation (peak < 1)
+    # clipping protection is ONE gain on the whole mix (balance untouched) and only above 1.0
+    sf.write(str(tmp_path / "bass.wav"), (0.9 * np.ones((4410, 2))).astype("float32"), 44100)
+    y2, _ = sf.read(str(pipeline_helpers.write_instrumental(tmp_path, force=True)), always_2d=True)
+    assert abs(float(np.abs(y2).max()) - 1.0) < 1e-6 and np.allclose(y2 / y2.max(), 1.0)
+
+
+def test_cli_instrumental_prints_the_reference_path(tmp_path, capsys):
+    _write_stems(tmp_path)
+    assert pipeline_helpers.main(["instrumental", str(tmp_path)]) == 0
+    assert capsys.readouterr().out.strip() == str(tmp_path / "instrumental.wav")
+
+
+def test_scoring_reference_resolves_original_to_the_instrumental(tmp_path):
+    pytest.importorskip("fastmcp")
+    sys.path.insert(0, str(HERE.parent.parent.parent))
+    from mcp_servers.loop.server import scoring_reference
+    _write_stems(tmp_path)
+    assert scoring_reference(str(tmp_path / "original.wav")) == str(tmp_path / "instrumental.wav")
+    assert scoring_reference("/x/other_reference.wav") == "/x/other_reference.wav"     # explicit reference as given
+
+
 def test_control_lookup_distinguishes_none_from_failure(tmp_path, monkeypatch, capsys):
     root = tmp_path
     (root / "eval" / "datasets").mkdir(parents=True)
     ds = root / "eval" / "datasets" / "reference_tracks.yaml"
     ds.write_text("tracks:\n  - {genre: g, cache_key: A}\n  - {genre: g, cache_key: B}\n")
-    assert pipeline_helpers.control_track_path("g", "A", repo_root=root) is None      # no cached original.wav
-    wav = root / ".cache" / "stems" / "B" / "original.wav"
-    wav.parent.mkdir(parents=True); wav.write_bytes(b"x")
-    assert pipeline_helpers.control_track_path("g", "A", repo_root=root) == wav
+    assert pipeline_helpers.control_track_path("g", "A", repo_root=root) is None      # no cached track
+    d = root / ".cache" / "stems" / "B"
+    d.mkdir(parents=True)
+    _write_stems(d)
+    found = pipeline_helpers.control_track_path("g", "A", repo_root=root)
+    assert found == d / "instrumental.wav", found          # the control is the other track's INSTRUMENTAL, not its mix
+    wav = found
     assert pipeline_helpers.control_track_path("g", "B", repo_root=root) is None      # never the track itself
     ds.write_text("tracks: [unclosed\n")
     with pytest.raises(Exception):

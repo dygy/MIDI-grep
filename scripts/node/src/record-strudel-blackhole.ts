@@ -21,6 +21,7 @@
  *   node dist/record-strudel-blackhole.js input.strudel -o output.wav -d 30
  */
 
+import { measureDeviceRate, type SizeSample } from './capture-rate.js';
 import puppeteer from 'puppeteer';
 import { spawn, spawnSync } from 'child_process';
 import * as fs from 'fs';
@@ -365,9 +366,14 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
   // Wait a bit more for samples to fully load
   await new Promise(r => setTimeout(r, POST_PLAY_SETTLE_MS));
 
-  // Wait for duration
+  // Wait for duration, sampling the capture file's size (steady-state device-rate measurement)
   console.log(`Recording for ${duration} seconds...`);
+  const sizeSamples: SizeSample[] = [];
+  const sampleSize = () => { try { sizeSamples.push({ tMs: Date.now(), bytes: fs.statSync(outputPath).size }); } catch { /* not yet */ } };
+  const sizeTimer = setInterval(sampleSize, 250);
   await new Promise(r => setTimeout(r, duration * 1000));
+  sampleSize();
+  clearInterval(sizeTimer);
 
   // Stop playback
   console.log('Stopping...');
@@ -412,13 +418,18 @@ async function recordStrudel(strudelCode: string, options: RecordOptions): Promi
     const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration',
       '-of', 'csv=p=0', outputPath], { encoding: 'utf8' });
     const rawSeconds = parseFloat((probe.stdout || '').trim());
-    if (Number.isFinite(rawSeconds) && rawSeconds > 1 && captureWallSeconds > 1) {
-      const realRate = Math.round(48000 * rawSeconds / captureWallSeconds);
-      console.log(`Raw capture: ${rawSeconds.toFixed(3)} s of audio over ${captureWallSeconds.toFixed(3)} s wall-clock ` +
-        `-> real device rate ${realRate} Hz (ratio ${(rawSeconds / captureWallSeconds).toFixed(4)}); correcting uniformly`);
-      speedFilter = `asetrate=${realRate},aresample=44100,`;
+    const finalBytes = fs.statSync(outputPath).size;
+    const headerBytes = 44;
+    // bytes per frame from the finished file itself (format-agnostic): payload / (seconds * nominal rate)
+    const bytesPerFrame = Number.isFinite(rawSeconds) && rawSeconds > 1 ? (finalBytes - headerBytes) / (rawSeconds * 48000) : 0;
+    const m = measureDeviceRate(sizeSamples, bytesPerFrame, headerBytes);
+    if (m) {
+      console.log(`Raw capture: steady-state ${m.deltaFrames} frames over ${m.deltaSeconds.toFixed(3)} s (${m.points} size samples) ` +
+        `-> real device rate ${m.realRate} Hz (ratio ${(m.realRate / 48000).toFixed(4)}); file ${rawSeconds.toFixed(3)} s, ` +
+        `process wall ${captureWallSeconds.toFixed(3)} s (not used); correcting uniformly`);
+      speedFilter = `asetrate=${m.realRate},aresample=44100,`;
     } else {
-      console.log('Raw capture: could not measure the speed ratio, leaving speed uncorrected');
+      console.log('Raw capture: could not measure the steady-state rate (span too short), leaving speed uncorrected');
     }
   }
   const trimProcess = spawn('ffmpeg', [

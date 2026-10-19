@@ -47,31 +47,34 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
 
 ## Rendering & comparison
 
-- **BlackHole recorder** (`scripts/node/src/record-strudel-blackhole.ts`) — RECOMMENDED; records
-  real Strudel playback → ~100% accurate audio. Use this for accept/reject decisions.
-- **Node.js synth** — REMOVED (Jun 2026). `render-strudel-node.ts` no longer exists; the BlackHole
-  recorder is the only render path and the only one that may gate.
+- **Offline renderer** (`scripts/node/src/render-strudel-offline.ts`) — DEFAULT since 2026-10-19; Strudel's own
+  `renderPatternAudio` into an OfflineAudioContext (real superdough engine, headless Chromium): sample-exact timing
+  and pitch, no audio device. `MIDIGREP_RENDERER=offline|blackhole` (`scripts/python/renderer.py`).
+- **BlackHole recorder** (`scripts/node/src/record-strudel-blackhole.ts`) — cross-check only; KNOWN DEFECT: ~12%
+  sample loss + rate relabel → every pitch ~2.3–2.7 semitones flat.
+- **Node.js synth** — REMOVED (Jun 2026). `render-strudel-node.ts` no longer exists.
 - **`scripts/python/compare_audio.py`** — similarity via **MAE** on frequency bands (NOT cosine —
   cosine hid 20%+ band errors). Since 2026-10-18 overall = 0.5 × static (Freq 40%, MFCC 20%, Energy 15%,
   Brightness 15%, Tempo/Chroma 5%, time-averaged) + 0.5 × temporal (aligned frame-wise chroma/mel corr,
   onset F1 ±50 ms, envelope corr); `--control` = a different same-genre song the render must beat by 0.02.
   The old time-averaged score scored a different song 0.876 vs our 0.932 — pre-2026-10-18 numbers are old-scale.
 - **`scripts/editable-pipeline.sh`** — ONE command from a YouTube link to both editable pieces, scored on
-  real playback (spec 004): extract → MIDI per stem → drum bands → sample pack (+vocal) → granular
-  instruments (`build_instruments.py` manifest) → R2/local host → `auto-calibrate.sh` (N iters) then `auto-calibrate.sh --mode synth`
+  real playback (spec 004): extract → MIDI per stem (bass/melodic; never vocals) → drum bands → sample pack → granular
+  instruments (one grain per transcribed note, every sample pitch-verified; `build_instruments.py` manifest + `verification.json`) → R2/local host → `auto-calibrate.sh` (N iters) then `auto-calibrate.sh --mode synth`
   (starts from those knobs, own env correction) → `compare_audio --strudel` → `eval/gate.py` → `vNNN/` promotion → stage 10 report (`pipeline_helpers.py report`: charts, Demucs
   render + iteration stems, per-stem comparison, `iterations.json`, `report.html`; mandatory, `--no-iteration-stems`). Reads bpm/key/genre from the
   track `metadata.json` (stamped by `pipeline_helpers.py stamp`, incl. CLAP genre with the bpm prior);
-  `--genre` overrides are logged. Second track: 93.2% / 92.2% editable (v004, after the #10 per-bar correction).
+  `--genre` overrides are logged. Renders are OFFLINE by default (`render-strudel-offline.js`, Strudel's own
+  renderPatternAudio; `MIDIGREP_RENDERER=blackhole` = cross-check, known ~2.5-semitone-flat defect) and are scored
+  against `instrumental.wav` (bass+drums+melodic) — **vocals are never generated** (owner decision 2026-10-19).
+  Tempo is phase-coherence-refined off librosa's tempogram bins (`tempo_refine.py`).
 - **Section-aware diagnostics (fix #10):** `compare_audio.py` stores `comparison.section_windows` (per 10-s
   window mfcc/band/energy/win/rms/band_diff); `calibrate_dynamic.py --env-correction-out` derives per-bar
   bass/lead/master multipliers from them (damped, composable via `--env-correction-in`); the generator applies
   them with `--env-correction PATH`; `auto-calibrate.sh` chains it per iteration and keeps `best.env.json`.
 - **`scripts/python/generate_dynamic_strudel.py`** — the editable generator (spec 003). `--mode
   {sample-instrument,synth}` (default sample-instrument; synth = palette sounds, no `samples()`),
-  `--vocal-mode {instrument,chops,texture,none}` (default instrument = transcribed `let vocal` on the
-  `<prefix>_vocal` multisample; `texture` is the old full-stem loop, allowed only under ≥2 editable
-  voices and tagged `// texture`). Header lines `// generation_mode:` / `// vocal_mode:`; runs
+  no vocal voice in either mode. Header line `// generation_mode:`; runs
   `strudel_validation.validate_code` on its own output.
 - **`scripts/python/calibrate_dynamic.py`** — data-driven mix calibrator: reads a render's
   `comparison.json` and emits the NEXT `generate_dynamic_strudel.py` knobs (sub-gain, bass-mult,
@@ -80,14 +83,14 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   CENTROID (the 1%-magnitude high bands are too noisy in bass-heavy genres); when lead-lpf maxes
   out and the mix is still dark, it raises a TR808 hat layer (`--hat-gain`) — the hats carry the
   brightness the extracted lead can't.
-- **`scripts/auto-calibrate.sh`** — runs the full generate→render(BlackHole)→compare→calibrate
+- **`scripts/auto-calibrate.sh`** — runs the full generate→render(offline)→compare→calibrate
   loop, keeping the best render. Took Regime CLT 88.7%→92.4% overall (freq 86→95, section-aware
   82→89) over ~6 iterations from a cold start, fully data-driven.
 
 ## Sample-pack → R2 (highest similarity)
 
 - `scripts/python/build_sample_pack.py` — stems → drum one-shots + pitched bass/melodic + raw
-  beat-aligned per-bar **loops** (drums/bass/melodic/vocals). Loops are written RAW (un-normalized)
+  beat-aligned per-bar **loops** (drums/bass/melodic; never vocals). Loops are written RAW (un-normalized)
   to preserve dynamics + inter-stem balance — normalizing them drops reconstruction 99%→70%.
 - `scripts/python/generate_sample_strudel.py` — writes host-resolved `samples.json` (absolute
   `_base` ending in `/` — Strudel concats `base+path` with no slash) + `output_<mode>.strudel`

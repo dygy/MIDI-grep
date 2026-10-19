@@ -72,11 +72,11 @@ def test_promote_run_writes_four_files_and_metadata(tmp_path: Path) -> None:
     assert vdir.name == "v005"
     assert sorted(p.name for p in vdir.iterdir()) == ["comparison.json", "metadata.json", "output.strudel", "render.wav"]
     meta = json.loads((vdir / "metadata.json").read_text())
-    assert set(meta) == {"version", "created_at", "generation_mode", "editability", "vocal_mode", "generator", "render",
+    assert set(meta) == {"version", "created_at", "generation_mode", "editability", "generator", "render",
                          "compare", "similarity_overall", "similarity_section_aware", "frequency_balance",
                          "tempo_similarity", "env_correction"}
     assert meta["env_correction"] is None and not (vdir / "env_correction.json").exists()
-    assert (meta["version"], meta["generation_mode"], meta["editability"], meta["vocal_mode"]) == (5, "synth", "pass", "instrument")
+    assert (meta["version"], meta["generation_mode"], meta["editability"]) == (5, "synth", "pass")
     assert (meta["similarity_overall"], meta["tempo_similarity"]) == (0.7879, 0.4624)
     assert json.loads((vdir / "comparison.json").read_text()) == doc
 

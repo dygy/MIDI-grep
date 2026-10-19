@@ -39,8 +39,8 @@ SPLIT = 4          # bars [0, SPLIT) get the boost, the rest the cut
 BOOST, CUT = 1.3, 0.8
 
 _REQUIRED = [
-    STEMS / "vocals.wav", STEMS / "bass.wav", STEMS / "melodic.wav", STEMS / "drums.wav",
-    PACK / "bass.mid", PACK / "melodic.mid", PACK / "drums_bands.json", PACK / "vocals.mid",
+    STEMS / "bass.wav", STEMS / "melodic.wav", STEMS / "drums.wav",
+    PACK / "bass.mid", PACK / "melodic.mid", PACK / "drums_bands.json",
     PACK / "strudel.json",
 ]
 needs_pack = pytest.mark.skipif(not all(p.exists() for p in _REQUIRED),
@@ -51,7 +51,7 @@ ARGS = [
     "--bass-midi", str(PACK / "bass.mid"), "--lead-midi", str(PACK / "melodic.mid"),
     "--drums-json", str(PACK / "drums_bands.json"), "--base-url", BASE,
     "--mode", "synth", "--bpm", "136", "--key", "C# minor", "--genre", "brazilian_funk",
-    "--num-bars", str(NBARS), "--drum-mode", "bank", "--vocal-mode", "instrument",
+    "--num-bars", str(NBARS), "--drum-mode", "bank",
 ]
 
 

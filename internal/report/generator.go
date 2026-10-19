@@ -20,7 +20,7 @@ import (
 type ReportData struct {
 	TrackName   string
 	Version     int
-	BPM         int
+	BPM         float64
 	Key         string
 	Style       string
 	Genre       string
@@ -147,6 +147,7 @@ func (g *Generator) LoadData() (*ReportData, error) {
 	// Find audio files in cache dir
 	data.MelodicPath = findFile(g.cacheDir, "melodic.wav", "piano.wav")
 	data.DrumsPath = findFile(g.cacheDir, "drums.wav")
+	// original vocal stem only; vocals are never generated, so no rendered one is searched for
 	data.VocalsPath = findFile(g.cacheDir, "vocals.wav")
 	data.BassPath = findFile(g.cacheDir, "bass.wav")
 
@@ -199,7 +200,7 @@ func (g *Generator) LoadData() (*ReportData, error) {
 				data.Version = int(v)
 			}
 			if v, ok := meta["bpm"].(float64); ok {
-				data.BPM = int(v)
+				data.BPM = v
 			}
 			if v, ok := meta["key"].(string); ok {
 				data.Key = v
@@ -295,16 +296,41 @@ func cleanTrackName(name string) string {
 	return re.ReplaceAllString(name, "")
 }
 
+var (
+	bpmHeaderRe   = regexp.MustCompile(`BPM:\s*(\d+(?:\.\d+)?)`)
+	genreHeaderRe = regexp.MustCompile(`Genre:\s*(\w+)`)
+)
+
+// formatBPM shows the BPM with the precision given (129.989 stays 129.989, 136 stays 136).
+func formatBPM(v float64, fallback string) string {
+	if v > 0 {
+		return strconv.FormatFloat(math.Round(v*1000)/1000, 'f', -1, 64)
+	}
+	return fallback
+}
+
+// resolveStyle returns the style, falling back to genre when style is empty, "N/A" or "auto".
+func resolveStyle(style, genre string) string {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "", "n/a", "auto":
+		return formatStringValue(genre, "N/A")
+	}
+	return style
+}
+
 func extractStrudelInfo(data *ReportData) {
 	code := data.StrudelCode
 
 	// BPM
-	if re := regexp.MustCompile(`BPM:\s*(\d+)`); re.MatchString(code) {
-		if m := re.FindStringSubmatch(code); len(m) > 1 {
-			if v, _ := strconv.Atoi(m[1]); v > 0 && data.BPM == 0 {
-				data.BPM = v
-			}
+	if m := bpmHeaderRe.FindStringSubmatch(code); len(m) > 1 {
+		if v, err := strconv.ParseFloat(m[1], 64); err == nil && v > 0 && data.BPM == 0 {
+			data.BPM = v
 		}
+	}
+
+	// Genre (fallback when metadata.json lacks it)
+	if m := genreHeaderRe.FindStringSubmatch(code); len(m) > 1 && data.Genre == "" {
+		data.Genre = m[1]
 	}
 
 	// Key
@@ -760,9 +786,9 @@ func generateHTML(data *ReportData) string {
 
 	// Format values
 	trackName := html.EscapeString(data.TrackName)
-	bpm := formatValue(data.BPM, "N/A")
+	bpm := formatBPM(data.BPM, "N/A")
 	key := formatStringValue(data.Key, "N/A")
-	style := formatStringValue(data.Style, formatStringValue(data.Genre, "N/A"))
+	style := resolveStyle(data.Style, data.Genre)
 	notes := formatValue(data.Notes, "N/A")
 	drumHits := formatValue(data.DrumHits, "N/A")
 
@@ -772,6 +798,13 @@ func generateHTML(data *ReportData) string {
 			return fmt.Sprintf(`<div class="audio-player"><label>%s</label><div class="no-data">Not available</div></div>`, label)
 		}
 		return fmt.Sprintf(`<div class="audio-player"><label>%s</label><audio controls src="%s" id="%s"></audio></div>`, label, dataURI, id)
+	}
+
+	// Vocals are never generated: this is the ORIGINAL vocal stem, labelled as such, muted by
+	// default and kept out of the all-stems group. No player at all when the stem is missing.
+	vocalsPlayer := ""
+	if vocalsData != "" {
+		vocalsPlayer = fmt.Sprintf(`<div class="audio-player"><label>Vocals (not generated)</label><audio controls muted src="%s" id="audio-vocals"></audio></div>`, vocalsData)
 	}
 
 	// Generate chart image HTML
@@ -957,7 +990,7 @@ func generateHTML(data *ReportData) string {
 
         const audioGroups = {
             'drums-melodic': ['audio-drums', 'audio-melodic'],
-            'all-stems': ['audio-drums', 'audio-melodic', 'audio-vocals', 'audio-bass']
+            'all-stems': ['audio-drums', 'audio-melodic', 'audio-bass']
         };
         let activeGroup = null;
 
@@ -1018,7 +1051,7 @@ func generateHTML(data *ReportData) string {
 		html.EscapeString(style), // style badge
 		audioPlayer("Melodic", melodicData, "audio-melodic"),
 		audioPlayer("Drums", drumsData, "audio-drums"),
-		audioPlayer("Vocals", vocalsData, "audio-vocals"),
+		vocalsPlayer,
 		audioPlayer("Bass", bassData, "audio-bass"),
 		audioPlayer("Strudel Render", renderData, "audio-render"),
 		bpm,                                   // stat

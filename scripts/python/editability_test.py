@@ -49,7 +49,9 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-RECORDER = REPO_ROOT / "scripts" / "node" / "dist" / "record-strudel-blackhole.js"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from renderer import renderer_script  # noqa: E402
+RECORDER = renderer_script()   # MIDIGREP_RENDERER: offline (default) | blackhole
 
 NOTE_NAMES = ["c", "cs", "d", "ds", "e", "f", "fs", "g", "gs", "a", "as", "b"]
 _NOTE_RE = re.compile(r"^([a-g])(s|#|b|f)?(-?\d+)$", re.I)
@@ -691,8 +693,15 @@ def render(strudel: Path, wav: Path, seconds: float, *, recorder: Path = RECORDE
             while time.time() < deadline:
                 rc = proc.poll()
                 text = log_path.read_text(errors="replace") if log_path.exists() else ""
-                if "Saved:" in text and wav.exists():
-                    saved = True
+                if rc is not None and rc != 0:   # the renderer's own checks failed: never accept its file
+                    break
+                if ("Saved:" in text or text.rstrip().endswith("OK")) and wav.exists():   # BlackHole recorder / offline renderer
+                    # Give the process the same 10 s it gets after SIGTERM to report its status: a non-zero exit
+                    # rejects the file; one that is still alive then is the lingering-children quirk above.
+                    try:
+                        saved = proc.wait(timeout=10) == 0
+                    except subprocess.TimeoutExpired:
+                        saved = True
                     break
                 if rc is not None:
                     break
@@ -708,6 +717,7 @@ def render(strudel: Path, wav: Path, seconds: float, *, recorder: Path = RECORDE
                     pass
         if saved:
             return
+        wav.unlink(missing_ok=True)   # a failed render's file must not be mistaken for a result on the retry
         tail = log_path.read_text(errors="replace")[-1500:] if log_path.exists() else ""
         last_err = f"render failed ({proc.returncode}): {tail}"
     raise RuntimeError(last_err)

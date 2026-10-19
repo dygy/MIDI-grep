@@ -1,0 +1,3478 @@
+{
+  "name": "regime_clt_dj_brunin_xm_aurora_shukita_lead",
+  "type": "granular",
+  "source_audio": "/Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/Regime CLT (Dj Brunin XM, Aurora Shukita)/melodic.wav",
+  "created": "2026-10-19T11:47:59.439903",
+  "sample_rate": 44100,
+  "num_grains": 344,
+  "grain_mode": "notes",
+  "grain_duration_ms": null,
+  "midi_path": "/Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/Regime CLT (Dj Brunin XM, Aurora Shukita)/sample_pack/melodic.mid",
+  "pitched_map": {
+    "d#4": "pitched/d_sharp_4.wav",
+    "f#4": "pitched/f_sharp_4.wav",
+    "g#4": "pitched/g_sharp_4.wav",
+    "a4": "pitched/a4.wav",
+    "b4": "pitched/b4.wav",
+    "c#5": "pitched/c_sharp_5.wav",
+    "d#5": "pitched/d_sharp_5.wav",
+    "e5": "pitched/e5.wav"
+  },
+  "grains": [
+    {
+      "index": 0,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 0.4068181818181818,
+      "duration_sec": 0.034081632653061224,
+      "label_method": "salience",
+      "quality": 1.0677746108956137
+    },
+    {
+      "index": 1,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 0.4636363636363636,
+      "duration_sec": 0.0363718820861678,
+      "label_method": "salience",
+      "quality": 1.2097141326394893
+    },
+    {
+      "index": 2,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 0.5795454545454545,
+      "duration_sec": 0.09317460317460317,
+      "label_method": "salience",
+      "quality": 1.3982976956652828
+    },
+    {
+      "index": 3,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 0.6727272727272727,
+      "duration_sec": 0.0590702947845805,
+      "label_method": "salience",
+      "quality": 1.5048443936568265
+    },
+    {
+      "index": 4,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 0.8136363636363636,
+      "duration_sec": 0.06816326530612245,
+      "label_method": "salience",
+      "quality": 1.4198511152633957
+    },
+    {
+      "index": 5,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 0.9863636363636363,
+      "duration_sec": 0.12723356009070294,
+      "label_method": "salience",
+      "quality": 1.2130179808130517
+    },
+    {
+      "index": 6,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 1.2886363636363636,
+      "duration_sec": 0.0590702947845805,
+      "label_method": "salience",
+      "quality": 1.2641610918261434
+    },
+    {
+      "index": 7,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 2.009090909090909,
+      "duration_sec": 0.0818140589569161,
+      "label_method": "salience",
+      "quality": 1.3102317960132024
+    },
+    {
+      "index": 8,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 2.125,
+      "duration_sec": 0.07049886621315193,
+      "label_method": "salience",
+      "quality": 1.1991818600466246
+    },
+    {
+      "index": 9,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 2.475,
+      "duration_sec": 0.05680272108843538,
+      "label_method": "salience",
+      "quality": 1.0758671904316919
+    },
+    {
+      "index": 10,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 3.902272727272727,
+      "duration_sec": 0.034126984126984124,
+      "label_method": "salience",
+      "quality": 1.014808492548707
+    },
+    {
+      "index": 11,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 5.702272727272727,
+      "duration_sec": 0.0818140589569161,
+      "label_method": "salience",
+      "quality": 1.0108791310891312
+    },
+    {
+      "index": 12,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 5.818181818181818,
+      "duration_sec": 0.04773242630385487,
+      "label_method": "salience",
+      "quality": 1.0134245955202938
+    },
+    {
+      "index": 13,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 5.888636363636364,
+      "duration_sec": 0.04777777777777778,
+      "label_method": "salience",
+      "quality": 1.2448135629987755
+    },
+    {
+      "index": 14,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 5.995454545454545,
+      "duration_sec": 0.0454421768707483,
+      "label_method": "salience",
+      "quality": 1.3062165768219938
+    },
+    {
+      "index": 15,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 6.25,
+      "duration_sec": 0.08179138321995465,
+      "label_method": "salience",
+      "quality": 1.1928603378957636
+    },
+    {
+      "index": 16,
+      "pitch_hz": 329.6275569128699,
+      "midi_note": 64,
+      "transcribed_note": 64,
+      "onset_sec": 6.888636363636364,
+      "duration_sec": 0.011383219954648527,
+      "label_method": "salience",
+      "quality": 1.005876355659301
+    },
+    {
+      "index": 17,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 6.8999999999999995,
+      "duration_sec": 0.25448979591836735,
+      "label_method": "salience",
+      "quality": 1.8255176952317878
+    },
+    {
+      "index": 18,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 7.4795454545454545,
+      "duration_sec": 0.09317460317460317,
+      "label_method": "salience",
+      "quality": 1.1600652136205332
+    },
+    {
+      "index": 19,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 7.572727272727272,
+      "duration_sec": 0.1045578231292517,
+      "label_method": "salience",
+      "quality": 1.304527704160757
+    },
+    {
+      "index": 20,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 7.793181818181818,
+      "duration_sec": 0.04770975056689342,
+      "label_method": "salience",
+      "quality": 1.1229405269512145
+    },
+    {
+      "index": 21,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 7.8977272727272725,
+      "duration_sec": 0.0954875283446712,
+      "label_method": "salience",
+      "quality": 1.6371667863769974
+    },
+    {
+      "index": 22,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 8.027272727272727,
+      "duration_sec": 0.1863265306122449,
+      "label_method": "salience",
+      "quality": 1.435928433458297
+    },
+    {
+      "index": 23,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 8.549999999999999,
+      "duration_sec": 0.0818140589569161,
+      "label_method": "salience",
+      "quality": 1.3257797551659953
+    },
+    {
+      "index": 24,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 9.118181818181817,
+      "duration_sec": 0.10453514739229025,
+      "label_method": "salience",
+      "quality": 1.550245502133208
+    },
+    {
+      "index": 25,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 9.23409090909091,
+      "duration_sec": 0.0818140589569161,
+      "label_method": "salience",
+      "quality": 1.3184857843507571
+    },
+    {
+      "index": 26,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 9.431818181818182,
+      "duration_sec": 0.09317460317460317,
+      "label_method": "salience",
+      "quality": 1.4918484529156761
+    },
+    {
+      "index": 27,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 12.220454545454546,
+      "duration_sec": 0.05902494331065759,
+      "label_method": "salience",
+      "quality": 1.0466765534609712
+    },
+    {
+      "index": 28,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 12.768181818181818,
+      "duration_sec": 0.15,
+      "label_method": "salience",
+      "quality": 2.437812372648139
+    },
+    {
+      "index": 29,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 13.197727272727272,
+      "duration_sec": 0.11591836734693878,
+      "label_method": "pyin",
+      "quality": 0.928667681844194
+    },
+    {
+      "index": 30,
+      "pitch_hz": 493.8833012561241,
+      "midi_note": 71,
+      "transcribed_note": 71,
+      "onset_sec": 14.463636363636363,
+      "duration_sec": 0.034058956916099774,
+      "label_method": "salience",
+      "quality": 1.1581245395741888
+    },
+    {
+      "index": 31,
+      "pitch_hz": 830.6093951598903,
+      "midi_note": 80,
+      "transcribed_note": 80,
+      "onset_sec": 14.463636363636363,
+      "duration_sec": 0.034058956916099774,
+      "label_method": "salience",
+      "quality": 1.0908398873451755
+    },
+    {
+      "index": 32,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 14.695454545454545,
+      "duration_sec": 0.0818140589569161,
+      "label_method": "salience",
+      "quality": 1.4400719802526294
+    },
+    {
+      "index": 33,
+      "pitch_hz": 493.8833012561241,
+      "midi_note": 71,
+      "transcribed_note": 71,
+      "onset_sec": 14.788636363636362,
+      "duration_sec": 0.09317460317460317,
+      "label_method": "salience",
+      "quality": 1.032975995652199
+    },
+    {
+      "index": 34,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 14.927272727272726,
+      "duration_sec": 0.0818140589569161,
+      "label_method": "salience",
+      "quality": 1.6499323642326293
+    },
+    {
+      "index": 35,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 15.009090909090908,
+      "duration_sec": 0.11591836734693878,
+      "label_method": "salience",
+      "quality": 2.1160417919873185
+    },
+    {
+      "index": 36,
+      "pitch_hz": 830.6093951598903,
+      "midi_note": 80,
+      "transcribed_note": 80,
+      "onset_sec": 15.136363636363635,
+      "duration_sec": 0.05913832199546485,
+      "label_method": "salience",
+      "quality": 1.2239271940336647
+    },
+    {
+      "index": 37,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 15.274999999999999,
+      "duration_sec": 0.07049886621315193,
+      "label_method": "salience",
+      "quality": 1.0820019382171726
+    },
+    {
+      "index": 38,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 15.509090909090908,
+      "duration_sec": 0.0681859410430839,
+      "label_method": "salience",
+      "quality": 1.1615890810783924
+    },
+    {
+      "index": 39,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 15.588636363636363,
+      "duration_sec": 0.1295691609977324,
+      "label_method": "salience",
+      "quality": 2.1942980120142765
+    },
+    {
+      "index": 40,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 15.729545454545454,
+      "duration_sec": 0.05687074829931973,
+      "label_method": "salience",
+      "quality": 1.0729315487072306
+    },
+    {
+      "index": 41,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 15.797727272727272,
+      "duration_sec": 0.0590702947845805,
+      "label_method": "salience",
+      "quality": 1.1280295297483665
+    },
+    {
+      "index": 42,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 15.85681818181818,
+      "duration_sec": 0.011383219954648527,
+      "label_method": "salience",
+      "quality": 1.1525927563084393
+    },
+    {
+      "index": 43,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 16.079545454545453,
+      "duration_sec": 0.12727891156462584,
+      "label_method": "salience",
+      "quality": 1.0139304951856103
+    },
+    {
+      "index": 44,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 16.21818181818182,
+      "duration_sec": 0.011315192743764172,
+      "label_method": "salience",
+      "quality": 1.0494275550643344
+    },
+    {
+      "index": 45,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 16.229545454545455,
+      "duration_sec": 0.081859410430839,
+      "label_method": "salience",
+      "quality": 1.5574620170230773
+    },
+    {
+      "index": 46,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 16.334090909090907,
+      "duration_sec": 0.045396825396825394,
+      "label_method": "salience",
+      "quality": 1.0015430572045705
+    },
+    {
+      "index": 47,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 16.56590909090909,
+      "duration_sec": 0.09319727891156462,
+      "label_method": "salience",
+      "quality": 1.8811760580281591
+    },
+    {
+      "index": 48,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 16.902272727272727,
+      "duration_sec": 0.05909297052154195,
+      "label_method": "salience",
+      "quality": 1.1890398024059627
+    },
+    {
+      "index": 49,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 17.71590909090909,
+      "duration_sec": 0.034104308390022674,
+      "label_method": "salience",
+      "quality": 1.1342993850341372
+    },
+    {
+      "index": 50,
+      "pitch_hz": 830.6093951598903,
+      "midi_note": 80,
+      "transcribed_note": 80,
+      "onset_sec": 18.679545454545455,
+      "duration_sec": 0.0590702947845805,
+      "label_method": "salience",
+      "quality": 1.021442933339896
+    },
+    {
+      "index": 51,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 19.004545454545454,
+      "duration_sec": 0.013650793650793651,
+      "label_method": "salience",
+      "quality": 1.075260145098592
+    },
+    {
+      "index": 52,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 19.120454545454546,
+      "duration_sec": 0.09312925170068027,
+      "label_method": "salience",
+      "quality": 1.2271952506602073
+    },
+    {
+      "index": 53,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 19.21363636363636,
+      "duration_sec": 0.1295691609977324,
+      "label_method": "salience",
+      "quality": 1.4906504102641083
+    },
+    {
+      "index": 54,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 19.493181818181817,
+      "duration_sec": 0.0591156462585034,
+      "label_method": "salience",
+      "quality": 1.557154637815944
+    },
+    {
+      "index": 55,
+      "pitch_hz": 1864.6550460723597,
+      "midi_note": 94,
+      "transcribed_note": 94,
+      "onset_sec": 19.795454545454543,
+      "duration_sec": 0.011337868480725623,
+      "label_method": "salience",
+      "quality": 1.110969630028677
+    },
+    {
+      "index": 56,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 19.80681818181818,
+      "duration_sec": 0.0454875283446712,
+      "label_method": "salience",
+      "quality": 1.3480234574539627
+    },
+    {
+      "index": 57,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 20.179545454545455,
+      "duration_sec": 0.034058956916099774,
+      "label_method": "salience",
+      "quality": 1.1909124484044826
+    },
+    {
+      "index": 58,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 20.236363636363635,
+      "duration_sec": 0.05913832199546485,
+      "label_method": "salience",
+      "quality": 1.3422465673409423
+    },
+    {
+      "index": 59,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 20.784090909090907,
+      "duration_sec": 0.11589569160997733,
+      "label_method": "salience",
+      "quality": 1.9961781272889916
+    },
+    {
+      "index": 60,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 21.004545454545454,
+      "duration_sec": 0.034058956916099774,
+      "label_method": "salience",
+      "quality": 1.2929699224831617
+    },
+    {
+      "index": 61,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 21.120454545454546,
+      "duration_sec": 0.07954648526077097,
+      "label_method": "salience",
+      "quality": 1.8865306419890173
+    },
+    {
+      "index": 62,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 21.654545454545453,
+      "duration_sec": 0.04546485260770975,
+      "label_method": "salience",
+      "quality": 1.0850705741000495
+    },
+    {
+      "index": 63,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 21.886363636363637,
+      "duration_sec": 0.05913832199546485,
+      "label_method": "salience",
+      "quality": 1.1942249024225728
+    },
+    {
+      "index": 64,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 21.956818181818182,
+      "duration_sec": 0.08179138321995465,
+      "label_method": "salience",
+      "quality": 1.483175783742915
+    },
+    {
+      "index": 65,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 22.386363636363637,
+      "duration_sec": 0.05913832199546485,
+      "label_method": "salience",
+      "quality": 1.0998609992371005
+    },
+    {
+      "index": 66,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 22.759090909090908,
+      "duration_sec": 0.011428571428571429,
+      "label_method": "salience",
+      "quality": 1.0707748116259719
+    },
+    {
+      "index": 67,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 22.770454545454545,
+      "duration_sec": 0.05682539682539683,
+      "label_method": "salience",
+      "quality": 1.43966844403362
+    },
+    {
+      "index": 68,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 22.897727272727273,
+      "duration_sec": 0.05678004535147392,
+      "label_method": "salience",
+      "quality": 1.0122328713556725
+    },
+    {
+      "index": 69,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 22.96818181818182,
+      "duration_sec": 0.0909297052154195,
+      "label_method": "salience",
+      "quality": 1.8737567945716231
+    },
+    {
+      "index": 70,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 23.14090909090909,
+      "duration_sec": 0.19768707482993197,
+      "label_method": "salience",
+      "quality": 1.1266714632540311
+    },
+    {
+      "index": 71,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 23.33863636363636,
+      "duration_sec": 0.011383219954648527,
+      "label_method": "salience",
+      "quality": 1.248993174115271
+    },
+    {
+      "index": 72,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 23.674999999999997,
+      "duration_sec": 0.05909297052154195,
+      "label_method": "salience",
+      "quality": 1.3857605865888813
+    },
+    {
+      "index": 73,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 23.920454545454543,
+      "duration_sec": 0.07043083900226757,
+      "label_method": "salience",
+      "quality": 1.3872987663617244
+    },
+    {
+      "index": 74,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 25.127272727272725,
+      "duration_sec": 0.011337868480725623,
+      "label_method": "salience",
+      "quality": 1.0073857359085059
+    },
+    {
+      "index": 75,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 25.313636363636363,
+      "duration_sec": 0.0590702947845805,
+      "label_method": "salience",
+      "quality": 1.116065425002798
+    },
+    {
+      "index": 76,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 26.104545454545452,
+      "duration_sec": 0.011360544217687075,
+      "label_method": "salience",
+      "quality": 1.0266159980364755
+    },
+    {
+      "index": 77,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 26.46363636363636,
+      "duration_sec": 0.0363718820861678,
+      "label_method": "salience",
+      "quality": 1.1269708062193349
+    },
+    {
+      "index": 78,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 26.579545454545453,
+      "duration_sec": 0.04775510204081632,
+      "label_method": "salience",
+      "quality": 1.247935338165696
+    },
+    {
+      "index": 79,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 27.904545454545453,
+      "duration_sec": 0.10453514739229025,
+      "label_method": "salience",
+      "quality": 1.8211361236034744
+    },
+    {
+      "index": 80,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 28.009090909090908,
+      "duration_sec": 0.0591156462585034,
+      "label_method": "salience",
+      "quality": 1.454242111146417
+    },
+    {
+      "index": 81,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 28.102272727272727,
+      "duration_sec": 0.0591156462585034,
+      "label_method": "salience",
+      "quality": 1.3635011380012794
+    },
+    {
+      "index": 82,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 28.543181818181818,
+      "duration_sec": 0.036303854875283446,
+      "label_method": "salience",
+      "quality": 1.4223111583328736
+    },
+    {
+      "index": 83,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 28.695454545454545,
+      "duration_sec": 0.011337868480725623,
+      "label_method": "salience",
+      "quality": 1.0901126123938574
+    },
+    {
+      "index": 84,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 28.91590909090909,
+      "duration_sec": 0.07954648526077097,
+      "label_method": "salience",
+      "quality": 1.3840418067580083
+    },
+    {
+      "index": 85,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 29.125,
+      "duration_sec": 0.05680272108843538,
+      "label_method": "salience",
+      "quality": 1.5774122181532637
+    },
+    {
+      "index": 86,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 29.18181818181818,
+      "duration_sec": 0.022675736961451247,
+      "label_method": "salience",
+      "quality": 1.1740266759080233
+    },
+    {
+      "index": 87,
+      "pitch_hz": 830.6093951598903,
+      "midi_note": 80,
+      "transcribed_note": 80,
+      "onset_sec": 29.565909090909088,
+      "duration_sec": 0.05680272108843538,
+      "label_method": "salience",
+      "quality": 1.750083034162216
+    },
+    {
+      "index": 88,
+      "pitch_hz": 329.6275569128699,
+      "midi_note": 64,
+      "transcribed_note": 64,
+      "onset_sec": 29.71590909090909,
+      "duration_sec": 0.022698412698412697,
+      "label_method": "salience",
+      "quality": 1.0323937647802872
+    },
+    {
+      "index": 89,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 29.811363636363634,
+      "duration_sec": 0.06811791383219955,
+      "label_method": "salience",
+      "quality": 1.4408880128535626
+    },
+    {
+      "index": 90,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 29.938636363636363,
+      "duration_sec": 0.05687074829931973,
+      "label_method": "salience",
+      "quality": 1.2864818386737582
+    },
+    {
+      "index": 91,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 30.077272727272724,
+      "duration_sec": 0.0227437641723356,
+      "label_method": "salience",
+      "quality": 1.1369397700244481
+    },
+    {
+      "index": 92,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 31.075,
+      "duration_sec": 0.04770975056689342,
+      "label_method": "salience",
+      "quality": 1.0765396360205892
+    },
+    {
+      "index": 93,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 31.354545454545452,
+      "duration_sec": 0.05904761904761905,
+      "label_method": "salience",
+      "quality": 1.5078202883520826
+    },
+    {
+      "index": 94,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 32.35454545454545,
+      "duration_sec": 0.0227437641723356,
+      "label_method": "salience",
+      "quality": 1.2330132018375326
+    },
+    {
+      "index": 95,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 33.654545454545456,
+      "duration_sec": 0.011360544217687075,
+      "label_method": "salience",
+      "quality": 1.1206359941491022
+    },
+    {
+      "index": 96,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 33.77272727272727,
+      "duration_sec": 0.022766439909297054,
+      "label_method": "salience",
+      "quality": 1.131032214069513
+    },
+    {
+      "index": 97,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 33.888636363636365,
+      "duration_sec": 0.09317460317460317,
+      "label_method": "salience",
+      "quality": 1.6953377831955416
+    },
+    {
+      "index": 98,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 34.38636363636363,
+      "duration_sec": 0.036349206349206346,
+      "label_method": "salience",
+      "quality": 1.264197726201503
+    },
+    {
+      "index": 99,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 34.445454545454545,
+      "duration_sec": 0.08183673469387755,
+      "label_method": "salience",
+      "quality": 1.807767030323944
+    },
+    {
+      "index": 100,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 34.57272727272727,
+      "duration_sec": 0.022766439909297054,
+      "label_method": "salience",
+      "quality": 1.0518509530839686
+    },
+    {
+      "index": 101,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 34.793181818181814,
+      "duration_sec": 0.09321995464852607,
+      "label_method": "salience",
+      "quality": 1.2364032392271793
+    },
+    {
+      "index": 102,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 34.793181818181814,
+      "duration_sec": 0.09321995464852607,
+      "label_method": "salience",
+      "quality": 1.63676310618828
+    },
+    {
+      "index": 103,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 35.35,
+      "duration_sec": 0.07045351473922902,
+      "label_method": "salience",
+      "quality": 1.3454839743203006
+    },
+    {
+      "index": 104,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 36.17727272727272,
+      "duration_sec": 0.05682539682539683,
+      "label_method": "salience",
+      "quality": 1.365482536460678
+    },
+    {
+      "index": 105,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 36.60681818181818,
+      "duration_sec": 0.05678004535147392,
+      "label_method": "salience",
+      "quality": 1.177829500964017
+    },
+    {
+      "index": 106,
+      "pitch_hz": 329.6275569128699,
+      "midi_note": 64,
+      "transcribed_note": 64,
+      "onset_sec": 36.73409090909091,
+      "duration_sec": 0.034104308390022674,
+      "label_method": "salience",
+      "quality": 1.172115019125475
+    },
+    {
+      "index": 107,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 36.89545454545454,
+      "duration_sec": 0.04775510204081632,
+      "label_method": "salience",
+      "quality": 1.441395566372731
+    },
+    {
+      "index": 108,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 37.175,
+      "duration_sec": 0.09319727891156462,
+      "label_method": "salience",
+      "quality": 1.5658829606146374
+    },
+    {
+      "index": 109,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 37.465909090909086,
+      "duration_sec": 0.034104308390022674,
+      "label_method": "salience",
+      "quality": 1.4641685309360162
+    },
+    {
+      "index": 110,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 37.58181818181818,
+      "duration_sec": 0.011383219954648527,
+      "label_method": "salience",
+      "quality": 1.162108384495684
+    },
+    {
+      "index": 111,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 37.89545454545454,
+      "duration_sec": 0.07045351473922902,
+      "label_method": "salience",
+      "quality": 1.3920108086924439
+    },
+    {
+      "index": 112,
+      "pitch_hz": 493.8833012561241,
+      "midi_note": 71,
+      "transcribed_note": 71,
+      "onset_sec": 38.127272727272725,
+      "duration_sec": 0.09324263038548752,
+      "label_method": "salience",
+      "quality": 1.0611071984218643
+    },
+    {
+      "index": 113,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 38.35,
+      "duration_sec": 0.0454875283446712,
+      "label_method": "salience",
+      "quality": 1.0471316719635797
+    },
+    {
+      "index": 114,
+      "pitch_hz": 493.8833012561241,
+      "midi_note": 71,
+      "transcribed_note": 71,
+      "onset_sec": 38.74318181818182,
+      "duration_sec": 0.04770975056689342,
+      "label_method": "salience",
+      "quality": 1.0389573784760484
+    },
+    {
+      "index": 115,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 38.89545454545454,
+      "duration_sec": 0.09095238095238095,
+      "label_method": "salience",
+      "quality": 1.8970465428003682
+    },
+    {
+      "index": 116,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 40.07954545454545,
+      "duration_sec": 0.022766439909297054,
+      "label_method": "salience",
+      "quality": 1.1246300546100778
+    },
+    {
+      "index": 117,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 40.44090909090909,
+      "duration_sec": 0.0681859410430839,
+      "label_method": "salience",
+      "quality": 1.203903664396808
+    },
+    {
+      "index": 118,
+      "pitch_hz": 830.6093951598903,
+      "midi_note": 80,
+      "transcribed_note": 80,
+      "onset_sec": 40.44090909090909,
+      "duration_sec": 0.0681859410430839,
+      "label_method": "salience",
+      "quality": 1.0928353754324094
+    },
+    {
+      "index": 119,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 40.53181818181818,
+      "duration_sec": 0.024965986394557823,
+      "label_method": "salience",
+      "quality": 1.052423981934195
+    },
+    {
+      "index": 120,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 41.52045454545454,
+      "duration_sec": 0.011337868480725623,
+      "label_method": "salience",
+      "quality": 1.0011072014217568
+    },
+    {
+      "index": 121,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 41.67045454545455,
+      "duration_sec": 0.0227437641723356,
+      "label_method": "salience",
+      "quality": 1.1483309065711285
+    },
+    {
+      "index": 122,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 41.76590909090909,
+      "duration_sec": 0.0681859410430839,
+      "label_method": "salience",
+      "quality": 1.4118239479332724
+    },
+    {
+      "index": 123,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 41.834090909090904,
+      "duration_sec": 0.0591156462585034,
+      "label_method": "salience",
+      "quality": 1.1823326305944641
+    },
+    {
+      "index": 124,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 41.90454545454545,
+      "duration_sec": 0.034058956916099774,
+      "label_method": "salience",
+      "quality": 1.1455639944723313
+    },
+    {
+      "index": 125,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 42.461363636363636,
+      "duration_sec": 0.05913832199546485,
+      "label_method": "salience",
+      "quality": 1.378078472974006
+    },
+    {
+      "index": 126,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 42.925,
+      "duration_sec": 0.04770975056689342,
+      "label_method": "salience",
+      "quality": 1.3029079591152193
+    },
+    {
+      "index": 127,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 43.26363636363636,
+      "duration_sec": 0.06816326530612245,
+      "label_method": "salience",
+      "quality": 1.4856161702050115
+    },
+    {
+      "index": 128,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 43.34318181818182,
+      "duration_sec": 0.0591156462585034,
+      "label_method": "salience",
+      "quality": 1.768369795913525
+    },
+    {
+      "index": 129,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 43.425,
+      "duration_sec": 0.12727891156462584,
+      "label_method": "salience",
+      "quality": 1.940942808081111
+    },
+    {
+      "index": 130,
+      "pitch_hz": 164.81377845643496,
+      "midi_note": 52,
+      "transcribed_note": 52,
+      "onset_sec": 43.62272727272727,
+      "duration_sec": 0.04546485260770975,
+      "label_method": "salience",
+      "quality": 1.0348673066875034
+    },
+    {
+      "index": 131,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 43.72727272727273,
+      "duration_sec": 0.036326530612244896,
+      "label_method": "salience",
+      "quality": 1.2880259519617947
+    },
+    {
+      "index": 132,
+      "pitch_hz": 164.81377845643496,
+      "midi_note": 52,
+      "transcribed_note": 52,
+      "onset_sec": 43.76363636363636,
+      "duration_sec": 0.04546485260770975,
+      "label_method": "salience",
+      "quality": 1.2860381965302072
+    },
+    {
+      "index": 133,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 44.099999999999994,
+      "duration_sec": 0.11591836734693878,
+      "label_method": "salience",
+      "quality": 1.3400673912491923
+    },
+    {
+      "index": 134,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 45.168181818181814,
+      "duration_sec": 0.02272108843537415,
+      "label_method": "salience",
+      "quality": 1.1194581632068086
+    },
+    {
+      "index": 135,
+      "pitch_hz": 493.8833012561241,
+      "midi_note": 71,
+      "transcribed_note": 71,
+      "onset_sec": 45.62045454545454,
+      "duration_sec": 0.011337868480725623,
+      "label_method": "salience",
+      "quality": 1.1059240591842259
+    },
+    {
+      "index": 136,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 46.00454545454545,
+      "duration_sec": 0.04775510204081632,
+      "label_method": "salience",
+      "quality": 1.1096549385007073
+    },
+    {
+      "index": 137,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 47.304545454545455,
+      "duration_sec": 0.024943310657596373,
+      "label_method": "salience",
+      "quality": 1.2116632227175583
+    },
+    {
+      "index": 138,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 48.72272727272727,
+      "duration_sec": 0.1636734693877551,
+      "label_method": "salience",
+      "quality": 1.870351492139335
+    },
+    {
+      "index": 139,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 49.01363636363636,
+      "duration_sec": 0.10453514739229025,
+      "label_method": "salience",
+      "quality": 1.2904134834073937
+    },
+    {
+      "index": 140,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 49.559090909090905,
+      "duration_sec": 0.0818140589569161,
+      "label_method": "salience",
+      "quality": 1.2746200322477343
+    },
+    {
+      "index": 141,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 49.663636363636364,
+      "duration_sec": 0.07045351473922902,
+      "label_method": "salience",
+      "quality": 1.5494448642594636
+    },
+    {
+      "index": 142,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 49.75681818181818,
+      "duration_sec": 0.22045351473922903,
+      "label_method": "salience",
+      "quality": 1.3359032276892977
+    },
+    {
+      "index": 143,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 50.45454545454545,
+      "duration_sec": 0.07045351473922902,
+      "label_method": "salience",
+      "quality": 1.609915044210493
+    },
+    {
+      "index": 144,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 50.652272727272724,
+      "duration_sec": 0.034126984126984124,
+      "label_method": "salience",
+      "quality": 1.288061568340858
+    },
+    {
+      "index": 145,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 50.720454545454544,
+      "duration_sec": 0.04773242630385487,
+      "label_method": "salience",
+      "quality": 1.2329253021327577
+    },
+    {
+      "index": 146,
+      "pitch_hz": 830.6093951598903,
+      "midi_note": 80,
+      "transcribed_note": 80,
+      "onset_sec": 50.929545454545455,
+      "duration_sec": 0.0363718820861678,
+      "label_method": "salience",
+      "quality": 1.1174369474660693
+    },
+    {
+      "index": 147,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 51.23181818181818,
+      "duration_sec": 0.11587301587301588,
+      "label_method": "salience",
+      "quality": 1.4038659111813665
+    },
+    {
+      "index": 148,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 51.79090909090909,
+      "duration_sec": 0.07047619047619047,
+      "label_method": "salience",
+      "quality": 1.1776934184494816
+    },
+    {
+      "index": 149,
+      "pitch_hz": 493.8833012561241,
+      "midi_note": 71,
+      "transcribed_note": 71,
+      "onset_sec": 52.777272727272724,
+      "duration_sec": 0.011337868480725623,
+      "label_method": "salience",
+      "quality": 1.0501013518159679
+    },
+    {
+      "index": 150,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 54.78636363636363,
+      "duration_sec": 0.08183673469387755,
+      "label_method": "salience",
+      "quality": 1.0340130874910987
+    },
+    {
+      "index": 151,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 56.902272727272724,
+      "duration_sec": 0.07952380952380952,
+      "label_method": "salience",
+      "quality": 1.2157935857697915
+    },
+    {
+      "index": 152,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 56.902272727272724,
+      "duration_sec": 0.07952380952380952,
+      "label_method": "salience",
+      "quality": 1.2160817062848162
+    },
+    {
+      "index": 153,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 56.99545454545454,
+      "duration_sec": 0.13863945578231293,
+      "label_method": "salience",
+      "quality": 1.6057888443581443
+    },
+    {
+      "index": 154,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 57.33181818181818,
+      "duration_sec": 0.05678004535147392,
+      "label_method": "salience",
+      "quality": 1.0701715170309
+    },
+    {
+      "index": 155,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 57.41136363636363,
+      "duration_sec": 0.05913832199546485,
+      "label_method": "salience",
+      "quality": 1.3340605001806507
+    },
+    {
+      "index": 156,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 57.64545454545454,
+      "duration_sec": 0.0227437641723356,
+      "label_method": "salience",
+      "quality": 1.1146388263484468
+    },
+    {
+      "index": 157,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 58.28409090909091,
+      "duration_sec": 0.022698412698412697,
+      "label_method": "salience",
+      "quality": 1.1368679675419173
+    },
+    {
+      "index": 158,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 58.91136363636363,
+      "duration_sec": 0.07043083900226757,
+      "label_method": "salience",
+      "quality": 1.1087244643326468
+    },
+    {
+      "index": 159,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 59.236363636363635,
+      "duration_sec": 0.0454421768707483,
+      "label_method": "salience",
+      "quality": 1.1509091557908167
+    },
+    {
+      "index": 160,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 59.79545454545454,
+      "duration_sec": 0.0454421768707483,
+      "label_method": "salience",
+      "quality": 1.1443237325510236
+    },
+    {
+      "index": 161,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 60.75909090909091,
+      "duration_sec": 0.04541950113378685,
+      "label_method": "salience",
+      "quality": 1.025440818850549
+    },
+    {
+      "index": 162,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 60.82727272727272,
+      "duration_sec": 0.036326530612244896,
+      "label_method": "salience",
+      "quality": 1.043399054228446
+    },
+    {
+      "index": 163,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 60.88636363636363,
+      "duration_sec": 0.03414965986394558,
+      "label_method": "salience",
+      "quality": 1.148922148201145
+    },
+    {
+      "index": 164,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 61.78181818181818,
+      "duration_sec": 0.0817687074829932,
+      "label_method": "salience",
+      "quality": 1.222247333237496
+    },
+    {
+      "index": 165,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 62.465909090909086,
+      "duration_sec": 0.04768707482993197,
+      "label_method": "salience",
+      "quality": 1.165050479989715
+    },
+    {
+      "index": 166,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 62.849999999999994,
+      "duration_sec": 0.034104308390022674,
+      "label_method": "salience",
+      "quality": 1.3410938437104805
+    },
+    {
+      "index": 167,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 62.92045454545454,
+      "duration_sec": 0.10453514739229025,
+      "label_method": "salience",
+      "quality": 1.6184172467363043
+    },
+    {
+      "index": 168,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 63.12954545454545,
+      "duration_sec": 0.0909750566893424,
+      "label_method": "salience",
+      "quality": 1.7136873773084609
+    },
+    {
+      "index": 169,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 64.5340909090909,
+      "duration_sec": 0.0818140589569161,
+      "label_method": "salience",
+      "quality": 1.0104020712698487
+    },
+    {
+      "index": 170,
+      "pitch_hz": 92.4986056779086,
+      "midi_note": 42,
+      "transcribed_note": 42,
+      "onset_sec": 70.00681818181818,
+      "duration_sec": 0.05678004535147392,
+      "label_method": "salience",
+      "quality": 1.0674025505224696
+    },
+    {
+      "index": 171,
+      "pitch_hz": 329.6275569128699,
+      "midi_note": 64,
+      "transcribed_note": 64,
+      "onset_sec": 70.89999999999999,
+      "duration_sec": 0.011405895691609977,
+      "label_method": "salience",
+      "quality": 1.0517285740620506
+    },
+    {
+      "index": 172,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 71.45681818181818,
+      "duration_sec": 0.10678004535147392,
+      "label_method": "salience",
+      "quality": 1.4634359927764837
+    },
+    {
+      "index": 173,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 71.56363636363636,
+      "duration_sec": 0.022766439909297054,
+      "label_method": "salience",
+      "quality": 1.0171902328769777
+    },
+    {
+      "index": 174,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 71.67954545454545,
+      "duration_sec": 0.0590702947845805,
+      "label_method": "salience",
+      "quality": 1.0430442751864804
+    },
+    {
+      "index": 175,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 71.80681818181817,
+      "duration_sec": 0.05909297052154195,
+      "label_method": "salience",
+      "quality": 1.8347223778147541
+    },
+    {
+      "index": 176,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 72.02727272727272,
+      "duration_sec": 0.08183673469387755,
+      "label_method": "salience",
+      "quality": 1.5551697228270271
+    },
+    {
+      "index": 177,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 72.77045454545454,
+      "duration_sec": 0.05902494331065759,
+      "label_method": "salience",
+      "quality": 1.54247004142233
+    },
+    {
+      "index": 178,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 73.13181818181818,
+      "duration_sec": 0.07954648526077097,
+      "label_method": "salience",
+      "quality": 1.4213144063338854
+    },
+    {
+      "index": 179,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 73.21136363636363,
+      "duration_sec": 0.11591836734693878,
+      "label_method": "salience",
+      "quality": 1.6645913670982337
+    },
+    {
+      "index": 180,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 74.9090909090909,
+      "duration_sec": 0.11591836734693878,
+      "label_method": "salience",
+      "quality": 1.2490969729744665
+    },
+    {
+      "index": 181,
+      "pitch_hz": 466.1637615180899,
+      "midi_note": 70,
+      "transcribed_note": 70,
+      "onset_sec": 75.02499999999999,
+      "duration_sec": 0.011405895691609977,
+      "label_method": "salience",
+      "quality": 1.078974497535149
+    },
+    {
+      "index": 182,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 75.25681818181818,
+      "duration_sec": 0.022675736961451247,
+      "label_method": "salience",
+      "quality": 1.114352742000911
+    },
+    {
+      "index": 183,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 76.76818181818182,
+      "duration_sec": 0.1045578231292517,
+      "label_method": "salience",
+      "quality": 1.1822291137453163
+    },
+    {
+      "index": 184,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 77.23181818181818,
+      "duration_sec": 0.05909297052154195,
+      "label_method": "salience",
+      "quality": 2.1557398845205262
+    },
+    {
+      "index": 185,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 77.31363636363636,
+      "duration_sec": 0.09317460317460317,
+      "label_method": "salience",
+      "quality": 1.0660620023311724
+    },
+    {
+      "index": 186,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 78.71818181818182,
+      "duration_sec": 0.07043083900226757,
+      "label_method": "salience",
+      "quality": 1.3609842477090894
+    },
+    {
+      "index": 187,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 78.8,
+      "duration_sec": 0.10448979591836735,
+      "label_method": "salience",
+      "quality": 1.6329790267728272
+    },
+    {
+      "index": 188,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 78.90454545454546,
+      "duration_sec": 0.036349206349206346,
+      "label_method": "salience",
+      "quality": 1.612005446917724
+    },
+    {
+      "index": 189,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 78.94090909090909,
+      "duration_sec": 0.034081632653061224,
+      "label_method": "salience",
+      "quality": 1.2327636337997738
+    },
+    {
+      "index": 190,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 78.98636363636363,
+      "duration_sec": 0.0227437641723356,
+      "label_method": "salience",
+      "quality": 1.219094552752401
+    },
+    {
+      "index": 191,
+      "pitch_hz": 830.6093951598903,
+      "midi_note": 80,
+      "transcribed_note": 80,
+      "onset_sec": 79.13636363636363,
+      "duration_sec": 0.04773242630385487,
+      "label_method": "salience",
+      "quality": 1.084312278021758
+    },
+    {
+      "index": 192,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 79.45,
+      "duration_sec": 0.011383219954648527,
+      "label_method": "salience",
+      "quality": 1.0163501102973616
+    },
+    {
+      "index": 193,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 79.71818181818182,
+      "duration_sec": 0.05909297052154195,
+      "label_method": "salience",
+      "quality": 1.0632052192941448
+    },
+    {
+      "index": 194,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 79.78863636363636,
+      "duration_sec": 0.14997732426303856,
+      "label_method": "salience",
+      "quality": 2.016631999423022
+    },
+    {
+      "index": 195,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 80.22954545454544,
+      "duration_sec": 0.081859410430839,
+      "label_method": "salience",
+      "quality": 1.6233064688390952
+    },
+    {
+      "index": 196,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 80.22954545454544,
+      "duration_sec": 0.081859410430839,
+      "label_method": "salience",
+      "quality": 1.1912079970417784
+    },
+    {
+      "index": 197,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 80.3340909090909,
+      "duration_sec": 0.04770975056689342,
+      "label_method": "salience",
+      "quality": 1.0539636326879087
+    },
+    {
+      "index": 198,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 80.89090909090909,
+      "duration_sec": 0.011383219954648527,
+      "label_method": "salience",
+      "quality": 1.1540574305780822
+    },
+    {
+      "index": 199,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 80.90227272727272,
+      "duration_sec": 0.0818140589569161,
+      "label_method": "salience",
+      "quality": 1.5480054668530552
+    },
+    {
+      "index": 200,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 81.05454545454545,
+      "duration_sec": 0.0227437641723356,
+      "label_method": "salience",
+      "quality": 1.2549896408713055
+    },
+    {
+      "index": 201,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 81.47272727272727,
+      "duration_sec": 0.0817687074829932,
+      "label_method": "salience",
+      "quality": 1.3538076884633827
+    },
+    {
+      "index": 202,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 82.01818181818182,
+      "duration_sec": 0.0136281179138322,
+      "label_method": "salience",
+      "quality": 1.1515553107160261
+    },
+    {
+      "index": 203,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 82.1590909090909,
+      "duration_sec": 0.034126984126984124,
+      "label_method": "salience",
+      "quality": 1.2259110552703578
+    },
+    {
+      "index": 204,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 82.34318181818182,
+      "duration_sec": 0.07040816326530612,
+      "label_method": "salience",
+      "quality": 1.2021562386912723
+    },
+    {
+      "index": 205,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 83.33181818181818,
+      "duration_sec": 0.05678004535147392,
+      "label_method": "salience",
+      "quality": 1.66353800158075
+    },
+    {
+      "index": 206,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 83.41136363636363,
+      "duration_sec": 0.0136281179138322,
+      "label_method": "salience",
+      "quality": 1.1762537430328421
+    },
+    {
+      "index": 207,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 84.05227272727272,
+      "duration_sec": 0.034126984126984124,
+      "label_method": "salience",
+      "quality": 1.2232531221790182
+    },
+    {
+      "index": 208,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 84.20227272727273,
+      "duration_sec": 0.036326530612244896,
+      "label_method": "salience",
+      "quality": 1.4363042358039626
+    },
+    {
+      "index": 209,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 85.05,
+      "duration_sec": 0.011383219954648527,
+      "label_method": "salience",
+      "quality": 1.185121569528903
+    },
+    {
+      "index": 210,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 85.12045454545454,
+      "duration_sec": 0.05682539682539683,
+      "label_method": "salience",
+      "quality": 1.3275384753348545
+    },
+    {
+      "index": 211,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 85.58636363636363,
+      "duration_sec": 0.0227437641723356,
+      "label_method": "salience",
+      "quality": 1.01877900203137
+    },
+    {
+      "index": 212,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 85.82954545454545,
+      "duration_sec": 0.08183673469387755,
+      "label_method": "salience",
+      "quality": 1.3933823152231757
+    },
+    {
+      "index": 213,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 86.05,
+      "duration_sec": 0.07045351473922902,
+      "label_method": "salience",
+      "quality": 1.781168249007094
+    },
+    {
+      "index": 214,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 86.12045454545454,
+      "duration_sec": 0.034036281179138324,
+      "label_method": "salience",
+      "quality": 1.2547146742034858
+    },
+    {
+      "index": 215,
+      "pitch_hz": 164.81377845643496,
+      "midi_note": 52,
+      "transcribed_note": 52,
+      "onset_sec": 86.39772727272727,
+      "duration_sec": 0.04777777777777778,
+      "label_method": "salience",
+      "quality": 1.0653312547444935
+    },
+    {
+      "index": 216,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 86.67727272727272,
+      "duration_sec": 0.12723356009070294,
+      "label_method": "salience",
+      "quality": 1.9233526947403334
+    },
+    {
+      "index": 217,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 86.81590909090909,
+      "duration_sec": 0.07045351473922902,
+      "label_method": "salience",
+      "quality": 1.2368439955462744
+    },
+    {
+      "index": 218,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 87.01363636363637,
+      "duration_sec": 0.04775510204081632,
+      "label_method": "salience",
+      "quality": 1.3888681804568865
+    },
+    {
+      "index": 219,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 87.14090909090909,
+      "duration_sec": 0.011383219954648527,
+      "label_method": "salience",
+      "quality": 1.0500118831893868
+    },
+    {
+      "index": 220,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 87.82727272727273,
+      "duration_sec": 0.025034013605442176,
+      "label_method": "salience",
+      "quality": 1.1086570598395575
+    },
+    {
+      "index": 221,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 88.16363636363636,
+      "duration_sec": 0.11816326530612245,
+      "label_method": "salience",
+      "quality": 2.3391518170849213
+    },
+    {
+      "index": 222,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 88.52499999999999,
+      "duration_sec": 0.0681859410430839,
+      "label_method": "salience",
+      "quality": 1.329187072723727
+    },
+    {
+      "index": 223,
+      "pitch_hz": 493.8833012561241,
+      "midi_note": 71,
+      "transcribed_note": 71,
+      "onset_sec": 88.675,
+      "duration_sec": 0.011405895691609977,
+      "label_method": "salience",
+      "quality": 1.087147922394737
+    },
+    {
+      "index": 224,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 88.675,
+      "duration_sec": 0.011405895691609977,
+      "label_method": "salience",
+      "quality": 1.0364428851213636
+    },
+    {
+      "index": 225,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 89.2090909090909,
+      "duration_sec": 0.02272108843537415,
+      "label_method": "salience",
+      "quality": 1.1320999844791861
+    },
+    {
+      "index": 226,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 89.3840909090909,
+      "duration_sec": 0.07040816326530612,
+      "label_method": "salience",
+      "quality": 1.0228085088278067
+    },
+    {
+      "index": 227,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 89.65227272727272,
+      "duration_sec": 0.011315192743764172,
+      "label_method": "salience",
+      "quality": 1.046570974920676
+    },
+    {
+      "index": 228,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 89.80227272727272,
+      "duration_sec": 0.02272108843537415,
+      "label_method": "salience",
+      "quality": 1.1778032009974497
+    },
+    {
+      "index": 229,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 90.33636363636363,
+      "duration_sec": 0.0227437641723356,
+      "label_method": "salience",
+      "quality": 1.1350049627988117
+    },
+    {
+      "index": 230,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 90.52272727272727,
+      "duration_sec": 0.011360544217687075,
+      "label_method": "salience",
+      "quality": 1.16699468054254
+    },
+    {
+      "index": 231,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 91.16136363636363,
+      "duration_sec": 0.034126984126984124,
+      "label_method": "salience",
+      "quality": 1.31685239551816
+    },
+    {
+      "index": 232,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 91.5340909090909,
+      "duration_sec": 0.0591156462585034,
+      "label_method": "salience",
+      "quality": 1.2584756793447578
+    },
+    {
+      "index": 233,
+      "pitch_hz": 184.9972113558172,
+      "midi_note": 54,
+      "transcribed_note": 54,
+      "onset_sec": 92.13863636363637,
+      "duration_sec": 0.07954648526077097,
+      "label_method": "salience",
+      "quality": 1.0261598735623054
+    },
+    {
+      "index": 234,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 92.22954545454544,
+      "duration_sec": 0.0590702947845805,
+      "label_method": "salience",
+      "quality": 1.3330092965492077
+    },
+    {
+      "index": 235,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 93.11363636363636,
+      "duration_sec": 0.022766439909297054,
+      "label_method": "salience",
+      "quality": 1.0786542908255716
+    },
+    {
+      "index": 236,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 93.46363636363635,
+      "duration_sec": 0.1045578231292517,
+      "label_method": "salience",
+      "quality": 1.3032445952700042
+    },
+    {
+      "index": 237,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 93.63636363636363,
+      "duration_sec": 0.05909297052154195,
+      "label_method": "salience",
+      "quality": 1.038828986853611
+    },
+    {
+      "index": 238,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 93.8340909090909,
+      "duration_sec": 0.0818140589569161,
+      "label_method": "salience",
+      "quality": 1.4437369425636404
+    },
+    {
+      "index": 239,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 94.64772727272727,
+      "duration_sec": 0.034081632653061224,
+      "label_method": "salience",
+      "quality": 1.0380457357583333
+    },
+    {
+      "index": 240,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 94.97272727272727,
+      "duration_sec": 0.022766439909297054,
+      "label_method": "salience",
+      "quality": 1.3134754152142036
+    },
+    {
+      "index": 241,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 95.25,
+      "duration_sec": 0.05909297052154195,
+      "label_method": "salience",
+      "quality": 1.275191361325867
+    },
+    {
+      "index": 242,
+      "pitch_hz": 493.8833012561241,
+      "midi_note": 71,
+      "transcribed_note": 71,
+      "onset_sec": 95.44999999999999,
+      "duration_sec": 0.034104308390022674,
+      "label_method": "salience",
+      "quality": 1.1223458358807705
+    },
+    {
+      "index": 243,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 96.21590909090908,
+      "duration_sec": 0.0454875283446712,
+      "label_method": "salience",
+      "quality": 1.014501086918989
+    },
+    {
+      "index": 244,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 97.12045454545454,
+      "duration_sec": 0.011337868480725623,
+      "label_method": "salience",
+      "quality": 1.036842897210228
+    },
+    {
+      "index": 245,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 97.55227272727272,
+      "duration_sec": 0.0681859410430839,
+      "label_method": "salience",
+      "quality": 1.1808669865636665
+    },
+    {
+      "index": 246,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 97.62045454545454,
+      "duration_sec": 0.05902494331065759,
+      "label_method": "salience",
+      "quality": 1.4471682196231574
+    },
+    {
+      "index": 247,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 97.67954545454545,
+      "duration_sec": 0.011360544217687075,
+      "label_method": "salience",
+      "quality": 1.0981851610517583
+    },
+    {
+      "index": 248,
+      "pitch_hz": 277.1826309768721,
+      "midi_note": 61,
+      "transcribed_note": 61,
+      "onset_sec": 98.02727272727272,
+      "duration_sec": 0.04773242630385487,
+      "label_method": "salience",
+      "quality": 1.22689603988143
+    },
+    {
+      "index": 249,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 98.225,
+      "duration_sec": 0.022698412698412697,
+      "label_method": "salience",
+      "quality": 1.096197954024527
+    },
+    {
+      "index": 250,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 98.79318181818181,
+      "duration_sec": 0.1045124716553288,
+      "label_method": "salience",
+      "quality": 1.252594845308449
+    },
+    {
+      "index": 251,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 99.09545454545454,
+      "duration_sec": 0.08183673469387755,
+      "label_method": "salience",
+      "quality": 2.0413038437323165
+    },
+    {
+      "index": 252,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 100.27045454545454,
+      "duration_sec": 0.068140589569161,
+      "label_method": "salience",
+      "quality": 1.6671014342839514
+    },
+    {
+      "index": 253,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 100.59545454545454,
+      "duration_sec": 0.08183673469387755,
+      "label_method": "salience",
+      "quality": 1.105652561284434
+    },
+    {
+      "index": 254,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 101.03636363636363,
+      "duration_sec": 0.09312925170068027,
+      "label_method": "salience",
+      "quality": 1.1094740957458273
+    },
+    {
+      "index": 255,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 101.42045454545455,
+      "duration_sec": 0.1272562358276644,
+      "label_method": "salience",
+      "quality": 1.1595736220376298
+    },
+    {
+      "index": 256,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 101.69999999999999,
+      "duration_sec": 0.04551020408163265,
+      "label_method": "salience",
+      "quality": 1.299808263960977
+    },
+    {
+      "index": 257,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 101.75681818181818,
+      "duration_sec": 0.12727891156462584,
+      "label_method": "salience",
+      "quality": 1.058872975109474
+    },
+    {
+      "index": 258,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 101.8840909090909,
+      "duration_sec": 0.07040816326530612,
+      "label_method": "salience",
+      "quality": 1.5447193876356091
+    },
+    {
+      "index": 259,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 101.95454545454545,
+      "duration_sec": 0.011360544217687075,
+      "label_method": "salience",
+      "quality": 1.2218842880135572
+    },
+    {
+      "index": 260,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 102.03636363636363,
+      "duration_sec": 0.0227437641723356,
+      "label_method": "salience",
+      "quality": 1.1250924836785945
+    },
+    {
+      "index": 261,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 103.12727272727273,
+      "duration_sec": 0.08183673469387755,
+      "label_method": "salience",
+      "quality": 1.2969138859234446
+    },
+    {
+      "index": 262,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 103.57045454545454,
+      "duration_sec": 0.034036281179138324,
+      "label_method": "salience",
+      "quality": 1.060652377723613
+    },
+    {
+      "index": 263,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 105.13636363636363,
+      "duration_sec": 0.05913832199546485,
+      "label_method": "salience",
+      "quality": 1.075586371366521
+    },
+    {
+      "index": 264,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 105.76590909090909,
+      "duration_sec": 0.05680272108843538,
+      "label_method": "salience",
+      "quality": 1.061425915311151
+    },
+    {
+      "index": 265,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 105.8340909090909,
+      "duration_sec": 0.0364172335600907,
+      "label_method": "salience",
+      "quality": 1.2333050850808573
+    },
+    {
+      "index": 266,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 106.11363636363636,
+      "duration_sec": 0.09315192743764172,
+      "label_method": "salience",
+      "quality": 1.631263203476243
+    },
+    {
+      "index": 267,
+      "pitch_hz": 164.81377845643496,
+      "midi_note": 52,
+      "transcribed_note": 52,
+      "onset_sec": 107.07727272727273,
+      "duration_sec": 0.05913832199546485,
+      "label_method": "salience",
+      "quality": 1.0354457998199926
+    },
+    {
+      "index": 268,
+      "pitch_hz": 329.6275569128699,
+      "midi_note": 64,
+      "transcribed_note": 64,
+      "onset_sec": 108.04318181818181,
+      "duration_sec": 0.05682539682539683,
+      "label_method": "salience",
+      "quality": 1.4648554510572327
+    },
+    {
+      "index": 269,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 108.1,
+      "duration_sec": 0.022698412698412697,
+      "label_method": "salience",
+      "quality": 1.1908761574300915
+    },
+    {
+      "index": 270,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 108.79772727272727,
+      "duration_sec": 0.022789115646258504,
+      "label_method": "salience",
+      "quality": 1.0648907348943277
+    },
+    {
+      "index": 271,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 108.98181818181817,
+      "duration_sec": 0.024965986394557823,
+      "label_method": "salience",
+      "quality": 1.135730489236944
+    },
+    {
+      "index": 272,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 111.60909090909091,
+      "duration_sec": 0.11591836734693878,
+      "label_method": "salience",
+      "quality": 1.0408886029481832
+    },
+    {
+      "index": 273,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 111.88863636363635,
+      "duration_sec": 0.022766439909297054,
+      "label_method": "salience",
+      "quality": 1.0726907837339401
+    },
+    {
+      "index": 274,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 112.60681818181817,
+      "duration_sec": 0.04768707482993197,
+      "label_method": "salience",
+      "quality": 1.268283732143192
+    },
+    {
+      "index": 275,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 112.95681818181818,
+      "duration_sec": 0.16138321995464852,
+      "label_method": "salience",
+      "quality": 1.4232965073082688
+    },
+    {
+      "index": 276,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 113.12954545454545,
+      "duration_sec": 0.4204761904761905,
+      "label_method": "salience",
+      "quality": 1.9698871842665777
+    },
+    {
+      "index": 277,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 114.39772727272727,
+      "duration_sec": 0.05678004535147392,
+      "label_method": "salience",
+      "quality": 1.0024673961786132
+    },
+    {
+      "index": 278,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 114.45454545454545,
+      "duration_sec": 0.0818140589569161,
+      "label_method": "salience",
+      "quality": 1.6770388166857366
+    },
+    {
+      "index": 279,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 114.53636363636363,
+      "duration_sec": 0.03414965986394558,
+      "label_method": "salience",
+      "quality": 1.3729386442772709
+    },
+    {
+      "index": 280,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 114.7090909090909,
+      "duration_sec": 0.07040816326530612,
+      "label_method": "salience",
+      "quality": 1.3465801195808687
+    },
+    {
+      "index": 281,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 114.77954545454544,
+      "duration_sec": 0.07047619047619047,
+      "label_method": "salience",
+      "quality": 1.1386754696307337
+    },
+    {
+      "index": 282,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 114.85,
+      "duration_sec": 0.0454875283446712,
+      "label_method": "salience",
+      "quality": 1.0577100743642323
+    },
+    {
+      "index": 283,
+      "pitch_hz": 830.6093951598903,
+      "midi_note": 80,
+      "transcribed_note": 80,
+      "onset_sec": 114.94318181818181,
+      "duration_sec": 0.06820861678004535,
+      "label_method": "salience",
+      "quality": 1.3654308111214895
+    },
+    {
+      "index": 284,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 115.01136363636363,
+      "duration_sec": 0.08183673469387755,
+      "label_method": "salience",
+      "quality": 1.238012596689119
+    },
+    {
+      "index": 285,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 115.25681818181818,
+      "duration_sec": 0.05909297052154195,
+      "label_method": "salience",
+      "quality": 1.2958067658377495
+    },
+    {
+      "index": 286,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 115.42045454545455,
+      "duration_sec": 0.1500453514739229,
+      "label_method": "salience",
+      "quality": 1.3464140177030977
+    },
+    {
+      "index": 287,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 115.79090909090908,
+      "duration_sec": 0.07047619047619047,
+      "label_method": "salience",
+      "quality": 1.2218085821057145
+    },
+    {
+      "index": 288,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 115.87272727272726,
+      "duration_sec": 0.034058956916099774,
+      "label_method": "salience",
+      "quality": 1.0709845096497501
+    },
+    {
+      "index": 289,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 116.78863636363636,
+      "duration_sec": 0.09317460317460317,
+      "label_method": "salience",
+      "quality": 1.1147868003437114
+    },
+    {
+      "index": 290,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 117.29090909090908,
+      "duration_sec": 0.05678004535147392,
+      "label_method": "salience",
+      "quality": 1.1851873222446923
+    },
+    {
+      "index": 291,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 119.02045454545454,
+      "duration_sec": 0.011337868480725623,
+      "label_method": "salience",
+      "quality": 1.1118538984013075
+    },
+    {
+      "index": 292,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 120.67045454545453,
+      "duration_sec": 0.011337868480725623,
+      "label_method": "salience",
+      "quality": 1.0644062416055722
+    },
+    {
+      "index": 293,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 120.85454545454544,
+      "duration_sec": 0.25684807256235825,
+      "label_method": "salience",
+      "quality": 1.8858535270866368
+    },
+    {
+      "index": 294,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 121.18181818181817,
+      "duration_sec": 0.0590702947845805,
+      "label_method": "salience",
+      "quality": 1.1210269167323132
+    },
+    {
+      "index": 295,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 121.33181818181818,
+      "duration_sec": 0.09317460317460317,
+      "label_method": "salience",
+      "quality": 1.4352340224610913
+    },
+    {
+      "index": 296,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 122.01818181818182,
+      "duration_sec": 0.05682539682539683,
+      "label_method": "salience",
+      "quality": 1.113291025243561
+    },
+    {
+      "index": 297,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 122.16818181818181,
+      "duration_sec": 0.07043083900226757,
+      "label_method": "salience",
+      "quality": 1.2068453990947425
+    },
+    {
+      "index": 298,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 122.23863636363636,
+      "duration_sec": 0.07047619047619047,
+      "label_method": "salience",
+      "quality": 1.370700647645053
+    },
+    {
+      "index": 299,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 122.37727272727273,
+      "duration_sec": 0.08183673469387755,
+      "label_method": "salience",
+      "quality": 1.1403582214631445
+    },
+    {
+      "index": 300,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 122.4590909090909,
+      "duration_sec": 0.0591156462585034,
+      "label_method": "salience",
+      "quality": 1.3263281418780082
+    },
+    {
+      "index": 301,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 122.60909090909091,
+      "duration_sec": 0.04770975056689342,
+      "label_method": "salience",
+      "quality": 1.1155447147252038
+    },
+    {
+      "index": 302,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 122.89999999999999,
+      "duration_sec": 0.011383219954648527,
+      "label_method": "salience",
+      "quality": 1.02622870925938
+    },
+    {
+      "index": 303,
+      "pitch_hz": 493.8833012561241,
+      "midi_note": 71,
+      "transcribed_note": 71,
+      "onset_sec": 123.22727272727272,
+      "duration_sec": 0.07952380952380952,
+      "label_method": "salience",
+      "quality": 1.0739426893064448
+    },
+    {
+      "index": 304,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 123.56363636363636,
+      "duration_sec": 0.081859410430839,
+      "label_method": "salience",
+      "quality": 1.3291132374568133
+    },
+    {
+      "index": 305,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 123.64545454545454,
+      "duration_sec": 0.068140589569161,
+      "label_method": "salience",
+      "quality": 1.1634943869178693
+    },
+    {
+      "index": 306,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 124.14318181818182,
+      "duration_sec": 0.0818140589569161,
+      "label_method": "salience",
+      "quality": 1.3256918117465883
+    },
+    {
+      "index": 307,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 124.68863636363636,
+      "duration_sec": 0.011383219954648527,
+      "label_method": "salience",
+      "quality": 1.2494799442377618
+    },
+    {
+      "index": 308,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 124.78181818181818,
+      "duration_sec": 0.0817687074829932,
+      "label_method": "salience",
+      "quality": 1.1836593173913796
+    },
+    {
+      "index": 309,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 124.875,
+      "duration_sec": 0.07045351473922902,
+      "label_method": "salience",
+      "quality": 1.1983877779633658
+    },
+    {
+      "index": 310,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 125.84090909090908,
+      "duration_sec": 0.011383219954648527,
+      "label_method": "salience",
+      "quality": 1.0750751856439278
+    },
+    {
+      "index": 311,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 126.00227272727273,
+      "duration_sec": 0.07043083900226757,
+      "label_method": "salience",
+      "quality": 1.620794180132013
+    },
+    {
+      "index": 312,
+      "pitch_hz": 622.2539674441618,
+      "midi_note": 75,
+      "transcribed_note": 75,
+      "onset_sec": 126.46818181818182,
+      "duration_sec": 0.05682539682539683,
+      "label_method": "salience",
+      "quality": 1.0076074464554376
+    },
+    {
+      "index": 313,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 126.675,
+      "duration_sec": 0.05909297052154195,
+      "label_method": "salience",
+      "quality": 1.3339053099304767
+    },
+    {
+      "index": 314,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 126.79318181818181,
+      "duration_sec": 0.09090702947845805,
+      "label_method": "salience",
+      "quality": 1.6967327988314096
+    },
+    {
+      "index": 315,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 127.33863636363635,
+      "duration_sec": 0.0363718820861678,
+      "label_method": "salience",
+      "quality": 1.2476297030889847
+    },
+    {
+      "index": 316,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 127.77954545454544,
+      "duration_sec": 0.46591836734693876,
+      "label_method": "salience",
+      "quality": 1.5000114855536968
+    },
+    {
+      "index": 317,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 127.77954545454544,
+      "duration_sec": 0.4659637188208617,
+      "label_method": "salience",
+      "quality": 1.7995915649743648
+    },
+    {
+      "index": 318,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 128.24545454545455,
+      "duration_sec": 0.011337868480725623,
+      "label_method": "salience",
+      "quality": 1.0837334406744707
+    },
+    {
+      "index": 319,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 128.58181818181816,
+      "duration_sec": 0.022675736961451247,
+      "label_method": "salience",
+      "quality": 1.0978329843048984
+    },
+    {
+      "index": 320,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 128.81363636363636,
+      "duration_sec": 0.09315192743764172,
+      "label_method": "salience",
+      "quality": 1.9083274679864048
+    },
+    {
+      "index": 321,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 129.0568181818182,
+      "duration_sec": 0.05909297052154195,
+      "label_method": "salience",
+      "quality": 1.0664175998346623
+    },
+    {
+      "index": 322,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 129.4181818181818,
+      "duration_sec": 0.0591156462585034,
+      "label_method": "salience",
+      "quality": 1.6972662631604187
+    },
+    {
+      "index": 323,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 129.48863636363635,
+      "duration_sec": 0.06816326530612245,
+      "label_method": "salience",
+      "quality": 1.2135268408908615
+    },
+    {
+      "index": 324,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 129.58181818181816,
+      "duration_sec": 0.14997732426303856,
+      "label_method": "salience",
+      "quality": 1.2094165332813298
+    },
+    {
+      "index": 325,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 129.58181818181816,
+      "duration_sec": 0.14997732426303856,
+      "label_method": "salience",
+      "quality": 1.9329682008023021
+    },
+    {
+      "index": 326,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 129.825,
+      "duration_sec": 0.1863718820861678,
+      "label_method": "salience",
+      "quality": 1.0018255203762008
+    },
+    {
+      "index": 327,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 130.02272727272728,
+      "duration_sec": 0.09317460317460317,
+      "label_method": "salience",
+      "quality": 1.3822980151316206
+    },
+    {
+      "index": 328,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 130.25454545454545,
+      "duration_sec": 0.081859410430839,
+      "label_method": "salience",
+      "quality": 1.1865823525340888
+    },
+    {
+      "index": 329,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 130.5090909090909,
+      "duration_sec": 0.07040816326530612,
+      "label_method": "salience",
+      "quality": 1.1809309250742188
+    },
+    {
+      "index": 330,
+      "pitch_hz": 415.3046975799451,
+      "midi_note": 68,
+      "transcribed_note": 68,
+      "onset_sec": 131.3590909090909,
+      "duration_sec": 0.1045124716553288,
+      "label_method": "salience",
+      "quality": 1.2941032320690677
+    },
+    {
+      "index": 331,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 131.88181818181818,
+      "duration_sec": 0.022675736961451247,
+      "label_method": "salience",
+      "quality": 1.0219365642706866
+    },
+    {
+      "index": 332,
+      "pitch_hz": 440.0,
+      "midi_note": 69,
+      "transcribed_note": 69,
+      "onset_sec": 132.46136363636364,
+      "duration_sec": 0.011337868480725623,
+      "label_method": "salience",
+      "quality": 1.1265151403179308
+    },
+    {
+      "index": 333,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 133.96136363636364,
+      "duration_sec": 0.034126984126984124,
+      "label_method": "salience",
+      "quality": 1.1254553341904296
+    },
+    {
+      "index": 334,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 134.0181818181818,
+      "duration_sec": 0.036326530612244896,
+      "label_method": "salience",
+      "quality": 1.148250043157298
+    },
+    {
+      "index": 335,
+      "pitch_hz": 369.9944227116344,
+      "midi_note": 66,
+      "transcribed_note": 66,
+      "onset_sec": 134.22727272727272,
+      "duration_sec": 0.11594104308390023,
+      "label_method": "salience",
+      "quality": 1.423024040525511
+    },
+    {
+      "index": 336,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 134.34318181818182,
+      "duration_sec": 0.1045124716553288,
+      "label_method": "salience",
+      "quality": 1.0114995019061397
+    },
+    {
+      "index": 337,
+      "pitch_hz": 659.2551138257398,
+      "midi_note": 76,
+      "transcribed_note": 76,
+      "onset_sec": 134.44772727272726,
+      "duration_sec": 0.04777777777777778,
+      "label_method": "salience",
+      "quality": 1.3383463655076564
+    },
+    {
+      "index": 338,
+      "pitch_hz": 554.3652619537442,
+      "midi_note": 73,
+      "transcribed_note": 73,
+      "onset_sec": 134.56363636363636,
+      "duration_sec": 0.11585034013605443,
+      "label_method": "salience",
+      "quality": 2.076472603484686
+    },
+    {
+      "index": 339,
+      "pitch_hz": 184.9972113558172,
+      "midi_note": 54,
+      "transcribed_note": 54,
+      "onset_sec": 134.79545454545453,
+      "duration_sec": 0.07045351473922902,
+      "label_method": "salience",
+      "quality": 1.1582333862123453
+    },
+    {
+      "index": 340,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 135.6,
+      "duration_sec": 0.11589569160997733,
+      "label_method": "salience",
+      "quality": 1.5545179293566984
+    },
+    {
+      "index": 341,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 135.77272727272725,
+      "duration_sec": 0.07047619047619047,
+      "label_method": "salience",
+      "quality": 1.4536932485984948
+    },
+    {
+      "index": 342,
+      "pitch_hz": 493.8833012561241,
+      "midi_note": 71,
+      "transcribed_note": 71,
+      "onset_sec": 136.1340909090909,
+      "duration_sec": 0.1045124716553288,
+      "label_method": "salience",
+      "quality": 1.388605912256074
+    },
+    {
+      "index": 343,
+      "pitch_hz": 311.1269837220809,
+      "midi_note": 63,
+      "transcribed_note": 63,
+      "onset_sec": 136.23863636363635,
+      "duration_sec": 0.19546485260770974,
+      "label_method": "salience",
+      "quality": 1.073973566851173
+    }
+  ],
+  "pitch_range_hz": [
+    77.78174593052023,
+    1013.1928225759599
+  ],
+  "target_length_sec": 0.20909090909091077,
+  "pitched_durations_sec": {
+    "d#4": 0.1977,
+    "f#4": 0.4205,
+    "g#4": 0.1182,
+    "a4": 0.1296,
+    "b4": 0.1045,
+    "c#5": 0.15,
+    "d#5": 0.0931,
+    "e5": 0.2568
+  }
+}

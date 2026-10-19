@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -101,13 +102,13 @@ def test_hat_stays_off_when_lead_below_high_mid_edge():
 GOLDEN = {
     "vagabundo_sample_v004.json":
         "--bass-mult 0.521 --sub-gain 0.784 --cal-lead 1.082 --lead-lpf 6300 --hat-gain 0.1 "
-        "--master-gain 0.728 --cal-vocal 1.0",
+        "--master-gain 0.728",
     "vagabundo_sample_v002.json":
         "--bass-mult 0.526 --sub-gain 0.759 --cal-lead 1.142 --lead-lpf 6255 --hat-gain 0.1 "
-        "--master-gain 0.728 --cal-vocal 0.919",
+        "--master-gain 0.728",
     "regime_sample_v026.json":
         "--bass-mult 0.541 --sub-gain 0.732 --cal-lead 1.46 --lead-lpf 6652 --hat-gain 0.1 "
-        "--master-gain 0.728 --cal-vocal 0.85",
+        "--master-gain 0.728",
 }
 
 
@@ -129,9 +130,10 @@ def test_sample_instrument_never_emits_bass_lpf_or_new_hat(name):
 def test_auto_calibrate_syntax_and_8_field_contract():
     subprocess.run(["bash", "-n", str(AUTO)], check=True)
     src = AUTO.read_text()
-    assert 'LH=0; read -r BM SG CL LLPF HG MG CV BL LH' in src            # 7, 8 or 9 fields, BL/LH default 0
+    assert 'read -r BM SG CL LLPF HG MG BL LH' in src                       # 6, 7 or 8 fields, BL/LH default 0
     assert '--bass-lpf "$BL"' in src and '--bass-lpf) BL="$2"' in src and '--lead-hpf) LH="$2"' in src
-    assert '"$BM $SG $CL $LLPF $HG $MG $CV $BL $LH"' in src and "iters.tsv" in src       # 9 fields recorded per iteration
+    assert '"$BM $SG $CL $LLPF $HG $MG $BL $LH"' in src and "iters.tsv" in src          # 8 fields recorded per iteration
+    assert '--cal-vocal "$CV"' not in src and '--vocal-mode "$VOCAL_MODE"' not in src      # the vocal knob is gone
 
 
 def test_auto_calibrate_parse_step_round_trip():
@@ -141,13 +143,32 @@ def test_auto_calibrate_parse_step_round_trip():
     end = src.index("done", src.index("while [ $# -gt 0 ]; do case", start)) + len("done")
     loop = src[start:end]
     frag = ('--bass-mult 0.5 --sub-gain 0.8 --cal-lead 1.1 --lead-lpf 6000 --hat-gain 0.1 '
-            '--master-gain 0.65 --cal-vocal 1.0 --bass-lpf 422 --lead-hpf 428')
-    script = (f'CLI="{frag}"; BL=0; LH=0\n{loop}\necho "$BM $SG $CL $LLPF $HG $MG $CV $BL $LH"\n'
-              'for s in "1 2 3 4 5 6 7" "1 2 3 4 5 6 7 422"; do BL=0; '
-              'read -r BM SG CL LLPF HG MG CV BL <<<"$s"; BL="${BL:-0}"; echo "$BL"; done')
+            '--master-gain 0.65 --bass-lpf 422 --lead-hpf 428')
+    script = (f'CLI="{frag}"; BL=0; LH=0\n{loop}\necho "$BM $SG $CL $LLPF $HG $MG $BL $LH"\n'
+              'for s in "1 2 3 4 5 6" "1 2 3 4 5 6 422"; do BL=0; '
+              'read -r BM SG CL LLPF HG MG BL <<<"$s"; BL="${BL:-0}"; echo "$BL"; done')
     out = subprocess.run(["bash", "-c", script], capture_output=True, text=True, check=True).stdout.split()
-    assert out[:9] == "0.5 0.8 1.1 6000 0.1 0.65 1.0 422 428".split()
-    assert out[9:] == ["0", "422"]
+    assert out[:8] == "0.5 0.8 1.1 6000 0.1 0.65 422 428".split()
+    assert out[8:] == ["0", "422"]
+
+
+@pytest.mark.parametrize("old_start", [
+    "0.4 0.7 1.0 5000 0.1 0.6 1.0 422 300",     # old 9-field format (… MG CV BL LH)
+    "0.4 0.7 1.0 5000 0.1 0.6 1.0",             # old 7-field (… MG CV): CV would land in BL
+    "0.4 0.7 1.0 5000 0.1 0.6 1.0 422",         # old 8-field (… MG CV BL)
+])
+def test_start_in_the_old_cv_format_fails_loudly(old_start):
+    # AC_PY: the script resolves the renderer through Python before parsing args; CI has no repo venv
+    r = subprocess.run(["bash", str(AUTO), "--stems", "x", "--base", "y", "--start", old_start],
+                       capture_output=True, text=True, env={**os.environ, "AC_PY": sys.executable})
+    assert r.returncode == 64 and "--start" in r.stderr and "CV" in r.stderr, r.stderr
+
+
+@pytest.mark.parametrize("new_start", ["0.4 0.7 1.0 5000 0.1 0.6", "0.4 0.7 1.0 5000 0.1 0.6 422", "0.4 0.7 1.0 5000 0.1 0.6 422 300"])
+def test_start_in_the_new_format_is_accepted(new_start):
+    r = subprocess.run(["bash", str(AUTO), "--stems", "/nonexistent", "--base", "y", "--start", new_start],
+                       capture_output=True, text=True)
+    assert "--start" not in r.stderr, r.stderr      # parsed fine (it fails later on the missing stems, not on --start)
 
 
 def test_generator_reports_top_bass_note_hz():
@@ -172,7 +193,7 @@ print(json.dumps({"comparison": {"overall_similarity": 0.8, "section_aware_simil
 '''
 STUB_CAL = r'''
 print("--bass-mult 0.5 --sub-gain 0.8 --cal-lead 1.1 --lead-lpf 6000 --hat-gain 0.1 "
-      "--master-gain 0.65 --cal-vocal 1.0 --bass-lpf 422")
+      "--master-gain 0.65 --bass-lpf 422")
 '''
 STUB_REC = '#!/bin/bash\nwhile [ $# -gt 0 ]; do [ "$1" = "-o" ] && echo wav > "$2"; shift; done\n'
 
@@ -185,10 +206,12 @@ def run_driver(tmp_path: Path, script: Path, *args: str, gen: str = STUB_GEN,
     stems = tmp_path / "stems"
     (stems / "sample_pack").mkdir(parents=True, exist_ok=True)
     (stems / "original.wav").write_text("x")
+    (stems / "instrumental.wav").write_text("x")
     env = {"PATH": "/usr/bin:/bin", "AC_PY": sys.executable, "AC_GEN": str(tmp_path / "gen.py"),
            "AC_CMP": str(tmp_path / "cmp.py"), "AC_CAL": str(tmp_path / "cal.py"),
            "AC_REC": str(tmp_path / "rec.sh"), "AC_NODE": "/bin/bash", "AC_SETTLE_S": "0",
-           "AC_PGREP": "false", "AC_RECORDER_WAIT_S": "0"}     # hermetic: never wait on a real recorder
+           "AC_PGREP": "false", "AC_RECORDER_WAIT_S": "0",
+           "AC_REF": str(stems / "instrumental.wav")}     # hermetic: never wait on a real recorder
     env.update(extra_env or {})
     return subprocess.run(["/bin/bash", "-u", str(script), "--stems", str(stems), "--base", "http://x/",
                            "--iters", "1", "--workdir", str(tmp_path / "work"), *args],
@@ -196,7 +219,7 @@ def run_driver(tmp_path: Path, script: Path, *args: str, gen: str = STUB_GEN,
 
 
 @pytest.mark.parametrize("extra", [
-    ["--mode", "synth", "--start", "0.447 0.707 0.969 5199 0.0 0.672 0.852"],
+    ["--mode", "synth", "--start", "0.447 0.707 0.969 5199 0.0 0.672"],
     ["--mode", "sample-instrument", "--inst", "http://x/samples.json", "--key", "C# minor"],
 ])
 def test_driver_runs_under_set_u_with_stubs(tmp_path, extra):
@@ -204,7 +227,7 @@ def test_driver_runs_under_set_u_with_stubs(tmp_path, extra):
     assert r.returncode == 0, r.stderr
     best = [ln for ln in r.stdout.splitlines() if ln.startswith("BEST:")][0]
     params = best.split("params:")[1].split()
-    assert len(params) == 9, best
+    assert len(params) == 8, best
     assert params[-2:] == ["0", "0"]   # BL, LH (the overrides that went INTO the best render)
 
 
@@ -230,9 +253,9 @@ CAL2 = FIX / "vagabundo_synth_cal2.json"
 LEAD = ["--lead-hpf", "300", "--lead-note-min-hz", "130.81"]
 SYNTH = ["--mode", "synth"]
 CAL2_KNOBS = ["--bass-mult", "0.474", "--sub-gain", "0.836", "--cal-lead", "0.735", "--lead-lpf", "5923",
-              "--hat-gain", "0.135", "--master-gain", "0.753", "--cal-vocal", "1.022"]
+              "--hat-gain", "0.135", "--master-gain", "0.753"]
 CAL1_KNOBS = ["--bass-mult", "0.447", "--sub-gain", "0.707", "--cal-lead", "0.969", "--lead-lpf", "5199",
-              "--hat-gain", "0.0", "--master-gain", "0.672", "--cal-vocal", "0.852"]
+              "--hat-gain", "0.0", "--master-gain", "0.672"]
 BASS = ["--bass-lpf", "422", "--bass-lpf-max", "603", "--bass-note-max-hz", "123.47"]
 
 
@@ -307,18 +330,10 @@ def test_llms_full_hat_rule_mentions_centroid_gate():
     assert "r_cent > 1.15" in row and "lead_hpf" in row
 
 
-# --- pass 3: vocal gain hold, hat overshoot, gate-aware BEST, partial-register octave ----------------
+# --- pass 3: hat overshoot, gate-aware BEST, partial-register octave ----------------
 RUN2_CAL1 = FIX / "vagabundo_synth_run2_cal1.json"
 RUN2_KNOBS = ["--mode", "synth", "--bass-mult", "0.474", "--sub-gain", "0.836", "--cal-lead", "0.735",
-              "--lead-lpf", "5923", "--hat-gain", "0.135", "--master-gain", "0.753", "--cal-vocal", "1.022"]
-
-
-def test_vocal_gain_not_raised_by_proxy_when_render_sits_a_band_too_low():
-    # run-2 cal1: high_mid proxy asks for more vocal (old calibrator: 1.022 -> 1.226) but low_mid-per-mid is 6x
-    got = run_cal(RUN2_CAL1, *RUN2_KNOBS)
-    assert float(got["--cal-vocal"]) <= 1.022
-    sample = run_cal(RUN2_CAL1, *[a for a in RUN2_KNOBS if a not in ("--mode", "synth")])   # sample mode: old behaviour
-    assert float(sample["--cal-vocal"]) > 1.022
+              "--lead-lpf", "5923", "--hat-gain", "0.135", "--master-gain", "0.753"]
 
 
 def test_hat_backs_off_on_drums_stem_high_overshoot(tmp_path):
@@ -424,26 +439,26 @@ def test_shipped_reference_has_nothing_per_track():
 VAG = REPO / ".cache" / "stems" / "VAGABUNDO NÃO NAMORA"
 
 
-@pytest.mark.skipif(not (VAG / "sample_pack" / "vocals.mid").exists(), reason="VAGABUNDO stems not cached")
-@pytest.mark.parametrize("mode,vocal_oct", [("synth", 1), ("sample-instrument", 0)])
-def test_generator_derives_vocal_octave_only_in_synth(tmp_path, mode, vocal_oct):
+@pytest.mark.skipif(not (VAG / "sample_pack" / "melodic.mid").exists(), reason="VAGABUNDO stems not cached")
+@pytest.mark.parametrize("mode", ["synth", "sample-instrument"])
+def test_generator_summary_has_no_vocal_fields_and_derives_lead_octave_only_in_synth(tmp_path, mode):
     pack = VAG / "sample_pack"
     ref = tmp_path / "ref.json"      # synthetic sweep table (a test double, not a measurement)
-    ref.write_text(json.dumps({"sounds": {"gm_voice_oohs": {"log2": -0.1, "per_note": {"60": -0.1, "72": -0.1},
-                                                              "source": "chromatic sweep probe test"},
-                                          "gm_lead_2_sawtooth": {"log2": 0.5, "source": "chromatic sweep probe test"}}}))
+    ref.write_text(json.dumps({"sounds": {"gm_lead_2_sawtooth": {"log2": 0.5, "source": "chromatic sweep probe test"}}}))
     cmd = [sys.executable, "-W", "ignore", str(SCRIPTS / "generate_dynamic_strudel.py"), "--stems-dir", str(VAG),
            "--pack-dir", str(pack), "--bass-midi", str(pack / "bass.mid"), "--lead-midi", str(pack / "melodic.mid"),
            "--drums-json", str(pack / "drums_bands.json"), "--base-url", "http://x/", "--mode", mode, "--bpm", "129",
            "--genre", "brazilian_funk", "--num-bars", "24", "--drum-mode", "bank" if mode == "synth" else "extracted",
-           "--vocal-mode", "instrument", "--partial-reference", str(ref), "--out", str(tmp_path / "o.strudel")]
+           "--partial-reference", str(ref), "--out", str(tmp_path / "o.strudel")]
     if mode != "synth":
         cmd += ["--samples-url", "http://x/instruments/samples.json"]
     r = subprocess.run(cmd, capture_output=True, text=True)
     if r.returncode != 0 or not r.stdout.strip().startswith("{"):
         pytest.skip(f"generator not runnable here: {r.stderr[-200:]}")
     summ = json.loads(r.stdout)
-    assert summ["vocal_octave"] == vocal_oct and summ["lead_octave"] == 0
+    assert not [k for k in summ if "vocal" in k], "vocals are never generated: no vocal field in the summary"
+    if mode != "synth":
+        assert summ["lead_octave"] == 0
 
 
 # --- pass 4: probe tool, reference hygiene, cache, argparse type, hat/vocal/gate honesty ---------------
@@ -487,7 +502,7 @@ def test_probe_cli_dry_run_writes_strudel_without_rendering(tmp_path):
     code = Path(info["strudel"]).read_text()
     assert '.s("gm_voice_oohs")' in code and "c2 cs2" in code and code.rstrip().endswith('.s("gm_voice_oohs")')
     assert not any(w in code for w in ("lpf", "hpf", "gain(", ".gain", "room"))     # no filters, no gain pattern
-    assert "record-strudel-blackhole.js" in " ".join(info["render"]) and info["render"][-2] == "-d"
+    assert "render-strudel-offline.js" in " ".join(info["render"]) and info["render"][-2] == "-d"
     assert not Path(info["wav"]).exists()                                            # nothing was rendered
 
 
@@ -542,8 +557,8 @@ def test_register_cache_hit_and_miss(tmp_path, monkeypatch):
 def test_octave_flag_rejects_out_of_range_with_argparse_error(bad):
     r = subprocess.run([sys.executable, str(SCRIPTS / "generate_dynamic_strudel.py"), "--stems-dir", "x",
                         "--pack-dir", "x", "--bass-midi", "x", "--lead-midi", "x", "--base-url", "x",
-                        "--vocal-octave", bad], capture_output=True, text=True)
-    assert r.returncode == 2 and "--vocal-octave" in r.stderr and "auto" in r.stderr
+                        "--lead-octave", bad], capture_output=True, text=True)
+    assert r.returncode == 2 and "--lead-octave" in r.stderr and "auto" in r.stderr
     sys.path.insert(0, str(SCRIPTS))
     import partial_register as PR
     assert PR.octave_arg("auto") == "auto" and PR.octave_arg("2") == 2
@@ -569,16 +584,6 @@ def test_hat_drums_stem_branch_acts_even_when_lead_lpf_moves(tmp_path):
     (tmp_path / "stem_comparison.json").write_text((FIX / "vagabundo_synth_v006_stem_drums.json").read_text())
     got = run_cal(p, *RUN2_KNOBS)
     assert int(got["--lead-lpf"]) > 5923 and float(got["--hat-gain"]) < 0.135
-
-
-def test_vocal_hold_also_applies_to_stem_rms_branch(tmp_path):
-    cmp_ = tmp_path / "comparison.json"; cmp_.write_text(RUN2_CAL1.read_text())
-    (tmp_path / "stem_comparison.json").write_text(json.dumps({"stems": {"vocals": {
-        "original": {"spectral": {"rms_mean": 0.2}}, "rendered": {"spectral": {"rms_mean": 0.1}}}}}))
-    held = run_cal(cmp_, *RUN2_KNOBS)
-    assert float(held["--cal-vocal"]) <= 1.022
-    sample = run_cal(cmp_, *[a for a in RUN2_KNOBS if a not in ("--mode", "synth")])
-    assert float(sample["--cal-vocal"]) > 1.022                                       # measured deficit still raises it
 
 
 GATE_STUB = ("import os,sys\nd=os.path.dirname(__file__);f=os.path.join(d,'g');n=int(open(f).read()) if os.path.exists(f) else 0\n"

@@ -97,7 +97,9 @@ recognizable — while staying fully mine to edit.
 - [x] Resemblance is achieved through extracted **musical content** (notes, groove,
       harmony, key, tempo) plus **timbre** from one of:
       (a) synth voices, or (b) **sample-instruments built from the track's stems** that
-      are played by the **user's own** `note()`/drum patterns.
+      are played by the **user's own** `note()`/drum patterns. The singing is **never**
+      generated (no vocal voice or vocal instrument); resemblance is measured against the
+      track's instrumental (its bass, drums and melodic parts). *(amended 2026-10-19)*
       — verified 2026-10-09: `--mode sample-instrument` (stem-derived multisamples incl. the vocal) and `--mode synth` (palette); `test_23_sample_instrument_realism_lives_in_declared_note_data`, `test_23_synth_mode_is_pure_synthesis`
 - [x] If sample-instruments are used, the **notes/patterns/arrangement are editable
       data** (the realism is in the *sounds*, not in a baked performance) — this is the
@@ -149,12 +151,15 @@ recognizable — while staying fully mine to edit.
       Regime v026 0.6967/0.6736, VAGABUNDO v004 0.6626/0.6223 → floors 0.64/0.60; synth Regime v027
       0.5589/0.5525, VAGABUNDO v007 0.6627/0.5860 → floors 0.54/0.53 (lowest track − 0.02). Genre-wide floors
       measured on the old scale are checked against `static_similarity` only.
+      — re-measured 2026-10-19 (offline renderer, refined tempo, note-aligned verified instruments, no vocal
+      voice, scored against `instrumental.wav`): sample-instrument VAGABUNDO v013 0.7170/0.7073, Regime v031 0.7794/0.7744 → floors 0.70/0.69; synth Regime v032 0.6709/0.6523, VAGABUNDO v014 0.7240/0.7007 → floors 0.65/0.63.
 - [ ] **A render must beat a different song.** Each scored render is also compared against the
       original of a *different* reference track of the same genre; the render must score above
       that control by more than the run-to-run noise margin (0.02), or the gate fails. A score
       that a different song can reach says nothing about this song.
       *(added 2026-10-18 — not yet verified via `/awos:verify`; measured: v026 +0.120, v004 +0.086,
-      v007 +0.086 pass; Regime synth v027 −0.018 FAILS — recorded shortfall)*
+      v007 +0.086 pass; Regime synth v027 −0.018 FAILS — recorded shortfall; 2026-10-19 on the instrumental
+      target: v013 +0.142, v014 +0.149, v031 +0.204, v032 +0.096 — all pass)*
 
 ### 2.5 Reporting reflects the values
 
@@ -206,3 +211,11 @@ scores, **so that** I'm never shown a misleading number again.
   re-measured on the existing renders and reset (sample-instrument 0.64/0.60, synth 0.54/0.53); all
   earlier similarity numbers are on the old scale. Status unchanged (Completed) — the new criterion is
   left unticked until `/awos:verify`.
+- **2026-10-19 — product decision (owner): vocals are never generated** (fix `instruments-short-grains-wrong-labels`
+  run). "It's vocals, it's people singing — it can't be part of the music." §2.3: no vocal voice, no vocal
+  sample-instrument, no vocal transcription in the output of either mode; similarity (§2.4) is measured against
+  the track's instrumental (`instrumental.wav` = bass + drums + melodic stems), including the different-song
+  control. On the two reference tracks the three stems leave 49% / 34% of the original's RMS unexplained without
+  the vocal stem (8% / 6% with it), so the old full-mix target scored us against a large part we must not make.
+  Floors re-measured on the instrumental target: sample-instrument VAGABUNDO v013 0.7170/0.7073, Regime v031 0.7794/0.7744 → floors 0.70/0.69; synth Regime v032 0.6709/0.6523, VAGABUNDO v014 0.7240/0.7007 → floors 0.65/0.63 (all four
+  pass, margins over the different-song control +0.096 to +0.204).
