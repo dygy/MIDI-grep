@@ -39,6 +39,7 @@ import os
 import shutil
 import subprocess
 import sys
+import time
 from pathlib import Path
 
 # WAV is not reliably in the system mimetypes db; pin the ones we emit so the
@@ -49,6 +50,19 @@ CONTENT_TYPES = {
     ".mp3": "audio/mpeg",
     ".ogg": "audio/ogg",
 }
+
+
+# I/O policy (not audio parameters): a ~1000-object upload spans many minutes, so a
+# single network blip must not abort it; 4 attempts with 2/4/8 s backoff ride out
+# short outages while a real outage still fails within ~15 s per object.
+PUT_MAX_ATTEMPTS = 4
+PUT_BACKOFF_BASE_S = 2.0
+# Substrings (lowercased) of wrangler output that mark a retryable failure.
+TRANSIENT_MARKERS = (
+    "fetch request failed", "connectivity issue", "timed out", "timeout",
+    "econnreset", "etimedout", "enotfound", "socket hang up",
+    "502", "503", "504", "internal server error", "service unavailable",
+)
 
 
 def content_type_for(path: Path) -> str:
@@ -126,9 +140,19 @@ def upload_wrangler(pack_dir: Path, bucket: str, prefix: str) -> None:
             *runner, "r2", "object", "put", f"{bucket}/{key}",
             "--file", str(f), "--content-type", content_type_for(f), "--remote",
         ]
-        res = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True)
-        if res.returncode != 0:
-            sys.stderr.write(res.stdout + res.stderr)
+        for attempt in range(1, PUT_MAX_ATTEMPTS + 1):
+            res = subprocess.run(cmd, stdin=subprocess.DEVNULL, capture_output=True, text=True)
+            if res.returncode == 0:
+                break
+            out = res.stdout + res.stderr
+            transient = any(m in out.lower() for m in TRANSIENT_MARKERS)
+            if transient and attempt < PUT_MAX_ATTEMPTS:
+                delay = PUT_BACKOFF_BASE_S * 2 ** (attempt - 1)
+                print(f"[wrangler] transient failure on {key} (attempt {attempt}/"
+                      f"{PUT_MAX_ATTEMPTS}); retrying in {delay:.0f}s", file=sys.stderr)
+                time.sleep(delay)
+                continue
+            sys.stderr.write(out)
             raise SystemExit(
                 f"wrangler upload failed for {key}. If this is an auth error, run "
                 f"`npx wrangler login` in an interactive terminal first."
