@@ -147,6 +147,7 @@ func (g *Generator) LoadData() (*ReportData, error) {
 	// Find audio files in cache dir
 	data.MelodicPath = findFile(g.cacheDir, "melodic.wav", "piano.wav")
 	data.DrumsPath = findFile(g.cacheDir, "drums.wav")
+	// original vocal stem only; vocals are never generated, so no rendered one is searched for
 	data.VocalsPath = findFile(g.cacheDir, "vocals.wav")
 	data.BassPath = findFile(g.cacheDir, "bass.wav")
 
@@ -774,6 +775,13 @@ func generateHTML(data *ReportData) string {
 		return fmt.Sprintf(`<div class="audio-player"><label>%s</label><audio controls src="%s" id="%s"></audio></div>`, label, dataURI, id)
 	}
 
+	// Vocals are never generated: this is the ORIGINAL vocal stem, labelled as such, muted by
+	// default and kept out of the all-stems group. No player at all when the stem is missing.
+	vocalsPlayer := ""
+	if vocalsData != "" {
+		vocalsPlayer = fmt.Sprintf(`<div class="audio-player"><label>Vocals (not generated)</label><audio controls muted src="%s" id="audio-vocals"></audio></div>`, vocalsData)
+	}
+
 	// Generate chart image HTML
 	chartImage := func(dataURI, alt string) string {
 		if dataURI == "" {
@@ -957,7 +965,7 @@ func generateHTML(data *ReportData) string {
 
         const audioGroups = {
             'drums-melodic': ['audio-drums', 'audio-melodic'],
-            'all-stems': ['audio-drums', 'audio-melodic', 'audio-vocals', 'audio-bass']
+            'all-stems': ['audio-drums', 'audio-melodic', 'audio-bass']
         };
         let activeGroup = null;
 
@@ -1018,7 +1026,7 @@ func generateHTML(data *ReportData) string {
 		html.EscapeString(style), // style badge
 		audioPlayer("Melodic", melodicData, "audio-melodic"),
 		audioPlayer("Drums", drumsData, "audio-drums"),
-		audioPlayer("Vocals", vocalsData, "audio-vocals"),
+		vocalsPlayer,
 		audioPlayer("Bass", bassData, "audio-bass"),
 		audioPlayer("Strudel Render", renderData, "audio-render"),
 		bpm,                                   // stat

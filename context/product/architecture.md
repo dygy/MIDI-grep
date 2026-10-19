@@ -22,8 +22,10 @@ system is built; `values.md` decides what counts as a valid output.
 - **Audio / ML runtime:** Python 3.11 venv at `scripts/python/.venv`. **Pinned to 3.11** by
   `basic-pitch` → TensorFlow 2.15 + `keras<3` (`scripts/python/requirements.txt`); 3.12-only syntax is
   not allowed.
-- **Strudel rendering:** TypeScript/Node — Puppeteer BlackHole recorder only
-  (`scripts/node/src/record-strudel-blackhole.ts`, built to `scripts/node/dist/` with `npm run build`).
+- **Strudel rendering:** TypeScript/Node — DEFAULT offline renderer `scripts/node/src/render-strudel-offline.ts`
+  (Strudel's own `renderPatternAudio` on an OfflineAudioContext, @strudel/web 1.3.0, headless Chromium) since
+  2026-10-19; the Puppeteer BlackHole recorder (`record-strudel-blackhole.ts`) is a `MIDIGREP_RENDERER=blackhole`
+  cross-check with a known pitch defect. Built to `scripts/node/dist/` with `npm run build`.
   The offline Node synthesizer (`render-strudel-node.ts`) has been **deleted**.
 - **LLM:** Ollama (default model `midi-grep-strudel-mistral`, built from `Modelfile.mistral`); Claude API
   optional via `--ollama=false`.
@@ -134,7 +136,16 @@ code** — all codegen is Python/LLM.*
       └──────────────────────────┘
 ```
 
-### Audio Rendering (single path: BlackHole recorder)
+### Audio Rendering (default: offline Strudel render; BlackHole = cross-check)
+
+**Since 2026-10-19 the default is `render-strudel-offline.ts`:** the same superdough engine rendered into
+OfflineAudioContexts in ~20 s whole-cycle chunks (fresh page each, 4 s tail overlap-add, polyphony 4096) — sample-exact
+timing and pitch, no audio device, ~5x faster than real time. The BlackHole recorder described below was found to
+lose ~12% of the captured samples; its rate relabel restored duration but lowered every pitch by ~2.3–2.7 semitones,
+so every BlackHole-scored number since Oct 2026 was on pitch-shifted audio. It stays as a cross-check of live
+playback (`MIDIGREP_RENDERER=blackhole`). Scores are computed against `instrumental.wav` (bass+drums+melodic) —
+vocals are never generated. The rest of this section documents the recorder as it stands.
+
 
 There is exactly **one** render path. The former offline Node.js synthesizer was deleted; the
 only script in `scripts/node/src/` is `record-strudel-blackhole.ts`. It records the **real Strudel
@@ -199,7 +210,7 @@ on sped-up audio and are invalid.
 `mcp_servers/loop/server.py`. Residual references to `render-strudel-node.js` remain in
 `cmd/midi-grep/main.go` (`renderStrudelNodeJS`), `mcp_servers/loop/server.py` (`recorder='node'`),
 `scripts/node/package.json` (`npm run render`), `synth_profiles.py` and `ai_learning_optimizer.py`;
-they point at a file that no longer exists and are dead paths. **Only the BlackHole recorder may
+they point at a file that no longer exists and are dead paths. **Only a real-Strudel render (offline renderer by default, or the BlackHole recorder) may
 gate accept/reject decisions.**
 
 ### Comparison & Eval Gate

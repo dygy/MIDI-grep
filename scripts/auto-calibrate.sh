@@ -18,17 +18,16 @@
 #     --bpm 136 --key "C# minor" --genre brazilian_funk --bars 78 \
 #     [--iters 6] [--mode sample-instrument|synth] \
 #     [--bass-sound regime_bass --lead-sound regime_lead] \
-#     [--vocal-mode instrument|chops|texture|none] [--dur 170] [--workdir <tmp>]
+#     [--dur 170] [--workdir <tmp>]
 #
 # --mode (spec 003 Slice 4) is passed straight through to the generator. `sample-instrument`
 # (default) plays the pack's pitched instruments (bass/lead sounds default to regime_bass /
-# regime_lead, drums = the extracted kit); `synth` emits no samples() at all — bass/lead/vocal
+# regime_lead, drums = the extracted kit); `synth` emits no samples() at all — bass/lead
 # sounds and the drum machine come from the sound_selector genre palette unless --bass-sound /
 # --lead-sound are given explicitly, and drums take the --drum-mode bank path.
 #
-# The vocal voice (spec 003 Slice 3) is editable data by default (--vocal-mode instrument) and is
-# balanced by the `cal-vocal` lever: calibrate_dynamic.py reads the vocal stem RMS ratio from a
-# stem_comparison.json next to the comparison when one exists, else the high_mid band proxy.
+# Vocals are never generated. Every iteration is scored against <stems>/instrumental.wav
+# (bass+drums+melodic, built by pipeline_helpers.py instrumental), not the full mix.
 #
 # Requires: BlackHole device + Multi-Output selected (see CLAUDE.md preflight), node recorder
 # built (scripts/node/dist), the sample pack + bass/lead MIDI present in <stems>/sample_pack,
@@ -41,26 +40,36 @@ GEN="${AC_GEN:-$ROOT/scripts/python/generate_dynamic_strudel.py}"
 CAL="${AC_CAL:-$ROOT/scripts/python/calibrate_dynamic.py}"
 CMP="${AC_CMP:-$ROOT/scripts/python/compare_audio.py}"
 GATE="${AC_GATE:-$ROOT/scripts/python/gate_margin.py}"
-REC="${AC_REC:-$ROOT/scripts/node/dist/record-strudel-blackhole.js}"
+RENDERER="${MIDIGREP_RENDERER:-offline}"   # offline (default): exact Strudel OfflineAudioContext render; blackhole: real-time capture
+case "$RENDERER" in
+  offline)   REC="${AC_REC:-$ROOT/scripts/node/dist/render-strudel-offline.js}" ;;
+  blackhole) REC="${AC_REC:-$ROOT/scripts/node/dist/record-strudel-blackhole.js}" ;;
+  *) echo "MIDIGREP_RENDERER=$RENDERER: expected offline|blackhole" >&2; exit 2 ;;
+esac
 NODE_BIN="${AC_NODE:-node}"; SETTLE="${AC_SETTLE_S:-3}"
 PGREP="${AC_PGREP:-pgrep}"; WAIT_MAX="${AC_RECORDER_WAIT_S:-120}"   # tests: AC_PGREP=false, AC_RECORDER_WAIT_S=0
 RC=0   # exit status: 70 when any iteration failed (GEN/RENDER/CMP FAILED, recorder wait abort); BEST is still printed
 
 STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" BARS="78"
-ENV_START=""; ITERS="6" DUR="170" BASS_SOUND="" LEAD_SOUND="" VOCAL_MODE="instrument" MODE="sample-instrument"
+ENV_START=""; ITERS="6" DUR="170" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
 WORK="${TMPDIR:-/tmp}/auto-calibrate.$$"
 # starting knobs (generator defaults are sane cold-start values)
-BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" CV="1.0" BL="0" LH="0"   # BL = bass low-pass override Hz, LH = lead high-pass Hz; 0 = generator/analysis default
+BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" BL="0" LH="0"   # BL = bass low-pass override Hz, LH = lead high-pass Hz; 0 = generator/analysis default
 
 while [ $# -gt 0 ]; do case "$1" in
   --stems) STEMS="$2"; shift 2;; --base) BASE="$2"; shift 2;; --inst) INST="$2"; shift 2;;
   --bpm) BPM="$2"; shift 2;; --key) KEY="$2"; shift 2;; --genre) GENRE="$2"; shift 2;;
   --bars) BARS="$2"; shift 2;; --iters) ITERS="$2"; shift 2;; --dur) DUR="$2"; shift 2;;
   --bass-sound) BASS_SOUND="$2"; shift 2;; --lead-sound) LEAD_SOUND="$2"; shift 2;;
-  --vocal-mode) VOCAL_MODE="$2"; shift 2;;
+  --vocal-mode) echo "--vocal-mode was removed: vocals are never generated" >&2; exit 64;;
   --mode) MODE="$2"; shift 2;;
   --workdir) WORK="$2"; shift 2;;
-  --start) BL=0; LH=0; read -r BM SG CL LLPF HG MG CV BL LH <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; shift 2;;   # resume from a previous BEST: "BM SG CL LLPF HG MG CV [BL [LH]]" (7, 8 or 9 fields)
+  --start) BL=0; LH=0; read -r BM SG CL LLPF HG MG BL LH EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH]]" (6, 7 or 8 fields)
+    # The pre-"no vocals" format had a CV field after MG ("... MG CV [BL [LH]]"). A 9-field start is that old format;
+    # 7/8 fields would silently shift CV into BL, but a real bass/lead cutoff is 0 or >= 20 Hz, a cal-vocal is ~1.
+    [ -z "${EXTRA:-}" ] || { echo "--start: more than 8 fields - the old CV (cal-vocal) field was removed; drop the 7th value" >&2; exit 64; }
+    for _v in "$BL" "$LH"; do awk -v v="$_v" 'BEGIN{exit !(v==0 || v>=20)}' || { echo "--start: BL/LH must be 0 or >= 20 Hz (got $_v) - old format with the removed CV field? drop the 7th value" >&2; exit 64; }; done
+    shift 2;;
   --env-start) ENV_START="$2"; shift 2;;                        # per-bar env-correction JSON to apply from iteration 1
   *) echo "unknown arg: $1" >&2; exit 64;;
 esac; done
@@ -75,8 +84,8 @@ else
   DRUM_MODE="bank"
 fi
 PACK="$STEMS/sample_pack"
-ORIG="$STEMS/original.wav"
-[ -f "$ORIG" ] || ORIG="$PACK/originalfull.wav"
+# reference = the INSTRUMENTAL (bass+drums+melodic), never the full mix with the singer
+ORIG="${AC_REF:-$("$PY" "$ROOT/scripts/python/pipeline_helpers.py" instrumental "$STEMS")}" || { echo "cannot build $STEMS/instrumental.wav" >&2; exit 65; }   # AC_REF: tests point at a stub
 # Chance control (same lookup as editable-pipeline.sh stage 8): a DIFFERENT same-genre reference track scored against
 # this original by every iteration, so the gate margin / BEST selection include the chance constraint.
 # pipeline_helpers.py control exits 0 = found, 3 = legitimately none (logged), anything else = the lookup failed.
@@ -84,7 +93,7 @@ CONTROL_ARG=()
 CTRL_PATH="$("$PY" "$ROOT/scripts/python/pipeline_helpers.py" control --genre "$GENRE" --exclude-key "$(basename "$STEMS")" 2>/dev/null)" && CTRL_RC=0 || CTRL_RC=$?
 case "$CTRL_RC" in
   0) CONTROL_ARG=(--control "$CTRL_PATH"); echo "chance control: $CTRL_PATH";;
-  3) echo "chance control: none (no other $GENRE reference track with an original.wav)";;
+  3) echo "chance control: none (no other $GENRE reference track)";;
   *) echo "control lookup FAILED (rc=$CTRL_RC) - fix eval/datasets/reference_tracks.yaml" >&2; exit 65;;
 esac
 mkdir -p "$WORK"
@@ -105,9 +114,9 @@ for i in $(seq 1 "$ITERS"); do
     --bass-midi "$PACK/bass.mid" --lead-midi "$PACK/melodic.mid" \
     --drums-json "$PACK/drums_bands.json" --base-url "$BASE" ${inst_arg[@]+"${inst_arg[@]}"} ${snd_arg[@]+"${snd_arg[@]}"} \
     --mode "$MODE" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --num-bars "$BARS" \
-    --drum-mode "$DRUM_MODE" --vocal-mode "$VOCAL_MODE" \
+    --drum-mode "$DRUM_MODE" \
     --bass-mult "$BM" --sub-gain "$SG" --cal-lead "$CL" --lead-lpf "$LLPF" \
-    --hat-gain "$HG" --master-gain "$MG" --cal-vocal "$CV" --bass-lpf "$BL" ${lh_arg[@]+"${lh_arg[@]}"} ${env_arg[@]+"${env_arg[@]}"} --out "$STRU" \
+    --hat-gain "$HG" --master-gain "$MG" --bass-lpf "$BL" ${lh_arg[@]+"${lh_arg[@]}"} ${env_arg[@]+"${env_arg[@]}"} --out "$STRU" \
     >"$WORK/$TAG.gen.json" 2>"$WORK/$TAG.gen.log" \
     || { echo "[$TAG] GEN FAILED"; RC=70; break; }
   # the generator reports the EFFECTIVE bass cutoff + its bounds (analysis value, top bass note);
@@ -121,17 +130,19 @@ for i in $(seq 1 "$ITERS"); do
   # wedged (every following capture produced no file). Wait for any live recorder to finish instead.
   # Bounded + anchored (review #2): wait at most 120 s for a LIVE recorder/capture, matched on the
   # actual invocations (not any process whose command line mentions the file name).
-  waited=0
-  while "$PGREP" -f "node .*record-strudel-blackhole\.js|ffmpeg .* -f avfoundation" >/dev/null; do
-    [ "$waited" -ge "$WAIT_MAX" ] && { echo "[$TAG] a recorder/capture has been running for ${WAIT_MAX} s — stale? (pgrep -fl 'record-strudel|avfoundation'); aborting"; RC=70; break 2; }
-    sleep 2; waited=$((waited+2))
-  done; sleep "$SETTLE"
+  if [ "$RENDERER" = blackhole ]; then   # the offline renderer has no capture device to wait for
+    waited=0
+    while "$PGREP" -f "node .*record-strudel-blackhole\.js|ffmpeg .* -f avfoundation" >/dev/null; do
+      [ "$waited" -ge "$WAIT_MAX" ] && { echo "[$TAG] a recorder/capture has been running for ${WAIT_MAX} s — stale? (pgrep -fl 'record-strudel|avfoundation'); aborting"; RC=70; break 2; }
+      sleep 2; waited=$((waited+2))
+    done; sleep "$SETTLE"
+  fi
   "$NODE_BIN" "$REC" "$STRU" -o "$WAV" -d "$DUR" >"$WORK/$TAG.render.log" 2>&1
   [ -f "$WAV" ] || { echo "[$TAG] RENDER FAILED (see $WORK/$TAG.render.log)"; RC=70; break; }
 
   "$PY" "$CMP" "$ORIG" "$WAV" -d 135 -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$CJ" 2>/dev/null || { echo "[$TAG] CMP FAILED"; RC=70; break; }
   read -r OVER SECT < <("$PY" -c "import json,sys;d=json.load(open('$CJ'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
-  echo "[$TAG] mode=$MODE overall=$OVER section_aware=$SECT  (bm=$BM sg=$SG cl=$CL llpf=$LLPF hg=$HG mg=$MG cv=$CV bl=$BL eff_bl=$EBL lh=$LH eff_lh=$ELH)"
+  echo "[$TAG] mode=$MODE overall=$OVER section_aware=$SECT  (bm=$BM sg=$SG cl=$CL llpf=$LLPF hg=$HG mg=$MG bl=$BL eff_bl=$EBL lh=$LH eff_lh=$ELH)"
 
   # Record this iteration; BEST is chosen AFTER the loop (see below) so the ordering is one consistent rule.
   # Gate margin = smallest margin to the eval-gate floors (eval/thresholds.yaml via eval/gate.py, per
@@ -144,21 +155,21 @@ for i in $(seq 1 "$ITERS"); do
   fi
   echo "[$TAG] gate: $GATE_OUT"
   ENVUSED="-"; if [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ]; then cp "$PREV_ENV" "$WORK/$TAG.envused.json"; ENVUSED="$WORK/$TAG.envused.json"; fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$TAG" "$OVER" "$MARG" "$GATE_OUT" "$BM $SG $CL $LLPF $HG $MG $CV $BL $LH" "$ENVUSED" >>"$WORK/iters.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$TAG" "$OVER" "$MARG" "$GATE_OUT" "$BM $SG $CL $LLPF $HG $MG $BL $LH" "$ENVUSED" >>"$WORK/iters.tsv"
 
   # calibrate -> next knobs
   ENV_OUT="$WORK/$TAG.env.json"
   envin_arg=(); [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && envin_arg=(--env-correction-in "$PREV_ENV")
   CLI=$("$PY" "$CAL" --comparison "$CJ" --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
     --bass-mult "$BM" --sub-gain "$SG" --cal-lead "$CL" --lead-lpf "$LLPF" \
-    --hat-gain "$HG" --master-gain "$MG" --cal-vocal "$CV" \
+    --hat-gain "$HG" --master-gain "$MG" \
     --mode "$MODE" --bass-lpf "$EBL" --bass-lpf-max "$EBLMAX" --bass-note-max-hz "$EBHZ" \
     --lead-hpf "$ELH" --lead-note-min-hz "$ELHZ" 2>"$WORK/$TAG.cal.log")
   # parse "--bass-mult X --sub-gain Y ..." into the loop vars
   set -- $CLI
   while [ $# -gt 0 ]; do case "$1" in
     --bass-mult) BM="$2";; --sub-gain) SG="$2";; --cal-lead) CL="$2";;
-    --lead-lpf) LLPF="$2";; --hat-gain) HG="$2";; --master-gain) MG="$2";; --cal-vocal) CV="$2";; --bass-lpf) BL="$2";; --lead-hpf) LH="$2";;
+    --lead-lpf) LLPF="$2";; --hat-gain) HG="$2";; --master-gain) MG="$2";; --bass-lpf) BL="$2";; --lead-hpf) LH="$2";;
   esac; shift 2; done
   [ -s "$ENV_OUT" ] && PREV_ENV="$ENV_OUT"
 done

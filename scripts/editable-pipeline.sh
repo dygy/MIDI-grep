@@ -8,7 +8,7 @@
 #
 # Stages:
 #   1 stems+analysis   ./bin/midi-grep extract --url U --render none --iterate 0
-#   2 MIDI per stem    transcribe.py {bass,melodic,vocals}.wav -> sample_pack/*.mid
+#   2 MIDI per stem    transcribe.py {bass,melodic}.wav -> sample_pack/*.mid (vocals are never transcribed or generated)
 #   3 drum onsets      detect_drums_bands.py drums.wav --bpm B -> sample_pack/drums_bands.json
 #   4 sample pack      build_sample_pack.py
 #   5 instruments      midi-grep generative train (bass, lead) + build_instruments.py
@@ -47,7 +47,12 @@ ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 PY="$ROOT/scripts/python/.venv/bin/python"
 SP="$ROOT/scripts/python"
 PH=("$PY" "$SP/pipeline_helpers.py")
-REC="$ROOT/scripts/node/dist/record-strudel-blackhole.js"
+RENDERER="${MIDIGREP_RENDERER:-offline}"   # offline (default) | blackhole
+case "$RENDERER" in
+  offline)   REC="$ROOT/scripts/node/dist/render-strudel-offline.js" ;;
+  blackhole) REC="$ROOT/scripts/node/dist/record-strudel-blackhole.js" ;;
+  *) echo "MIDIGREP_RENDERER=$RENDERER: expected offline|blackhole" >&2; exit 2 ;;
+esac
 GATE="$ROOT/eval/gate.py"
 CACHE="$ROOT/.cache/stems"
 R2_BUCKET_NAME="4cast"
@@ -55,7 +60,11 @@ R2_PUBLIC="https://pub-56831423fee34641805da07cfdaf6812.r2.dev"
 R2_ACCOUNT="503e92d7d95838d80c33802d3274f284"
 LOCAL_PORT="5555"
 COMPARE_SECONDS="135"
-RENDER_NOTE="record-strudel-blackhole.js RAW capture + uniform speed correction (ffmpeg wallclock restamp)"
+if [ "$RENDERER" = offline ]; then
+  RENDER_NOTE="render-strudel-offline.js (@strudel/web 1.3.0 OfflineAudioContext, chunked, polyphony 4096)"
+else
+  RENDER_NOTE="record-strudel-blackhole.js RAW capture + uniform speed correction (ffmpeg wallclock restamp)"
+fi
 
 URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="3" SYNTH_ITERS="" DUR="170" HOSTING="r2" FORCE="" ITER_STEMS_ARG=()
 
@@ -147,6 +156,9 @@ fi
 BPM="$(jget "$META" bpm)"; KEY="$(jget "$META" key)"; GENRE="$(jget "$META" genre)"
 DURATION="$(jget "$META" duration)"; TRACK_TITLE="$(jget "$META" title)"
 [ -n "$BPM" ] && [ -n "$DURATION" ] || die "metadata.json lacks bpm/duration: $META"
+# The scoring REFERENCE is the INSTRUMENTAL (bass+drums+melodic): vocals are never generated, so the singer is not
+# part of the target. Plain sample-aligned sum, no normalisation except clipping protection (pipeline_helpers.py).
+INSTRUMENTAL="$("${PH[@]}" instrumental "$TRACK")" || die "cannot build instrumental.wav from the bass/drums/melodic stems"
 if [ -n "$GENRE_OVERRIDE" ]; then
   log "GENRE OVERRIDE: detector said '${GENRE:-none}', using '$GENRE_OVERRIDE' (--genre)"
   GENRE="$GENRE_OVERRIDE"
@@ -162,7 +174,7 @@ if [ "$HOSTING" = r2 ]; then HOST_BASE="$R2_PUBLIC/midi-grep"; else HOST_BASE="h
 BASE="$HOST_BASE/$SLUG"; INST_BASE="$BASE/instruments/"
 
 # ---------------------------------------------------------------- stage 2: MIDI per stem
-for pair in "bass.wav:bass.mid" "melodic.wav:melodic.mid" "vocals.wav:vocals.mid"; do
+for pair in "bass.wav:bass.mid" "melodic.wav:melodic.mid"; do
   src="${pair%%:*}"; dst="${pair##*:}"
   if stage_done "$PACK/$dst"; then log "stage 2 skip: $dst exists"; continue; fi
   log "stage 2: transcribe $src"
@@ -196,8 +208,9 @@ for pair in "bass:bass.wav" "lead:melodic.wav"; do
     log "stage 5 skip: models/${SND}_$role trained"; continue; fi
   midi="$PACK/${src%.wav}.mid"   # the stem's transcribed notes (stage 2): one grain per note, length from the music
   log "stage 5: train granular ${SND}_$role from $src (note-aligned, $midi)"
-  (cd "$SP" && PYTHONPATH="$SP" "$PY" -m rave.cli train "$TRACK/$src" --name "${SND}_$role" --mode granular \
-      --midi "$midi" --output "$ROOT/models") >/dev/null || die "stage 5 train ${SND}_$role failed"
+  (cd "$ROOT" && ./bin/midi-grep generative train "$TRACK/$src" --name "${SND}_$role" --mode granular \
+      --midi "$midi" --output "$ROOT/models") >&2 \
+    || die "stage 5 train ${SND}_$role failed"
 done
 if stage_done "$PACK/instruments/samples.json" "$PACK/instruments/verification.json" && base_ok "$PACK/instruments/samples.json" "$INST_BASE"; then
   log "stage 5 skip: instruments/samples.json exists for $INST_BASE"
@@ -262,7 +275,8 @@ guard_no_recorder() {
   [ -z "$p" ] || die "another record-strudel-blackhole process is running (pid $p); one render at a time"
 }
 preflight_render() {
-  [ -f "$REC" ] || die "node recorder not built: (cd scripts/node && npm run build)"
+  [ -f "$REC" ] || die "node renderer not built: (cd scripts/node && npm run build)"
+  [ "$RENDERER" = blackhole ] || return 0   # offline: no device to guard or probe
   guard_no_recorder; probe_blackhole
 }
 
@@ -276,13 +290,13 @@ run_sample_instrument() {
   key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
   "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --base "$BASE" --inst "$INST_BASE""samples.json" \
     --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" --iters "$ITERS" --dur "$DUR" \
-    --bass-sound "${SND}_bass" --lead-sound "${SND}_lead" --vocal-mode instrument \
+    --bass-sound "${SND}_bass" --lead-sound "${SND}_lead" \
     --mode sample-instrument --workdir "$W" 2>&1 | tee "$W/calibrate.log" >&2
   local cal_rc="${PIPESTATUS[0]}"
   [ "$cal_rc" -eq 0 ] || die "sample-instrument auto-calibrate exited $cal_rc (see $W/calibrate.log)"
   local best; best="$(grep '^BEST:' "$W/calibrate.log" | tail -1)"
   [ -n "$best" ] && [ -s "$W/best.wav" ] || die "auto-calibrate produced no BEST render (see $W/calibrate.log)"
-  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG CV BL LH" (9 values; CV = cal-vocal, BL = bass-lpf, LH = lead high-pass Hz; 0 = generator default)
+  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG BL LH" (8 values; BL = bass-lpf, LH = lead high-pass Hz; 0 = generator default)
   echo "${best##*params: }" > "$W/best.params"
   sleep 3
 }
@@ -292,7 +306,7 @@ run_synth() {
   if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params"; then
     log "stage 7 skip (synth): best render exists in $W"; return 0; fi
   preflight_render
-  # Start from the sample-instrument BEST knobs when present (7, 8 or 9 fields, passed to --start UNSPLIT);
+  # Start from the sample-instrument BEST knobs when present (6, 7 or 8 fields, passed to --start UNSPLIT);
   # otherwise the calibrator's cold-start defaults. The synth pass then runs its own calibration loop
   # (knobs + per-bar env correction measured on SYNTH renders), writing $W/best.env.json for stage 9.
   local start_arg=() knobs=""
@@ -307,12 +321,12 @@ run_synth() {
   log "stage 7: auto-calibrate synth (iters=$SYNTH_ITERS)"
   "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --base "$BASE" \
     --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" --iters "$SYNTH_ITERS" --dur "$DUR" \
-    --vocal-mode instrument --mode synth --workdir "$W" ${start_arg[@]+"${start_arg[@]}"} 2>&1 | tee "$W/calibrate.log" >&2
+    --mode synth --workdir "$W" ${start_arg[@]+"${start_arg[@]}"} 2>&1 | tee "$W/calibrate.log" >&2
   local cal_rc="${PIPESTATUS[0]}"
   [ "$cal_rc" -eq 0 ] || die "synth auto-calibrate exited $cal_rc (see $W/calibrate.log)"
   local best; best="$(grep '^BEST:' "$W/calibrate.log" | tail -1)"
   [ -n "$best" ] && [ -s "$W/best.wav" ] || die "synth auto-calibrate produced no BEST render (see $W/calibrate.log)"
-  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG CV [BL [LH]]" (7, 8 or 9 values)
+  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG [BL [LH]]" (6, 7 or 8 values)
   echo "${best##*params: }" > "$W/best.params"
   sleep 3
 }
@@ -341,16 +355,16 @@ score_and_promote() {
     return 0
   fi
   log "stage 8: score $mode (compare_audio -d $COMPARE_SECONDS --strudel)"
-  # Chance control: a DIFFERENT same-genre reference track scored against this original by the same function.
+  # Chance control: a DIFFERENT same-genre reference track scored against this INSTRUMENTAL reference by the same function.
   local control control_arg=() control_rc=0
   control="$("${PH[@]}" control --genre "$GENRE" --exclude-key "$(basename "$TRACK")")" || control_rc=$?
   case "$control_rc" in
     0) control_arg=(--control "$control"); log "stage 8: chance control = $control";;
-    3) log "stage 8: no control track (no other $GENRE reference track with an original.wav in the cache)";;
+    3) log "stage 8: no control track (no other $GENRE reference track in the cache)";;
     *) die "stage 8: control lookup FAILED (rc=$control_rc) - fix eval/datasets/reference_tracks.yaml; not scoring without the chance check";;
   esac
   local cmp_rc=0
-  "$PY" "$SP/compare_audio.py" "$TRACK/original.wav" "$WAV" -d "$COMPARE_SECONDS" -j --strudel "$STR" -o "$CJ" \
+  "$PY" "$SP/compare_audio.py" "$INSTRUMENTAL" "$WAV" -d "$COMPARE_SECONDS" -j --strudel "$STR" -o "$CJ" \
     ${control_arg[@]+"${control_arg[@]}"} \
     >"$W/compare.stdout" 2>"$W/compare.stderr" || cmp_rc=$?
   [ -s "$CJ" ] || die "stage 8 compare_audio wrote no comparison.json for $mode (rc=$cmp_rc, see $W/compare.stderr)"
@@ -370,7 +384,7 @@ score_and_promote() {
   vdir="$("${PH[@]}" promote --track-dir "$TRACK" --mode "$mode" --strudel "$STR" --wav "$WAV" --comparison "$CJ" \
     --generator "generate_dynamic_strudel.py --mode $mode (knobs from calibrate_dynamic.py: $(cat "$W/best.params"); genre $GENRE; bars $BARS)" \
     --render "$RENDER_NOTE; -d $DUR; pack served from $BASE/" \
-    --compare "compare_audio.py -d $COMPARE_SECONDS --strudel (detector-stamped)" --vocal-mode instrument ${env_arg[@]+"${env_arg[@]}"})" \
+    --compare "compare_audio.py -d $COMPARE_SECONDS --strudel vs instrumental.wav (detector-stamped)" ${env_arg[@]+"${env_arg[@]}"})" \
     || die "stage 9 promote failed for $mode"
   "$PY" - "$W/result.json" "$mode" "$vdir" "$STR" "$WAV" "$CJ" "$edit_rc" "$gate_rc" "$W/gate.txt" <<'PYR'
 import json, sys

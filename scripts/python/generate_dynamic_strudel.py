@@ -21,22 +21,16 @@ Output is the project's bar-array format so voices/bars are freely editable:
 The R2 sample-instrument is referenced via ``await samples("<base>/samples.json")``
 where samples.json carries note-keyed maps + an absolute ``_base`` (trailing /).
 
-Vocal voice (spec 003 Slice 3 — ``--vocal-mode``):
-  instrument (default)  transcribed ``vocals.mid`` folded to the detected vocal range →
-                        ``let vocal = [...]`` on the pack's pitched ``<prefix>_vocal`` instrument
-  chops                 onset-sliced one-shots ``vox0..voxN`` (pack ``vocals/chops.json``) →
-                        16-step ``let vox = [...]`` played by ``s(cat(...vox))``
-  texture               the hosted stem loop (replay) — opt-in ONLY, tagged ``// texture`` and
-                        emitted only when >= 2 editable voices exist (detector rule R4)
-  none                  no vocal voice
+Vocals are NEVER generated (product decision): a vocal is a person singing, not part of the generated
+music. The voices are bass, lead and drums; ``vocals.wav`` is not read here.
 
 Generation modes (spec 003 Slice 4 — ``--mode``):
   sample-instrument (default)  the pack's pitched instruments (``trackbass``/``tracklead``/
-                               ``<prefix>_vocal`` or a hosted manifest) via ``await samples(...)``
-  synth                        NO ``samples(...)`` and no custom sample names: bass/lead/vocal
+                               or a hosted manifest) via ``await samples(...)``
+  synth                        NO ``samples(...)`` and no custom sample names: bass/lead
                                sounds and the drum machine come from the ``sound_selector`` genre
                                palette (``pick_palette_sound``), drums take the ``--drum-mode bank``
-                               path, the vocal line plays on a palette instrument. Same editable
+                               path. Same editable
                                bar arrays, envelopes and ``setcps``.
 Both write ``// generation_mode: <mode>`` so the detector/report never guess.
 """
@@ -60,7 +54,6 @@ from editability_check import check_editability  # noqa: E402  (spec 003 detecto
 from sound_selector import pick_palette_sound  # noqa: E402  (genre palette — no hardcoded names)
 from strudel_validation import VALID_SOUNDS  # noqa: E402  (library sound catalog)
 
-VOCAL_MODES = ("instrument", "chops", "texture", "none")
 GENERATION_MODES = ("sample-instrument", "synth")
 
 NOTE_NAMES = ["c", "cs", "d", "ds", "e", "f", "fs", "g", "gs", "a", "as", "b"]
@@ -184,90 +177,6 @@ def onset_driven_bars(stem_path: Path, midi_path: Path, bpm: float, nbars: int, 
                  for s in range(quantize)]
         bars.append(" ".join(slots))
     return bars
-
-
-def detect_vocal_range(midi_path: Path, *, lo_pct: float = 10.0, hi_pct: float = 90.0,
-                       min_span: int = 12) -> tuple[int, int] | None:
-    """Detect the sung range of a transcribed vocal as a MIDI ``(lo, hi)`` fold window.
-
-    Range-folding rule (documented here, applied via ``fold_pitch`` in ``midi_to_bars`` /
-    ``onset_driven_bars``):
-
-      * Take every transcribed note's pitch, weighted by its DURATION (long held notes are
-        the singer's real tessitura; Basic Pitch's octave slips are short).
-      * ``lo`` = P10 and ``hi`` = P90 of that weighted distribution — the central 80 % of
-        sung time. On Regime CLT the raw transcription spans MIDI 27..95 (bass-bleed and
-        harmonic ghosts) while the weighted P10..P90 is 42..71: the real voice.
-      * Widen symmetrically to at least ``min_span`` semitones (one octave) so a narrow
-        hook still has room for its melodic contour.
-      * Every emitted note is then folded INTO ``[lo, hi]`` by octaves (pitch class kept),
-        so an octave error becomes the same note in the singer's register instead of a
-        screech or a growl. No absolute MIDI numbers are hardcoded — the window is the
-        track's own distribution (CLAUDE.md ZERO HARDCODING).
-    """
-    if not midi_path.exists():
-        return None
-    pm = pretty_midi.PrettyMIDI(str(midi_path))
-    notes = [n for inst in pm.instruments for n in inst.notes]
-    if not notes:
-        return None
-    pitches = np.array([n.pitch for n in notes], dtype=float)
-    weights = np.array([max(1e-3, n.end - n.start) for n in notes], dtype=float)
-    order = np.argsort(pitches)
-    cum = np.cumsum(weights[order]) / weights.sum()
-    lo = int(round(pitches[order][np.searchsorted(cum, lo_pct / 100.0)]))
-    hi = int(round(pitches[order][min(len(order) - 1, np.searchsorted(cum, hi_pct / 100.0))]))
-    if hi - lo < min_span:
-        pad = min_span - (hi - lo)
-        lo -= pad // 2
-        hi += pad - pad // 2
-    return max(0, lo), min(127, hi)
-
-
-def chops_to_bars(chops_json: Path, bpm: float, nbars: int, *, quantize: int = 16) -> list[str] | None:
-    """Quantise the pack's vocal chop onsets (``vocals/chops.json``) to a 16-step grid →
-    one ``"vox3 ~ ~ vox7 …"`` string per bar. When two chops land on one step the stronger
-    onset wins. Returns None when the file is missing/empty."""
-    if not chops_json.exists():
-        return None
-    meta = json.loads(chops_json.read_text())
-    chops = meta.get("chops") or []
-    if not chops:
-        return None
-    step_dur = (60.0 / bpm * 4) / quantize
-    total = nbars * quantize
-    chosen: dict[int, dict] = {}
-    for c in chops:
-        step = int(round(float(c["time"]) / step_dur))
-        if not (0 <= step < total):
-            continue
-        if step not in chosen or float(c.get("strength", 0)) > float(chosen[step].get("strength", 0)):
-            chosen[step] = c
-    if not chosen:
-        return None
-    bars = []
-    for b in range(nbars):
-        slots = [chosen[b * quantize + s]["name"] if (b * quantize + s) in chosen else "~"
-                 for s in range(quantize)]
-        bars.append(" ".join(slots))
-    return bars
-
-
-def vocal_sound_from_pack(pack_dir: Path) -> str | None:
-    """The pack's pitched vocal instrument key (``<prefix>_vocal``), read from samples.json /
-    strudel.json as written by ``build_sample_pack.py`` — never assumed."""
-    for name in ("samples.json", "strudel.json"):
-        p = pack_dir / name
-        if not p.exists():
-            continue
-        try:
-            m = json.loads(p.read_text())
-        except ValueError:
-            continue
-        for k, v in m.items():
-            if k.endswith("_vocal") and isinstance(v, dict) and v:
-                return k
-    return None
 
 
 def js_array(name: str, bars: list[str]) -> str:
@@ -477,16 +386,12 @@ def section_map(mix_path: Path, nbars: int, bpm: float):
 
 
 def pitched_map(pack_dir: Path, base: str) -> dict:
-    """Note-keyed pitched-instrument maps (trackbass/tracklead/<prefix>_vocal) + the vocal
-    one-shots (``vox<N>`` as single-element arrays) + absolute _base."""
+    """Note-keyed pitched-instrument maps (trackbass/tracklead) + absolute _base."""
     sm = json.loads((pack_dir / "strudel.json").read_text())
     out = {"_base": base}
     for k, v in sm.items():
-        if k in ("trackbass", "tracklead") or k.endswith("_vocal"):
-            if isinstance(v, dict) and v:
-                out[k] = v
-        elif k.startswith("vox") and k[3:].isdigit():
-            out[k] = v if isinstance(v, list) else [v]
+        if k in ("trackbass", "tracklead") and isinstance(v, dict) and v:
+            out[k] = v
     return out
 
 
@@ -507,7 +412,7 @@ def main() -> int:
     ap.add_argument("--num-bars", type=int, default=16)
     ap.add_argument("--mode", choices=GENERATION_MODES, default="sample-instrument",
                     help="sample-instrument=the pack's pitched instruments via samples() [default]; "
-                         "synth=no samples() at all — bass/lead/vocal sounds + drum machine from the "
+                         "synth=no samples() at all — bass/lead sounds + drum machine from the "
                          "sound_selector genre palette, drums on the --drum-mode bank path")
     ap.add_argument("--bass-sound", default=None,
                     help="trackbass (custom, sample-instrument default) or a library sound "
@@ -515,24 +420,6 @@ def main() -> int:
     ap.add_argument("--lead-sound", default=None,
                     help="tracklead (custom, sample-instrument default) or a library sound "
                          "(synth default: the genre palette's lead pick)")
-    ap.add_argument("--vocal-mode", choices=VOCAL_MODES, default="instrument",
-                    help="instrument=transcribed vocal line (let vocal) on the pack's pitched "
-                         "<prefix>_vocal instrument [default]; chops=onset-sliced vox0..voxN one-shots "
-                         "on an editable 16-step let vox pattern; texture=the hosted stem loop as an "
-                         "opt-in replay layer (tagged // texture, needs >= 2 editable voices); "
-                         "none=no vocal voice")
-    ap.add_argument("--vocal-loop", action="store_true", default=False,
-                    help="DEPRECATED alias of --vocal-mode texture")
-    ap.add_argument("--no-vocal-loop", action="store_true", default=False,
-                    help="DEPRECATED alias of --vocal-mode none")
-    ap.add_argument("--vocal-midi", type=Path, default=None,
-                    help="Basic Pitch transcription of vocals.wav (default <pack>/vocals.mid; "
-                         "produce with transcribe.py vocals.wav <pack>/vocals.mid)")
-    ap.add_argument("--vocal-sound", default=None,
-                    help="pitched vocal instrument name (default: the <prefix>_vocal key found in "
-                         "the pack's samples.json/strudel.json)")
-    ap.add_argument("--vocal-chops", type=Path, default=None,
-                    help="chops.json from build_sample_pack.py (default <pack>/vocals/chops.json)")
     ap.add_argument("--drum-mode", choices=["extracted", "bank", "realstem"], default="extracted",
                     help="extracted=DRUMS GENERATOR — the track's OWN extracted kick/snare/hat one-shots "
                          "(bd/sd/hh/oh) triggered by the detected, editable rhythm pattern (real sounds + "
@@ -547,7 +434,6 @@ def main() -> int:
     ap.add_argument("--cal-bass", type=float, default=1.0)
     ap.add_argument("--cal-lead", type=float, default=1.0)
     ap.add_argument("--cal-drums", type=float, default=1.0)
-    ap.add_argument("--cal-vocal", type=float, default=1.0)
     ap.add_argument("--master-gain", type=float, default=1.0,
                     help="master gain on the whole stack to back off the recorder's 0 dBFS limiter (~0.6)")
     ap.add_argument("--env-steps", type=int, default=4,
@@ -574,8 +460,6 @@ def main() -> int:
                     help="octaves (int) to move the lead line up, or 'auto' (default): synth mode only, "
                          "derived by partial_register.py from the original stem's dominant-partial register "
                          "minus the palette sound's measured reference; sample modes always 0")
-    ap.add_argument("--vocal-octave", type=PR.octave_arg, default="auto",
-                    help="same as --lead-octave for the vocal line (synth mode, --vocal-mode instrument)")
     ap.add_argument("--sub-gain", type=float, default=0.7,
                     help="sub-sine layer gain (raise to fill the 20-60Hz sub_bass band)")
     ap.add_argument("--bass-cut", type=int, default=0,
@@ -602,22 +486,10 @@ def main() -> int:
     ap.add_argument("--out", type=Path)
     args = ap.parse_args()
 
-    # deprecated aliases (pre-spec-003 flags) → the explicit mode, loudly
-    if args.vocal_loop:
-        print("WARNING: --vocal-loop is deprecated; use --vocal-mode texture "
-              "(the stem loop is a replay layer, not the deliverable — values.md A1)", file=sys.stderr)
-        args.vocal_mode = "texture"
-    if args.no_vocal_loop:
-        print("WARNING: --no-vocal-loop is deprecated; use --vocal-mode none", file=sys.stderr)
-        args.vocal_mode = "none"
-    vocal_mode = args.vocal_mode
-    vocal_midi = args.vocal_midi or (args.pack_dir / "vocals.mid")
-    vocal_chops = args.vocal_chops or (args.pack_dir / "vocals" / "chops.json")
-
     # --- generation mode: which instruments voice the (identical) note material ------------
     # synth: every sound is a library sound DERIVED from the genre palette (sound_selector), never
     # a pack sample and never a name typed here (CLAUDE.md ZERO HARDCODING). An explicit
-    # --bass-sound/--lead-sound/--vocal-sound is honoured only if it is a known library sound.
+    # --bass-sound/--lead-sound is honoured only if it is a known library sound.
     synth = args.mode == "synth"
 
     def _library_sound(explicit: str | None, role: str) -> str:
@@ -633,10 +505,6 @@ def main() -> int:
     if synth:
         bass_sound = _library_sound(args.bass_sound, "bass")
         lead_sound = _library_sound(args.lead_sound, "lead")
-        if vocal_mode in ("chops", "texture"):
-            print(f"WARNING mode=synth: --vocal-mode {vocal_mode} needs pack samples — the transcribed vocal "
-                  "line plays on a palette instrument instead (--vocal-mode instrument)", file=sys.stderr)
-            vocal_mode = "instrument"
         if args.drum_mode != "bank":
             print(f"WARNING mode=synth: --drum-mode {args.drum_mode} uses the pack's drum samples — "
                   "using the library drum machine path (--drum-mode bank)", file=sys.stderr)
@@ -698,66 +566,6 @@ def main() -> int:
     drums_fx = H.effects_for(H.stem_features(args.stems_dir / "drums.wav", dur), ref_rms,
                              kind="drums", library=True)
 
-    # --- vocal material per --vocal-mode -------------------------------------------------
-    vocal_note_bars: list[str] | None = None   # instrument: note strings on <prefix>_vocal
-    vox_bars: list[str] | None = None       # chops: vox<N> one-shot strings
-    vocal_range: tuple[int, int] | None = None
-    vocal_oct, vocal_partial, vocal_dec = 0, None, None
-    if synth:
-        vocal_sound = _library_sound(args.vocal_sound, "vocal")
-    else:
-        vocal_sound = args.vocal_sound or vocal_sound_from_pack(args.pack_dir)
-    vocal_fx = H.effects_for(H.stem_features(args.stems_dir / "vocals.wav", dur), ref_rms,
-                             kind="vocal", library=synth)
-
-    def _downgrade(reason: str) -> None:
-        nonlocal vocal_mode
-        print(f"WARNING vocal: {reason} — emitting no vocal voice (--vocal-mode none)", file=sys.stderr)
-        vocal_mode = "none"
-
-    if vocal_mode == "instrument":
-        if not vocal_sound:
-            _downgrade("no <prefix>_vocal pitched instrument in the pack (build_sample_pack.py --sections vocals)")
-        else:
-            vocal_range = detect_vocal_range(vocal_midi)
-            if vocal_range is None:
-                _downgrade(f"no transcription at {vocal_midi} (run transcribe.py vocals.wav {vocal_midi})")
-            else:
-                lo, hi = vocal_range
-                vocal_oct, vocal_partial, vocal_dec = _octave(args.vocal_octave, args.stems_dir / "vocals.wav", vocal_midi,
-                                                   lo, hi, vocal_sound)
-                lo, hi = lo + 12 * vocal_oct, hi + 12 * vocal_oct   # the fold window moves, so the DATA is transposed
-                if args.rhythm == "onset":
-                    vocal_note_bars = onset_driven_bars(args.stems_dir / "vocals.wav", vocal_midi, args.bpm, nbars,
-                                                        pick="high", lo=lo, hi=hi) \
-                        or midi_to_bars(vocal_midi, args.bpm, nbars, pick="high", lo=lo, hi=hi)
-                else:
-                    vocal_note_bars = midi_to_bars(vocal_midi, args.bpm, nbars, pick="high", lo=lo, hi=hi)
-                if not vocal_note_bars:
-                    _downgrade("vocal transcription has no notes inside the arrangement")
-    elif vocal_mode == "chops":
-        vox_bars = chops_to_bars(vocal_chops, args.bpm, nbars)
-        if not vox_bars:
-            _downgrade(f"no vocal chops at {vocal_chops} (build_sample_pack.py --sections vocals)")
-
-    # texture: the vocal stem as a hosted loop (REPLAY — values.md A1). Opt-in only, and only
-    # tolerated under >= 2 editable voices with a `// texture` marker (detector rule R4).
-    vocal_ok = False
-    if vocal_mode == "texture":
-        voc_out = args.pack_dir / "vocalsfull.wav"
-        if args.samples_url:
-            # An external manifest is already HOSTED; its vocalsfull.wav is authoritative. Do NOT
-            # rewrite the local copy (write_continuous_loop would make a full nbars-long loop and
-            # desync from the shorter hosted loop, so slice()/slow() would use the wrong bar count
-            # and the vocal would play at the wrong rate). Use the existing local copy as-is —
-            # vocalBars is measured from it below, so keep local == hosted.
-            vocal_ok = voc_out.exists()
-        else:
-            vocal_ok = H.write_continuous_loop(
-                args.stems_dir / "vocals.wav", voc_out, nbars, args.bpm)
-        if not vocal_ok:
-            _downgrade("no vocalsfull.wav loop could be prepared")
-
     # realstem drums: play the track's OWN drum stem as a Strudel sample so the rendered drums
     # are the real drums (identical sound + spectrogram), via legit Strudel samples() — not a
     # library drum machine. The drum stem already carries its own dynamics, so no env is applied.
@@ -770,35 +578,25 @@ def main() -> int:
     samples_url = None if synth else args.samples_url
     if synth and args.samples_url:
         print("WARNING mode=synth: --samples-url ignored (synth emits no samples() load)", file=sys.stderr)
-    vocal_uses_pack = (not synth) and (bool(vocal_note_bars) or bool(vox_bars))   # instrument/chops live in the PACK manifest
     needs_samples = (not synth) and (bool(samples_url) or (
         bass_sound == "trackbass" or lead_sound == "tracklead"
-        or vocal_ok or vocal_uses_pack or drum_realstem))
+        or drum_realstem))
     if needs_samples and not samples_url:
         smap = pitched_map(args.pack_dir, base)
-        if vocal_ok:
-            smap["vocalsfull"] = ["vocalsfull.wav"]
         if drum_realstem:
             smap["drumsfull"] = ["drumsfull.wav"]
         (args.pack_dir / "samples.json").write_text(json.dumps(smap, indent=2) + "\n")
         samples_url = f"{base}samples.json"
 
-    # When an EXTERNAL manifest is referenced (e.g. trained instruments/samples.json), it carries
-    # only the pitched instruments + drum one-shots — NOT the vocal/realstem-drum loops, which live
-    # in the PACK manifest. The vocal voice's s("vocalsfull") would then resolve to nothing (silent
-    # singer). Strudel merges successive samples() calls, so we add a SECOND samples() that loads
-    # the co-hosted pack manifest ({base}samples.json, which always carries vocalsfull/drumsfull).
-    # Use the proven STRING-URL form — Strudel's embed transpiler rejects the inline-object form
-    # `samples({...}, base)` here with "Unexpected string". The pack manifest's other entries
-    # (trackbass/tracklead) are fetched lazily, so loading it costs nothing unless they're played.
+    # When an EXTERNAL manifest is referenced (e.g. trained instruments/samples.json) it carries only the
+    # pitched instruments + drum one-shots, not the realstem-drum loop, which lives in the PACK manifest.
+    # Strudel merges successive samples() calls, so a SECOND samples() loads the co-hosted pack manifest.
     extra_samples_url = None
-    if samples_url and args.samples_url and (
-            (vocal_ok and (args.pack_dir / "vocalsfull.wav").exists())
-            or vocal_uses_pack or drum_realstem):
+    if samples_url and args.samples_url and drum_realstem:
         extra_samples_url = f"{base}samples.json"
 
     # slice()/run()/slow() of a hosted LOOP must use the bar-span of THAT SAMPLE, not the
-    # arrangement length: x = round(sample_seconds * cps). A vocal/drum loop that is e.g. 16 bars
+    # arrangement length: x = round(sample_seconds * cps). A drum loop that is e.g. 16 bars
     # long (28s @136bpm) sliced by nbars=78 plays at the wrong rate (mangled). Measure the sample
     # and emit the count as a derived const so it tracks cps and the real loop length.
     def _sample_bars(p: Path) -> int:
@@ -808,18 +606,16 @@ def main() -> int:
             return nbars
         return max(1, round(secs * cps))
 
-    vocal_bars = _sample_bars(args.pack_dir / "vocalsfull.wav") if vocal_ok else nbars
     drum_bars = _sample_bars(args.pack_dir / "drumsfull.wav") if drum_realstem else nbars
 
     # Effective mode: `synth` when requested; a sample-instrument request that ends up needing no
-    # pack samples (all library sounds, no vocal, bank drums) is honestly labelled synth too.
+    # pack samples (all library sounds, bank drums) is honestly labelled synth too.
     generation_mode = "synth" if synth else ("sample-instrument" if needs_samples else "synth")
     L = [
         "// MIDI-grep dynamic — transcribed note material on pitched instruments",
         f"// genre={args.genre}",
         f"// generation_mode: {generation_mode}",
         "// editability: checked-by editability_check.py",
-        f"// vocal_mode: {vocal_mode}",
         *([f"// env_correction: {args.env_correction.name}"] if args.env_correction else []),
         f"// BPM: {args.bpm:.0f}",
         f"// Key: {args.key}",
@@ -830,10 +626,8 @@ def main() -> int:
     if needs_samples:
         L.append(f'await samples("{samples_url}")')
     if extra_samples_url:
-        # second manifest (pack) for loops missing from an external samples_url (e.g. vocalsfull).
+        # second manifest (pack) for loops missing from an external samples_url (drumsfull).
         L.append(f'await samples("{extra_samples_url}")')
-    if vocal_ok:
-        L.append(f"const vocalBars = {vocal_bars}   // round(vocal_sample_secs * cps): bars the vocal loop spans")
     if drum_realstem:
         L.append(f"const drumBars = {drum_bars}   // round(drum_sample_secs * cps)")
     L.append("")
@@ -852,10 +646,6 @@ def main() -> int:
     drums_fx["gain"] = round(drums_fx["gain"] * args.cal_drums, 2)       # inter-stem balance
     sub_g = round(args.sub_gain * args.cal_bass, 2)
     sub_transpose = f".add(note({-12 * args.sub_octave}))" if args.sub_octave else ""
-    # vocal base gain from analysis (unity for stem-derived material) x the measured
-    # calibration lever (calibrate_dynamic.py --cal-vocal) — never a hand-set level.
-    vocal_g = round(vocal_fx["gain"] * args.cal_vocal, 2)
-
     # --- Arrangement dynamics: bake each original stem's per-bar loudness envelope into
     # its render voice so the render follows the original's drops/breakdowns (SHAPE metric).
     # floor keeps voices musically present; drums get floor 0 so they truly drop out in
@@ -875,7 +665,6 @@ def main() -> int:
     # average drum-stem level, which is gain-limited by clipping not boostable at the master)
     # while still ducking in breakdowns. gamma 1.0 = faithful envelope.
     drum_env = bar_env_pattern(args.stems_dir / "drums.wav", nbars, args.bpm, floor=args.drum_floor, gamma=1.0, steps=args.env_steps)
-    voc_env = bar_env_pattern(args.stems_dir / "vocals.wav", nbars, args.bpm, floor=0.10, steps=args.env_steps)
 
     # Measured per-section correction (calibrate_dynamic.py --env-correction-out): scales each
     # voice's per-bar envelope BEFORE gain_pattern folds base*env into the single .gain(). The
@@ -899,7 +688,6 @@ def main() -> int:
         bass_env = _corrected(bass_env, "bass")
         lead_env = _corrected(lead_env, "lead")
         drum_env = _corrected(drum_env, "drums")
-        voc_env = _corrected(voc_env, "vocal")
 
     # IMPORTANT: Strudel's chained .gain() REPLACES (last wins), it does NOT multiply (verified
     # empirically). So a voice must carry exactly ONE .gain(): the per-bar envelope pattern with
@@ -992,29 +780,14 @@ def main() -> int:
                          + f'{gain_pattern(drum_env, drums_fx["gain"] * M)}')
             channels.append(("DRUMS", label, drum_code))
 
-    # --- editable vocal voices (instrument / chops) ---------------------------------------
-    if vocal_note_bars:
-        L += [js_array("vocal", vocal_note_bars), ""]
-        # same shape as the lead: the pitched vocal multisample is driven by the user's notes;
-        # lpf from the stem's measured roll-off, clip(1.3) smooths the monophonic line.
-        vocal_lpf = f'.lpf({vocal_fx["lpf"]})' if vocal_fx.get("lpf") else ""
-        vocal_code = (f'note(cat(...vocal)).s("{vocal_sound}"){vocal_lpf}.clip(1.3)'
-                      f'.room({vocal_fx["room"]}){gain_pattern(voc_env, vocal_g * M)}')
-        channels.append(("VOCAL", f"transcribed vocal line on your {vocal_sound} instrument — edit notes in `vocal`",
-                         vocal_code))
-    if vox_bars:
-        L += [js_array("vox", vox_bars), ""]
-        # the chops are your own one-shots; the 16-step pattern is the editable data.
-        vocal_code = f's(cat(...vox)).room({vocal_fx["room"]}){gain_pattern(voc_env, vocal_g * M)}'
-        channels.append(("VOCAL", "onset-sliced vocal chops (vox0..voxN) — edit the pattern in `vox`", vocal_code))
-
     # Each `$:` is a channel; a (label, comment, code, marker) tuple → one top-level pattern.
     # `marker` is a comment token the detector reads (only `// texture` today).
     def assemble(chs: list[tuple]) -> str:
         lines = list(L)
         if args.dj_flow:
             # --- Performance header: arrangement map + how to play it live ---
-            spark, sections = section_map(args.pack_dir / "originalfull.wav", nbars, args.bpm)
+            spark, sections = section_map(args.stems_dir / "instrumental.wav" if (args.stems_dir / "instrumental.wav").exists()
+                                         else args.pack_dir / "originalfull.wav", nbars, args.bpm)
             lines.append("// ┌── LIVE-PLAY DJ FLOW " + "─" * 40)
             lines.append("// │ Each $: below is a channel — comment a line to MUTE it, or comment all-but-one to SOLO.")
             lines.append("// │ Voices already build & drop with the song (per-bar gain envelopes track the original).")
@@ -1044,25 +817,6 @@ def main() -> int:
         return "\n".join(lines) + "\n"
 
     code = assemble(channels)
-
-    # --- texture: the stem loop may ride along ONLY under >= 2 editable voices (R4) ---------
-    if vocal_ok:
-        pre = check_editability(code)
-        if len(pre.editable_voices) >= 2:
-            # loopAt(N) renders SILENT for large N on a long sample (embed bug). slice(N,run(N)).slow(N)
-            # .clip(1) plays the full hosted vocal in order, one bar-slice/cycle, gaplessly.
-            vocal_code = ('s("vocalsfull").slice(vocalBars, run(vocalBars)).slow(vocalBars).clip(1)'
-                          f'.room({vocal_fx["room"]}){gain_pattern(voc_env, vocal_g * M)}')
-            channels.append(("VOCAL", "real vocal stem loop — REPLAY layer, not editable; "
-                             "swap for --vocal-mode instrument|chops to edit it", vocal_code, "texture"))
-            code = assemble(channels)
-        else:
-            _downgrade(f"texture loop needs >= 2 editable voices, found {len(pre.editable_voices)}")
-            vocal_ok = False
-            # the header line reflects the EFFECTIVE mode
-            L[L.index("// vocal_mode: texture")] = "// vocal_mode: none"
-            L[:] = [ln for ln in L if not ln.startswith("const vocalBars")]
-            code = assemble(channels)
 
     voices = channels  # for the summary count below
 
@@ -1096,13 +850,9 @@ def main() -> int:
                       # effective bass low-pass + its bounds, fed back to calibrate_dynamic.py
                       "bass_lpf": int(bass_fx.get("lpf") or 0), "bass_lpf_analysis": bass_lpf_analysis,
                       "bass_note_max_hz": bars_max_hz(bass_bars),
-                      "lead_octave": lead_oct, "vocal_octave": vocal_oct,
-                      "lead_octave_decision": lead_dec, "vocal_octave_decision": vocal_dec,
-                      "lead_partial_log2": lead_partial, "vocal_partial_log2": vocal_partial,
+                      "lead_octave": lead_oct, "lead_octave_decision": lead_dec,
+                      "lead_partial_log2": lead_partial,
                       "lead_hpf": int(args.lead_hpf), "lead_note_min_hz": bars_min_hz(lead_bars),
-                      "vocal_mode": vocal_mode, "vocal_sound": vocal_sound if vocal_note_bars else None,
-                      "vocal_bars": len(vocal_note_bars or vox_bars or []),
-                      "vocal_range": list(vocal_range) if vocal_range else None,
                       "generation_mode": generation_mode,
                       "env_correction": str(args.env_correction) if args.env_correction else None,
                       "uses_custom_samples": needs_samples,

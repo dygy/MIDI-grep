@@ -279,7 +279,8 @@ def _render_solo_drums(track_dir: Path, version_dir: Path) -> Path | None:
     signal). Skips gracefully if the recorder/strudel file is missing. Run this WITHOUT any other
     BlackHole render in flight — concurrent captures from the one device produce silence."""
     import subprocess
-    recorder = Path(__file__).resolve().parent.parent / "node" / "dist" / "record-strudel-blackhole.js"
+    from renderer import renderer_script  # MIDIGREP_RENDERER: offline (default) | blackhole
+    recorder = renderer_script()
     strudel = version_dir / "output.strudel"
     if not recorder.exists() or not strudel.exists():
         print(f"  [solo-drums] skipped (recorder or output.strudel missing)", file=sys.stderr)

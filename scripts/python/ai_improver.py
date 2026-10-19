@@ -264,7 +264,7 @@ def map_windows_to_sections(windowed: dict, sections: list) -> list:
 
 
 def _control_args(genre: str, original_audio: str) -> list:
-    """`--control <other same-genre reference original.wav>` for compare_audio.py (same lookup as the
+    """`--control <other same-genre reference instrumental.wav>` for compare_audio.py (same lookup as the
     editable-pipeline driver), or [] when there is legitimately no other reference track for the genre.
     A failing lookup (bad yaml, ...) raises: the chance check must not be silently skipped."""
     if not HAS_GATE or not genre:
@@ -278,40 +278,13 @@ def _control_args(genre: str, original_audio: str) -> list:
 
 
 def build_instrumental_reference(original_audio: str, output_dir: str) -> str:
-    """Sum bass+drums+melodic stems (NO vocals) into an instrumental reference.
-
-    The render is instrumental BY DESIGN — we don't generate the singer's voice — so comparing it
-    against the full mix (which includes vocals) unfairly penalises the missing vocal energy/spectrum.
-    Returns the instrumental.wav path, or the original full mix if the stems aren't available.
-    """
-    try:
-        import librosa
-        import soundfile as sf
-        stem_dir = Path(original_audio).parent
-        stems = [stem_dir / f"{s}.wav" for s in ("bass", "drums", "melodic")]
-        if not all(p.exists() for p in stems):
-            return original_audio
-        sr = 44100
-        mix = None
-        for p in stems:
-            y, _ = librosa.load(str(p), sr=sr, mono=True)
-            if mix is None:
-                mix = y
-            else:
-                n = min(len(mix), len(y))
-                mix = mix[:n] + y[:n]
-        if mix is None or len(mix) == 0:
-            return original_audio
-        peak = float(max(abs(mix.min()), abs(mix.max())))
-        if peak > 1.0:
-            mix = mix / peak * 0.99
-        out = Path(output_dir) / "instrumental.wav"
-        sf.write(str(out), mix, sr)
-        print(f"Built instrumental reference (bass+drums+melodic, no vocals): {out.name}")
-        return str(out)
-    except Exception as e:  # noqa: BLE001
-        print(f"Warning: could not build instrumental reference ({e}); comparing vs full mix")
-        return original_audio
+    """The scoring reference: ``<track>/instrumental.wav`` = bass+drums+melodic (NO vocals; a singer is never
+    generated), built by ``pipeline_helpers.write_instrumental``. Raises when the stems are missing - the loop
+    must not silently fall back to scoring against the full mix."""
+    from pipeline_helpers import write_instrumental
+    out = write_instrumental(Path(original_audio).parent)
+    print(f"Instrumental reference (bass+drums+melodic, no vocals): {out}")
+    return str(out)
 
 
 def get_audio_duration(audio_path: str) -> float:
@@ -635,7 +608,9 @@ def improve_strudel(
         # Node.js renderer was deleted and Python renderer can't parse arrange() format
         # BlackHole gives real audio - use full duration to compare the whole track
         render_path = Path(output_dir) / f"render_v{current_version:03d}.wav"
-        blackhole_recorder = Path(__file__).parent.parent / "node" / "dist" / "record-strudel-blackhole.js"
+        sys.path.insert(0, str(Path(__file__).resolve().parent)) if str(Path(__file__).resolve().parent) not in sys.path else None
+        from renderer import renderer_name, renderer_script
+        blackhole_recorder = renderer_script()   # MIDIGREP_RENDERER: offline (default) | blackhole
         iter_duration = exact_duration
 
         # Deterministically wire kick-ducks-bass before rendering (idempotent).
@@ -702,12 +677,12 @@ def improve_strudel(
                 "-o", str(render_path),
                 "-d", f"{iter_duration:.0f}"
             ]
-            print(f"       Rendering {iter_duration:.0f}s via BlackHole...")
+            print(f"       Rendering {iter_duration:.0f}s via {renderer_name()}...")
             result = subprocess.run(render_cmd, capture_output=True, text=True)
             if result.returncode != 0:
-                print(f"       BlackHole render failed: {result.stderr[:200]}")
+                print(f"       {renderer_name()} render failed: {result.stderr[:200]}")
         else:
-            print("       BlackHole recorder not found, skipping render")
+            print(f"       {renderer_name()} renderer not found ({blackhole_recorder}), skipping render")
 
         # Silent-render guard: a Strudel runtime error (e.g. a `"...".slow()` method-on-string crash)
         # records FULL-LENGTH SILENCE — the file exists and has the right duration, so the old

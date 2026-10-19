@@ -21,20 +21,19 @@ tracks:
     genre: brazilian_funk
     mode: sample-instrument
     cache_key: "Regime CLT (Dj Brunin XM, Aurora Shukita)"
-    version: v026
+    version: v029
     expected: pass
-    # Detector-passing render (editable vocal), raw-capture recorder, tempo 1.000.
-    # 2026-10-18 rescaled (0.5 static + 0.5 temporal); static-only was 0.9009 / 0.9205.
-    measured: { overall: 0.6967, section_aware: 0.6736, static: 0.9009, temporal: 0.4925, margin_over_chance: 0.1196 }
+    # 2026-10-19: offline renderer, note-aligned verified instruments, no vocal voice, scored vs instrumental.wav.
+    # Previous: v026 (BlackHole, vocal voice, full-mix reference) 0.6967 / 0.6736.
+    measured: { overall: 0.7793, section_aware: 0.7746, static: 0.8746, temporal: 0.6841, margin_over_chance: 0.2044 }
   - name: "Regime CLT (Dj Brunin XM, Aurora Shukita) — synth mode"
     genre: brazilian_funk
     mode: synth
     cache_key: "Regime CLT (Dj Brunin XM, Aurora Shukita)"
-    version: v027
-    expected: shortfall          # 2026-10-18: margin over chance -0.0182 < min_margin_over_chance 0.02 - a DIFFERENT song (VAGABUNDO) scores
-                                 # higher against the Regime original than this render does. Floor not lowered; the shortfall is the finding.
-    # Pure-synth render (palette sounds, no samples()), raw-capture recorder. Static-only was 0.7879 / 0.8319.
-    measured: { overall: 0.5589, section_aware: 0.5525, static: 0.7879, temporal: 0.3298, margin_over_chance: -0.0182 }
+    version: v030
+    expected: pass               # 2026-10-19: v027 (margin -0.0182, a different song scored higher) was a recorded shortfall on the BlackHole
+                                 # renderer (~2.5 semitones flat) with the full-mix reference; v030 = offline renderer, refined tempo, no vocals.
+    measured: { overall: 0.6705, section_aware: 0.6519, static: 0.8812, temporal: 0.4599, margin_over_chance: 0.0955 }
   # - name: "Caravan Palace - Lone Digger"
   #   genre: electro_swing
   #   cache_key: "Caravan Palace - Lone Digger (Official MV)"
@@ -47,18 +46,14 @@ tracks:
     genre: brazilian_funk
     mode: sample-instrument
     cache_key: "VAGABUNDO NÃO NAMORA"
-    version: v004
-    expected: pass               # 2026-10-10 fix #10: v002 was a recorded shortfall (0.9282 / 0.8721 < 0.90); v004 = same global knobs + the
-                                 # per-bar bass/lead/master correction measured from v002's section_windows → 0.9320 / 0.9216. Floors unchanged.
-    # 2026-10-18 rescaled; static-only was 0.9320 / 0.9216.
-    measured: { overall: 0.6626, section_aware: 0.6223, static: 0.9320, temporal: 0.3933, margin_over_chance: 0.0860 }
+    version: v010
+    expected: pass               # 2026-10-19: offline renderer, note-aligned verified instruments, no vocal voice, scored vs instrumental.wav.
+                                 # Previous: v004 (BlackHole, full-mix reference) 0.6626 / 0.6223.
+    measured: { overall: 0.7217, section_aware: 0.7074, static: 0.8524, temporal: 0.5909, margin_over_chance: 0.1469 }
   - name: "VAGABUNDO NÃO NAMORA (Christopher Luz) — synth mode"
     genre: brazilian_funk
     mode: synth
     cache_key: "VAGABUNDO NÃO NAMORA"
-    version: v007
-    expected: pass               # 2026-10-11 fix #11: v003 (0.7209 / 0.7520, worst band 30.07%) was ONE synth render with the sample-instrument
-                                 # knobs; v007 = auto-calibrate --mode synth (own knobs: bass-lpf 422, lead-hpf 500, hats 0.135, vocal +1 octave
-                                 # from the measured register) → 0.9393 / 0.8725, worst band 8.41%. Floors unchanged.
-    # 2026-10-18 rescaled; static-only was 0.9393 / 0.8725.
-    measured: { overall: 0.6627, section_aware: 0.5860, static: 0.9393, temporal: 0.3862, margin_over_chance: 0.0861 }
+    version: v011
+    expected: pass               # 2026-10-19: offline renderer, refined tempo, no vocal voice; previous v007 (BlackHole) 0.6627 / 0.5860.
+    measured: { overall: 0.7393, section_aware: 0.6907, static: 0.8668, temporal: 0.6119, margin_over_chance: 0.1645 }

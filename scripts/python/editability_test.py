@@ -49,7 +49,9 @@ from pathlib import Path
 import numpy as np
 
 REPO_ROOT = Path(__file__).resolve().parent.parent.parent
-RECORDER = REPO_ROOT / "scripts" / "node" / "dist" / "record-strudel-blackhole.js"
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from renderer import renderer_script  # noqa: E402
+RECORDER = renderer_script()   # MIDIGREP_RENDERER: offline (default) | blackhole
 
 NOTE_NAMES = ["c", "cs", "d", "ds", "e", "f", "fs", "g", "gs", "a", "as", "b"]
 _NOTE_RE = re.compile(r"^([a-g])(s|#|b|f)?(-?\d+)$", re.I)
@@ -691,7 +693,7 @@ def render(strudel: Path, wav: Path, seconds: float, *, recorder: Path = RECORDE
             while time.time() < deadline:
                 rc = proc.poll()
                 text = log_path.read_text(errors="replace") if log_path.exists() else ""
-                if "Saved:" in text and wav.exists():
+                if ("Saved:" in text or text.rstrip().endswith("OK")) and wav.exists():   # BlackHole recorder / offline renderer
                     saved = True
                     break
                 if rc is not None:

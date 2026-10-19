@@ -38,9 +38,9 @@ the pipeline broke on the new song was fixed in the pipeline rather than patched
   of its modes, **so that** I get the same kind of result the documentation shows for the first song.
   - **Acceptance Criteria:**
     - [x] When the pipeline is run on the track's YouTube link, then it produces a "sample-instrument"
-          piece whose bass, lead, vocal and drum parts are each a separate, editable block of notes or
-          patterns, with the vocal part played as notes on an instrument built from the song (not a
-          replay of the singer's recording).
+          piece whose bass, lead and drum parts are each a separate, editable block of notes or
+          patterns. The singing is not part of the generated music — no vocal part is produced, and the
+          piece is compared against the song's instrumental. *(amended 2026-10-19 — see Change Log)*
           — verified 2026-10-10: v002 `output.strudel`: separate `bass`/`lead`/`vocal` bar arrays + drum pattern blocks; vocal is `note(cat(...vocal)).s("vagabundo_nao_namora_vocal")` (multisample built from the song's vocal stem, no `vocalsfull`) — `test_spec004_acceptance` §2.1
     - [x] When the pipeline is run in synth mode on the same track, then it produces a second piece that
           uses only built-in synthesizer and drum-machine sounds and loads no audio from the song.
@@ -93,7 +93,8 @@ the pipeline broke on the new song was fixed in the pipeline rather than patched
   the sample-instrument piece plays from the link I am given, without any local server.
   - **Acceptance Criteria:**
     - [x] When the sample-instrument piece is loaded in Strudel on a machine with no local server
-          running, then every instrument it uses (bass, lead, vocal, drums) loads and plays.
+          running, then every instrument it uses (bass, lead, drums) loads and plays.
+          *(amended 2026-10-19: no vocal instrument exists any more)*
           — verified 2026-10-10: render straight from R2 (no local host) loads `vagabundo_nao_namora_bass/lead/vocal`, kit and vox; pieces reference exactly the two public manifests under `midi-grep/vagabundo-nao-namora/` — §2.4 static tests + recorder log
     - [x] When the hosted sample set is inspected, then it lives under this track's own folder next
           to the first track's, on the project's existing public host.
@@ -177,3 +178,12 @@ the pipeline broke on the new song was fixed in the pipeline rather than patched
   1.000). `eval/datasets/reference_tracks.yaml` now points the sample-instrument entry at `v004`
   (`expected: pass`); `v002` stays on record in its comment and in CLAUDE.md. The synth shortfall (`v003`,
   GitHub #11) is unchanged. Evidence lines above that cite `v002` as the dataset run are historical.
+
+- **2026-10-19 — product decision (owner): vocals are never generated.** §2.1 and §2.4 criteria amended: the
+  sample-instrument piece has bass, lead and drum blocks only, and no vocal instrument is built or hosted; pieces
+  are scored against the instrumental (`instrumental.wav`), not the full mix. The 2026-10-10 verification notes
+  that cite a vocal block / vocal instrument describe the behaviour at that time and are superseded. Same run:
+  the recorder was found to pitch-shift renders by about −2.3 semitones (sample loss + rate relabel) and is
+  replaced by an offline Strudel render as the default; the "tempo matches the song" criterion (§2.2) is
+  re-verified with sample-exact timing. Re-measured on the instrumental target: sample-instrument VAGABUNDO v010 0.7217/0.7074, Regime v029 0.7793/0.7746 → floors 0.70/0.69; synth Regime v030 0.6705/0.6519, VAGABUNDO v011 0.7393/0.6907 → floors 0.65/0.63;
+  the dataset now points at v010 / v011 (VAGABUNDO) and v029 / v030 (Regime), all `expected: pass`.

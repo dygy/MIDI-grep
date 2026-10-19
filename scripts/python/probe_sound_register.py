@@ -31,12 +31,13 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 import partial_register as PR  # noqa: E402
 
 REPO = Path(__file__).resolve().parents[2]
-RECORDER = REPO / "scripts" / "node" / "dist" / "record-strudel-blackhole.js"
+import renderer as RND  # noqa: E402
+RECORDER = RND.renderer_script()   # MIDIGREP_RENDERER: offline (default) | blackhole
 PROBE_NOTE_S = 0.5            # seconds per sweep note (one note per Strudel step)
 DEFAULT_LO, DEFAULT_HI = 36, 84   # c2..c6 in semitones
 LEAD_IN_TAIL_S = 6.0          # recorder start-up/trim slack added to the capture duration
 ANALYSIS_WINDOW = (0.25, 0.9)     # fraction of each note analysed: skip the attack, stop before the release
-RECORDER_BUSY = "node .*record-strudel-blackhole\\.js|ffmpeg .* -f avfoundation"
+RECORDER_BUSY = RND.BLACKHOLE_BUSY
 _NAMES = ["c", "cs", "d", "ds", "e", "f", "fs", "g", "gs", "a", "as", "b"]
 
 
@@ -58,7 +59,9 @@ def capture_seconds(lo: int, hi: int) -> int:
 
 
 def wait_for_idle_recorder(max_s: float = 120.0) -> None:
-    """One render at a time (same pattern/bound as auto-calibrate.sh): wait for a live recorder."""
+    """BlackHole only: one render at a time (same pattern/bound as auto-calibrate.sh). Offline: nothing to wait for."""
+    if not RND.needs_device_guard():
+        return
     waited = 0.0
     while subprocess.run(["pgrep", "-f", RECORDER_BUSY], capture_output=True).returncode == 0:
         if waited >= max_s:

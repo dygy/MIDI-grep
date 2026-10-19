@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""Dominant-partial register of a melodic/vocal stem relative to its transcribed notes.
+"""Dominant-partial register of a melodic stem relative to its transcribed notes.
 
 Why: a synth voice that plays the right PITCHES can still put its energy in the wrong BAND. A
 sustained palette sound (``gm_voice_oohs``, a saw lead) concentrates energy at the fundamental,
-while the original singer / lead concentrates it at a formant or harmonic 2-4x higher. For a
-415 Hz vocal that is the difference between low_mid (250-500 Hz) and mid (500-2000 Hz), and no
+while the original lead concentrates it at a formant or harmonic 2-4x higher. For a
+415 Hz lead that is the difference between low_mid (250-500 Hz) and mid (500-2000 Hz), and no
 gain or filter lever can move it (bug #11: stem melodic 15/64 low_mid/mid vs rendered 54/33).
 
 ``dominant_partial_log2(stem, midi, lo, hi)`` = energy-weighted mean of
@@ -182,7 +182,7 @@ def octave_shift(original_log2: float | None, sound: str, reference=None, pitch_
 
 
 def octave_arg(text: str):
-    """argparse ``type=`` for --lead-octave/--vocal-octave: 'auto' or an int in 0..MAX_OCTAVE_SHIFT."""
+    """argparse ``type=`` for --lead-octave: 'auto' or an int in 0..MAX_OCTAVE_SHIFT."""
     import argparse
     if text == "auto":
         return "auto"

@@ -2,14 +2,11 @@
 """
 build_sample_pack.py — Build a Strudel-playable sample pack from Demucs stems.
 
-Turns extracted stems (melodic.wav, bass.wav, drums.wav, vocals.wav) into:
+Turns extracted stems (melodic.wav, bass.wav, drums.wav) into (vocals are never used: a singer is not
+generated music):
   - drums/      : kick (bd), snare (sd), closed-hat (hh), open-hat (oh) one-shots
   - bass/       : pitched multi-samples (pyin) + representative bass.wav
   - melodic/    : pitched multi-samples + representative melodic.wav
-  - vocals/     : pitched multi-samples (pyin, manifest key ``<prefix>_vocal``) + onset-sliced
-                  one-shots ``vox0..voxN`` (edge-faded) + ``chops.json`` (onset times — the
-                  generator's ``--vocal-mode chops`` derives its 16-step ``let vox`` pattern
-                  from it). Spec 003 Slice 3: the vocal becomes editable data, not a replay.
   - loops/      : beat-aligned per-bar WAV slices for each stem
   - strudel.json: Strudel ``samples()`` manifest (relative paths only)
   - samples.json: host-resolved manifest (absolute ``_base`` ending in ``/``, one-shots as
@@ -25,7 +22,7 @@ Usage::
 
     build_sample_pack.py --stems-dir DIR --out DIR \\
         [--bpm FLOAT] [--key STR] [--num-bars INT] [--prefix NAME] [--base-url URL] \\
-        [--sections drums,bass,melodic,vocals,loops]
+        [--sections drums,bass,melodic,loops]
 """
 
 from __future__ import annotations
@@ -39,6 +36,8 @@ from typing import Optional
 import librosa
 import numpy as np
 import soundfile as sf
+
+from pitched_grains import pyin_geometry
 
 
 # ---------------------------------------------------------------------------
@@ -298,8 +297,8 @@ def _extract_pitched_samples(
     fmax: float,
     min_duration_sec: float = 0.15,
     sample_dur_sec: float = 0.45,
-    hop_length: int = 512,
-    frame_length: int = 2048,
+    hop_length: int | None = None,
+    frame_length: int | None = None,
 ) -> dict[int, np.ndarray]:
     """
     Run pyin pitch detection and return one audio excerpt per distinct MIDI pitch.
@@ -310,6 +309,10 @@ def _extract_pitched_samples(
     Returns:
         ``{midi_note: audio_chunk}``
     """
+    if frame_length is None or hop_length is None:
+        # the pyin window must cover several periods of the LOWEST searched f0 (pitched_grains.pyin_geometry);
+        # a fixed 2048 samples is ~1.5 periods of a 30 Hz bass note and cannot label it.
+        frame_length, hop_length = pyin_geometry(sr, fmin)
     min_frames = max(1, int(min_duration_sec * sr / hop_length))
 
     pitches, voiced_flag, _ = librosa.pyin(
@@ -461,162 +464,6 @@ def build_melodic(stems_dir: Path, out_dir: Path) -> tuple[dict[str, str], Optio
 
 
 # ---------------------------------------------------------------------------
-# Vocals: pitched multisample (instrument) + onset-sliced one-shots (chops)
-# ---------------------------------------------------------------------------
-
-# Physical prior for a sung voice (same role as the 30-400 Hz / 80-2000 Hz pyin windows
-# used for bass/melodic): roughly C2..C6. Not a per-track tuning value.
-VOCAL_FMIN: float = float(librosa.note_to_hz("C2"))
-VOCAL_FMAX: float = float(librosa.note_to_hz("C6"))
-
-# Percentile positions used for the chop slicer. These are positions in THIS track's own
-# distributions (like the P65/P40/P60 cuts in ``_classify_onsets``), never absolute values.
-CHOP_ONSET_GATE_PCT: float = 25.0   # drop the weakest quarter of onsets (breaths / bleed)
-CHOP_MAX_LEN_PCT: float = 90.0      # a chop never exceeds the P90 inter-onset interval
-CHOP_FADE_IOI_FRACTION: float = 0.10  # edge fade = 10% of the P10 inter-onset interval
-
-
-def _slice_vocal_chops(
-    y: np.ndarray,
-    sr: int,
-    *,
-    max_chops: int,
-    hop_length: int = 512,
-) -> tuple[list[dict], dict]:
-    """Onset-slice a vocal stem into one-shot chops.
-
-    Returns ``(chops, params)`` where each chop is ``{"start": int, "end": int,
-    "time": float, "dur": float, "strength": float}`` (sample offsets into *y*) and
-    ``params`` records the thresholds that were DERIVED for this track:
-
-      * ``gate_strength``  — onset-strength gate = P(CHOP_ONSET_GATE_PCT) of the detected
-                             peaks' strengths, raised further only if more than *max_chops*
-                             onsets survive (then the strongest *max_chops* are kept).
-      * ``max_len_sec``    — chop length cap = P(CHOP_MAX_LEN_PCT) of the inter-onset
-                             intervals, so one chop never swallows a whole phrase.
-      * ``fade_ms``        — edge fade = CHOP_FADE_IOI_FRACTION x P10 inter-onset interval:
-                             short enough for the fastest passage, long enough to be
-                             click-free; ``apply_fade`` additionally caps it at 1/4 of a chop.
-
-    Chop boundaries: start at the back-tracked onset (preceding energy minimum, so the attack
-    is intact), end at the next kept onset or the length cap, whichever is first.
-    """
-    oenv = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
-    peaks = librosa.onset.onset_detect(onset_envelope=oenv, sr=sr, hop_length=hop_length,
-                                       units="frames", backtrack=False)
-    if len(peaks) < 2:
-        return [], {}
-    n_detected = int(len(peaks))
-    strengths = oenv[peaks]
-    gate = float(np.percentile(strengths, CHOP_ONSET_GATE_PCT))
-    keep = strengths >= gate
-    if int(keep.sum()) > max_chops:
-        # raise the gate to the percentile that keeps exactly the strongest max_chops
-        gate = float(np.sort(strengths)[::-1][max_chops - 1])
-        keep = strengths >= gate
-    peaks = peaks[keep]
-    strengths = strengths[keep]
-    if len(peaks) < 2:
-        return [], {}
-
-    starts = librosa.frames_to_samples(librosa.onset.onset_backtrack(peaks, oenv), hop_length=hop_length)
-    starts = np.clip(starts, 0, len(y) - 1)
-    ioi = np.diff(starts) / sr
-    max_len = float(np.percentile(ioi, CHOP_MAX_LEN_PCT))
-    fade_ms = float(np.percentile(ioi, 10) * 1000.0 * CHOP_FADE_IOI_FRACTION)
-    max_len_samples = int(max_len * sr)
-    min_len_samples = max(1, int(2 * fade_ms * sr / 1000))  # must hold both ramps
-
-    chops: list[dict] = []
-    for i, s in enumerate(starts):
-        nxt = starts[i + 1] if i + 1 < len(starts) else len(y)
-        e = int(min(nxt, s + max_len_samples, len(y)))
-        if e - s < min_len_samples:
-            continue
-        seg = y[s:e]
-        if float(np.max(np.abs(seg))) < 1e-6:
-            continue
-        chops.append({"start": int(s), "end": int(e), "time": float(s / sr),
-                      "dur": float((e - s) / sr), "strength": float(strengths[i])})
-    params = {
-        "onset_gate_percentile": CHOP_ONSET_GATE_PCT,
-        "gate_strength": gate,
-        "max_len_percentile": CHOP_MAX_LEN_PCT,
-        "max_len_sec": round(max_len, 4),
-        "fade_ioi_fraction": CHOP_FADE_IOI_FRACTION,
-        "fade_ms": round(fade_ms, 3),
-        "onsets_detected": n_detected,
-        "onsets_kept": int(len(peaks)),
-    }
-    return chops, params
-
-
-def build_vocals(
-    stems_dir: Path,
-    out_dir: Path,
-    *,
-    prefix: str,
-    bpm: float,
-    max_chops: int,
-) -> tuple[dict[str, str], dict[str, str], dict]:
-    """
-    Build the editable vocal material from vocals.wav:
-
-      1. pitched multisample ``vocals/vocal_<midi>.wav`` (same pyin path as bass/melodic,
-         manifest key ``<prefix>_vocal``) — played by the user's ``note(cat(...vocal))``;
-      2. onset-sliced one-shots ``vocals/vox<i>.wav`` — triggered by an editable
-         ``s("vox0 ~ ~ vox3 …")`` pattern; onset times go to ``vocals/chops.json`` so the
-         generator can quantise them to the grid.
-
-    Returns ``(pitched_map, chops_map, chops_meta)``.
-    """
-    voc_path = stems_dir / "vocals.wav"
-    if not voc_path.exists():
-        print("[vocals] vocals.wav not found — skipping", file=sys.stderr)
-        return {}, {}, {}
-
-    print("[vocals] loading …", file=sys.stderr)
-    y, sr = load_mono(voc_path)
-    if float(np.max(np.abs(y))) < 1e-4:
-        print("[vocals] silent stem — skipping", file=sys.stderr)
-        return {}, {}, {}
-
-    voc_out = out_dir / "vocals"
-    voc_out.mkdir(parents=True, exist_ok=True)
-    # drop stale chops from a previous build so the manifest never points at missing files
-    for stale in voc_out.glob("vox*.wav"):
-        stale.unlink()
-
-    # --- 1. pitched instrument -------------------------------------------------------------
-    samples = _extract_pitched_samples(y, sr, fmin=VOCAL_FMIN, fmax=VOCAL_FMAX)
-    print(f"[vocals] {len(samples)} distinct pitches: {sorted(samples)}", file=sys.stderr)
-    pitched: dict[str, str] = {}
-    for midi, chunk in sorted(samples.items()):
-        fname = f"vocal_{midi}.wav"
-        write_wav(voc_out / fname, chunk, sr=sr)
-        pitched[midi_to_note_name(midi)] = f"vocals/{fname}"
-
-    # --- 2. onset chops ----------------------------------------------------------------------
-    chops, params = _slice_vocal_chops(y, sr, max_chops=max_chops)
-    chops_map: dict[str, str] = {}
-    entries = []
-    for i, c in enumerate(chops):
-        name = f"vox{i}"
-        fname = f"{name}.wav"
-        write_wav(voc_out / fname, y[c["start"]:c["end"]], sr=sr, fade_ms=params["fade_ms"])
-        chops_map[name] = f"vocals/{fname}"
-        entries.append({"name": name, "time": round(c["time"], 5), "dur": round(c["dur"], 5),
-                        "strength": round(c["strength"], 4)})
-    meta = {"bpm": round(bpm, 2), "sample_rate": sr, "instrument": f"{prefix}_vocal",
-            "pitches": sorted(samples), **params, "chops": entries}
-    (voc_out / "chops.json").write_text(json.dumps(meta, indent=2) + "\n")
-    print(f"[vocals] {len(chops)} chops (gate P{CHOP_ONSET_GATE_PCT:.0f}={params.get('gate_strength', 0):.3f}, "
-          f"max_len {params.get('max_len_sec', 0):.3f}s, fade {params.get('fade_ms', 0):.1f}ms)",
-          file=sys.stderr)
-    return pitched, chops_map, meta
-
-
-# ---------------------------------------------------------------------------
 # Beat-aligned loop slicing
 # ---------------------------------------------------------------------------
 
@@ -642,12 +489,11 @@ def build_loops(
     loop_out = out_dir / "loops"
     loop_out.mkdir(parents=True, exist_ok=True)
 
-    # Include vocals if present — important for genres where vocals are prominent
+    # Instrumental stems only: vocals are never part of the generated music
     stem_configs = [
         ("drums.wav",   "drums"),
         ("bass.wav",    "bass"),
         ("melodic.wav", "melodic"),
-        ("vocals.wav",  "vocals"),
     ]
 
     result: dict[str, list[str]] = {}
@@ -714,21 +560,17 @@ def main() -> None:
     parser.add_argument("--num-bars", type=int, default=16,
                         help="Number of loop bars to slice (default: 16)")
     parser.add_argument("--prefix", default="track",
-                        help="sound-name prefix for the pitched vocal instrument "
-                             "(manifest key <prefix>_vocal; default 'track' -> track_vocal)")
+                        help="sound-name prefix recorded in pack.json (informational)")
     parser.add_argument("--base-url", default=None,
                         help="absolute host base for samples.json (_base, trailing / added). "
                              "If omitted, an existing samples.json's _base is reused; if there "
                              "is none, only strudel.json (relative paths) is written")
-    parser.add_argument("--sections", default="drums,bass,melodic,vocals,loops",
+    parser.add_argument("--sections", default="drums,bass,melodic,loops",
                         help="comma list of sections to (re)build; others keep their existing "
-                             "strudel.json/samples.json/pack.json entries (e.g. --sections vocals)")
-    parser.add_argument("--max-chops", type=int, default=128,
-                        help="upper bound on vocal one-shots vox0..voxN (the onset gate is raised "
-                             "to this track's percentile that keeps the strongest N)")
+                             "strudel.json/samples.json/pack.json entries (e.g. --sections loops)")
     args = parser.parse_args()
     sections = {s.strip() for s in args.sections.split(",") if s.strip()}
-    unknown = sections - {"drums", "bass", "melodic", "vocals", "loops"}
+    unknown = sections - {"drums", "bass", "melodic", "loops"}
     if unknown:
         parser.error(f"unknown --sections: {sorted(unknown)}")
 
@@ -765,10 +607,17 @@ def main() -> None:
     drum_map: dict[str, str] = {}
     bass_pitched: dict[str, str] = {}
     mel_pitched: dict[str, str] = {}
-    voc_pitched: dict[str, str] = {}
-    voc_chops: dict[str, str] = {}
     loop_map: dict[str, list[str]] = {}
-    vocal_key = f"{args.prefix}_vocal"
+    # Product decision: vocals are never generated. A pack built before it may still carry vocal entries
+    # (``*_vocal`` maps, ``vox<N>`` chops, ``vocals*`` loops); strip them from the manifests every build.
+    def _is_vocal_key(k: str) -> bool:
+        return k.endswith("_vocal") or k.startswith("vocals") or (k.startswith("vox") and k[3:].isdigit())
+    for k in [k for k in strudel if _is_vocal_key(k)]:
+        strudel.pop(k)
+    for k in [k for k in counts if k.startswith("vocal")]:
+        counts.pop(k)
+    if isinstance(counts.get("loop_bars"), dict):
+        counts["loop_bars"] = {k: v for k, v in counts["loop_bars"].items() if not k.startswith("vocals")}
 
     if "drums" in sections:
         drum_map = build_drums(stems_dir, out_dir)
@@ -790,17 +639,6 @@ def main() -> None:
         elif mel_rep:
             strudel["lead"] = mel_rep
         counts["melodic_pitches"] = len(mel_pitched)
-    if "vocals" in sections:
-        voc_pitched, voc_chops, _voc_meta = build_vocals(
-            stems_dir, out_dir, prefix=args.prefix, bpm=bpm, max_chops=args.max_chops)
-        # drop stale vocal entries (any *_vocal map / vox<N> one-shots) before re-adding
-        for k in [k for k in strudel if k.endswith("_vocal") or (k.startswith("vox") and k[3:].isdigit())]:
-            strudel.pop(k)
-        if voc_pitched:
-            strudel[vocal_key] = voc_pitched
-        strudel.update(voc_chops)
-        counts["vocal_pitches"] = len(voc_pitched)
-        counts["vocal_chops"] = len(voc_chops)
     if "loops" in sections:
         loop_map = build_loops(stems_dir, out_dir, bpm=bpm, num_bars=args.num_bars)
         strudel.update(loop_map)
@@ -820,15 +658,14 @@ def main() -> None:
     if base:
         resolved = dict(existing_samples)
         resolved["_base"] = base
-        if "vocals" in sections:   # stale vocal entries from a previous build
-            for k in [k for k in resolved if k.endswith("_vocal") or (k.startswith("vox") and k[3:].isdigit())]:
-                resolved.pop(k)
+        for k in [k for k in resolved if _is_vocal_key(k)]:
+            resolved.pop(k)
         for k, v in strudel.items():
-            if k in ("trackbass", "tracklead", vocal_key) or k.endswith("_vocal"):
+            if k in ("trackbass", "tracklead"):
                 resolved[k] = v                                         # note-keyed dict
             elif isinstance(v, list):
                 resolved[k] = v                                         # loop arrays
-            elif k in drum_map or k in voc_chops or (k.startswith("vox") and k[3:].isdigit()):
+            elif k in drum_map:
                 resolved[k] = [v]                                       # one-shot -> [path]
         samples_path.write_text(json.dumps(resolved, indent=2) + "\n")
         samples_url = base + "samples.json"
@@ -854,8 +691,7 @@ def main() -> None:
             f"Drums: {[k for k in strudel if k in ('bd', 'sd', 'hh', 'oh')]}. "
             f"Bass pitches: {list(strudel.get('trackbass', {}))}. "
             f"Melodic pitches: {list(strudel.get('tracklead', {}))}. "
-            f"Vocal pitches: {list(strudel.get(vocal_key, {}))}. "
-            f"Vocal chops: {counts.get('vocal_chops', 0)}."
+            "No vocal material (vocals are never generated)."
         ),
     }
     pack_path.write_text(json.dumps(pack_meta, indent=2))

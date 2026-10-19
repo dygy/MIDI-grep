@@ -18,7 +18,7 @@ it FIRST and returns `{"ok": false, "stage": "editability", ...}` with the viola
 carries `generation_mode` + `editability`; `compare_render` / `eval_gate` accept `mode` for the
 per-mode floors in `eval/thresholds.yaml`.
 
-The only recorder is BlackHole (`scripts/node/dist/record-strudel-blackhole.js`) — the old Node
+The default renderer is offline (`scripts/node/dist/render-strudel-offline.js`); `MIDIGREP_RENDERER=blackhole` selects the BlackHole recorder (`scripts/node/dist/record-strudel-blackhole.js`) — the old Node
 offline synth emulation was deleted (commit f18f5cc) and read ~16% vs ~65% for the same code, so
 it must never gate; its `recorder='node'` option is gone.
 
@@ -28,6 +28,7 @@ Requires: fastmcp (`scripts/python/.venv/bin/pip install fastmcp`). Registered i
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 from pathlib import Path
@@ -40,6 +41,9 @@ COMPARE = REPO_ROOT / "scripts" / "python" / "compare_audio.py"
 NODE_DIR = REPO_ROOT / "scripts" / "node"
 NODE_MODULES = NODE_DIR / "node_modules"
 NODE_BLACKHOLE = NODE_DIR / "dist" / "record-strudel-blackhole.js"
+NODE_OFFLINE = NODE_DIR / "dist" / "render-strudel-offline.js"
+# offline (default): exact-timing/pitch OfflineAudioContext render; blackhole: real-time capture (lossy, needs the device)
+RENDERER = os.environ.get("MIDIGREP_RENDERER", "offline")
 
 # compare_audio.py exit code when the editability detector refuses to score (spec 003)
 EXIT_EDITABILITY_FAIL = 3
@@ -100,15 +104,38 @@ def _editability(strudel_path: str) -> dict:
         }
 
 
+def _renderer_script() -> Path:
+    if RENDERER not in ("offline", "blackhole"):
+        raise ValueError(f"MIDIGREP_RENDERER={RENDERER!r}: expected offline|blackhole")
+    return NODE_OFFLINE if RENDERER == "offline" else NODE_BLACKHOLE
+
+
+def scoring_reference(original: str) -> str:
+    """The scoring REFERENCE is the track's INSTRUMENTAL (bass+drums+melodic): vocals are never generated.
+
+    A path to a track's ``original.wav`` (with its demucs stems beside it) resolves to the sibling
+    ``instrumental.wav`` (built on demand, ``pipeline_helpers.write_instrumental``); any other path is an
+    explicit reference and is used as given."""
+    p = Path(original)
+    if p.name != "original.wav":
+        return original
+    scripts_python = str(REPO_ROOT / "scripts" / "python")
+    if scripts_python not in sys.path:
+        sys.path.insert(0, scripts_python)
+    from pipeline_helpers import write_instrumental
+    return str(write_instrumental(p.parent))
+
+
 def _recorder_preflight() -> str | None:
-    """Return an error message when the BlackHole recorder cannot run, else None."""
+    """Return an error message when the selected renderer cannot run, else None."""
     if not NODE_MODULES.exists():
         return (
             f"scripts/node/node_modules missing ({NODE_MODULES}) — run "
             "`cd scripts/node && npm install && npm run build`."
         )
-    if not NODE_BLACKHOLE.exists():
-        return f"renderer not built: {NODE_BLACKHOLE}. Run `cd scripts/node && npm run build`."
+    script = _renderer_script()
+    if not script.exists():
+        return f"renderer not built: {script}. Run `cd scripts/node && npm run build`."
     return None
 
 
@@ -132,20 +159,20 @@ def render_strudel(
     output_wav: str,
     duration: int = 30,
 ) -> dict:
-    """Render a .strudel file to a WAV file with the BlackHole recorder (real Strudel playback).
+    """Render a .strudel file to a WAV file with real Strudel (MIDIGREP_RENDERER: offline = default, blackhole).
 
     Args:
         strudel_path: path to the .strudel code file.
         output_wav: destination WAV path.
         duration: seconds to render.
 
-    Needs `scripts/node/node_modules` (npm install), the built recorder (npm run build), the
-    BlackHole device and a Multi-Output Device selected as system output (see CLAUDE.md).
+    Needs `scripts/node/node_modules` (npm install) and the built renderer (npm run build). Only with
+    MIDIGREP_RENDERER=blackhole does it also need the BlackHole device and a Multi-Output Device.
     """
     err = _recorder_preflight()
     if err:
         return {"ok": False, "error": err}
-    cmd = ["node", str(NODE_BLACKHOLE), strudel_path, "-o", output_wav, "-d", str(duration)]
+    cmd = ["node", str(_renderer_script()), strudel_path, "-o", output_wav, "-d", str(duration)]
     try:
         proc = _run(cmd, timeout=duration + 120)
     except subprocess.TimeoutExpired:
@@ -153,7 +180,7 @@ def render_strudel(
     ok = proc.returncode == 0 and Path(output_wav).exists()
     return {
         "ok": ok,
-        "recorder": "blackhole",
+        "recorder": RENDERER,
         "output_wav": output_wav,
         "returncode": proc.returncode,
         "stderr_tail": proc.stderr[-1000:] if proc.stderr else "",
@@ -175,6 +202,8 @@ def compare_render(
     eval/thresholds.yaml for the given genre (and generation mode, when a per-mode floor exists).
 
     Args:
+        original: the reference. A track's `original.wav` resolves to its `instrumental.wav`
+            (bass+drums+melodic, no vocals - vocals are never generated); any other path is used as given.
         strudel_path: the Strudel source of the render. Passed as `--strudel` so the detector
             runs first and the comparison.json is stamped with generation_mode + editability.
             A replay deliverable returns {"ok": false, "stage": "editability", ...} unscored.
@@ -183,7 +212,11 @@ def compare_render(
     """
     if not COMPARE.exists():
         return {"ok": False, "error": f"compare_audio.py not found at {COMPARE}"}
-    cmd = [_python(), str(COMPARE), original, rendered, "-d", str(duration), "-j"]
+    try:
+        reference = scoring_reference(original)
+    except (OSError, ValueError) as exc:
+        return {"ok": False, "error": f"cannot build the instrumental reference: {exc}"}
+    cmd = [_python(), str(COMPARE), reference, rendered, "-d", str(duration), "-j"]
     if strudel_path:
         cmd += ["--strudel", strudel_path]
     try:
@@ -221,6 +254,7 @@ def compare_render(
         "ok": True,
         **_gate_fields(verdict),
         "comparison_json": str(tmp),
+        "reference": reference,
     }
 
 

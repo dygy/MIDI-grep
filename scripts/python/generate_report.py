@@ -398,7 +398,7 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
         ('melodic', 'Melodic', '#3fb950', melodic_data),
         ('drums', 'Drums', '#58a6ff', drums_data),
         ('bass', 'Bass', '#f85149', bass_data),
-        ('vocals', 'Vocals', '#d29922', vocals_data),
+        ('vocals', 'Vocals <small>(not generated)</small>', '#d29922', vocals_data),
     ]
 
     for stem_id, label, color, data in track_configs:
@@ -407,7 +407,7 @@ def generate_audio_player_html(melodic_data, drums_data, vocals_data, bass_data,
                 <div class="daw-track" data-stem="{stem_id}">
                     <div class="track-header" style="--track-color: {color};">
                         <div class="track-name">{label}</div>
-                        <button class="track-mute-btn" onclick="toggleStemMute('{stem_id}')" title="Mute/Unmute">M</button>
+                        <button class="track-mute-btn{' muted' if stem_id == 'vocals' else ''}" onclick="toggleStemMute('{stem_id}')" title="{'Not generated and not part of the scored target (the instrumental) - unmute to listen' if stem_id == 'vocals' else 'Mute/Unmute'}">M</button>
                     </div>
                     <div class="track-waveform" onclick="seekAudio(event)">
                         <canvas class="track-canvas" data-stem="{stem_id}" data-color="{color}"></canvas>
@@ -2369,7 +2369,7 @@ def generate_report(cache_dir, version_dir, output_path=None, iterations_file=No
             melodic: {{ muted: false, solo: false }},
             drums: {{ muted: false, solo: false }},
             bass: {{ muted: false, solo: false }},
-            vocals: {{ muted: false, solo: false }},
+            vocals: {{ muted: true, solo: false }},   // not generated, not in the scored instrumental target: listen-only
             'render-melodic': {{ muted: false, solo: false }},
             'render-drums': {{ muted: false, solo: false }},
             'render-bass': {{ muted: false, solo: false }}

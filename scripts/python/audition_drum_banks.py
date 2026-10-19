@@ -21,7 +21,8 @@ sys.path.insert(0, str(Path(__file__).resolve().parent))
 from sound_timbre import analyze_stem_timbre
 
 ROOT = Path(__file__).resolve().parent.parent.parent
-RECORDER = ROOT / "scripts" / "node" / "dist" / "record-strudel-blackhole.js"
+from renderer import renderer_script  # noqa: E402
+RECORDER = renderer_script()   # MIDIGREP_RENDERER: offline (default) | blackhole
 CACHE = ROOT / "eval" / "drum_bank_timbre.json"
 PATTERN = 'bd hh sd hh bd hh sd oh'   # a standard kit groove, same for every bank
 

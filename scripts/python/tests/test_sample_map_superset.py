@@ -1,12 +1,11 @@
 # @layer: unit
 # @spec: 003-editable-strudel-generation
 # @regression
-"""``generate_sample_strudel.build_sample_map`` must be a SUPERSET of the pack manifest.
+"""``generate_sample_strudel.build_sample_map`` must be a SUPERSET of the pack manifest, minus vocals.
 
-Slice 3 found that rewriting ``samples.json`` through ``generate_sample_strudel.py`` dropped the
-pack's pitched vocal (``<prefix>_vocal``) and the vocal chops (``vox<N>``), silencing the
-editable vocal voice of ``generate_dynamic_strudel.py``. Every key of ``strudel.json`` must
-survive the rewrite, in a shape Strudel's ``samples()`` accepts.
+Every key of ``strudel.json`` survives the rewrite in a shape Strudel's ``samples()`` accepts, EXCEPT vocal
+entries (``*_vocal`` pitched maps, ``vox<N>`` chops, ``vocals*`` loops): a singer is never generated (product
+decision), so a pack built before it must not leak vocal samples into the hosted manifest.
 """
 from __future__ import annotations
 
@@ -27,21 +26,24 @@ MANIFEST = {
     "regime_vocal": {"cs3": "vocals/vocal_49.wav", "e3": "vocals/vocal_52.wav"},
     "vox0": ["vocals/vox0.wav"],
     "vox1": "vocals/vox1.wav",
+    "vocalsloop": ["loops/vocals_000.wav"],
     "custom_thing": "misc/x.wav",
 }
 
 
-def test_every_manifest_key_survives_the_rewrite():
-    out = build_sample_map(MANIFEST, "instrument")
-    assert set(MANIFEST) <= set(out), sorted(set(MANIFEST) - set(out))
+VOCAL_KEYS = {"regime_vocal", "vox0", "vox1", "vocalsloop"}
 
 
-def test_vocal_entries_keep_their_shapes():
+def test_every_non_vocal_manifest_key_survives_the_rewrite():
     out = build_sample_map(MANIFEST, "instrument")
-    assert out["regime_vocal"] == MANIFEST["regime_vocal"]          # note-keyed pitched map
-    assert out["vox0"] == ["vocals/vox0.wav"]
-    assert out["vox1"] == ["vocals/vox1.wav"]                        # string → single-element array
-    assert out["custom_thing"] == ["misc/x.wav"]
+    assert set(MANIFEST) - VOCAL_KEYS <= set(out), sorted(set(MANIFEST) - VOCAL_KEYS - set(out))
+    assert out["custom_thing"] == ["misc/x.wav"]                     # unknown keys still pass through (shape fixed)
+
+
+def test_vocal_entries_are_never_carried():
+    for mode in ("instrument", "hybrid", "loops"):
+        out = build_sample_map(MANIFEST, mode)
+        assert not (VOCAL_KEYS & set(out)), sorted(VOCAL_KEYS & set(out))
 
 
 def test_existing_instrument_rules_are_unchanged():

@@ -14,7 +14,7 @@ CLI (each prints one value / path on stdout, errors on stderr with exit 1)::
     pipeline_helpers.py next-version <track_dir>
     pipeline_helpers.py control --genre G --exclude-key K
     pipeline_helpers.py promote --track-dir D --mode M --strudel F --wav F --comparison F [--env-correction F] \\
-        --generator "<knobs>" --render "<capture>" --compare "<args>" [--vocal-mode instrument]
+        --generator "<knobs>" --render "<capture>" --compare "<args>"
     pipeline_helpers.py report --track-dir D --version vNNN --seconds S [--calib-workdir W] \\
         [--no-iteration-stems] [--force] [--config F] [--gate-verdict PASS|FAIL --gate-message M]
 """
@@ -47,7 +47,6 @@ class RunMeta(BaseModel):
     generator: str
     render: str
     compare: str
-    vocal_mode: str = "instrument"
 
 
 class RunMetadata(BaseModel):
@@ -57,7 +56,6 @@ class RunMetadata(BaseModel):
     created_at: str
     generation_mode: str
     editability: str
-    vocal_mode: str
     generator: str
     render: str
     compare: str
@@ -145,7 +143,6 @@ def promote_run(track_dir: Path, mode: str, strudel: Path, wav: Path, comparison
         created_at=datetime.now().astimezone().isoformat(timespec="seconds"),
         generation_mode=mode,
         editability=str(cmp_doc.get("editability", "unknown")),
-        vocal_mode=meta.vocal_mode,
         generator=meta.generator,
         render=meta.render,
         compare=meta.compare,
@@ -476,9 +473,7 @@ def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_wo
     render = vdir / "render.wav"
     if not render.is_file():
         raise FileNotFoundError(f"report: {render} not found")
-    original = track_dir / "original.wav"
-    if not original.is_file():
-        raise FileNotFoundError(f"report: {original} not found")
+    original = write_instrumental(track_dir)   # the scoring reference: bass+drums+melodic, no vocals
     orig_stems = {s: _find_audio(track_dir, s) for s in RENDER_STEMS}
     missing = [s for s, p in orig_stems.items() if p is None]
     if missing:
@@ -565,12 +560,63 @@ def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_wo
 
 
 
+INSTRUMENTAL_STEMS: tuple[str, ...] = ("bass", "drums", "melodic")
+INSTRUMENTAL_FILE = "instrumental.wav"
+
+
+def write_instrumental(track_dir: Path, *, force: bool = False) -> Path:
+    """``<track>/instrumental.wav`` = bass + drums + melodic, the scoring REFERENCE (product decision: vocals are
+    never generated, so the target is the mix without the singer).
+
+    A plain sample-aligned sum (every stem from sample 0; a shorter stem is zero-padded to the longest). No
+    loudness normalisation: the only gain is clipping protection - when the summed peak exceeds 1.0 the whole mix
+    is divided by that peak (one gain, inter-stem balance untouched). Written as 32-bit float. Rebuilt when
+    missing or older than any stem. ``vocals.wav`` stays on disk, unused. Raises if a stem is missing."""
+    import numpy as np
+    import soundfile as sf
+
+    track_dir = Path(track_dir)
+    out = track_dir / INSTRUMENTAL_FILE
+    stems = [track_dir / f"{s}.wav" for s in INSTRUMENTAL_STEMS]
+    if not stems[2].is_file() and (track_dir / "piano.wav").is_file():
+        stems[2] = track_dir / "piano.wav"        # legacy name of the melodic stem (see _find_audio)
+    missing = [p.name for p in stems if not p.is_file()]
+    if missing:
+        raise FileNotFoundError(f"instrumental: {', '.join(missing)} missing in {track_dir}")
+    if out.is_file() and not force and out.stat().st_mtime >= max(p.stat().st_mtime for p in stems):
+        return out
+    loaded, sr = [], None
+    for p in stems:
+        y, fs = sf.read(str(p), dtype="float32", always_2d=True)
+        if sr is None:
+            sr = fs
+        elif fs != sr:
+            raise ValueError(f"instrumental: {p.name} is {fs} Hz but the other stems are {sr} Hz")
+        loaded.append(y)
+    ch = min(y.shape[1] for y in loaded)
+    n = max(len(y) for y in loaded)
+    mix = np.zeros((n, ch), dtype=np.float64)
+    for y in loaded:
+        mix[: len(y)] += y[:, :ch] if y.shape[1] == ch else y.mean(axis=1, keepdims=True)
+    peak = float(np.abs(mix).max())
+    if peak > 1.0:
+        mix /= peak
+    sf.write(str(out), mix.astype(np.float32), sr, subtype="FLOAT")
+    return out
+
+
+def instrumental_path(track_dir: Path) -> Path:
+    """The scoring reference of a track (built on demand from its stems)."""
+    return write_instrumental(track_dir)
+
+
 CONTROL_NONE_EXIT = 3   # `control`: lookup worked, there is simply no other same-genre reference track
 
 
 def control_track_path(genre: str, exclude_key: str, repo_root: Path | None = None) -> Path | None:
-    """``original.wav`` of the first ``eval/datasets/reference_tracks.yaml`` track with the same genre and
-    a different cache_key whose file exists - the chance-control song for ``compare_audio.py --control``."""
+    """``instrumental.wav`` of the first ``eval/datasets/reference_tracks.yaml`` track with the same genre and a
+    different cache_key - the chance-control song for ``compare_audio.py --control``. It is the control's
+    INSTRUMENTAL (built from its stems on demand), because the scored reference is an instrumental too."""
     import yaml  # local: only this subcommand needs it
 
     root = repo_root or Path(__file__).resolve().parents[2]
@@ -579,9 +625,9 @@ def control_track_path(genre: str, exclude_key: str, repo_root: Path | None = No
         key = track.get("cache_key")
         if not key or key == exclude_key or track.get("genre") != genre:
             continue
-        wav = root / ".cache" / "stems" / key / "original.wav"
-        if wav.is_file():
-            return wav
+        d = root / ".cache" / "stems" / key
+        if (d / "original.wav").is_file():
+            return instrumental_path(d)
     return None
 
 
@@ -593,9 +639,12 @@ def main(argv: list[str] | None = None) -> int:
     nb.add_argument("duration", type=float)
     nb.add_argument("bpm", type=float)
     sub.add_parser("next-version").add_argument("track_dir", type=Path)
-    ct = sub.add_parser("control", help="original.wav of another same-genre reference track (chance control)")
+    ct = sub.add_parser("control", help="instrumental.wav of another same-genre reference track (chance control)")
     ct.add_argument("--genre", required=True)
     ct.add_argument("--exclude-key", required=True, help="cache_key of the track being scored")
+    ins = sub.add_parser("instrumental", help="write <track>/instrumental.wav (bass+drums+melodic) and print its path")
+    ins.add_argument("track_dir", type=Path)
+    ins.add_argument("--force", action="store_true")
     rf = sub.add_parser("record-floor")
     rf.add_argument("--thresholds", required=True, type=Path)
     rf.add_argument("--mode", required=True)
@@ -616,7 +665,6 @@ def main(argv: list[str] | None = None) -> int:
     pr.add_argument("--generator", required=True)
     pr.add_argument("--render", required=True)
     pr.add_argument("--compare", required=True)
-    pr.add_argument("--vocal-mode", default="instrument")
     pr.add_argument("--env-correction", type=Path, default=None,
                     help="per-bar correction JSON the generator applied; persisted as vNNN/env_correction.json")
     rp = sub.add_parser("report", help="stage 10: charts, render stems, per-stem comparison, iterations, report.html")
@@ -649,6 +697,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "stamp":
             m = stamp_track_metadata(args.track_dir, genre_override=args.genre, detector_json=args.detector_json)
             print(json.dumps({k: m.get(k) for k in ("bpm", "key", "genre", "genre_detected", "genre_confidence", "genre_override", "duration", "style_heuristic")}))
+        elif args.cmd == "instrumental":
+            print(write_instrumental(args.track_dir, force=args.force))
         elif args.cmd == "control":
             # exit 0 + path: control found; exit 3: legitimately none (no other same-genre reference track with an
             # original.wav); exit 1 (the generic handler below): the lookup itself failed (bad/missing yaml, ...)
@@ -664,8 +714,7 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "next-version":
             print(next_version_dir(args.track_dir))
         else:
-            meta = RunMeta(generator=args.generator, render=args.render, compare=args.compare,
-                           vocal_mode=args.vocal_mode)
+            meta = RunMeta(generator=args.generator, render=args.render, compare=args.compare)
             print(promote_run(args.track_dir, args.mode, args.strudel, args.wav, args.comparison, meta,
                                      env_correction=args.env_correction))
     except (FileNotFoundError, ValueError, ReportError, OSError, subprocess.CalledProcessError) as exc:

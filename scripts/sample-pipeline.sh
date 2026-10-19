@@ -105,11 +105,13 @@ curl -fs -o /dev/null "$BASE_URL/samples.json" || {
 
 OUT="$PACK/output_${MODE}.strudel"
 REND="$PACK/render_${MODE}.wav"
-if [[ -f "$ROOT/scripts/node/dist/record-strudel-blackhole.js" && -d "$ROOT/scripts/node/node_modules/puppeteer" ]]; then
-  echo "==> Rendering via BlackHole"
-  node "$ROOT/scripts/node/dist/record-strudel-blackhole.js" "$OUT" -o "$REND" -d 30 2>&1 | grep -iE "saved|NET FAIL" | head -3 || true
+RENDERER="${MIDIGREP_RENDERER:-offline}"   # offline (default) | blackhole
+if [[ "$RENDERER" = blackhole ]]; then REC_JS="$ROOT/scripts/node/dist/record-strudel-blackhole.js"; else REC_JS="$ROOT/scripts/node/dist/render-strudel-offline.js"; fi
+if [[ -f "$REC_JS" && -d "$ROOT/scripts/node/node_modules/puppeteer" ]]; then
+  echo "==> Rendering ($RENDERER)"
+  node "$REC_JS" "$OUT" -o "$REND" -d 30 2>&1 | grep -iE "saved|NET FAIL" | head -3 || true
   echo "==> Similarity vs original:"
-  "$PY" "$ROOT/scripts/python/compare_audio.py" "$STEMS_DIR/original.wav" "$REND" -d 25 -j 2>/dev/null \
+  "$PY" "$ROOT/scripts/python/compare_audio.py" "$("$PY" "$ROOT/scripts/python/pipeline_helpers.py" instrumental "$STEMS_DIR")" "$REND" -d 25 -j 2>/dev/null \
     | "$PY" -c 'import sys,json;c=json.load(sys.stdin)["comparison"];print("   overall %.1f%%  (mfcc %.2f, chroma %.2f, freq %.2f)"%(c["overall_similarity"]*100,c.get("mfcc_similarity",0),c.get("chroma_similarity",0),c.get("frequency_balance_similarity",0)))'
 else
   echo "==> Skipping render (need: cd scripts/node && npm install, + BlackHole 2ch)"

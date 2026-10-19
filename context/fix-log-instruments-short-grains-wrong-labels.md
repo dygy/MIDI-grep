@@ -1,0 +1,29 @@
+# fix-log instruments-short-grains-wrong-labels
+- Step1/2: description source; no prior PR. Preflight OK. Step3: branch fix/instruments-short-grains-wrong-labels.
+- Step4 diagnose (verified): solo bass probe render (scratchpad/solo_bass.wav): sounding ~0.15 s per 0.464 s note; onsets every ~0.53 s => recorder speed off. Click probe 35 s: period 0.482 (exp 0.4644). Recorder rate = 48000*rawSeconds/captureWallSeconds, wall span includes ffmpeg open + stop latency. Tempo: drums stems measure VAG 129.99 / Regime 135.03 BPM, pipeline writes librosa bins 129.199 / 135.999 (analyze.py:30 beat_track). Timing-corrected v004: temporal 0.393→0.426, chroma still 0 → instruments are the pitch cause.
+- User: one run, timing first (tempo → recorder → instruments), one PR.
+- Step5: conformance x3 (001 §2.3, 004 §2.2 recorder speed — re-verify evidence, 003 §2.3b).
+- Step6: dispatched ml-audio-expert (tempo + instruments), audio-dsp-expert (recorder) in parallel.
+- Recorder (audio-dsp): steady-state rate measure (capture-rate.ts). Click: D35 ratio 1.078→1.031, D170 1.026→0.9998; but in-run drift 0.4502→0.4293 quarters (~5%), IOI std 17 ms. User chose: OFFLINE Strudel render (renderPatternAudio, @strudel/webaudio 1.3.0) as default, BlackHole cross-check. Sent to same agent.
+- Tempo (A) committed: VAG 129.199→129.989, Regime 136.0→135.017 (drums.wav, conf 0.42/0.10). Fail→pass: test_tempo_refine old 1 failed → 3 passed.
+- Instruments (B) staged: note-aligned grains + verification. Fail→pass: grains old 3 failed→3 passed; build_instruments old 9 failed→10 passed. Yield low (VAG bass5/lead7, Regime bass3/lead1) — pyin monophonic on polyphonic stem → follow-up: polyphony-robust verification + vocal rebuild. Driver bypassed Go generative train → golang-expert adds --midi.
+- Pending: 3 tests (setcps == metadata bpm) need regenerated outputs.
+- Offline renderer done (audio-dsp): render-strudel-offline.ts, @strudel/web 1.3.0 IIFE, chunked ~20 s + 4 s tail, polyphony 4096. Click 170 s: period 0.4412 exact, IOI std 0.0 ms. 150 s in 33.9 s wall.
+- KEY (orchestrator, verified): BlackHole raw capture drops ~12% samples; asetrate relabel restores duration but shifts PITCH ~−2.3 st. Sine-only bass probe: BH 59.25 Hz (−2.71 st vs C#2), offline 68.75 Hz (−0.14). Explains day-one −2/−3 st errors + chroma≈0.
+- Offline v004 (same code, old instruments, old bpm): overall 0.707 / sa 0.671, chroma 0.262 (BH 0.000), margin +0.130 (BH +0.086).
+- Sent wiring (shell, MCP, Python callers, renderer helper) + re-probe partial_reference.json to ml-audio-expert.
+- GM soundfonts offline OK (@strudel/soundfonts 1.2.6; pitch ±0.1 st). v007 offline 0.704/0.641 chroma 0.560 vs BH 0.663/0.586 chroma 0.
+- Commit f543c65 render path (node 23/23 tests). Wiring + renderer.py + re-probe (partial_reference: gm_voice_oohs -0.1623→+0.1413, gm_lead_2_sawtooth -0.131→+0.1467) done, uncommitted.
+- Full runs started (2026-10-19 ~02:00): stale stage 3/4/6/7 outputs moved to <track>/.pre-timing-fix/; driver --title ... --r2 for VAG then Regime; logs scratchpad/run_{vag,regime}.log.
+- Runs: VAG rc=0 → v008 sample-instr 0.732/0.699 chroma 0.326 margin +0.155 PASS; v009 synth 0.735/0.675 chroma 0.556 margin +0.158 PASS. Regime v028 sample-instr 0.753/0.736 chroma 0.485 margin +0.176 PASS; Regime synth FAILED: offline renderer "Target closed" on cal2 → sent to audio-dsp agent.
+- USER DECISION 2026-10-19: vocals are never generated; score vs instrumental (bass+drums+melodic). Sent full removal + instrumental reference to ml-audio-expert. Spec 003/004 amendment needed (user decision = approval). Memory saved.
+- User feedback: "we're at ~20% of what we need" → after this PR, deep gap analysis (per stem bass/drums/melodic, per section, vs chance) to drive the next work.
+- Vocals removed + instrumental.wav reference (ml-audio-expert): 7 stale-cache test failures pending re-run. Go report vocals "not generated" (golang-expert). Renderer hang-on-exit after retry found (pid 52075 alive 19 min after OK) → sent to audio-dsp (src only; no build during run).
+- Spec 003 §2.3 + 004 §2.1/§2.4 amended (owner decision) + Change Logs. Docs: CLAUDE.md, llms*.txt, architecture.md.
+- Run 2 (no vocals, instrumental target) started 03:0x: logs run2_{vag,regime}.log.
+- Run 2: Regime rc=0 → v029 sample-instr 0.7793/0.7746 (temporal 0.684, chroma 0.492, onset F1 0.701) margin +0.204 PASS; v030 synth 0.6705/0.6519 margin +0.096 PASS. VAG rc=1: stage 6 upload aborted on ONE transient wrangler fetch failure (also uploading my *.pre-fix backup dirs inside sample_pack — moved to <track>/.pre-fix-pack/, with stale vocals* pack files). Fix: upload_r2.py retries transient puts (python-expert; test_upload_r2_retry old 2 failed → 3 passed).
+- Run 3 VAG rc=0 → v010 sample-instr 0.7217/0.7074 (chroma 0.321) margin +0.147 PASS; v011 synth 0.7393/0.6907 (chroma 0.565) margin +0.165 PASS. Control ≈0.575.
+- Renderer hang fix built: node 25/25; no orphan Chromium.
+- Re-baseline: floors = round(min − 0.02, 2): sample-instrument 0.70/0.69 (binding VAG v010), synth 0.65/0.63 (binding Regime v030); dataset → v010/v011/v029/v030 all pass. test_spec004_acceptance retargeted (python-expert). Docs/specs numbers updated.
+- Static gate: go build/vet/test ok; pytest 581 passed, 3 skipped (conditional: synth-deliverable / no multi-line block); node 25/25; eval gate PASS ×4 on new floors.
+- Not committed: models/regime_bass (reverted to HEAD) and models/regime_lead (local, untracked) — superseded by slug-named models the driver now trains.
