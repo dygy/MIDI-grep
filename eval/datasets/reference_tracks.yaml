@@ -33,7 +33,7 @@ tracks:
     version: v032
     expected: pass               # 2026-10-19: v027 (margin -0.0182, a different song scored higher) was a recorded shortfall on the BlackHole
                                  # renderer (~2.5 semitones flat) with the full-mix reference; v032 = offline renderer, refined tempo, no vocals.
-    measured: { overall: 0.6709, section_aware: 0.6523, static: 0.8815, temporal: 0.4603, margin_over_chance: 0.0959 }
+    measured: { overall: 0.7478, section_aware: 0.7361, static: 0.8815, temporal: 0.6142, margin_over_chance: 0.1729 }   # re-scored 2026-10-19 after the alignment fix (was 0.6709 / 0.6523, one bar off)
   # - name: "Caravan Palace - Lone Digger"
   #   genre: electro_swing
   #   cache_key: "Caravan Palace - Lone Digger (Official MV)"
