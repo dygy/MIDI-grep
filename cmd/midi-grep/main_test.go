@@ -40,3 +40,52 @@ func TestAbsOutputDir(t *testing.T) {
 		t.Fatalf("absolute dir must be kept: %q", got)
 	}
 }
+
+func TestGenTrainArgs(t *testing.T) {
+	cases := []struct {
+		name     string
+		mode     string
+		midi     string
+		grainMS  int
+		grainSet bool
+		want     []string // flag/value pairs that must appear ("--x" alone = flag must appear)
+		absent   []string
+	}{
+		{"midi only: no grain-ms", "granular", "/s/bass.mid", 0, false, []string{"--midi", "/s/bass.mid"}, []string{"--grain-ms"}},
+		{"neither: no grain-ms", "granular", "", 0, false, nil, []string{"--grain-ms", "--midi"}},
+		{"explicit grain-ms passed", "granular", "", 250, true, []string{"--grain-ms", "250"}, []string{"--midi"}},
+		{"midi and explicit grain-ms", "granular", "/s/l.mid", 80, true, []string{"--midi", "/s/l.mid", "--grain-ms", "80"}, nil},
+		{"rave ignores grain/midi", "rave", "/s/l.mid", 80, true, []string{"--epochs"}, []string{"--grain-ms", "--midi"}},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			genTrainingMode, genMidiPath, genGrainMS = tc.mode, tc.midi, tc.grainMS
+			got := genTrainArgs("/a.wav", "/out", tc.grainSet)
+			idx := func(f string) int {
+				for i, a := range got {
+					if a == f {
+						return i
+					}
+				}
+				return -1
+			}
+			for i := 0; i < len(tc.want); i++ {
+				j := idx(tc.want[i])
+				if j < 0 {
+					t.Fatalf("missing %q in %v", tc.want[i], got)
+				}
+				if tc.want[i] != "--epochs" && i+1 < len(tc.want) && tc.want[i+1][0] != '-' {
+					if j+1 >= len(got) || got[j+1] != tc.want[i+1] {
+						t.Fatalf("%s value: want %q in %v", tc.want[i], tc.want[i+1], got)
+					}
+					i++
+				}
+			}
+			for _, a := range tc.absent {
+				if idx(a) >= 0 {
+					t.Errorf("unexpected %q in %v", a, got)
+				}
+			}
+		})
+	}
+}

@@ -120,7 +120,8 @@ def cmd_train(args):
         result = trainer.train(
             str(audio_path),
             args.name,
-            grain_ms=args.grain_ms
+            grain_ms=args.grain_ms,
+            midi_path=args.midi
         )
 
     # Add to repository if requested
@@ -223,7 +224,10 @@ Examples:
     train_parser.add_argument("--mode", choices=["granular", "rave"], default="granular",
                              help="Training mode")
     train_parser.add_argument("--epochs", type=int, default=500, help="RAVE epochs")
-    train_parser.add_argument("--grain-ms", type=int, default=100, help="Granular grain size")
+    train_parser.add_argument("--grain-ms", type=float, default=None,
+                             help="Granular grain size; default: derived (note length with --midi, else stem IOI)")
+    train_parser.add_argument("--midi", default=None,
+                             help="Transcribed notes (.mid): cut one note-aligned grain per note (granular)")
     train_parser.add_argument("--add-to-repo", action="store_true",
                              help="Add to model repository")
     train_parser.add_argument("--github", help="GitHub repo")

@@ -40,6 +40,8 @@ from pathlib import Path
 
 from pydantic import BaseModel, Field
 
+from pitched_grains import VERIFY_TOLERANCE_ST, _note_midi as _pg_note_midi, coverage, read_midi_notes, verify_samples
+
 # Chromatic names; the 'c#' spelling is what Strudel and models/regime_instruments/r2/samples.json use.
 NOTE_NAMES: tuple[str, ...] = ("c", "c#", "d", "d#", "e", "f", "f#", "g", "g#", "a", "a#", "b")
 # Pitch-class file stems written by the legacy trainer (rave/trainer.py ``NN``): 's' means sharp.
@@ -59,6 +61,8 @@ class ModelMetadata(BaseModel):
 
     name: str | None = None
     pitched_map: dict[str, str] | None = None
+    midi_path: str | None = None
+    pitch_range_hz: list[float] | None = None   # register the trainer searched (note-aligned models)
     grains: list[Grain] = Field(default_factory=list)
 
 
@@ -152,17 +156,36 @@ def resolve_kit(kit_dir: Path) -> dict[str, Path]:
     return found
 
 
-def build_instruments(models: list[Path], kit_dir: Path, out_dir: Path, base_url: str) -> InstrumentManifest:
-    """Copy wavs into ``out_dir`` and write ``out_dir/samples.json``; returns the manifest."""
+VERIFICATION_FILE = "verification.json"
+
+
+def build_instruments(models: list[Path], kit_dir: Path, out_dir: Path, base_url: str,
+                      verify: bool = True) -> InstrumentManifest:
+    """Copy wavs into ``out_dir`` and write ``out_dir/samples.json``; returns the manifest.
+
+    With ``verify`` (default) every sample is re-measured BEFORE it enters the manifest
+    (:func:`pitched_grains.verify_samples`): |error| <= 0.5 st keep, a different uncovered note relabel,
+    otherwise (unvoiced / note already covered) drop. ``out_dir/verification.json`` records each decision."""
     base = normalize_base_url(base_url)
     kit = resolve_kit(kit_dir)  # validate everything before writing anything
     plans: dict[str, dict[str, Path]] = {}
+    report: dict[str, list[dict]] = {}
+    cover: dict[str, dict] = {}
     for model_dir in models:
         meta = load_metadata(model_dir)
         name = meta.name or model_dir.name
         if name in plans or name in KIT_SOUNDS:
             raise ValueError(f"duplicate or reserved instrument name {name!r} (model {model_dir})")
         plans[name] = resolve_notes(model_dir, meta)
+        if verify:
+            lo_hi = meta.pitch_range_hz or (None, None)
+            plans[name], rows = verify_samples(plans[name], fmin=lo_hi[0], fmax=lo_hi[1])
+            report[name] = rows
+            if meta.midi_path and Path(meta.midi_path).is_file():
+                cover[name] = coverage([n.pitch for n in read_midi_notes(meta.midi_path)],
+                                       [_pg_note_midi(n) for n in plans[name]])
+            if not plans[name]:
+                raise ValueError(f"model {model_dir}: no sample survived pitch verification")
 
     instruments: dict[str, dict[str, str]] = {}
     for name, notes in plans.items():
@@ -179,6 +202,13 @@ def build_instruments(models: list[Path], kit_dir: Path, out_dir: Path, base_url
         kit_entries[sound] = [f"kit/{src.name}"]
 
     manifest = InstrumentManifest(base=base, instruments=instruments, kit=kit_entries)
+    if verify:
+        summary = {n: {a: sum(1 for r in rows if r["action"] == a) for a in ("kept", "relabelled", "dropped")}
+                   for n, rows in report.items()}
+        (out_dir / VERIFICATION_FILE).write_text(
+            json.dumps({"tolerance_st": VERIFY_TOLERANCE_ST, "summary": summary, "coverage": cover,
+                        "samples": report}, indent=2) + "\n",
+            encoding="utf-8")
     (out_dir / "samples.json").write_text(json.dumps(manifest.to_json_dict(), indent=2) + "\n", encoding="utf-8")
     return manifest
 
@@ -189,9 +219,10 @@ def main(argv: list[str] | None = None) -> int:
     ap.add_argument("--kit", required=True, type=Path, help="sample pack drums/ dir with bd/sd/hh/oh.wav")
     ap.add_argument("--out", required=True, type=Path, help="output dir (becomes <base-url>)")
     ap.add_argument("--base-url", required=True, help="absolute URL the --out dir is served at")
+    ap.add_argument("--no-verify", action="store_true", help="skip the per-sample pitch verification (not advised)")
     args = ap.parse_args(argv)
     try:
-        manifest = build_instruments(args.models, args.kit, args.out, args.base_url)
+        manifest = build_instruments(args.models, args.kit, args.out, args.base_url, verify=not args.no_verify)
     except (FileNotFoundError, ValueError) as exc:
         print(f"build_instruments: {exc}", file=sys.stderr)
         return 1

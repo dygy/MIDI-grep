@@ -621,7 +621,7 @@ def test_24_build_instruments_emits_a_host_resolved_manifest(tmp_path):
     for s in KIT_SOUNDS:
         (kit / f"{s}.wav").write_bytes(b"k")
     out = tmp_path / "out"
-    build_instruments([model], kit, out, "https://h.test/midi-grep/demo/instruments")   # no trailing slash on input
+    build_instruments([model], kit, out, "https://h.test/midi-grep/demo/instruments", verify=False)   # no trailing slash on input
     doc = json.loads((out / "samples.json").read_text())
     assert _manifest_problems(doc, expect_notes={"demo_bass"}, expect_arrays=set(KIT_SOUNDS)) == []
     assert doc["_base"] == "https://h.test/midi-grep/demo/instruments/"

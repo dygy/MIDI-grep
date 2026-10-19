@@ -229,11 +229,18 @@ class GranularTrainer:
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
 
-    def train(self, audio_path: str, model_name: str, grain_ms: int = 100,
-              pitch_fmin: float = 50.0, pitch_fmax: float = 2000.0,
-              attack_ms: float = 5.0, release_ms: float = 40.0) -> Dict:
+    def train(self, audio_path: str, model_name: str, grain_ms: Optional[float] = None,
+              pitch_fmin: Optional[float] = None, pitch_fmax: Optional[float] = None,
+              midi_path: Optional[str] = None) -> Dict:
         """
         Create granular model from audio.
+
+        With ``midi_path`` (the stem's transcribed notes) every grain is ONE note, from its onset to its
+        end (clipped at the next onset), so grain length comes from the music; the pitch label is measured
+        on the grain (pitched_grains.measure_pitch) and the search range comes from the transcribed
+        register. Without MIDI (onset fallback) the grain length is ``grain_ms`` if the caller sets it, else the
+        lower quartile of the stem's own inter-onset intervals (so most grains hold a single onset), and the
+        pitch range is derived from the stem's long-term spectrum unless ``pitch_fmin``/``pitch_fmax`` are given.
 
         Args:
             audio_path: Source audio
@@ -263,74 +270,85 @@ class GranularTrainer:
         y, sr = librosa.load(audio_path, sr=44100, mono=True)
         y = y / (np.max(np.abs(y)) + 1e-8) * 0.95
 
-        # Create grains directory
+        # Create grains directory (fresh: a retrain must not leave stale samples that metadata no longer names)
         grains_dir = model_dir / "grains"
-        grains_dir.mkdir(exist_ok=True)
-
-        # Extract grains at onsets
-        grain_samples = int(grain_ms * sr / 1000)
-
-        # Detect onsets
-        onset_frames = librosa.onset.onset_detect(y=y, sr=sr)
-        onset_samples = librosa.frames_to_samples(onset_frames)
-
-        # Pitch search range from the instrument register (keeps pyin honest: a bass grain
-        # can't be 1kHz, a lead can't be 40Hz) — kills the octave errors that made the raw
-        # granular model unplayable.
-        fmin, fmax = (float(pitch_fmin), float(pitch_fmax))
-        NN = ['c', 'cs', 'd', 'ds', 'e', 'f', 'fs', 'g', 'gs', 'a', 'as', 'b']
-        grains_info = []
-        for i, onset in enumerate(onset_samples):
-            if onset + grain_samples > len(y):
-                continue
-            grain = y[onset:onset + grain_samples]
-            # Window: short attack, configurable release. A long release yields a SUSTAINED
-            # sample whose tail bridges retriggers (smooth, continuous bass) vs a short one
-            # that leaves a transient-then-gap (choppy).
-            attack = int(attack_ms / 1000.0 * sr)
-            release = int(release_ms / 1000.0 * sr)
-            envelope = np.ones(len(grain))
-            if attack > 0:
-                envelope[:attack] = np.linspace(0, 1, attack)
-            if 0 < release < len(grain):
-                # smootherstep fade so the long tail decays gently (no audible edge)
-                t = np.linspace(0, 1, release)
-                envelope[-release:] = 1.0 - (t * t * (3 - 2 * t))
-            grain = grain * envelope
-
-            # Pitch + VOICED CONFIDENCE (only trust well-pitched, stable grains).
-            pitches, voiced_flag, voiced_prob = librosa.pyin(grain, fmin=fmin, fmax=fmax, sr=sr)
-            voiced = pitches[~np.isnan(pitches)]
-            vfrac = float(np.mean(voiced_flag)) if voiced_flag is not None else 0.0
-            if voiced.size < 3 or vfrac < 0.40:
-                continue  # percussive/noisy grain — not a usable pitched sample
-            pitch_hz = float(np.median(voiced))
-            pstd = float(np.std(12 * np.log2(np.clip(voiced, 1e-6, None) / 440)))  # semitone stability
-            midi_note = int(round(12 * np.log2(pitch_hz / 440) + 69))
-            grain_path = grains_dir / f"g{i:04d}.wav"
-            sf.write(str(grain_path), grain, sr)
-            grains_info.append({
-                "index": i, "file": grain_path.name, "pitch_hz": pitch_hz,
-                "midi_note": midi_note, "onset_sec": float(onset / sr),
-                "vfrac": vfrac, "pstd": pstd,
-                "quality": vfrac / (1.0 + pstd),  # voiced & stable = high
-            })
-
-        # Pitched multisample: BEST grain per MIDI note (cleanest, most stable), keyed by the
-        # real note+octave so Strudel pitch-shifts minimally → a clean, note-playable instrument.
         pitched_dir = model_dir / "pitched"
-        pitched_dir.mkdir(exist_ok=True)
-        by_note = {}
-        for g in grains_info:
-            by_note.setdefault(g["midi_note"], []).append(g)
-        pitched_map = {}
-        for midi_note, gs in by_note.items():
-            best = max(gs, key=lambda g: g["quality"])
+        for d in (grains_dir, pitched_dir):
+            shutil.rmtree(d, ignore_errors=True)
+            d.mkdir(exist_ok=True)
+        NN = ['c', 'cs', 'd', 'ds', 'e', 'f', 'fs', 'g', 'gs', 'a', 'as', 'b']
+
+        def key_and_file(midi_note: int):
             octave = midi_note // 12 - 1
-            key = f"{NN[midi_note % 12]}{octave}".replace('s', '#')   # e.g. e1, a#2
-            fn = f"{NN[midi_note % 12]}{octave}.wav".replace('s', '_sharp_')
-            shutil.copy(grains_dir / best["file"], pitched_dir / fn)
-            pitched_map[key] = f"pitched/{fn}"
+            return (f"{NN[midi_note % 12]}{octave}".replace('s', '#'),
+                    f"{NN[midi_note % 12]}{octave}.wav".replace('s', '_sharp_'))
+
+        grains_info = []
+        pitched_map = {}
+        if midi_path:
+            import pitched_grains as pg
+            notes = pg.read_midi_notes(midi_path)
+            if not notes:
+                raise ValueError(f"{midi_path} has no notes - cannot cut note-aligned grains")
+            fmin, fmax = pg.register_hz([n.pitch for n in notes])
+            target = pg.typical_note_length(notes)
+            print(f"note-aligned grains from {len(notes)} transcribed notes; search {fmin:.1f}-{fmax:.1f} Hz; "
+                  f"target length P75 = {target:.3f}s")
+            grains = pg.extract_note_grains(y, sr, notes, fmin, fmax)
+            chosen = pg.select_per_pitch(grains, target, pg.stub_note_length(notes))
+            for i, g in enumerate(grains):
+                grains_info.append({
+                    "index": i, "pitch_hz": pg.midi_to_hz(g.note), "midi_note": g.note,
+                    "transcribed_note": g.transcribed, "onset_sec": g.onset_s, "duration_sec": g.duration_s,
+                    "label_method": g.method, "quality": g.quality,
+                })
+            for midi_note, g in sorted(chosen.items()):
+                key, fn = key_and_file(midi_note)
+                sf.write(str(pitched_dir / fn), g.audio, sr)
+                pitched_map[key] = f"pitched/{fn}"
+            grain_mode = "notes"
+            extra = {"pitch_range_hz": [fmin, fmax], "target_length_sec": target,
+                     "pitched_durations_sec": {key_and_file(m)[0]: round(g.duration_s, 4) for m, g in sorted(chosen.items())}}
+        else:
+            import pitched_grains as pg
+            onset_samples = librosa.frames_to_samples(librosa.onset.onset_detect(y=y, sr=sr))
+            if grain_ms is None:
+                ioi = np.diff(onset_samples) / sr
+                if len(ioi) == 0:
+                    raise ValueError("no onsets found - cannot derive a grain length from this stem")
+                grain_ms = float(np.percentile(ioi, 25.0)) * 1000.0   # P25 IOI: 3 of 4 grains contain one onset
+            grain_samples = int(grain_ms * sr / 1000)
+            if pitch_fmin is None or pitch_fmax is None:
+                spec = np.abs(librosa.stft(y)) ** 2
+                cum = np.cumsum(spec.mean(axis=1)); cum /= cum[-1]
+                freqs = librosa.fft_frequencies(sr=sr)
+                d_lo = float(freqs[int(np.searchsorted(cum, 0.01))])     # 1 % of energy lies below
+                d_hi = float(freqs[int(np.searchsorted(cum, 0.85))])     # 85 % roll-off
+                pitch_fmin = pitch_fmin or max(d_lo, 20.0)               # 20 Hz: lower edge of hearing
+                pitch_fmax = pitch_fmax or d_hi
+            fmin, fmax = float(pitch_fmin), float(pitch_fmax)
+            by_note = {}
+            for i, onset in enumerate(onset_samples):
+                if onset + grain_samples > len(y):
+                    continue
+                grain = y[onset:onset + grain_samples]
+                pm = pg.measure_pitch(grain, sr, fmin, fmax)   # voiced + stable, label = measured median
+                if pm is None:
+                    continue  # percussive/noisy grain - not a usable pitched sample
+                grain_path = grains_dir / f"g{i:04d}.wav"
+                sf.write(str(grain_path), pg.shape_grain(grain, sr, pm.hz), sr)
+                row = {"index": i, "file": grain_path.name, "pitch_hz": pm.hz, "midi_note": pm.note,
+                       "onset_sec": float(onset / sr), "vfrac": pm.voiced_fraction, "pstd": pm.stability_st,
+                       "quality": pm.quality}
+                grains_info.append(row)
+                by_note.setdefault(pm.note, []).append(row)
+            for midi_note, gs in by_note.items():
+                best = max(gs, key=lambda g: g["quality"])
+                key, fn = key_and_file(midi_note)
+                shutil.copy(grains_dir / best["file"], pitched_dir / fn)
+                pitched_map[key] = f"pitched/{fn}"
+            grain_mode = "onsets"
+            extra = {"pitch_range_hz": [fmin, fmax]}
         print(f"Clean pitched instrument: {len(pitched_map)} notes -> {sorted(pitched_map)}")
 
         # Save metadata
@@ -341,9 +359,12 @@ class GranularTrainer:
             "created": datetime.now().isoformat(),
             "sample_rate": sr,
             "num_grains": len(grains_info),
-            "grain_duration_ms": grain_ms,
+            "grain_mode": grain_mode,
+            "grain_duration_ms": round(grain_ms, 2) if grain_mode == "onsets" else None,
+            "midi_path": str(midi_path) if midi_path else None,
             "pitched_map": pitched_map,
-            "grains": grains_info
+            "grains": grains_info,
+            **extra,
         }
 
         with open(model_dir / "metadata.json", 'w') as f:
@@ -364,7 +385,8 @@ if __name__ == "__main__":
     parser.add_argument("--output", default="models", help="Output directory")
     parser.add_argument("--type", choices=["rave", "granular"], default="granular")
     parser.add_argument("--epochs", type=int, default=500, help="Training epochs (RAVE)")
-    parser.add_argument("--grain-ms", type=int, default=100, help="Grain duration (granular)")
+    parser.add_argument("--grain-ms", type=float, default=None, help="Grain duration (granular, onset fallback)")
+    parser.add_argument("--midi", default=None, help="Transcribed notes (.mid): cut one grain per note")
 
     args = parser.parse_args()
 
@@ -373,6 +395,6 @@ if __name__ == "__main__":
         result = trainer.train(args.audio, args.name, epochs=args.epochs)
     else:
         trainer = GranularTrainer(args.output)
-        result = trainer.train(args.audio, args.name, grain_ms=args.grain_ms)
+        result = trainer.train(args.audio, args.name, grain_ms=args.grain_ms, midi_path=args.midi)
 
     print(f"\nResult: {json.dumps(result, indent=2)}")

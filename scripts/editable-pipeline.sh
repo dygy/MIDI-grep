@@ -191,12 +191,15 @@ fi
 # ---------------------------------------------------------------- stage 5: instruments
 for pair in "bass:bass.wav" "lead:melodic.wav"; do
   role="${pair%%:*}"; src="${pair##*:}"
-  if stage_done "$ROOT/models/${SND}_$role/metadata.json"; then log "stage 5 skip: models/${SND}_$role trained"; continue; fi
-  log "stage 5: train granular ${SND}_$role from $src"
-  (cd "$ROOT" && ./bin/midi-grep generative train "$TRACK/$src" --name "${SND}_$role" --mode granular --output "$ROOT/models") >&2 \
-    || die "stage 5 train ${SND}_$role failed"
+  # a model trained before note-aligned grains (no grain_mode) is retrained
+  if stage_done "$ROOT/models/${SND}_$role/metadata.json" && [ "$(jget "$ROOT/models/${SND}_$role/metadata.json" grain_mode)" = notes ]; then
+    log "stage 5 skip: models/${SND}_$role trained"; continue; fi
+  midi="$PACK/${src%.wav}.mid"   # the stem's transcribed notes (stage 2): one grain per note, length from the music
+  log "stage 5: train granular ${SND}_$role from $src (note-aligned, $midi)"
+  (cd "$SP" && PYTHONPATH="$SP" "$PY" -m rave.cli train "$TRACK/$src" --name "${SND}_$role" --mode granular \
+      --midi "$midi" --output "$ROOT/models") >/dev/null || die "stage 5 train ${SND}_$role failed"
 done
-if stage_done "$PACK/instruments/samples.json" && base_ok "$PACK/instruments/samples.json" "$INST_BASE"; then
+if stage_done "$PACK/instruments/samples.json" "$PACK/instruments/verification.json" && base_ok "$PACK/instruments/samples.json" "$INST_BASE"; then
   log "stage 5 skip: instruments/samples.json exists for $INST_BASE"
 else
   log "stage 5: assemble instruments manifest"

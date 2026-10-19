@@ -264,6 +264,7 @@ var (
 	genThreshold    float64
 	genModelName    string
 	genGrainMS      int
+	genMidiPath     string
 	genAddToRepo    bool
 	genSync         bool
 	genPort         int
@@ -360,7 +361,8 @@ func init() {
 	genTrainCmd.Flags().StringVar(&genOutputDir, "output", "models", "Output directory")
 	genTrainCmd.Flags().StringVar(&genTrainingMode, "mode", "granular", "Training mode (granular or rave)")
 	genTrainCmd.Flags().IntVar(&epochs, "epochs", 500, "Training epochs (RAVE mode)")
-	genTrainCmd.Flags().IntVar(&genGrainMS, "grain-ms", 100, "Grain duration in ms (granular mode)")
+	genTrainCmd.Flags().IntVar(&genGrainMS, "grain-ms", 0, "Fixed grain duration in ms (granular mode); only passed when set, otherwise the grain length is derived from the music")
+	genTrainCmd.Flags().StringVar(&genMidiPath, "midi", "", "Transcribed stem (.mid): cut one note-aligned grain per note (granular mode)")
 	genTrainCmd.Flags().BoolVar(&genAddToRepo, "add-to-repo", true, "Add to model repository")
 	genTrainCmd.Flags().StringVar(&genGitHubRepo, "github", "", "GitHub repo for sync")
 	genTrainCmd.Flags().BoolVar(&genSync, "sync", false, "Sync to GitHub after training")
@@ -1745,6 +1747,29 @@ func runGenProcess(cmd *cobra.Command, args []string) error {
 	return execCmd.Run()
 }
 
+// genTrainArgs builds the rave.cli train argv. --grain-ms is passed only when the user set it
+// explicitly (grainSet), so the Python side derives grain length from the music (or --midi)
+// instead of a hardcoded 100 ms.
+func genTrainArgs(audioPath, outputDir string, grainSet bool) []string {
+	args := []string{
+		"-m", "rave.cli",
+		"train", audioPath,
+		"--name", genModelName,
+		"--output", outputDir,
+		"--mode", genTrainingMode,
+	}
+	if genTrainingMode == "rave" {
+		return append(args, "--epochs", fmt.Sprintf("%d", epochs))
+	}
+	if genMidiPath != "" {
+		args = append(args, "--midi", genMidiPath)
+	}
+	if grainSet {
+		args = append(args, "--grain-ms", fmt.Sprintf("%d", genGrainMS))
+	}
+	return args
+}
+
 func runGenTrain(cmd *cobra.Command, args []string) error {
 	audioPath, _ := filepath.Abs(args[0])
 	scriptsDir, _ := filepath.Abs(findScriptsDir())
@@ -1756,8 +1781,10 @@ func runGenTrain(cmd *cobra.Command, args []string) error {
 	if genTrainingMode == "rave" {
 		fmt.Printf("Epochs: %d\n", epochs)
 		fmt.Println("Note: RAVE training can take hours for quality results")
-	} else {
+	} else if cmd.Flags().Changed("grain-ms") {
 		fmt.Printf("Grain size: %dms\n", genGrainMS)
+	} else if genMidiPath != "" {
+		fmt.Printf("Grains: note-aligned from %s\n", genMidiPath)
 	}
 	fmt.Println()
 
@@ -1770,19 +1797,7 @@ func runGenTrain(cmd *cobra.Command, args []string) error {
 	// scripts/python, so a relative "models" silently landed in scripts/python/models/ (hidden by
 	// .gitignore) — spec 004 defect #7. Resolve it before handing it to the subprocess.
 	outputDir := absOutputDir(genOutputDir)
-	pyArgs := []string{
-		"-m", "rave.cli",
-		"train", audioPath,
-		"--name", genModelName,
-		"--output", outputDir,
-		"--mode", genTrainingMode,
-	}
-
-	if genTrainingMode == "rave" {
-		pyArgs = append(pyArgs, "--epochs", fmt.Sprintf("%d", epochs))
-	} else {
-		pyArgs = append(pyArgs, "--grain-ms", fmt.Sprintf("%d", genGrainMS))
-	}
+	pyArgs := genTrainArgs(audioPath, outputDir, cmd.Flags().Changed("grain-ms"))
 
 	if genAddToRepo {
 		pyArgs = append(pyArgs, "--add-to-repo")
