@@ -9,6 +9,8 @@ Takes one bug — a plain description, a GitHub issue on `dygy/MIDI-grep`, or a 
 
 This command is self-contained and derived from `context/product/delivery-flow.md`, the decision record. **Do not read that file during a run.** There is no `/awos:flow` to regenerate this command: to change a decision, edit the record and then this file directly, and log the change in the record's Generation Log.
 
+
+> **Sound-quality work uses the Improvement Loop** (`context/product/delivery-flow.md` §11): one `improve/<theme>` branch, a local commit per measured improvement, no per-change review / PR / CI / merge steps — run Steps up to the render verification, commit, and continue with the next gap; land a batch with one PR when the owner asks.
 ## Arguments
 
 `$ARGUMENTS` — a GitHub issue number or URL, a free-text description, or a path to a `comparison.json` (typically `.cache/stems/<key>/vNNN/comparison.json`) whose gate failed. If empty, ask.

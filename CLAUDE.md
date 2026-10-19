@@ -30,6 +30,12 @@ Reference install at the same level: the Citation orchestrator repo
 
 These rules govern *how* to work, independent of the audio domain.
 
+### Improvement Loop (owner preference, 2026-10-19)
+Sound-quality work runs as a continuous self-testing loop on ONE `improve/<theme>` branch — measure → fix +
+regression test → static gate → render + score both reference tracks vs the previous best → commit if it improved,
+revert if not → next gap. No PR / `/code-review` / keep-drop question per change; one PR per batch (the owner merges).
+Details: `context/product/delivery-flow.md` §11.
+
 ### Clarifying Questions Budget
 Ask at most ONE round of clarifying questions before taking action. If the request is ambiguous, pick the most likely interpretation, state your assumption, and proceed. Do not use `AskUserQuestion` for routine git operations, stash decisions, or small implementation choices.
 

@@ -141,10 +141,35 @@ Gates in order:
 - **2026-10-09 — hand-generated.** No `/awos:flow` exists to regenerate from; every later change is a direct edit here and in the commands, logged below.
 - **2026-10-09 — hired roster for Step 6 dispatch:** `golang-expert` (`internal/`, `cmd/`), `python-expert` (`scripts/python/` plumbing), `ml-audio-expert` (librosa / demucs / `compare_audio.py` / `eval/`), `audio-dsp-expert` (synthesis, recorder DSP), `strudel-expert` (Strudel output and the Strudel content of prompts), `llm-expert` (`ollama_*`, prompts, Modelfiles), `music-theory-expert` (keys, chords, arrangement), `testing-expert` (acceptance tests, the Feature Testing & Regression slice). The first seven live in `.claude/agents/`; `testing-expert` is provided by the `awos` plugin (no file in `.claude/agents/` — probed 2026-10-09).
 
+## 11. Improvement Loop (default for sound-quality work — owner decision 2026-10-19)
+
+The owner wants continuous, self-tested improvement instead of a PR per fix. For work whose goal is "sounds
+more like the original" (gap-analysis items, calibration, instruments, transcription, the metric itself):
+
+- **One long-lived branch** `improve/<theme>` from `origin/main`; every improvement is a **local commit** on it.
+  Push the branch whenever it moves (backup), but open **no PR per change**.
+- **The loop, per change, until no gain beyond noise:** diagnose with numbers → one specialist dispatch (fix +
+  regression test that fails on the old code) → static gate (Go / pytest / Node) → **render and score** on both
+  reference tracks against the previous best (`comparison.json`, offline renderer, `--control`) → **keep** the
+  change (commit, with before/after numbers in the message) if it improves the target or fixes a measured
+  defect without regressing the gate; otherwise **revert** it and record why in the flow log. Then pick the
+  next gap from the ranked list and repeat.
+- **Skipped per change:** `/code-review` + the keep/drop `AskUserQuestion`, PR creation, CI wait, merge
+  question. The specialist's fail→pass proof and the orchestrator's re-run of tests and renders are the gate.
+- **Batch landing:** one PR when the owner asks or a batch is coherent — then one `/code-review` (medium) over
+  the whole branch, fix findings without a keep/drop round (the owner pre-accepted), CI, and a single merge
+  question (a human still merges).
+- **Still asked:** product decisions (what the music should be), outward or irreversible actions, and a stop
+  after several consecutive changes that fail to improve. Floors follow the derivation rule automatically
+  (round(min − 0.02, 2), owner decision 2026-10-19); a spec is amended only when behavior contradicts it, with
+  one Change Log entry per batch.
+- **Still never skipped:** zero hardcoding, no pre-existing issues, numbers only from real runs, no vocals.
+
 ---
 
 ## Generation Log
 
+- 2026-10-19 — **§11 Improvement Loop added (owner request):** "i don't need this much prs … we could just always keep do self testing until we reach improvements". Quality work runs on one `improve/<theme>` branch with local commits per measured improvement; per-change review/PR/CI/merge steps are skipped; one PR per batch.
 - 2026-10-09 — **initial generation, by hand from the 2.4.5 templates.** Decisions settled from `CLAUDE.md`'s Working Agreement and the repo probes below: ticketless source (prompt / file / GitHub issue via `gh`); `origin/main` base with `feat|fix|docs/<slug>` branches, rebase-while-private / merge-in-once-open, `git merge-tree` conflict check; worktrees via `wt` for code, BlackHole render main-repo-only; gates = local static suite → `/code-review` medium → PR to `main` (owner reviews) → no CI (wanted) → BlackHole eval gate through the `loop` MCP, Node recorder never gates; two document gates, `tasks.md` auto-approved; human merges (squash) behind `AskUserQuestion`; DoD = merged + `Status: Completed` + context docs updated + cited numbers from a real `comparison.json`; agent budget 3–5/8 (features), 1–3/6 (bugs); no notifications; bug-fix flow with conformance/divergence classification and a RED-proven regression test.
 - **Probe records — 2026-10-09:**
   - `git remote -v` → `origin git@github.com:dygy/MIDI-grep.git`; `gh auth status` → logged in as `dygy`, scopes `gist, read:org, repo, workflow` — **gh auth ok**.
