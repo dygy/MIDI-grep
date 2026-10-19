@@ -16,7 +16,7 @@
 #     --base   "https://<r2>/midi-grep/<id>" \
 #     --inst   "https://<r2>/midi-grep/<id>/instruments/samples.json" \
 #     --bpm 136 --key "C# minor" --genre brazilian_funk --bars 78 \
-#     [--iters 6] [--mode sample-instrument|synth] \
+#     [--iters N] [--mode sample-instrument|synth] \
 #     [--bass-sound regime_bass --lead-sound regime_lead] \
 #     [--dur 170] [--workdir <tmp>]
 #
@@ -29,6 +29,13 @@
 # Vocals are never generated. Every iteration is scored against <stems>/instrumental.wav
 # (bass+drums+melodic, built by pipeline_helpers.py instrumental), not the full mix.
 #
+# Loop control (scripts/python/calibrate_loop.py, noise = eval/thresholds.yaml calibration_noise): a step whose
+# result is worse than the best so far beyond noise is reverted - the next step starts from the BEST knobs
+# (and env correction) along the proposed direction with a shorter step derived from the observed loss; BEST is the
+# largest minimum margin to the gate floors, margins within noise of each other counting as tied (higher overall
+# wins, then section-aware); the loop stops after PATIENCE steps without a beyond-noise improvement, or at the cap
+# (--iters N; default MAX_ITERS from calibrate_loop.py).
+#
 # Requires: BlackHole device + Multi-Output selected (see CLAUDE.md preflight), node recorder
 # built (scripts/node/dist), the sample pack + bass/lead MIDI present in <stems>/sample_pack,
 # and the instruments samples.json already hosted (R2) so Strudel can fetch it.
@@ -40,6 +47,7 @@ GEN="${AC_GEN:-$ROOT/scripts/python/generate_dynamic_strudel.py}"
 CAL="${AC_CAL:-$ROOT/scripts/python/calibrate_dynamic.py}"
 CMP="${AC_CMP:-$ROOT/scripts/python/compare_audio.py}"
 GATE="${AC_GATE:-$ROOT/scripts/python/gate_margin.py}"
+LOOP="${AC_LOOP:-$ROOT/scripts/python/calibrate_loop.py}"
 # Renderer selection lives in ONE place (scripts/python/renderer.py: MIDIGREP_RENDERER, default offline = exact
 # Strudel OfflineAudioContext render; blackhole = real-time capture). A bad value exits 2 there.
 RENDERER_PY="${AC_RENDERER_PY:-$ROOT/scripts/python/renderer.py}"
@@ -51,7 +59,7 @@ PGREP="${AC_PGREP:-pgrep}"; WAIT_MAX="${AC_RECORDER_WAIT_S:-120}"   # tests: AC_
 RC=0   # exit status: 70 when any iteration failed (GEN/RENDER/CMP FAILED, recorder wait abort); BEST is still printed
 
 STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" BARS="78"
-ENV_START=""; ITERS="6" DUR="170" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
+ENV_START=""; ITERS="" DUR="170" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
 WORK="${TMPDIR:-/tmp}/auto-calibrate.$$"
 # starting knobs (generator defaults are sane cold-start values)
 BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" BL="0" LH="0"   # BL = bass low-pass override Hz, LH = lead high-pass Hz; 0 = generator/analysis default
@@ -96,13 +104,17 @@ case "$CTRL_RC" in
   3) echo "chance control: none (no other $GENRE reference track)";;
   *) echo "control lookup FAILED (rc=$CTRL_RC) - fix eval/datasets/reference_tracks.yaml" >&2; exit 65;;
 esac
+[ -n "$ITERS" ] || ITERS="$("$PY" "$LOOP" max-iters)" || exit 2
 mkdir -p "$WORK"
 echo "workdir: $WORK"
 
 best=-1; best_params=""; best_tag=""; best_gate="n/a"; : >"$WORK/iters.tsv"
 rm -f "$WORK/best.env.json"   # never report a stale env from a previous run
 PREV_ENV="${ENV_START:-}"   # env-correction JSON measured from the previous iteration (fed to the next generation); --env-start seeds it
-for i in $(seq 1 "$ITERS"); do
+PARENT=""; ALPHA="1"   # the iteration these knobs were stepped from, and the fraction of its proposed step taken
+i=0
+while [ "$i" -lt "$ITERS" ]; do
+  i=$((i+1))
   TAG="cal$i"; STRU="$WORK/$TAG.strudel"; WAV="$WORK/$TAG.wav"; CJ="$WORK/$TAG.cmp.json"
   inst_arg=(); [ -n "$INST" ] && inst_arg=(--samples-url "$INST")
   key_arg=();  [ -n "$KEY" ]  && key_arg=(--key "$KEY")
@@ -160,12 +172,15 @@ for i in $(seq 1 "$ITERS"); do
   fi
   echo "[$TAG] gate: $GATE_OUT"
   ENVUSED="-"; if [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ]; then cp "$PREV_ENV" "$WORK/$TAG.envused.json"; ENVUSED="$WORK/$TAG.envused.json"; fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\n' "$TAG" "$OVER" "$MARG" "$GATE_OUT" "$BM $SG $CL $LLPF $HG $MG $BL $LH" "$ENVUSED" >>"$WORK/iters.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$TAG" "$OVER" "$MARG" "$GATE_OUT" "$BM $SG $CL $LLPF $HG $MG $BL $LH" "$ENVUSED" "$SECT" "${PARENT:--}" "$ALPHA" >>"$WORK/iters.tsv"
+  echo "$EBL $ELH" >"$WORK/$TAG.eff"
 
   # calibrate -> next knobs
   ENV_OUT="$WORK/$TAG.env.json"
   envin_arg=(); [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && envin_arg=(--env-correction-in "$PREV_ENV")
-  CLI=$("$PY" "$CAL" --comparison "$CJ" --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
+  parent_arg=(); if [ -n "$PARENT" ] && [ -f "$WORK/$PARENT.cmp.json" ]; then
+    read -r PEBL PELH <"$WORK/$PARENT.eff"; parent_arg=(--parent-comparison "$WORK/$PARENT.cmp.json" --parent-bass-lpf "$PEBL" --parent-lead-hpf "$PELH"); fi
+  CLI=$("$PY" "$CAL" --comparison "$CJ" ${parent_arg[@]+"${parent_arg[@]}"} --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
     --bass-mult "$BM" --sub-gain "$SG" --cal-lead "$CL" --lead-lpf "$LLPF" \
     --hat-gain "$HG" --master-gain "$MG" \
     --mode "$MODE" --bass-lpf "$EBL" --bass-lpf-max "$EBLMAX" --bass-note-max-hz "$EBHZ" \
@@ -176,22 +191,35 @@ for i in $(seq 1 "$ITERS"); do
     --bass-mult) BM="$2";; --sub-gain) SG="$2";; --cal-lead) CL="$2";;
     --lead-lpf) LLPF="$2";; --hat-gain) HG="$2";; --master-gain) MG="$2";; --bass-lpf) BL="$2";; --lead-hpf) LH="$2";;
   esac; shift 2; done
-  [ -s "$ENV_OUT" ] && PREV_ENV="$ENV_OUT"
+  echo "$BM $SG $CL $LLPF $HG $MG $BL $LH" >"$WORK/$TAG.prop"
+
+  # next step: continue from this iteration, or revert to the best and shorten the step; stop when nothing improves
+  NEXT="$("$PY" "$LOOP" next "$WORK/iters.tsv" --cap "$ITERS")" || { echo "[$TAG] loop control FAILED"; RC=70; break; }
+  read -r DECISION NPARENT NALPHA <<<"$NEXT"
+  if [ "$DECISION" != "CONTINUE" ]; then echo "[$TAG] stop: ${NEXT#STOP }"; break; fi
+  if [ "$NPARENT" != "$TAG" ]; then
+    echo "[$TAG] regressed vs best $NPARENT beyond noise - next step restarts from $NPARENT at ${NALPHA} of its proposed step"
+  fi
+  PARENT="$NPARENT"; ALPHA="$NALPHA"
+  prow=$(awk -F'\t' -v t="$PARENT" '$1==t{print $5"\t"$6}' "$WORK/iters.tsv")
+  pknobs="${prow%%$'\t'*}"; penv="${prow##*$'\t'}"
+  read -r PEBL PELH <"$WORK/$PARENT.eff"
+  read -r BM SG CL LLPF HG MG BL LH < <("$PY" "$LOOP" blend --parent "$pknobs" --prop "$(cat "$WORK/$PARENT.prop")" --eff "$PEBL $PELH" --alpha "$ALPHA")
+  PREV_ENV=""
+  if [ -s "$WORK/$PARENT.env.json" ]; then
+    "$PY" "$LOOP" blend-env --used "$penv" --new "$WORK/$PARENT.env.json" --alpha "$ALPHA" --out "$WORK/cal$((i+1)).envin.json" && PREV_ENV="$WORK/cal$((i+1)).envin.json"
+  elif [ "$penv" != "-" ]; then PREV_ENV="$penv"; fi
 done
 
 # BEST = the iteration with the largest minimum margin to the gate floors (a render that passes both beats one
-# that does not; among failures the one nearest to passing). If the gate was unreadable for ANY iteration the
+# that does not; among failures the one nearest to passing; margins within calibration_noise of the top are tied
+# and the higher overall, then section-aware, wins). If the gate was unreadable for ANY iteration the
 # margins are not comparable, so ALL iterations are ranked by overall instead (one consistent ordering).
-SEL=$("$PY" - "$WORK/iters.tsv" <<'PYEOF'
-import sys
-rows = [l.rstrip("\n").split("\t") for l in open(sys.argv[1]) if l.strip()]
-if rows:
-    gated = all(r[2] != "n/a" for r in rows)
-    key = (lambda r: (float(r[2]), float(r[1]))) if gated else (lambda r: (float(r[1]),))
-    b = max(rows, key=key)
-    print("\t".join([b[0], b[1], b[3], b[4], b[5], "gate" if gated else "overall"]))
-PYEOF
-)
+SEL=""
+if [ -s "$WORK/iters.tsv" ]; then
+  SELTAG="$("$PY" "$LOOP" select "$WORK/iters.tsv")" || { echo "BEST selection failed" >&2; exit 70; }
+  SEL=$(awk -F'\t' -v t="$SELTAG" '{if($3=="n/a")na=1} $1==t{row=$1"\t"$2"\t"$4"\t"$5"\t"$6} END{print row"\t"(na?"overall":"gate")}' "$WORK/iters.tsv")
+fi
 if [ -n "$SEL" ]; then
   IFS=$'\t' read -r best_tag best best_gate best_params best_envused SEL_BY <<<"$SEL"
   if [ "$SEL_BY" = "overall" ]; then

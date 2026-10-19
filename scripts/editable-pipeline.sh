@@ -23,7 +23,7 @@
 #
 # Usage:
 #   scripts/editable-pipeline.sh --url <youtube> [--title "<cache folder title>"] [--prefix <slug>]
-#       [--genre <g>] [--mode sample-instrument|synth|both] [--iters 3] [--synth-iters N] [--dur 170]
+#       [--genre <g>] [--mode sample-instrument|synth|both] [--iters N] [--synth-iters N] [--dur 170]
 #       [--r2 | --local] [--no-iteration-stems] [--force]
 #
 #   --url      YouTube link (required unless --title names an already-extracted track dir)
@@ -31,7 +31,8 @@
 #   --prefix   slug for hosting/model names (default: kebab-case of the track title)
 #   --genre    override the genre in metadata.json (the override is logged)
 #   --mode     which pieces to build (default both)
-#   --iters    sample-instrument calibration iterations (default 3; best of N is kept)
+#   --iters    cap on sample-instrument calibration iterations (default: calibrate_loop.py MAX_ITERS; the loop
+#              stops earlier after PATIENCE steps without a beyond-noise improvement; best iteration is kept)
 #   --synth-iters  synth calibration iterations (default = --iters)
 #   --dur      BlackHole capture seconds per render (default 170)
 #   --r2       host on the project's public R2 bucket (default); --local serves on localhost:5555
@@ -64,7 +65,7 @@ else
   RENDER_NOTE="record-strudel-blackhole.js RAW capture + uniform speed correction (ffmpeg wallclock restamp)"
 fi
 
-URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="3" SYNTH_ITERS="" DUR="170" HOSTING="r2" FORCE="" ITER_STEMS_ARG=()
+URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="" SYNTH_ITERS="" DUR="170" HOSTING="r2" FORCE="" ITER_STEMS_ARG=()
 
 usage() { sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
 log() { echo "[editable-pipeline] $*" >&2; }
@@ -304,10 +305,10 @@ run_sample_instrument() {
   [ ! -s "$W/best.params" ] || params_ok "$W/best.params" || log "stage 7: $W/best.params is in the old (CV) format - stale, rerunning"
   rm -f "$W/result.json"   # a rerun invalidates what stages 8-9 derived from the old best render
   preflight_render
-  log "stage 7: auto-calibrate sample-instrument (iters=$ITERS)"
+  log "stage 7: auto-calibrate sample-instrument (iters cap=${ITERS:-default})"
   key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
   "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --base "$BASE" --inst "$INST_BASE""samples.json" \
-    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" --iters "$ITERS" --dur "$DUR" \
+    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" ${ITERS:+--iters "$ITERS"} --dur "$DUR" \
     --bass-sound "${SND}_bass" --lead-sound "${SND}_lead" \
     --mode sample-instrument --workdir "$W" 2>&1 | tee "$W/calibrate.log" >&2
   local cal_rc="${PIPESTATUS[0]}"
@@ -338,9 +339,9 @@ run_synth() {
     log "stage 7: no sample-instrument calibration found; synth calibration starts from cold-start defaults"
   fi
   local key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
-  log "stage 7: auto-calibrate synth (iters=$SYNTH_ITERS)"
+  log "stage 7: auto-calibrate synth (iters cap=${SYNTH_ITERS:-default})"
   "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --base "$BASE" \
-    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" --iters "$SYNTH_ITERS" --dur "$DUR" \
+    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" ${SYNTH_ITERS:+--iters "$SYNTH_ITERS"} --dur "$DUR" \
     --mode synth --workdir "$W" ${start_arg[@]+"${start_arg[@]}"} 2>&1 | tee "$W/calibrate.log" >&2
   local cal_rc="${PIPESTATUS[0]}"
   [ "$cal_rc" -eq 0 ] || die "synth auto-calibrate exited $cal_rc (see $W/calibrate.log)"

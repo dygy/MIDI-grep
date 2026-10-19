@@ -61,6 +61,22 @@ def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
 
+def measured_exponent(r_now: float, r_parent: float | None, f: float, sign: float) -> float:
+    """Elasticity of a share ratio to a cutoff move, MEASURED from the step that produced this render.
+
+    ``r_*`` = orig/rend share ratio now / at the render this one was derived from, ``f`` = cutoff_now /
+    cutoff_parent, ``sign`` = +1 when raising the cutoff raises the ratio (lead high-pass), -1 when lowering
+    it does (bass low-pass). The step rule below assumes exponent 1 (a cutoff move ``f`` moves the ratio by
+    ``f**1``); VAGABUNDO synth cal1->cal2 measured 2.7 (hpf 300->428 Hz moved low_mid-per-mid 0.49 -> 1.27 of the
+    original's), so the next step was 2.7x too long and overshot. The result is floored at 1 so a measured
+    exponent can only SHORTEN a step relative to the unmeasured rule, never lengthen it.
+    """
+    if r_parent is None or r_parent <= 0 or r_now <= 0 or f <= 0 or abs(math.log(f)) < 0.05:
+        return 1.0
+    e = sign * math.log(r_now / r_parent) / math.log(f)
+    return e if math.isfinite(e) and e > 1.0 else 1.0
+
+
 HIGH_MID_TOP_HZ = FREQ_BANDS["high_mid"][1]   # lead cutoff above this adds nothing to high_mid
 LOW_MID_TOP_HZ = FREQ_BANDS["low_mid"][1]     # lead high-pass ceiling: above it we would eat the mid band
 # DEAD BANDS (not tuned gains). SHARE_DEAD_BAND: a share ratio inside [1/1.33, 1.33] (+-33%) is left
@@ -179,6 +195,11 @@ def main() -> int:
     ap.add_argument("--lead-note-min-hz", type=float, default=0.0,
                     help="lowest lead fundamental (summary 'lead_note_min_hz'); floor of the lead-hpf "
                          "lever. 0 = unknown -> lever stays off")
+    ap.add_argument("--parent-comparison", type=Path, default=None,
+                    help="comparison.json of the render these knobs were derived from; with --parent-lead-hpf / "
+                         "--parent-bass-lpf it lets the placement levers measure their own response")
+    ap.add_argument("--parent-lead-hpf", type=int, default=0)
+    ap.add_argument("--parent-bass-lpf", type=int, default=0)
     ap.add_argument("--bass-note-max-hz", type=float, default=0.0,
                     help="highest bass fundamental (summary 'bass_note_max_hz'); sets the lever's "
                          "floor. 0 = unknown -> lever stays off")
@@ -259,6 +280,21 @@ def main() -> int:
             sc_stems = {}
     nxt["bass_lpf"], nxt["lead_hpf"] = cur_blpf, cur_lhpf
 
+    parent_bands = None
+    if args.parent_comparison and args.parent_comparison.exists():
+        try:
+            pd = json.loads(args.parent_comparison.read_text())
+            parent_bands = (pd["original"]["bands"], pd["rendered"]["bands"])
+        except (OSError, ValueError, KeyError):
+            parent_bands = None
+
+    def parent_share_ratio(num: str, den: str) -> float | None:
+        if parent_bands is None:
+            return None
+        po, pr = parent_bands
+        return (((po.get(num, 0.0) + eps) / (po.get(den, 0.0) + eps)) /
+                ((pr.get(num, 0.0) + eps) / (pr.get(den, 0.0) + eps)))
+
     # low_mid-per-mid placement ratio, needed by the lead-hpf lever
     r_lm_mid = share_ratio("low_mid", "mid") if synth else float("nan")
 
@@ -275,7 +311,9 @@ def main() -> int:
         floor_h = int(math.ceil(args.lead_note_min_hz))
         ceil_h = max(cur_lhpf, LOW_MID_TOP_HZ)
         if floor_h <= ceil_h and not (1 / SHARE_DEAD_BAND <= r_lm_mid <= SHARE_DEAD_BAND):
-            nxt["lead_hpf"] = int(clamp(cur_lhpf / damp(r_lm_mid, lo=0.7, hi=1.3), floor_h, ceil_h))
+            e_h = measured_exponent(r_lm_mid, parent_share_ratio("low_mid", "mid"),
+                                    cur_lhpf / args.parent_lead_hpf if args.parent_lead_hpf > 0 else 1.0, +1.0)
+            nxt["lead_hpf"] = int(clamp(cur_lhpf / damp(r_lm_mid, lo=0.7, hi=1.3) ** (1.0 / e_h), floor_h, ceil_h))
             lead_hpf_moved = nxt["lead_hpf"] != cur_lhpf
 
     # --- bass low-pass: tame the saw's upper harmonics (synth only) -------------------------
@@ -291,7 +329,9 @@ def main() -> int:
         ceil_ = max(cur_blpf, args.bass_lpf_max)                   # never open past the analysis value
         if (not lead_hpf_moved and floor <= ceil_
                 and not (1 / SHARE_DEAD_BAND <= r_lm_bass <= SHARE_DEAD_BAND)):
-            nxt["bass_lpf"] = int(clamp(cur_blpf * damp(r_lm_bass, lo=0.7, hi=1.3), floor, ceil_))
+            e_b = measured_exponent(r_lm_bass, parent_share_ratio("low_mid", "bass"),
+                                    cur_blpf / args.parent_bass_lpf if args.parent_bass_lpf > 0 else 1.0, -1.0)
+            nxt["bass_lpf"] = int(clamp(cur_blpf * damp(r_lm_bass, lo=0.7, hi=1.3) ** (1.0 / e_b), floor, ceil_))
             bass_lpf_moved = nxt["bass_lpf"] != cur_blpf
 
     # --- bass (60-250 Hz): body of the pitched bass sample --------------------------------

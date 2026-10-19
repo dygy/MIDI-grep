@@ -44,6 +44,14 @@ max_worst_band_diff: 0.30
 # run-to-run noise margin already used for the floors below.
 min_margin_over_chance: 0.02
 
+# Run-to-run noise of a rendered+scored candidate, used by the calibration loop (scripts/python/calibrate_loop.py)
+# to decide "regressed", "improved" and "tied". MEASURED 2026-10-19 on VAGABUNDO synth (cal1 knobs): 7 renders
+# (same code x3, knobs perturbed ~2% x4), offline renderer: overall 0.7220..0.7263 (range 0.0043, sd 0.0015),
+# section-aware 0.6789..0.6805 (range 0.0016), margin_over_chance 0.1471..0.1514 (range 0.0043). Even identical
+# code does not re-score identically (0.7220 / 0.7230 / 0.7237). 0.005 = the largest range, rounded up.
+# Not an acceptance margin: min_margin_over_chance (0.02) above stays the gate's own safety margin.
+calibration_noise: 0.005
+
 # Section-aware floors (OPTIONAL — only checked when compare_audio.py produces
 # section_aware_similarity in the comparison dict, i.e. >= Task C version).
 #
