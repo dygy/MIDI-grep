@@ -127,8 +127,9 @@ sample-instrument VAGABUNDO v013 **71.7% / 70.7%**, Regime v031 **77.9% / 77.4%*
 **72.4% / 70.1%**, Regime v032 **74.8% / 73.6%** — all four beat the different-song control (≈57.5%) by +0.142 to
 +0.204. Time-aligned chroma rose from ≈0 to 0.33–0.56. Floors: sample-instrument 0.70/0.69, synth 0.70/0.68.
 (Fix `compare-alignment-one-bar-off`: the onset envelope is bar-periodic, so the ±1-bar search could lock one bar off —
-Regime v032 read 67.1% / 65.2%; candidates are now picked by onset peaks and chosen by the harmony trajectory, and
-`comparison.temporal.lag_candidates` records the runner-up.)
+Regime v032 read 67.1% / 65.2%. The onset-best true local maximum now stays unless it is tied with a bar-aliased
+or statistically indistinguishable candidate AND the whole-excerpt chroma trajectory separates them by > 1 standard
+error; `comparison.temporal.lag_candidates` (and `chance.lag_candidates`) record the runner-up, nulls for unscorable.)
 
 **Previous achievement (old scale, contract-passing):** editable dynamic-Strudel with ALL voices as
 editable data — transcribed bass/lead/VOCAL notes on stem-derived sample-instruments + extracted drum

@@ -710,8 +710,22 @@ def test_24_two_modes_ship_and_loops_is_not_one_of_them(tmp_path):
     # both modes have a measured floor
     modes = THRESHOLDS["modes"]
     assert set(modes) >= {"sample_instrument", "synth"}
-    # >=: once both were measured correctly aligned (2026-10-19) synth scores as well as sample-instrument
-    assert modes["sample_instrument"]["genres"]["brazilian_funk"] >= modes["synth"]["genres"]["brazilian_funk"]
+    # each mode's floor is derived from THAT mode's own runs (round(min over its tracks - margin, 2)), not from
+    # the other mode: no ordering between the modes is asserted (once both are measured correctly aligned they
+    # may even coincide).
+    dataset = yaml.safe_load((REPO / "eval" / "datasets" / "reference_tracks.yaml").read_text())["tracks"]
+    for mode in ("sample_instrument", "synth"):
+        block = modes[mode]
+        for genre, m in block["measured"].items():
+            tracks = m["tracks"]
+            own = {f"{t['cache_key']}/{t['version']}" for t in dataset
+                   if t["genre"] == genre and t["mode"].replace("-", "_") == mode}
+            assert {t["run"] for t in tracks} == own, (mode, {t["run"] for t in tracks}, own)
+            assert block["genres"][genre] == pytest.approx(round(min(t["overall"] for t in tracks) - m["margin"], 2))
+            assert block["section_aware"][genre] == pytest.approx(
+                round(min(t["section_aware"] for t in tracks) - m["margin"], 2))
+            binding = min(tracks, key=lambda t: t["overall"])
+            assert m["run"] == binding["run"] and m["overall"] == pytest.approx(binding["overall"])
 
 
 def _resolve_run(run: str) -> Path:
