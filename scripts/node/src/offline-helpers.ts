@@ -102,3 +102,22 @@ export function planChunks(onsetsPerCycle: number[], cycles: number, maxCycles: 
   if (n > b) out.push([b, Math.min(n, cycles)]);
   return out;
 }
+
+export interface Closable { close(): Promise<unknown>; kill(): void; }
+/**
+ * Close every resource within `graceMs`; anything whose close() hangs or rejects is killed. Resolves
+ * (never hangs) with how many needed the kill. Used for ALL browsers a run launched (initial + relaunches).
+ */
+export async function closeAllWithin(items: Closable[], graceMs: number): Promise<number> {
+  let killed = 0;
+  await Promise.all(items.map(async it => {
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const ok = await Promise.race([
+      it.close().then(() => true, () => false),
+      new Promise<boolean>(r => { timer = setTimeout(() => r(false), graceMs); }),
+    ]);
+    if (timer) clearTimeout(timer);
+    if (!ok) { killed++; try { it.kill(); } catch { /* already gone */ } }
+  }));
+  return killed;
+}

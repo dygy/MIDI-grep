@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { createRequire } from 'module';
-import { analyzeWav, checkRender, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures } from './offline-helpers.js';
+import { analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures } from './offline-helpers.js';
 
 const SHIM = `const S = window.strudel;
 export const { noteToMidi, freqToMidi, getSoundIndex, getAudioContext, registerSound, getParamADSR, getADSRValues, getPitchEnvelope, getVibratoOscillator } = S;`;
@@ -145,12 +145,18 @@ async function main() {
   const port = (server.address() as any).port;
 
   const t0 = Date.now();
-  const launch = () => puppeteer.launch({ headless: true, protocolTimeout: 3600000, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--disable-web-security'] });
+  // EVERY browser this run launches (initial + crash relaunches) is tracked and closed at the end.
+  const launched: any[] = [];
+  const launch = async () => {
+    const b = await puppeteer.launch({ headless: true, protocolTimeout: 900000, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--disable-web-security'] });
+    launched.push(b); return b;
+  };
   let browser = await launch();
   let exit = 0;
   // A render step that dies with the page/browser ("Target closed") is retried on a fresh page (and a fresh
   // browser if it is gone). Every attempt is reported with WHAT it held; after MAX_ATTEMPTS it fails loudly.
   const MAX_ATTEMPTS = 3;
+  const quickClose = (pg: any) => Promise.race([pg.close().catch(() => {}), new Promise(r => setTimeout(r, 5000))]); // a dead page's close() must not hang the run
   const attempt = async <T>(label: string, held: string, fn: () => Promise<T>): Promise<T> => {
     for (let k = 1; ; k++) {
       try { return await fn(); }
@@ -177,7 +183,7 @@ async function main() {
   try {
     let page = await openPage();
     let initTry = 0;
-    const init: any = await attempt('init', 'first page', async () => { if (initTry++ > 0) { await page.close().catch(() => {}); page = await openPage(); } return page.evaluate((c, site) => (window as any).__init(c, site), code, SITE); });
+    const init: any = await attempt('init', 'first page', async () => { if (initTry++ > 0) { await quickClose(page); page = await openPage(); } return page.evaluate((c, site) => (window as any).__init(c, site), code, SITE); });
     const cps: number = init.cps, cycles = duration * cps;
     const total = Math.floor((cycles / cps) * sampleRate);
     console.log(`samples("url") rewritten to single quotes: ${init.rewrites}`);
@@ -205,7 +211,7 @@ async function main() {
         const held = `${density.slice(b, Math.ceil(e)).reduce((x, y) => x + y, 0)} haps over cycles [${b.toFixed(2)}, ${e.toFixed(2)}), ctx ${len} frames`;
         let heapMb = 0;
         const { r, raw } = await attempt(`chunk ${ci + 1}/${wins.length}`, held, async () => {
-          await page.close().catch(() => {}); page = await openPage();
+          await quickClose(page); page = await openPage();
           await page.evaluate((c, site) => (window as any).__init(c, site), code, SITE);
           const rr: any = await page.evaluate((b0, e0, sr, sf, ln, po) => (window as any).__chunk(b0, e0, sr, sf, ln, po), b, e, sampleRate, startFrame, len, maxPolyphony);
           const bytes = await fetchBytes(page, rr.bytes);
@@ -240,7 +246,10 @@ async function main() {
   } catch (e: any) {
     console.error(`ERROR: ${e.message}`); exit = 1;
   } finally {
-    await browser.close().catch(() => {});
+    // close all browsers (grace 5 s each, then SIGKILL the Chromium process: it is only ever OUR headless
+    // Chromium, never an ffmpeg capture), stop the server, then exit explicitly so no handle can keep node alive.
+    const killed = await closeAllWithin(launched.map(b => ({ close: () => b.close(), kill: () => b.process()?.kill('SIGKILL') })), 5000);
+    if (killed) console.log(`[CLEANUP] ${killed} browser(s) did not close within 5 s and were killed`);
     server.close();
   }
   process.exit(exit);

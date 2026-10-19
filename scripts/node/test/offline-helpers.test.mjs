@@ -63,3 +63,16 @@ test('planChunks: time cap, onset cap, min one cycle, exact tiling', () => {
   const d2 = [300, 400, 600, 700, 100, 100, 100];
   for (const [b, e] of planChunks(d2, 7, 11, 1000)) assert.ok(e - b === 1 || d2.slice(b, e).reduce((x, y) => x + y, 0) <= 1000);
 });
+
+import { closeAllWithin } from '../dist/offline-helpers.js';
+test('closeAllWithin: hung/rejecting close() is killed within the grace, good ones are not', async () => {
+  const killed = [];
+  const mk = (name, close) => ({ close, kill: () => killed.push(name) });
+  const t0 = Date.now();
+  const n = await closeAllWithin([
+    mk('ok', async () => {}),
+    mk('hang', () => new Promise(() => {})),
+    mk('reject', () => Promise.reject(new Error('gone'))),
+  ], 100);
+  assert.equal(n, 2); assert.deepEqual(killed.sort(), ['hang', 'reject']); assert.ok(Date.now() - t0 < 1000);
+});
