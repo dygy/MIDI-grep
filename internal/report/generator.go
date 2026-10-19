@@ -109,11 +109,11 @@ type ComparisonData struct {
 type TemporalData struct {
 	LagSeconds         float64        `json:"lag_seconds"`
 	LagCandidates      []LagCandidate `json:"lag_candidates,omitempty"`
-	ChromaCorr         float64 `json:"chroma_corr"`
-	MelCorr            float64 `json:"mel_corr"`
-	OnsetF1            float64 `json:"onset_f1"`
-	EnvelopeCorr       float64 `json:"envelope_corr"`
-	TemporalSimilarity float64 `json:"temporal_similarity"`
+	ChromaCorr         float64        `json:"chroma_corr"`
+	MelCorr            float64        `json:"mel_corr"`
+	OnsetF1            float64        `json:"onset_f1"`
+	EnvelopeCorr       float64        `json:"envelope_corr"`
+	TemporalSimilarity float64        `json:"temporal_similarity"`
 }
 
 // LagCandidate is one alignment candidate. Scores are null in comparison.json when unscorable
