@@ -20,6 +20,14 @@ ONE measured lever, the generator's ``--master-gain``, read off the render itsel
            the reference's samples within ``PLATEAU_DB`` of its own peak, i.e. the mass at the ceiling a mastered original
            has): 0.5-1.5 % clipped against 1.3-1.7 % near the peak in the four measured pieces.
 
+MASTER BUS (engines that have it, e.g. the fork: ``renderer.supports_master_bus``): the same level and crest are reached
+by the engine's compressor + brickwall limiter instead of clipping. The voices keep the clip-limited ``--master-gain``
+(so the SAME file on an engine WITHOUT the bus plays exactly as the clip stage left it; the generator guards the calls with
+``typeof setMasterLimiter === 'function'``). Everything on the bus is measured (``derive_master_bus``): ceiling = the
+original's true peak; threshold/knee/ratio from where the render's sample-level distribution (relative to its own RMS)
+departs the original's and how far its peak overshoots; attack/release from the original's 5 ms RMS envelope (median 10-90 %
+rise and fall of its loudness peaks); makeup closes the RMS error over a few rounds (``next_master_bus``).
+
 A round is kept only when level (RMS) and crest match the reference AND neither score (overall, section-aware)
 dropped by more than the calibration noise; otherwise the unmixed BEST stays.
 
@@ -91,7 +99,7 @@ def profile(y: np.ndarray, sr: int) -> dict[str, float]:
             "plateau_frac": float(np.mean(a >= pk * 10 ** (-PLATEAU_DB / 20.0))) if len(a) else 0.0}
 
 
-def level_verdict(reference: dict, render_profile: dict) -> dict:
+def level_verdict(reference: dict, render_profile: dict, ceiling_db: float | None = None) -> dict:
     """Does the render have the reference's level (RMS) and dynamics (crest)? (``clip_frac`` is reported, not judged.)"""
     rms_err = render_profile["rms_db"] - reference["rms_db"]
     crest_err = render_profile["crest_db"] - reference["crest_db"]
@@ -100,7 +108,115 @@ def level_verdict(reference: dict, render_profile: dict) -> dict:
         problems.append(f"rms {rms_err:+.1f} dB off")
     if abs(crest_err) > CREST_TOL_DB:
         problems.append(f"crest {crest_err:+.1f} dB off")
+    if ceiling_db is not None:           # a limited render must not exceed its ceiling (16-bit quantisation: +0.05 dB) or clip
+        if render_profile["peak_db"] > ceiling_db + 0.05:
+            problems.append(f"peak {render_profile['peak_db']:.2f} dBFS over the {ceiling_db:.2f} ceiling")
+        if render_profile.get("clip_frac", 0.0) > 0.0:
+            problems.append(f"{100 * render_profile['clip_frac']:.2f} % of samples clipped")
     return {"rms_err_db": rms_err, "crest_err_db": crest_err, "problems": problems, "ok": not problems}
+
+
+def true_peak_db(y: np.ndarray, sr: int) -> float:
+    """Inter-sample (true) peak in dBFS: 4x polyphase oversampling, what a limiter ceiling is judged against."""
+    from scipy.signal import resample_poly
+    return db(float(np.abs(resample_poly(y, 4, 1)).max())) if len(y) else db(0.0)
+
+
+def _rel_levels(y: np.ndarray, quantiles: np.ndarray) -> np.ndarray:
+    """dB of the sample-magnitude quantiles relative to the signal's own RMS."""
+    a = np.abs(y)
+    rms = math.sqrt(float(np.mean(y ** 2)))
+    return np.array([db(float(v)) - db(rms) for v in np.quantile(a, quantiles)])
+
+
+def envelope_times(y: np.ndarray, sr: int) -> tuple[float, float]:
+    """(attack, release) seconds from the loudness envelope: 5 ms-hop RMS (20 ms window); for every envelope peak above
+    its median, the time to climb 10 -> 90 % of the way up from the previous minimum and to fall 90 -> 10 % to the next
+    one. The medians are how fast this material's loudness moves, which is how fast a bus compressor should."""
+    from scipy.signal import find_peaks
+    hop, win = max(1, int(0.005 * sr)), max(2, int(0.020 * sr))
+    n = max(1, (len(y) - win) // hop)
+    env = np.sqrt(np.array([np.mean(y[i * hop:i * hop + win] ** 2) for i in range(n)]))
+    prom = float(np.std(env))          # a loudness event must stand out by one envelope standard deviation
+    pk, _ = find_peaks(env, height=float(np.median(env)), prominence=prom)
+    mn, _ = find_peaks(-env, prominence=prom / 2)
+
+    def span(seg: np.ndarray) -> float | None:
+        """Seconds for a monotone-ish segment to go from 10 % to 90 % of its own range (either direction)."""
+        lo, hi = float(seg.min()), float(seg.max())
+        if hi <= lo:
+            return None
+        up = seg[-1] > seg[0]
+        norm = (seg - lo) / (hi - lo)
+        if not up:
+            norm = 1.0 - norm            # a fall read backwards is a rise
+        i10, i90 = np.where(norm >= 0.1)[0], np.where(norm >= 0.9)[0]
+        return None if not len(i10) or not len(i90) or i90[0] < i10[0] else (i90[0] - i10[0]) * hop / sr
+
+    rises, falls = [], []
+    for p in pk:
+        before, after = mn[mn < p], mn[mn > p]
+        if not len(before) or not len(after):
+            continue
+        r, f = span(env[before[-1]:p + 1]), span(env[p:after[0] + 1])
+        if r is not None:
+            rises.append(r)
+        if f is not None:
+            falls.append(f)
+    attack = float(np.median(rises)) if rises else 0.01
+    release = float(np.median(falls)) if falls else 0.1
+    return attack, release
+
+
+def derive_master_bus(reference: np.ndarray, probe: np.ndarray, sr: int, probe_offset_db: float) -> dict:
+    """The master-bus settings that take the render's dynamics onto the original's.
+
+    ``reference`` is the original (instrumental); ``probe`` an UNCLIPPED render of the same piece (rendered
+    ``probe_offset_db`` dB below the level the voices will really play at, so its peaks fit in the file). Returns
+    ``{"ceiling": dBFS, "compressor": {...} | None, "measured": {...}}``; ``makeup`` starts at 0 (closed by rounds)."""
+    q = np.concatenate([np.linspace(0.5, 0.99, 50), 1 - np.logspace(-2, -5, 40)])
+    q = q[q < 1.0]
+    q = np.unique(np.append(q, 1.0))
+    lr, lref = _rel_levels(probe, q), _rel_levels(reference, q)
+    excess = lr - lref
+    bus_rms = db(math.sqrt(float(np.mean(probe ** 2)))) + probe_offset_db     # render RMS at the level the bus will see
+    ceiling = true_peak_db(reference, sr)
+    m = {"reference_true_peak_db": ceiling, "probe_rms_at_bus_db": bus_rms, "peak_excess_db": float(excess[-1])}
+    # Two different excesses need two different tools. A PEAK excess (the render's transients overshoot the original's, the
+    # top of the sample distribution above) is the limiter's job: it holds the original's true peak and loses no sustained
+    # level. A SPREAD excess (the 3 s short-term loudness range p90 - p10 wider than the original's) is the compressor's job.
+    # Compressing a peak-only excess was measured to flatten the loudness contour (VAGABUNDO: ST p10 -27.1 -> -23.6 dB,
+    # overall 0.7925 -> 0.7721), so the compressor only gets a ratio > 1 when the spread really is wider.
+    pr, pf = profile(probe, sr), profile(reference, sr)
+    spread_r, spread_ref = pr["st_p90_db"] - pr["st_p10_db"], pf["st_p90_db"] - pf["st_p10_db"]
+    attack, release = envelope_times(reference, sr)
+    ratio = spread_r / max(spread_ref, 1e-6)
+    squeeze = ratio > 1.0 + RMS_TOL_DB / max(spread_ref, 1e-6)       # wider by more than the level tolerance
+    # downward compression pivots at the render's own p10 loudness (quiet passages are left alone)
+    t_abs = pr["st_p10_db"] + probe_offset_db if squeeze else 0.0
+    comp = {"threshold": round(t_abs, 2), "knee": 0.0, "ratio": round(min(20.0, ratio), 2) if squeeze else 1.0,
+            "attack": round(attack, 4), "release": round(release, 4),
+            # first guess: the RMS the limited mix will lack/exceed; rounds close the rest (the limiter eats some of it)
+            "makeup": round(pf["rms_db"] - bus_rms, 2)}
+    m.update(st_spread_render_db=spread_r, st_spread_reference_db=spread_ref, attack_s=attack, release_s=release)
+    # the limiter must let go as fast as the music's loudness rises (the original's median 10-90 % rise), or its gain
+    # reduction on a transient ducks the notes after it - a clipper has no such memory, a 100 ms release does (measured:
+    # the score fell with every dB of makeup)
+    return {"ceiling": round(ceiling, 2), "limiter_release": round(attack, 4), "compressor": comp, "measured": {k: round(float(v), 4) for k, v in m.items()}}
+
+
+def next_master_bus(spec: dict, reference: dict, render_profile: dict) -> dict:
+    """Close the remaining error with the bus's own levers: ``makeup`` by the RMS error, and the compressor ratio by the
+    crest error (a peakier render than the original -> more ratio). Damped by sqrt so the rounds converge."""
+    new = json.loads(json.dumps(spec))
+    comp = new.get("compressor")
+    rms_err = reference["rms_db"] - render_profile["rms_db"]
+    crest_err = render_profile["crest_db"] - reference["crest_db"]
+    if comp is None:
+        return new
+    comp["makeup"] = round(max(-24.0, min(24.0, comp["makeup"] + rms_err)), 2)
+    comp["ratio"] = round(min(20.0, max(1.0, 1.0 + (comp["ratio"] - 1.0) * 10 ** (crest_err / 20.0 / 2))), 2)
+    return new
 
 
 def next_master(reference: dict, render_profile: dict, master: float) -> float:
@@ -174,10 +290,23 @@ def main(argv: list[str] | None = None) -> int:
     c.add_argument("--best-cmp", type=Path, required=True, help="comparison.json of the unmixed best render")
     c.add_argument("--round", nargs=2, action="append", metavar=("WAV", "CMP"), required=True)
     c.add_argument("--tolerance", type=float, required=True, help="score points a round may lose (calibration noise)")
+    c.add_argument("--ceiling-db", type=float, default=None, help="limited rounds: peak must stay under this (and 0 clipped samples)")
     r = sub.add_parser("report")
     r.add_argument("--reference", type=Path, required=True)
     r.add_argument("--render", type=Path, required=True)
     r.add_argument("--seconds", type=float, required=True)
+    d = sub.add_parser("derive-bus", help="measure the master-bus settings from the original and an unclipped probe render")
+    d.add_argument("--reference", type=Path, required=True)
+    d.add_argument("--probe", type=Path, required=True)
+    d.add_argument("--probe-offset-db", type=float, required=True, help="how many dB BELOW the real voice level the probe was rendered")
+    d.add_argument("--seconds", type=float, required=True)
+    d.add_argument("--out", type=Path, required=True)
+    nb = sub.add_parser("next-bus", help="update a bus spec from a render that used it (makeup by rms error, ratio by crest error)")
+    nb.add_argument("--reference", type=Path, required=True)
+    nb.add_argument("--render", type=Path, required=True)
+    nb.add_argument("--seconds", type=float, required=True)
+    nb.add_argument("--spec", type=Path, required=True)
+    nb.add_argument("--out", type=Path, required=True)
     s = sub.add_parser("shares")
     s.add_argument("--strudel", type=Path, required=True)
     s.add_argument("--stems-dir", type=Path, required=True)
@@ -203,6 +332,18 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     ref = profile(*load_mono(a.reference, a.seconds))
+    if a.cmd == "derive-bus":
+        yr, sr_ = load_mono(a.reference, a.seconds)
+        yp, _ = load_mono(a.probe, a.seconds)
+        spec = derive_master_bus(yr, yp, sr_, a.probe_offset_db)
+        a.out.write_text(json.dumps(spec, indent=1))
+        print(json.dumps(spec))
+        return 0
+    if a.cmd == "next-bus":
+        spec = next_master_bus(json.loads(a.spec.read_text()), ref, profile(*load_mono(a.render, a.seconds)))
+        a.out.write_text(json.dumps(spec, indent=1))
+        print(json.dumps(spec))
+        return 0
     if a.cmd == "choose":
         def scores(path):
             cmp = json.loads(Path(path).read_text())["comparison"]
@@ -211,7 +352,7 @@ def main(argv: list[str] | None = None) -> int:
         rounds = []
         for wav, cmp in a.round:
             prof = profile(*load_mono(Path(wav), a.seconds))
-            rounds.append({**scores(cmp), "level": level_verdict(ref, prof), "profile": prof})
+            rounds.append({**scores(cmp), "level": level_verdict(ref, prof, a.ceiling_db), "profile": prof})
         pick = choose_round(best, rounds, a.tolerance)
         print(f"reference rms {ref['rms_db']:.1f} peak {ref['peak_db']:.1f} crest {ref['crest_db']:.1f} plateau "
               f"{100 * ref['plateau_frac']:.2f} % within {PLATEAU_DB:g} dB of peak | unmixed best overall {best['overall']:.4f} section {best['section']:.4f}", file=sys.stderr)

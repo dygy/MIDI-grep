@@ -291,6 +291,50 @@ if [ "$MIXDYN" = 1 ] && [ -n "$best_tag" ] && [ -s "$WORK/best.wav" ]; then
     esac
   fi
 fi
+# ---- master-bus stage (engines that define setMasterLimiter/setMasterCompressor, e.g. the fork; renderer.py master-bus) ----
+# The voices keep the clip-limited gain above (so the same file on an engine WITHOUT the bus plays as before); on a bus engine
+# the measured limiter (ceiling = the original's true peak) + a unity-ratio-unless-the-loudness-spread-is-wider compressor
+# take over the level and the clipping goes away. Probe render 12 dB down -> mix_dynamics.py derive-bus -> up to MIX_ROUNDS
+# rounds (makeup closes the RMS error). Kept only if level, crest AND ceiling match (0 clipped samples) and the score did not
+# drop beyond the calibration noise vs the clip result; otherwise the clip result stays.
+if [ "$MIXDYN" = 1 ] && [ -n "$best_tag" ] && [ -s "$WORK/best.wav" ] && "$PY" "$RENDERER_PY" master-bus; then
+  read -r BM SG CL LLPF HG MG BL LH SU <<<"$best_params"
+  [ -s "$WORK/best.master" ] && MG="$(cat "$WORK/best.master")"      # the clip stage's final gain
+  bus_env=(); [ -s "$WORK/best.env.json" ] && bus_env=(--env-correction "$WORK/best.env.json")
+  CLIP_MG="$MG"; PROBE_MG="$("$PY" -c "print(round($CLIP_MG * 0.25, 4))")"      # 0.25 = 12.0412 dB below: peaks fit the 16-bit file
+  MG="$PROBE_MG"
+  if gen_piece "$WORK/bus.probe.strudel" "$WORK/bus.probe.gen.json" "$WORK/bus.probe.gen.log" ${bus_env[@]+"${bus_env[@]}"} \
+     && rm -f "$WORK/bus.probe.wav" && "$NODE_BIN" "$REC" "$WORK/bus.probe.strudel" -o "$WORK/bus.probe.wav" -d "$DUR" >"$WORK/bus.probe.render.log" 2>&1 \
+     && "$PY" "$MIXD" derive-bus --reference "$ORIG" --probe "$WORK/bus.probe.wav" --probe-offset-db 12.0412 --seconds "$SONG_S" --out "$WORK/bus.spec.json" >/dev/null; then
+    MG="$CLIP_MG"; bus_args=(); br=0
+    CEIL="$("$PY" -c "import json;print(json.load(open('$WORK/bus.spec.json'))['ceiling'])")"
+    while [ "$br" -lt "$MIX_ROUNDS" ]; do
+      br=$((br+1)); BS="$WORK/bus$br.strudel"; BW="$WORK/bus$br.wav"; BC="$WORK/bus$br.cmp.json"
+      cp "$WORK/bus.spec.json" "$WORK/bus$br.spec.json"
+      gen_piece "$BS" "$WORK/bus$br.gen.json" "$WORK/bus$br.gen.log" ${bus_env[@]+"${bus_env[@]}"} --master-bus "$WORK/bus$br.spec.json" \
+        || { echo "[bus] round $br: GEN FAILED"; break; }
+      rm -f "$BW"; rrc=0; "$NODE_BIN" "$REC" "$BS" -o "$BW" -d "$DUR" >"$WORK/bus$br.render.log" 2>&1 || rrc=$?
+      if [ "$rrc" -ne 0 ] || [ ! -f "$BW" ]; then rm -f "$BW"; echo "[bus] round $br: RENDER FAILED (rc=$rrc)"; break; fi
+      "$PY" "$CMP" "$ORIG" "$BW" -d "$SONG_S" -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$BC" 2>/dev/null || { echo "[bus] round $br: CMP FAILED"; break; }
+      bus_args+=(--round "$BW" "$BC")
+      "$PY" "$MIXD" next-bus --reference "$ORIG" --render "$BW" --seconds "$SONG_S" --spec "$WORK/bus$br.spec.json" --out "$WORK/bus.spec.json" >/dev/null || break
+    done
+    if [ "${#bus_args[@]}" -gt 0 ]; then
+      BPICK="$("$PY" "$MIXD" choose --reference "$ORIG" --seconds "$SONG_S" --best-cmp "$WORK/best.cmp.json" --ceiling-db "$CEIL" \
+        --tolerance "$("$PY" "$LOOP" noise)" "${bus_args[@]}" 2>"$WORK/bus.choose.log")" || BPICK="none"
+      sed 's/^/[bus] /' "$WORK/bus.choose.log"
+      case "$BPICK" in
+        [0-9]*)
+          cp "$WORK/bus$BPICK.strudel" "$WORK/best.strudel"; cp "$WORK/bus$BPICK.wav" "$WORK/best.wav"; cp "$WORK/bus$BPICK.cmp.json" "$WORK/best.cmp.json"
+          best="$("$PY" -c "import json;print(round(json.load(open('$WORK/best.cmp.json'))['comparison']['overall_similarity'],4))")"
+          echo "[bus] kept round $BPICK (master-bus lines in best.strudel; voices keep --master-gain $CLIP_MG)";;
+        *) echo "[bus] no bus round matched level+crest+ceiling within the score tolerance - the clip-limited result stays";;
+      esac
+    fi
+  else
+    echo "[bus] probe/derive FAILED (see $WORK/bus.probe.*.log) - the clip-limited result stays"
+  fi
+fi
 echo "BEST: $best_tag overall=$best  params: $best_params"
 echo "  gate:    $best_gate  (margin PASS/FAIL overall section_aware floor sa_floor; BEST = largest minimum margin to the floors)"
 echo "  strudel: $WORK/best.strudel"

@@ -436,6 +436,23 @@ def load_env_correction(path: Path, nbars: int) -> dict[str, list[float]]:
     return result
 
 
+def master_bus_lines(spec: dict | None) -> list[str]:
+    """Strudel lines for a measured master bus (mix_dynamics.derive_master_bus). Each call is guarded with ``typeof``, so the
+    SAME file plays on engines that define ``setMasterCompressor`` / ``setMasterLimiter`` (the fork) and on those that
+    do not (npm @strudel/web 1.3.0, the hosted site), where the lines are no-ops and the voice gains alone decide the
+    level."""
+    if not spec:
+        return []
+    def obj(d: dict) -> str:
+        return "{ " + ", ".join(f"{k}: {v:g}" for k, v in d.items()) + " }"
+    out = ["// master bus (measured from the original; no-ops on engines without setMasterCompressor/setMasterLimiter)"]
+    if spec.get("compressor"):
+        out.append(f"typeof setMasterCompressor === 'function' && setMasterCompressor({obj(spec['compressor'])})")
+    if spec.get("ceiling") is not None:
+        out.append(f"typeof setMasterLimiter === 'function' && setMasterLimiter({obj({'ceiling': spec['ceiling'], **({'release': spec['limiter_release']} if spec.get('limiter_release') else {})})})")
+    return out + [""]
+
+
 def compose_env_multipliers(voice_m: list[float] | None, master_m: list[float] | None,
                             clamp: list[float] | None) -> list[float] | None:
     """Per-bar multiplier for one voice: voice x master, bounded to ``clamp`` = ``[lo, hi]``.
@@ -589,6 +606,9 @@ def main() -> int:
                     help="omit the harmony (chord) voice: the lead keeps one note per step, as before")
     ap.add_argument("--master-gain", type=float, default=1.0,
                     help="master gain on the whole stack to back off the recorder's 0 dBFS limiter (~0.6)")
+    ap.add_argument("--master-bus", type=Path, default=None,
+                    help="JSON from mix_dynamics.py derive-bus/next-bus: emit the measured master-bus lines (bus compressor + "
+                         "brickwall limiter, each guarded so engines without them ignore the line). Voice gains are NOT touched")
     ap.add_argument("--env-steps", type=int, default=4,
                     help="sub-bar resolution of the per-voice loudness envelope baked into .gain() "
                          "(1=per-bar arrangement only, 4=per-beat [default], 8=8ths, 16=16ths). Higher "
@@ -1013,9 +1033,11 @@ def main() -> int:
     # `marker` is a comment token the detector reads (only `// texture` today).
     def assemble(chs: list[tuple]) -> str:
         lines = list(L)
+        bus_lines = master_bus_lines(json.loads(args.master_bus.read_text()) if args.master_bus else None)
         # counts of what THIS piece plays (bars / detected drum pattern are final by now)
         lines[2:2] = count_header_lines(args.genre, count_note_events(bass_bars, lead_bars, chord_bars),
                                         count_drum_hits(detected if isinstance(detected, list) else None))
+        lines += bus_lines
         if args.dj_flow:
             # --- Performance header: arrangement map + how to play it live ---
             spark, sections = section_map(args.stems_dir / "instrumental.wav" if (args.stems_dir / "instrumental.wav").exists()

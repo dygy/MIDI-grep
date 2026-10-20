@@ -135,11 +135,15 @@ async function main() {
   removeStaleOutput(outputPath); // a file from an earlier render must never survive a failed one
   const code = fs.readFileSync(input, 'utf8');
   const require = createRequire(import.meta.url);
-  const bundlePath = path.join(path.dirname(require.resolve('@strudel/web/package.json')), 'dist', 'index.js');
+  // MIDIGREP_STRUDEL_BUNDLE=<path to an @strudel/web-compatible dist/index.js> selects another engine build (e.g. the
+  // fork with the master bus); unset = the pinned npm @strudel/web. The choice is logged ("Engine: ... [source]").
+  const envBundle = (process.env.MIDIGREP_STRUDEL_BUNDLE || '').trim();
+  const bundlePath = envBundle ? path.resolve(envBundle) : path.join(path.dirname(require.resolve('@strudel/web/package.json')), 'dist', 'index.js');
+  if (envBundle && !fs.existsSync(bundlePath)) { console.error(`ERROR: MIDIGREP_STRUDEL_BUNDLE=${envBundle}: no such file`); process.exit(2); }
   const sfDir = path.dirname(require.resolve('@strudel/soundfonts/package.json'));
   const engineVersions = ['@strudel/web', '@strudel/core', '@strudel/webaudio', 'superdough', '@strudel/soundfonts']
     .map(p => { try { return `${p}@${JSON.parse(fs.readFileSync(path.join(path.dirname(require.resolve('@strudel/web/package.json')), '..', '..', p, 'package.json'), 'utf8')).version}`; } catch { return `${p}@?`; } });
-  console.log(`Engine: bundle ${bundlePath} (${engineVersions.join(', ')}); site sample maps from ${SITE}; GM soundfonts from the pinned package via https://felixroos.github.io/webaudiofontdata/sound (the site's default)`);
+  console.log(`Engine: bundle ${bundlePath} [${envBundle ? 'MIDIGREP_STRUDEL_BUNDLE' : 'npm @strudel/web'}] (${envBundle ? 'versions of the npm packages are NOT this bundle: ' : ''}${engineVersions.join(', ')}); site sample maps from ${SITE}; GM soundfonts from the pinned package via https://felixroos.github.io/webaudiofontdata/sound (the site's default)`);
 
   const server = http.createServer((req, res) => {
     const js = (body: string | Buffer) => { res.writeHead(200, { 'content-type': 'text/javascript' }); res.end(body); };
