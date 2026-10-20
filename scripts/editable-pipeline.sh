@@ -15,7 +15,7 @@
 #   6 host             upload_r2.py (--r2) | local CORS server on :5555 (--local)
 #   7 generate+calib.  auto-calibrate.sh (sample-instrument), then auto-calibrate.sh --mode synth
 #                      (start = the sample-instrument BEST knobs when present; own env correction)
-#   8 score + gate     compare_audio.py -d 135 --strudel ; eval/gate.py ; editability_check.py
+#   8 score + gate     compare_audio.py -d <whole-bar seconds> --strudel ; eval/gate.py ; editability_check.py
 #   9 promote          pipeline_helpers.py promote -> vNNN/{output.strudel,render.wav,comparison.json,metadata.json}
 #  10 report           pipeline_helpers.py report -> vNNN/{report.html,comparison.png,chart_*.png,render_*.wav,
 #                      stem_comparison.json,iterations.json,iterations/}; Demucs on the render + each calibration
@@ -23,7 +23,7 @@
 #
 # Usage:
 #   scripts/editable-pipeline.sh --url <youtube> [--title "<cache folder title>"] [--prefix <slug>]
-#       [--genre <g>] [--mode sample-instrument|synth|both] [--iters N] [--synth-iters N] [--dur 170]
+#       [--genre <g>] [--mode sample-instrument|synth|both] [--iters N] [--synth-iters N] [--dur <seconds>]
 #       [--r2 | --local] [--no-iteration-stems] [--force]
 #
 #   --url      YouTube link (required unless --title names an already-extracted track dir)
@@ -34,7 +34,8 @@
 #   --iters    cap on sample-instrument calibration iterations (default: calibrate_loop.py MAX_ITERS; the loop
 #              stops earlier after PATIENCE steps without a beyond-noise improvement; best iteration is kept)
 #   --synth-iters  synth calibration iterations (default = --iters)
-#   --dur      BlackHole capture seconds per render (default 170)
+#   --dur      render seconds per render (default: the whole bars of the track, bars*240/bpm - never past the
+#              song end, so the pattern cannot loop back to bar 0)
 #   --r2       host on the project's public R2 bucket (default); --local serves on localhost:5555
 #   --no-iteration-stems  stage 10: skip Demucs on each calibration iteration (report keeps the mixes only)
 #   --force    redo every stage even if its output exists
@@ -58,14 +59,14 @@ R2_BUCKET_NAME="4cast"
 R2_PUBLIC="https://pub-56831423fee34641805da07cfdaf6812.r2.dev"
 R2_ACCOUNT="503e92d7d95838d80c33802d3274f284"
 LOCAL_PORT="5555"
-COMPARE_SECONDS="135"
+COMPARE_SECONDS=""   # derived below from the track: the seconds its generated bars cover (pipeline_helpers.py render-seconds)
 if [ "$RENDERER" = offline ]; then
   RENDER_NOTE="render-strudel-offline.js (@strudel/web 1.3.0 OfflineAudioContext, chunked, polyphony 4096)"
 else
   RENDER_NOTE="record-strudel-blackhole.js RAW capture + uniform speed correction (ffmpeg wallclock restamp)"
 fi
 
-URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="" SYNTH_ITERS="" DUR="170" HOSTING="r2" FORCE="" ITER_STEMS_ARG=()
+URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="" SYNTH_ITERS="" DUR="" HOSTING="r2" FORCE="" ITER_STEMS_ARG=()
 
 usage() { sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
 log() { echo "[editable-pipeline] $*" >&2; }
@@ -175,7 +176,10 @@ fi
 SLUG="${PREFIX:-$("${PH[@]}" slug "${TRACK_TITLE:-$(basename "$TRACK")}")}" || die "cannot derive a slug"
 SND="${SLUG//-/_}"      # model / Strudel sound names avoid '-' (mini-notation); hosting prefix keeps kebab
 BARS="$("${PH[@]}" num-bars "$DURATION" "$BPM")" || die "cannot derive num-bars"
-log "track='$TRACK' slug=$SLUG bpm=$BPM key='$KEY' genre=$GENRE duration=${DURATION}s bars=$BARS mode=$MODE host=$HOSTING"
+SONG_SECONDS="$("${PH[@]}" render-seconds "$DURATION" "$BPM")" || die "cannot derive render seconds"
+[ -n "$DUR" ] || DUR="$SONG_SECONDS"
+COMPARE_SECONDS="$SONG_SECONDS"
+log "track='$TRACK' slug=$SLUG bpm=$BPM key='$KEY' genre=$GENRE duration=${DURATION}s bars=$BARS render=${DUR}s compare=${COMPARE_SECONDS}s mode=$MODE host=$HOSTING"
 
 PACK="$TRACK/sample_pack"; PW="$TRACK/.pipeline"; mkdir -p "$PACK" "$PW"
 if [ "$HOSTING" = r2 ]; then HOST_BASE="$R2_PUBLIC/midi-grep"; else HOST_BASE="http://localhost:$LOCAL_PORT"; fi

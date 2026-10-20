@@ -18,7 +18,7 @@
 #     --bpm 136 --key "C# minor" --genre brazilian_funk --bars 78 \
 #     [--iters N] [--mode sample-instrument|synth] \
 #     [--bass-sound regime_bass --lead-sound regime_lead] \
-#     [--dur 170] [--workdir <tmp>]
+#     [--dur <seconds>] [--workdir <tmp>]
 #
 # --mode (spec 003 Slice 4) is passed straight through to the generator. `sample-instrument`
 # (default) plays the pack's pitched instruments (bass/lead sounds default to regime_bass /
@@ -59,7 +59,7 @@ PGREP="${AC_PGREP:-pgrep}"; WAIT_MAX="${AC_RECORDER_WAIT_S:-120}"   # tests: AC_
 RC=0   # exit status: 70 when any iteration failed (GEN/RENDER/CMP FAILED, recorder wait abort); BEST is still printed
 
 STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" BARS="78"
-ENV_START=""; ITERS="" DUR="170" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
+ENV_START=""; ITERS="" DUR="" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
 WORK="${TMPDIR:-/tmp}/auto-calibrate.$$"
 # starting knobs (generator defaults are sane cold-start values)
 BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" BL="0" LH="0" SU="0"   # BL = bass low-pass override Hz, LH = lead high-pass Hz; 0 = generator/analysis default
@@ -105,6 +105,11 @@ case "$CTRL_RC" in
   3) echo "chance control: none (no other $GENRE reference track)";;
   *) echo "control lookup FAILED (rc=$CTRL_RC) - fix eval/datasets/reference_tracks.yaml" >&2; exit 65;;
 esac
+# Song seconds = what the BARS whole bars cover (bars*240/bpm, floored to the ms). Render length defaults to it (the
+# caller's --dur wins) - rendering longer makes the looped pattern wrap back to bar 0 past the song end - and it is
+# the compare window (compare_audio reads min(window, both files)).
+SONG_S="$("$PY" -c 'import math, sys; print(f"{math.floor(int(sys.argv[1]) * 240 / float(sys.argv[2]) * 1000) / 1000:g}")' "$BARS" "$BPM")" || exit 2
+[ -n "$DUR" ] || DUR="$SONG_S"
 [ -n "$ITERS" ] || ITERS="$("$PY" "$LOOP" max-iters)" || exit 2
 mkdir -p "$WORK"
 echo "workdir: $WORK"
@@ -160,7 +165,7 @@ while [ "$i" -lt "$ITERS" ]; do
     rm -f "$WAV"; echo "[$TAG] RENDER FAILED (rc=$rrc, see $WORK/$TAG.render.log)"; RC=70; break
   fi
 
-  "$PY" "$CMP" "$ORIG" "$WAV" -d 135 -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$CJ" 2>/dev/null || { echo "[$TAG] CMP FAILED"; RC=70; break; }
+  "$PY" "$CMP" "$ORIG" "$WAV" -d "$SONG_S" -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$CJ" 2>/dev/null || { echo "[$TAG] CMP FAILED"; RC=70; break; }
   read -r OVER SECT < <("$PY" -c "import json,sys;d=json.load(open('$CJ'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
   echo "[$TAG] mode=$MODE overall=$OVER section_aware=$SECT  (bm=$BM sg=$SG cl=$CL llpf=$LLPF hg=$HG mg=$MG su=$ESU bl=$BL eff_bl=$EBL lh=$LH eff_lh=$ELH)"
 

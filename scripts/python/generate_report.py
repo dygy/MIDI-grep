@@ -2432,14 +2432,17 @@ def generate_report(cache_dir, version_dir, output_path=None, iterations_file=No
 
             // Draw waveform
             const data = buffer.getChannelData(0);
-            const step = Math.ceil(data.length / width);
+            // ONE shared time axis: a track shorter than the longest one covers only its share of the lane
+            // (pixel x = seconds / maxDuration), so original and render line up instead of both being stretched.
+            const drawW = maxDuration > 0 ? Math.max(1, Math.min(width, Math.round(width * buffer.duration / maxDuration))) : width;
+            const step = Math.ceil(data.length / drawW);
             const amp = height * 0.4;
 
             ctx.strokeStyle = color;
             ctx.lineWidth = 1;
             ctx.beginPath();
 
-            for (let i = 0; i < width; i++) {{
+            for (let i = 0; i < drawW; i++) {{
                 const idx = Math.floor(i * step);
                 let min = 1.0, max = -1.0;
 

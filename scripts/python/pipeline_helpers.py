@@ -11,6 +11,7 @@ CLI (each prints one value / path on stdout, errors on stderr with exit 1)::
 
     pipeline_helpers.py slug "<title>"
     pipeline_helpers.py num-bars <duration_s> <bpm>
+    pipeline_helpers.py render-seconds <duration_s> <bpm>
     pipeline_helpers.py next-version <track_dir>
     pipeline_helpers.py control --genre G --exclude-key K
     pipeline_helpers.py promote --track-dir D --mode M --strudel F --wav F --comparison F [--env-correction F] \\
@@ -86,6 +87,15 @@ def num_bars(duration_s: float, bpm: float) -> int:
     if duration_s <= 0 or bpm <= 0:
         raise ValueError(f"duration and bpm must be positive, got duration={duration_s} bpm={bpm}")
     return math.floor(duration_s * bpm / 240)
+
+
+def render_seconds(duration_s: float, bpm: float) -> float:
+    """Seconds of audio the generated code covers: ``num_bars`` whole bars = bars * 240 / bpm, floored to the ms.
+
+    This is the render length AND the compare window: rendering longer makes the looped Strudel wrap back to bar 0
+    (audio past the song end); the song's trailing partial bar has no generated code, so it is not rendered or scored.
+    """
+    return math.floor(num_bars(duration_s, bpm) * 240 / bpm * 1000) / 1000
 
 
 def next_version_dir(track_dir: Path) -> Path:
@@ -735,6 +745,9 @@ def main(argv: list[str] | None = None) -> int:
     nb = sub.add_parser("num-bars")
     nb.add_argument("duration", type=float)
     nb.add_argument("bpm", type=float)
+    rs = sub.add_parser("render-seconds", help="render length / compare window: whole bars of the track, in seconds")
+    rs.add_argument("duration", type=float)
+    rs.add_argument("bpm", type=float)
     sub.add_parser("next-version").add_argument("track_dir", type=Path)
     ct = sub.add_parser("control", help="instrumental.wav of another same-genre reference track (chance control)")
     ct.add_argument("--genre", required=True)
@@ -790,6 +803,8 @@ def main(argv: list[str] | None = None) -> int:
             print(res.report)
         elif args.cmd == "slug":
             print(slug_from_title(args.title))
+        elif args.cmd == "render-seconds":
+            print(f"{render_seconds(args.duration, args.bpm):g}")
         elif args.cmd == "num-bars":
             print(num_bars(args.duration, args.bpm))
         elif args.cmd == "record-floor":
