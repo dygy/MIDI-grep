@@ -36,10 +36,18 @@ STUBS = {
     "build_instruments.py": 'import sys, json\nfrom pathlib import Path\n'
         'a = sys.argv[1:]\nout = Path(a[a.index("--out") + 1])\nbase = a[a.index("--base-url") + 1]\n'
         'open(Path(__file__).parent / "calls.log", "a").write("instruments\\n")\n'
-        'out.mkdir(parents=True, exist_ok=True)\n(out / "samples.json").write_text(json.dumps({"_base": base}))\n'
-        '(out / "verification.json").write_text("{}")\n(out / "bass.wav").write_bytes(b"x")\n',
+        'out.mkdir(parents=True, exist_ok=True)\n(out / "samples.json").write_text(json.dumps({"_base": base, "bass": ["bass.wav"]}))\n'
+        '(out / "verification.json").write_text("{}")\n'
+        'model = Path(a[a.index("--models") + 1])\n(out / "bass.wav").write_bytes((model / "a.wav").read_bytes())\n',
     "bass_register.py": 'import sys\na = sys.argv[1:]\nopen(a[a.index("--out") + 1], "w").write("{}")\n',   # stage 3b (real one needs a real stem)
-    "upload_r2.py": 'from pathlib import Path\nopen(Path(__file__).parent / "calls.log", "a").write("upload\\n")\n',
+    # the real planner (pack_sync, symlinked in) decides; only the network step is stubbed
+    "upload_r2.py": 'import sys\nfrom pathlib import Path\nimport pack_sync\n'
+        'a = sys.argv[1:]\npack = Path(a[a.index("--pack-dir") + 1])\n'
+        'base = a[a.index("--public-base") + 1].rstrip("/") + "/" + a[a.index("--prefix") + 1].strip("/")\n'
+        'h = pack_sync.hash_served(pack)\nplan = pack_sync.plan_sync(pack, base, a[a.index("--bucket") + 1], force="--full" in a, hashes=h)\n'
+        'if "--check" in a:\n    sys.exit(0 if plan.is_noop else 3)\n'
+        'open(Path(__file__).parent / "calls.log", "a").write("upload\\n")\n'
+        'pack_sync.write_state(pack, base, a[a.index("--bucket") + 1], h)\n',
     "compare_audio.py": 'import sys\nsys.exit(9)\n',        # stops the pipeline right after stage 7 (stage 8 dies)
     "transcribe.py": 'import sys\nopen(sys.argv[2], "w").write("mid")\n',
 }
@@ -124,17 +132,14 @@ def test_stages_3_and_4_are_rebuilt_when_the_stamped_bpm_changes(repo):
 def test_upload_is_repeated_when_the_pack_changed_after_the_last_upload(repo):
     run(repo, "--r2", "--mode", "synth")
     assert calls(repo).count("upload") == 1
-    past = 1_000_000_000
-    for f in repo.pack.rglob("*"):
-        if f.is_file() and f.name != ".uploaded":
-            os.utime(f, (past, past))
-    for f in (repo.root / "models").rglob("*"):
-        os.utime(f, (past, past))
     n = len(calls(repo))
     run(repo, "--r2", "--mode", "synth")
     assert calls(repo)[n:].count("upload") == 0, "nothing changed: the upload must be skipped"
+    (repo.pack / "drums_bands.json").write_text('{"stage": 3}')    # an analysis file: never served, never re-uploaded
+    r = run(repo, "--r2", "--mode", "synth")
+    assert calls(repo)[n:].count("upload") == 0, "drums_bands.json is not served: the upload must be skipped"
     model_file = repo.root / "models" / f"{SLUG}_bass" / "a.wav"   # stage 5 retrained the bass model
-    os.utime(model_file, None)
+    model_file.write_bytes(b"retrained")
     n = len(calls(repo))
     r = run(repo, "--r2", "--mode", "synth")
     again = calls(repo)[n:]

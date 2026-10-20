@@ -42,6 +42,8 @@ import sys
 import time
 from pathlib import Path
 
+import pack_sync
+
 # WAV is not reliably in the system mimetypes db; pin the ones we emit so the
 # browser fetch + CORS gets a sane Content-Type.
 CONTENT_TYPES = {
@@ -98,7 +100,7 @@ def pick_backend(requested: str, account_id: str, access_key: str, secret: str) 
 
 def upload_aws(
     pack_dir: Path, bucket: str, prefix: str, account_id: str,
-    access_key: str, secret: str,
+    access_key: str, secret: str, files: list[Path] | None = None,
 ) -> None:
     if not (account_id and access_key and secret):
         raise SystemExit("aws backend needs R2_ACCOUNT_ID, R2_ACCESS_KEY_ID, R2_SECRET_ACCESS_KEY")
@@ -111,6 +113,14 @@ def upload_aws(
     }
     ep = endpoint_url(account_id)
     dest = f"s3://{bucket}/{prefix.strip('/')}/"
+    if files is not None:  # incremental: exactly these files, one copy each
+        for f in files:
+            key = f"{dest}{f.relative_to(pack_dir).as_posix()}"
+            cmd = ["aws", "s3", "cp", str(f), key, "--endpoint-url", ep,
+                   "--content-type", content_type_for(f)]
+            print(f"[aws] {' '.join(cmd)}", file=sys.stderr)
+            subprocess.run(cmd, env=env, check=True)
+        return
     # One recursive copy; set the common content-type for the bulk WAVs.
     cmd = [
         "aws", "s3", "cp", str(pack_dir), dest,
@@ -130,9 +140,9 @@ def upload_aws(
     subprocess.run(cmd_json, env=env, check=True)
 
 
-def upload_wrangler(pack_dir: Path, bucket: str, prefix: str) -> None:
+def upload_wrangler(pack_dir: Path, bucket: str, prefix: str, files: list[Path] | None = None) -> None:
     runner = ["npx", "-y", "wrangler@latest"] if not have("wrangler") else ["wrangler"]
-    files = iter_files(pack_dir)
+    files = iter_files(pack_dir) if files is None else files
     print(f"[wrangler] uploading {len(files)} files to {bucket}/{prefix}", file=sys.stderr)
     for i, f in enumerate(files, 1):
         key = f"{prefix.strip('/')}/{f.relative_to(pack_dir).as_posix()}"
@@ -196,6 +206,10 @@ def main() -> int:
     ap.add_argument("--backend", choices=["auto", "aws", "wrangler"], default="auto")
     ap.add_argument("--set-cors", nargs="*", metavar="ORIGIN",
                     help="set bucket CORS to allow these origins (custom-domain buckets)")
+    ap.add_argument("--full", action="store_true",
+                    help="upload every file in the pack dir (the old behaviour); .uploaded.json is still rewritten")
+    ap.add_argument("--check", action="store_true",
+                    help="upload nothing; print the incremental plan and exit 0 if nothing needs uploading, 3 otherwise")
     args = ap.parse_args()
 
     access_key = os.environ.get("R2_ACCESS_KEY_ID", "")
@@ -208,6 +222,26 @@ def main() -> int:
     if not args.bucket:
         raise SystemExit("set --bucket or R2_BUCKET")
 
+    base = (args.public_base.rstrip("/") + "/" + args.prefix.strip("/")) if args.public_base else ""
+    # only what Strudel fetches (manifests + the files they reference) is hashed and recorded; analysis files
+    # (drums_bands.json, *.mid, pack.json ...) are never served, so changing them uploads nothing
+    hashes = pack_sync.hash_served(pack_dir)
+    plan = pack_sync.plan_sync(pack_dir, base or args.prefix, args.bucket, force=args.full, hashes=hashes)
+    kind = "FULL (--full / no recorded state / new base)" if plan.full else "incremental"
+    print(f"[upload_r2] plan: {kind}: {len(plan.upload)} of {plan.served} served files to upload"
+          f"{', ' + str(len(plan.deleted)) + ' no longer served (left on remote): ' + ', '.join(plan.deleted) if plan.deleted else ''}",
+          file=sys.stderr)
+    if args.check:
+        return 0 if plan.is_noop else 3
+    if plan.is_noop:
+        if plan.deleted:
+            pack_sync.write_state(pack_dir, base or args.prefix, args.bucket, hashes)
+        return 0
+    if args.full:  # explicit full upload: every file in the pack dir, as before (bookkeeping files excluded)
+        to_send = [f for f in iter_files(pack_dir) if f.name not in (".uploaded", pack_sync.STATE_NAME)]
+    else:
+        to_send = [pack_dir / r for r in plan.upload]
+
     backend = pick_backend(args.backend, args.account_id, access_key, secret)
     print(f"[upload_r2] backend={backend} bucket={args.bucket} prefix={args.prefix}", file=sys.stderr)
 
@@ -215,11 +249,11 @@ def main() -> int:
         set_cors(args.bucket, args.account_id, access_key, secret, args.set_cors or ["*"])
 
     if backend == "aws":
-        upload_aws(pack_dir, args.bucket, args.prefix, args.account_id, access_key, secret)
+        upload_aws(pack_dir, args.bucket, args.prefix, args.account_id, access_key, secret, files=to_send)
     else:
-        upload_wrangler(pack_dir, args.bucket, args.prefix)
-
-    base = (args.public_base.rstrip("/") + "/" + args.prefix.strip("/")) if args.public_base else ""
+        upload_wrangler(pack_dir, args.bucket, args.prefix, files=to_send)
+    # recorded only after every upload succeeded
+    pack_sync.write_state(pack_dir, base or args.prefix, args.bucket, hashes)
     result = {
         "backend": backend,
         "bucket": args.bucket,

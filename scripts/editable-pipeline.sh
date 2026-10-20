@@ -252,15 +252,17 @@ SRV_PID=""
 cleanup() { [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; [ -n "${SERVE_ROOT:-}" ] && rm -rf "$SERVE_ROOT"; }
 trap cleanup EXIT
 if [ "$HOSTING" = r2 ]; then
-  # skip only when the hosted copy is current: .uploaded names this base AND nothing in the pack (e.g. instruments
-  # stage 5 just rebuilt) is newer than the upload - otherwise R2 would keep serving the stale files
-  if stage_done "$PACK/.uploaded" && [ "$(cat "$PACK/.uploaded")" = "$BASE" ] && fresh "$PACK/.uploaded" "$PACK" \
+  # upload_r2.py is incremental: it hashes only what Strudel fetches (the manifests + the files they reference; analysis
+  # files such as drums_bands.json are never served) and uploads only files whose hash differs from .uploaded.json.
+  # No .uploaded.json (e.g. a legacy .uploaded base string), another base, or --force -> one full upload.
+  R2_ARGS=(--pack-dir "$PACK" --prefix "midi-grep/$SLUG" --bucket "$R2_BUCKET_NAME" --public-base "$R2_PUBLIC" --backend wrangler)
+  [ -n "$FORCE" ] && R2_ARGS+=(--full)
+  if [ -z "$FORCE" ] && "$PY" "$SP/upload_r2.py" ${R2_ARGS[@]+"${R2_ARGS[@]}"} --check >/dev/null 2>&1 \
      && curl -fsI -o /dev/null "$INST_BASE""samples.json"; then
-    log "stage 6 skip: already hosted at $BASE"
+    log "stage 6 skip: served files unchanged since the last upload to $BASE"
   else
-    log "stage 6: upload pack to R2 ($R2_BUCKET_NAME/midi-grep/$SLUG)"
-    CLOUDFLARE_ACCOUNT_ID="$R2_ACCOUNT" "$PY" "$SP/upload_r2.py" --pack-dir "$PACK" --prefix "midi-grep/$SLUG" \
-      --bucket "$R2_BUCKET_NAME" --public-base "$R2_PUBLIC" --backend wrangler >&2 || die "stage 6 upload_r2 failed"
+    log "stage 6: upload changed pack files to R2 ($R2_BUCKET_NAME/midi-grep/$SLUG)"
+    CLOUDFLARE_ACCOUNT_ID="$R2_ACCOUNT" "$PY" "$SP/upload_r2.py" ${R2_ARGS[@]+"${R2_ARGS[@]}"} >&2 || die "stage 6 upload_r2 failed"
     curl -fsI -o /dev/null "$INST_BASE""samples.json" || die "stage 6: $INST_BASE""samples.json not publicly reachable after upload"
     echo "$BASE" > "$PACK/.uploaded"
   fi
