@@ -571,6 +571,9 @@ def main() -> int:
                          "(bd/sd/hh/oh) triggered by the detected, editable rhythm pattern (real sounds + "
                          "real notes); bank=same groove on a library drum machine; realstem=replay the whole "
                          "drum stem (not a generator — identical audio but un-editable)")
+    ap.add_argument("--drum-velocity", choices=["off", "bar", "global"], default="bar",
+                    help="per-hit drum velocity measured from the drums stem (detect_drums_bands 'strength'): "
+                         "bar=hit strength / its class median in the same bar, global=/ the piece median, off=none")
     ap.add_argument("--drum-stem-gain", type=float, default=1.0,
                     help="gain for the realstem drum channel (balances the real drums in the mix)")
     ap.add_argument("--drum-lpf", type=int, default=0,
@@ -982,7 +985,7 @@ def main() -> int:
         channels.append(("DRUMS", "REAL drum stem (your track's drums, 100% — via Strudel samples)", drum_code))
         detected = True  # for the summary flag
     else:
-        detected = H.build_detected_drums(args.drums_json, args.bpm, nbars) if args.drums_json else None
+        detected = H.build_detected_drums(args.drums_json, args.bpm, nbars, velocity=None if args.drum_velocity == "off" else args.drum_velocity) if args.drums_json else None
         if detected:
             drum_lpf = f'.lpf({args.drum_lpf})' if args.drum_lpf else ''
             drum_lpf += f'.hpf({args.drum_hpf})' if args.drum_hpf else ''
@@ -1072,7 +1075,15 @@ def main() -> int:
         if validation_error:
             print(f"WARNING editability: {validation_error}", file=sys.stderr)
 
-    print(json.dumps({"out": str(out), "mode": args.mode, "bass_bars": len(bass_bars or []),
+    # live-player voice budget: peak simultaneous sources of THIS code (report only — stock web REPLs run with the
+    # superdough cap disabled, so no setMaxPolyphony line is emitted)
+    try:
+        import polyphony
+        poly = polyphony.estimate(code, args.pack_dir / "instruments" / "samples.json")
+    except Exception as exc:  # pragma: no cover - an estimate must never block the generator
+        poly = {"error": str(exc)}
+
+    print(json.dumps({"out": str(out), "mode": args.mode, "polyphony": poly, "bass_bars": len(bass_bars or []),
                       "lead_bars": len(lead_bars or []), "drums": bool(detected),
                       "drum_mode": args.drum_mode,
                       "bass_sound": bass_sound, "lead_sound": lead_sound,

@@ -14,7 +14,9 @@ that instrument:
   snare (sd) : mid band   180-1200 Hz (skin/body) — gated to avoid kick bleed
   hat (hh)   : high band  6-11 kHz
 
-Output is drums.json-compatible: {"hits": [{"time": s, "type": "bd|sd|hh"}], "bpm": ...}.
+Output is drums.json-compatible: {"hits": [{"time": s, "type": "bd|sd|hh", "strength": peak}], "bpm": ...}.
+``strength`` is the linear peak of the hit's own band around its onset; the generator turns strength / class
+median into the per-hit velocity it writes into the drum patterns.
 """
 
 from __future__ import annotations
@@ -29,6 +31,10 @@ import librosa
 import scipy.signal as sps
 
 SR = 22050
+# window around a detected onset in which the band peak is read: the attack lands within the detector's
+# frame resolution before it (hop 256 @ 22.05 kHz = 11.6 ms), the hit's body within the next 60 ms
+STRENGTH_PRE_S = 0.012
+STRENGTH_POST_S = 0.060
 
 
 def _bandpass(y, lo, hi):
@@ -67,7 +73,12 @@ def detect(stem_path: Path, bpm: float | None) -> dict:
         pk = _onsets(env, sr_env, delta_frac=df)
         times = librosa.frames_to_time(pk, sr=SR, hop_length=hop)
         for tm in times:
-            hits.append({"time": float(tm), "type": t})
+            # measured hit strength: peak amplitude of this band's signal around the onset (linear, so
+            # a ratio of two strengths is the gain ratio the original played them at)
+            i0 = max(0, int((float(tm) - STRENGTH_PRE_S) * SR))
+            i1 = min(len(yb), int((float(tm) + STRENGTH_POST_S) * SR) + 1)
+            strength = float(np.max(np.abs(yb[i0:i1]))) if i1 > i0 else 0.0
+            hits.append({"time": float(tm), "type": t, "strength": strength})
         counts[t] = len(times)
     # snare often also fires the kick band; drop sd hits that coincide with a bd hit (±40ms)
     bd_times = np.array([h["time"] for h in hits if h["type"] == "bd"])
