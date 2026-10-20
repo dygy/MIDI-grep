@@ -147,6 +147,7 @@ def main() -> int:
     sp = ap.add_subparsers(dest="cmd", required=True)
     sp.add_parser("max-iters")
     sp.add_parser("patience")
+    sp.add_parser("noise")
     s = sp.add_parser("select"); s.add_argument("tsv")
     x = sp.add_parser("next"); x.add_argument("tsv"); x.add_argument("--cap", type=int, required=True)
     x.add_argument("--patience", type=int, default=None)
@@ -161,6 +162,8 @@ def main() -> int:
         print(int(os.environ.get("AC_PATIENCE", PATIENCE)))
     elif a.cmd == "select":
         print(select(rows_of(a.tsv), noise()).tag)
+    elif a.cmd == "noise":
+        print(noise())
     elif a.cmd == "next":
         pat = a.patience if a.patience is not None else int(os.environ.get("AC_PATIENCE", PATIENCE))
         print(*next_step(rows_of(a.tsv), a.cap, pat, noise()))

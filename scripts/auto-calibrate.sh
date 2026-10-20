@@ -18,7 +18,10 @@
 #     --bpm 136 --key "C# minor" --genre brazilian_funk --bars 78 \
 #     [--iters N] [--mode sample-instrument|synth] \
 #     [--bass-sound regime_bass --lead-sound regime_lead] \
-#     [--dur <seconds>] [--workdir <tmp>]
+#     [--dur <seconds>] [--workdir <tmp>] [--no-mix-dynamics]
+#
+# After BEST, a loudness stage (mix_dynamics.py) moves --master-gain onto the instrumental's RMS (the score is level-
+# invariant, the loop cannot see loudness); --no-mix-dynamics skips it. The final gain is written to <workdir>/best.master.
 #
 # --mode (spec 003 Slice 4) is passed straight through to the generator. `sample-instrument`
 # (default) plays the pack's pitched instruments (bass/lead sounds default to regime_bass /
@@ -48,6 +51,7 @@ CAL="${AC_CAL:-$ROOT/scripts/python/calibrate_dynamic.py}"
 CMP="${AC_CMP:-$ROOT/scripts/python/compare_audio.py}"
 GATE="${AC_GATE:-$ROOT/scripts/python/gate_margin.py}"
 LOOP="${AC_LOOP:-$ROOT/scripts/python/calibrate_loop.py}"
+MIXD="${AC_MIXD:-$ROOT/scripts/python/mix_dynamics.py}"
 # Renderer selection lives in ONE place (scripts/python/renderer.py: MIDIGREP_RENDERER, default offline = exact
 # Strudel OfflineAudioContext render; blackhole = real-time capture). A bad value exits 2 there.
 RENDERER_PY="${AC_RENDERER_PY:-$ROOT/scripts/python/renderer.py}"
@@ -59,7 +63,7 @@ PGREP="${AC_PGREP:-pgrep}"; WAIT_MAX="${AC_RECORDER_WAIT_S:-120}"   # tests: AC_
 RC=0   # exit status: 70 when any iteration failed (GEN/RENDER/CMP FAILED, recorder wait abort); BEST is still printed
 
 STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" BARS="78"
-ENV_START=""; ITERS="" DUR="" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
+MIXDYN=1; ENV_START=""; ITERS="" DUR="" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
 WORK="${TMPDIR:-/tmp}/auto-calibrate.$$"
 # starting knobs (generator defaults are sane cold-start values)
 BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" BL="0" LH="0" SU="0"   # BL = bass low-pass override Hz, LH = lead high-pass Hz; 0 = generator/analysis default
@@ -71,6 +75,7 @@ while [ $# -gt 0 ]; do case "$1" in
   --bass-sound) BASS_SOUND="$2"; shift 2;; --lead-sound) LEAD_SOUND="$2"; shift 2;;
   --vocal-mode) echo "--vocal-mode was removed: vocals are never generated" >&2; exit 64;;
   --mode) MODE="$2"; shift 2;;
+  --no-mix-dynamics) MIXDYN=0; shift;;
   --workdir) WORK="$2"; shift 2;;
   --start) BL=0; LH=0; SU=0; read -r BM SG CL LLPF HG MG BL LH SU EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH [SU]]]" (6 to 9 fields; SU = sub-sine octave up 0/1)
     # The pre-"no vocals" format had a CV field after MG ("... MG CV [BL [LH]]"). A 9-field start is that old format;
@@ -114,20 +119,15 @@ SONG_S="$("$PY" -c 'import math, sys; print(f"{math.floor(int(sys.argv[1]) * 240
 mkdir -p "$WORK"
 echo "workdir: $WORK"
 
-SULOCK=0   # 1 once an octave-up step lost to its parent: the calibrator must not propose it again in this run
-best=-1; best_params=""; best_tag=""; best_gate="n/a"; : >"$WORK/iters.tsv"
-rm -f "$WORK/best.env.json"   # never report a stale env from a previous run
-PREV_ENV="${ENV_START:-}"   # env-correction JSON measured from the previous iteration (fed to the next generation); --env-start seeds it
-PARENT=""; ALPHA="1"   # the iteration these knobs were stepped from, and the fraction of its proposed step taken
-i=0
-while [ "$i" -lt "$ITERS" ]; do
-  i=$((i+1))
-  TAG="cal$i"; STRU="$WORK/$TAG.strudel"; WAV="$WORK/$TAG.wav"; CJ="$WORK/$TAG.cmp.json"
-  inst_arg=(); [ -n "$INST" ] && inst_arg=(--samples-url "$INST")
-  key_arg=();  [ -n "$KEY" ]  && key_arg=(--key "$KEY")
-  env_arg=();  [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && env_arg=(--env-correction "$PREV_ENV")
-  lh_arg=();   [ "$LH" -gt 0 ] 2>/dev/null && lh_arg=(--lead-hpf "$LH")   # 0 = generator default
-  snd_arg=();  [ -n "$BASS_SOUND" ] && snd_arg+=(--bass-sound "$BASS_SOUND")
+# gen_piece OUT SUMMARY_JSON LOG [extra generator args]: one generation with the CURRENT knob variables
+# (BM SG CL LLPF HG MG BL LH SU) - the loop and the final mix-dynamics stage share it, so they cannot drift apart.
+gen_piece() {
+  local out="$1" sum="$2" log="$3"; shift 3
+  local inst_arg=() key_arg=() lh_arg=() snd_arg=()
+  [ -n "$INST" ] && inst_arg=(--samples-url "$INST")
+  [ -n "$KEY" ]  && key_arg=(--key "$KEY")
+  [ "$LH" -gt 0 ] 2>/dev/null && lh_arg=(--lead-hpf "$LH")   # 0 = generator default
+  [ -n "$BASS_SOUND" ] && snd_arg+=(--bass-sound "$BASS_SOUND")
   [ -n "$LEAD_SOUND" ] && snd_arg+=(--lead-sound "$LEAD_SOUND")
   "$PY" "$GEN" --stems-dir "$STEMS" --pack-dir "$PACK" \
     --bass-midi "$PACK/bass.mid" --lead-midi "$PACK/melodic.mid" \
@@ -135,8 +135,21 @@ while [ "$i" -lt "$ITERS" ]; do
     --mode "$MODE" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --num-bars "$BARS" \
     --drum-mode "$DRUM_MODE" \
     --bass-mult "$BM" --sub-gain "$SG" --sub-up "$SU" --cal-lead "$CL" --lead-lpf "$LLPF" \
-    --hat-gain "$HG" --master-gain "$MG" --bass-lpf "$BL" ${lh_arg[@]+"${lh_arg[@]}"} ${env_arg[@]+"${env_arg[@]}"} --out "$STRU" \
-    >"$WORK/$TAG.gen.json" 2>"$WORK/$TAG.gen.log" \
+    --hat-gain "$HG" --master-gain "$MG" --bass-lpf "$BL" ${lh_arg[@]+"${lh_arg[@]}"} "$@" --out "$out" \
+    >"$sum" 2>"$log"
+}
+
+SULOCK=0   # 1 once an octave-up step lost to its parent: the calibrator must not propose it again in this run
+best=-1; best_params=""; best_tag=""; best_gate="n/a"; : >"$WORK/iters.tsv"
+rm -f "$WORK/best.env.json" "$WORK/best.master"   # never report a stale env / level from a previous run
+PREV_ENV="${ENV_START:-}"   # env-correction JSON measured from the previous iteration (fed to the next generation); --env-start seeds it
+PARENT=""; ALPHA="1"   # the iteration these knobs were stepped from, and the fraction of its proposed step taken
+i=0
+while [ "$i" -lt "$ITERS" ]; do
+  i=$((i+1))
+  TAG="cal$i"; STRU="$WORK/$TAG.strudel"; WAV="$WORK/$TAG.wav"; CJ="$WORK/$TAG.cmp.json"
+  env_arg=();  [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && env_arg=(--env-correction "$PREV_ENV")
+  gen_piece "$STRU" "$WORK/$TAG.gen.json" "$WORK/$TAG.gen.log" ${env_arg[@]+"${env_arg[@]}"} \
     || { echo "[$TAG] GEN FAILED"; RC=70; break; }
   # the generator reports the EFFECTIVE bass cutoff + its bounds (analysis value, top bass note);
   # the calibrator needs them to move the cutoff by measurement (0 = unreported -> lever off)
@@ -239,9 +252,49 @@ if [ -n "$SEL" ]; then
   rm -f "$WORK/best.env.json"; [ "$best_envused" != "-" ] && [ -s "$best_envused" ] && cp "$best_envused" "$WORK/best.env.json"
   cp "$WORK/$best_tag.strudel" "$WORK/best.strudel"; cp "$WORK/$best_tag.wav" "$WORK/best.wav"; cp "$WORK/$best_tag.cmp.json" "$WORK/best.cmp.json"
 fi
+
+# ---- loudness stage (scripts/python/mix_dynamics.py) -----------------------------------------------------------
+# The score is level-invariant, so the loop above never sees how loud a render is. This stage takes the BEST piece (same
+# knobs, same env) and moves ONE lever, --master-gain, onto the instrumental's RMS: up to MIX_ROUNDS render -> measure ->
+# next gain rounds (full-scale clipping makes the gain->RMS map sub-linear). A round is kept only if level (RMS) and crest
+# match the reference AND neither score dropped more than the calibration noise (the clipped share is printed); otherwise the
+# unmixed BEST stays and the log says why.
+MIX_ROUNDS=3
+if [ "$MIXDYN" = 1 ] && [ -n "$best_tag" ] && [ -s "$WORK/best.wav" ]; then
+  read -r BM SG CL LLPF HG MG BL LH SU <<<"$best_params"     # the BEST piece's knobs, for gen_piece
+  mix_env=(); [ -s "$WORK/best.env.json" ] && mix_env=(--env-correction "$WORK/best.env.json")
+  round_args=(); mr=0; MIX_PREV_WAV="$WORK/best.wav"; MIX_MG="$MG"
+  while [ "$mr" -lt "$MIX_ROUNDS" ]; do
+    mr=$((mr+1)); MS="$WORK/mix$mr.strudel"; MW="$WORK/mix$mr.wav"; MC="$WORK/mix$mr.cmp.json"
+    MG="$("$PY" "$MIXD" next-master --reference "$ORIG" --render "$MIX_PREV_WAV" --seconds "$SONG_S" --master "$MIX_MG")" \
+      || { echo "[mix] round $mr: measuring $MIX_PREV_WAV FAILED"; break; }
+    echo "[mix] round $mr: --master-gain $MIX_MG -> $MG"
+    gen_piece "$MS" "$WORK/mix$mr.gen.json" "$WORK/mix$mr.gen.log" ${mix_env[@]+"${mix_env[@]}"} \
+      || { echo "[mix] round $mr: GEN FAILED"; break; }
+    rm -f "$MW"; rrc=0; "$NODE_BIN" "$REC" "$MS" -o "$MW" -d "$DUR" >"$WORK/mix$mr.render.log" 2>&1 || rrc=$?
+    if [ "$rrc" -ne 0 ] || [ ! -f "$MW" ]; then rm -f "$MW"; echo "[mix] round $mr: RENDER FAILED (rc=$rrc, see $WORK/mix$mr.render.log)"; break; fi
+    "$PY" "$CMP" "$ORIG" "$MW" -d "$SONG_S" -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$MC" 2>/dev/null || { echo "[mix] round $mr: CMP FAILED"; break; }
+    round_args+=(--round "$MW" "$MC"); echo "$MG" >"$WORK/mix$mr.master"; MIX_PREV_WAV="$MW"; MIX_MG="$MG"
+  done
+  if [ "${#round_args[@]}" -gt 0 ]; then
+    PICK="$("$PY" "$MIXD" choose --reference "$ORIG" --seconds "$SONG_S" --best-cmp "$WORK/best.cmp.json" \
+      --tolerance "$("$PY" "$LOOP" noise)" "${round_args[@]}" 2>"$WORK/mix.choose.log")" || PICK="none"
+    sed 's/^/[mix] /' "$WORK/mix.choose.log"
+    case "$PICK" in
+      [0-9]*)
+        cp "$WORK/mix$PICK.strudel" "$WORK/best.strudel"; cp "$WORK/mix$PICK.wav" "$WORK/best.wav"
+        cp "$WORK/mix$PICK.cmp.json" "$WORK/best.cmp.json"
+        best="$("$PY" -c "import json;print(round(json.load(open('$WORK/best.cmp.json'))['comparison']['overall_similarity'],4))")"
+        cp "$WORK/mix$PICK.master" "$WORK/best.master"   # the BEST params keep the loop's knobs (a seed for the next mode); this is the final level
+        echo "[mix] kept round $PICK (--master-gain $(cat "$WORK/mix$PICK.master")) -> best.strudel/best.wav/best.cmp.json";;
+      *) echo "[mix] no round matched the reference level within the score tolerance - the unmixed BEST stays";;
+    esac
+  fi
+fi
 echo "BEST: $best_tag overall=$best  params: $best_params"
 echo "  gate:    $best_gate  (margin PASS/FAIL overall section_aware floor sa_floor; BEST = largest minimum margin to the floors)"
 echo "  strudel: $WORK/best.strudel"
+[ -s "$WORK/best.master" ] && echo "  master:  $(cat "$WORK/best.master")  (final --master-gain, set by the loudness stage; the params above are the loop's)"
 [ -s "$WORK/best.env.json" ] && echo "  env:     $WORK/best.env.json  (per-bar bass/lead/master correction used by the best render; pass --env-correction)"
 echo "  wav:     $WORK/best.wav"
 echo "  promote + report: scripts/editable-pipeline.sh --title <track> (stages 9-10), or pipeline_helpers.py promote then 'pipeline_helpers.py report --track-dir <track> --version vNNN --seconds 135 --calib-workdir $WORK'."

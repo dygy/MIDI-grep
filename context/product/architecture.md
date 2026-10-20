@@ -246,6 +246,10 @@ gate accept/reject decisions.**
   cal-lead, lead-lpf, hat-gain, master-gain), each a damped (sqrt) clamped proportional correction of
   an observed band/centroid ratio. `scripts/auto-calibrate.sh` closes the generate → render
   (BlackHole) → compare → calibrate loop and keeps the best render. No hardcoded per-track values.
+  The score is level-invariant (`compare_audio.rms_normalize`), so a final loudness stage
+  (`scripts/python/mix_dynamics.py`, in `auto-calibrate.sh`) moves `--master-gain` onto the reference
+  instrumental's RMS and verifies crest and clipped share; superdough has no master bus, so full-scale
+  clipping of the sum is the limiter (per-hap `.compressor` and per-layer tanh were measured and do not bound the sum).
 
 ### Loop MCP server (`mcp_servers/loop/server.py`)
 

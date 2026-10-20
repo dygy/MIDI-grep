@@ -417,7 +417,7 @@ score_and_promote() {
   local vdir env_arg=()
   [ -s "$W/best.env.json" ] && env_arg=(--env-correction "$W/best.env.json")
   vdir="$("${PH[@]}" promote --track-dir "$TRACK" --mode "$mode" --strudel "$STR" --wav "$WAV" --comparison "$CJ" \
-    --generator "generate_dynamic_strudel.py --mode $mode (knobs from calibrate_dynamic.py: $(cat "$W/best.params"); genre $GENRE; bars $BARS)" \
+    --generator "generate_dynamic_strudel.py --mode $mode (knobs from calibrate_dynamic.py: $(cat "$W/best.params"); final --master-gain $([ -s "$W/best.master" ] && cat "$W/best.master" || echo "= the 6th knob"); genre $GENRE; bars $BARS)" \
     --render "$RENDER_NOTE; -d $DUR; pack served from $BASE/" \
     --compare "compare_audio.py -d $COMPARE_SECONDS --strudel vs instrumental.wav (detector-stamped)" ${env_arg[@]+"${env_arg[@]}"})" \
     || die "stage 9 promote failed for $mode"

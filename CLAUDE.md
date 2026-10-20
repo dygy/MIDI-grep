@@ -177,6 +177,15 @@ raise a steady TR808 hat layer (`--hat-gain`), which lifted brightness 70%→91%
 89.8%→92.6% in one step (the extracted lead sample is inherently darker than the original).
 Synth mode adds spectral-placement fixes (bug #11): at generation `partial_register.py` measures where the original stem's strongest partial sits relative to the transcribed fundamentals and transposes a fundamental-dominant palette voice (reference = a track-independent chromatic sweep of the sound, `probe_sound_register.py`; the shift is bounded by floor(original) so the shifted fundamental never exceeds the original's dominant partial) so its energy leaves low_mid; the calibrator adds synth-only `lead-hpf`/`bass-lpf` levers (one per step, bounded by the note material and `compare_audio.FREQ_BANDS`), a vocal-gain hold, a hat overshoot back-off, and `auto-calibrate.sh` selects BEST by margin to the gate floors.
 
+**Loudness stage (2026-10-20, `scripts/python/mix_dynamics.py`, run by `auto-calibrate.sh` after BEST):** the score is
+level-invariant (`compare_audio.rms_normalize`), so renders sat 6-13 dB under the mastered instrumental with crest
+17-18 dB vs ~10 and nobody saw it. One measured lever moves it: `--master-gain` onto the instrumental's RMS (up to 3
+render rounds; kept only if RMS ±1 dB, crest ±1.5 dB and neither score drops more than `calibration_noise`; the unmixed
+BEST stays otherwise; `--no-mix-dynamics` skips it; final gain in `best.master`). superdough has NO master bus - the sum
+is limited by full-scale clipping (0.5-1.5 % of samples clip, printed vs the original's share within 3 dB of its peak).
+Per-hap `.compressor` and per-layer tanh saturators were measured and do not bound the sum (see `mix_dynamics.py`);
+per-stem share gains from the Demucs stems scored worse/inconsistent (bleed), so `mix_dynamics.py shares` only reports them.
+
 **CRITICAL: Similarity Calculation Fix (Feb 2026)**
 The old cosine-based frequency balance was HIDING massive errors (25% sub_bass, 20% mid differences showed as 95%!).
 Now uses MAE (Mean Absolute Error) with per-band penalty:

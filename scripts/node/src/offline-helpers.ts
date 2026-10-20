@@ -40,7 +40,7 @@ export function analyzeWav(buf: Uint8Array): WavInfo {
 
 /** Distinct log lines that indicate a sample / sound failed to load or a hap failed to trigger. */
 export function sampleFailures(lines: string[]): string[] {
-  const re = /\b(error|failed|failure)\b|not found|could not|unable to|404/i;
+  const re = /\b(error|failed|failure)\b|not found|could not|unable to|\b404\b/i;
   return [...new Set(lines.filter(l => re.test(l)).map(l => l.replace(/\s+/g, ' ').trim().slice(0, 200)))];
 }
 

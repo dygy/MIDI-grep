@@ -85,7 +85,11 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   brightness the extracted lead can't.
 - **`scripts/auto-calibrate.sh`** — runs the full generate→render(offline)→compare→calibrate
   loop, keeping the best render. Took Regime CLT 88.7%→92.4% overall (freq 86→95, section-aware
-  82→89) over ~6 iterations from a cold start, fully data-driven.
+  82→89) over ~6 iterations from a cold start, fully data-driven. After BEST it runs the loudness
+  stage (`scripts/python/mix_dynamics.py`): the score is level-invariant, so one measured lever,
+  `--master-gain`, is moved onto the instrumental's RMS in up to 3 render→measure rounds (the output
+  clips at full scale - superdough has no master bus); kept only if RMS and crest match the
+  reference and neither score drops more than `calibration_noise`; `--no-mix-dynamics` skips it.
 
 ## Sample-pack → R2 (highest similarity)
 

@@ -24,7 +24,7 @@ Levers (all multiply the *current* value, sqrt-damped + clamped to avoid oscilla
                                  low_mid-per-bass too high -> lower the bass cutoff, too low ->
                                  raise it. Bounded by the material: floor = 2x the highest bass
                                  fundamental, ceiling = the analysis-derived cutoff)
-  master-gain<- overall RMS      (gentle; the recorder limiter caps absolute loudness)
+  master-gain<- overall RMS      (gentle, capped for the loop; the FINAL level is set by mix_dynamics.py after BEST)
 
 Usage:
   python calibrate_dynamic.py --comparison <comparison.json> \

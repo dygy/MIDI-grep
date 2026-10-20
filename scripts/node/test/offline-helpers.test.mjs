@@ -112,3 +112,8 @@ test('commitOutput: failed checks leave NO file, passing checks rename atomicall
   assert.deepEqual([...fs.readFileSync(t)], [1, 2, 3]);
   fs.rmSync(d, { recursive: true });
 });
+
+test('sampleFailures: a load that merely took 404 ms is not a failure, an HTTP 404 is', () => {
+  assert.deepEqual(sampleFailures(['[sampler] load sound "x_bass:0:0"... done! loaded 54.9 KiB in 404ms']), []);
+  assert.equal(sampleFailures(['GET https://host/x.wav 404 (Not Found)']).length, 1);
+});
