@@ -51,6 +51,7 @@ sys.path.insert(0, str(Path(__file__).parent))
 import generate_hybrid_strudel as H  # noqa: E402
 import partial_register as PR  # noqa: E402
 import bass_register as BR  # noqa: E402  (stem-measured register + octave snap)
+import bass_shape as BS  # noqa: E402  (bass note shape from the stem: hold, glide, sample loop, kick duck)
 from editability_check import check_editability  # noqa: E402  (spec 003 detector)
 from sound_selector import pick_palette_sound  # noqa: E402  (genre palette — no hardcoded names)
 from strudel_validation import VALID_SOUNDS  # noqa: E402  (library sound catalog)
@@ -61,6 +62,7 @@ GENERATION_MODES = ("sample-instrument", "synth")
 # measurement (bass_register.py) is missing/stale, with a warning: they put a C#1 sub an octave up.
 LEGACY_BASS_WINDOW = (28, 48)
 LEGACY_LEAD_WINDOW = (48, 79)
+BASS_ORBIT = 2             # the bass' own audio bus: the kick's duck targets it (everything else stays on orbit 1)
 SUB_LPF_HZ = 90            # low-pass of the sine sub layer (the sub_bass band is 20-60 Hz; 90 keeps one octave of margin)
 
 NOTE_NAMES = ["c", "cs", "d", "ds", "e", "f", "fs", "g", "gs", "a", "as", "b"]
@@ -75,7 +77,7 @@ def _bars_pitches(bars: list[str] | None) -> list[int]:
     pitches = []
     for bar in bars or []:
         for tok in bar.split():
-            m = re.fullmatch(r"([a-g]s?)(-?\d+)", tok)
+            m = re.fullmatch(r"([a-g]s?)(-?\d+)(?:@\d+)?", tok)
             if m and m.group(1) in NOTE_NAMES:
                 pitches.append((int(m.group(2)) + 1) * 12 + NOTE_NAMES.index(m.group(1)))
     return pitches
@@ -657,6 +659,13 @@ def main() -> int:
                     help="bass_register.py f0 track of bass.wav (default <stems-dir>/.pipeline/bass_f0.json, written by "
                          "editable-pipeline.sh). Gives the bass window + per-note octave; absent/stale -> loud "
                          "fallback to the legacy typed windows")
+    ap.add_argument("--bass-shape", choices=["stem", "off"], default="stem",
+                    help="stem=BASS note shape measured from bass.wav (bass_shape.py): held notes (c2@3) instead of 1-step "
+                         "hits, glide() where the stem's f0 slides, sample loop points so held notes sustain; "
+                         "off=the old one-step note per transcribed trigger")
+    ap.add_argument("--bass-duck", choices=["auto", "off"], default="auto",
+                    help="auto=kick-triggered sidechain on the bass orbit when the original bass stem measurably dips "
+                         "after kick onsets (duckdepth/duckonset/duckattack measured); no dip -> none emitted")
     ap.add_argument("--rhythm", choices=["onset", "grid"], default="grid",
                     help="grid=quantise MIDI (better pitch/timbre fidelity); onset=stem onsets drive timing "
                          "(sparser but librosa bass onset detection is unreliable -> worse mfcc)")
@@ -771,6 +780,38 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001 - unreadable midi must not lose the rest of the piece
             print(f"WARNING harmony: could not derive ({exc}); no harmony voice", file=sys.stderr)
 
+    # BASS NOTE SHAPE (bass_shape.py): the original bass is one continuous tone, the transcription a row of hits.
+    bass_glide_bars, bass_loop_table, bass_duck, shape_info, loop_stats, duck_diag = None, {}, None, None, None, {}
+    if args.bass_shape == "stem" and bass_bars:
+        try:
+            ev = BS.StemEvidence.load(args.stems_dir / "bass.wav")
+            notes, shape_info = BS.shape_bars(bass_bars, args.bpm, ev, bass_reg)
+            bass_bars = BS.format_bars(notes, nbars, 16, midi_name)
+            if any(n.glide > 0 for n in notes):
+                bass_glide_bars = BS.format_bars(notes, nbars, 16, midi_name, glide=True)
+        except Exception as exc:  # noqa: BLE001 - an unmeasurable stem must not lose the piece
+            print(f"WARNING bass-shape: cannot measure bass.wav ({exc}); bass notes stay 1-step", file=sys.stderr)
+        if not synth:
+            sj = args.pack_dir / "instruments" / "samples.json"
+            try:
+                bass_loop_table, loop_stats = BS.sample_loops(sj, bass_sound, _bars_pitches(bass_bars))
+            except Exception as exc:  # noqa: BLE001
+                print(f"WARNING bass-shape: no loop points ({exc}); held sample notes play their grain once",
+                      file=sys.stderr)
+    if args.bass_duck == "auto" and bass_bars and args.drums_json and args.drums_json.exists() \
+            and args.drum_mode != "realstem":
+        try:
+            kicks = sorted({h["time"] for h in json.loads(args.drums_json.read_text()).get("hits", [])
+                            if h.get("type") == "bd"})
+            rms_f, hop_f = BS.stem_rms_fine(args.stems_dir / "bass.wav")
+            bass_duck = BS.measure_duck(rms_f, hop_f, kicks, diag=duck_diag)
+            if bass_duck and kicks and kicks[0] < BS.DUCK_MIN_T:
+                print(f"WARNING bass-duck: a kick at {kicks[0]:.3f}s precedes the engine's {BS.DUCK_MIN_T}s duck "
+                      f"scheduling bound; no ducking emitted", file=sys.stderr)
+                bass_duck = None
+        except Exception as exc:  # noqa: BLE001
+            print(f"WARNING bass-duck: cannot measure ({exc}); no ducking", file=sys.stderr)
+
     # effects aligned to the original stems
     ref_rms = max((H.stem_features(args.stems_dir / f"{s}.wav", dur) or {"rms": 1e-6})["rms"]
                   for s in ("drums", "bass", "melodic"))
@@ -838,6 +879,9 @@ def main() -> int:
         f"const cps = {cps:.6f}   // {fmt_bpm(args.bpm)} BPM, 4 beats/bar",
         "setcps(cps)",
     ]
+    if bass_glide_bars:
+        # portamento exists only in Strudel builds with glide(); everywhere else it is accepted and ignored
+        L.append("if (typeof Pattern.prototype.glide !== 'function') { register('glide', (t, pat) => pat, false) }")
     if needs_samples:
         L.append(f'await samples("{samples_url}")')
     if extra_samples_url:
@@ -971,12 +1015,25 @@ def main() -> int:
         # non-piled-up bass line (matches a real mono synth; without it, long samples overlap
         # polyphonically and build into a loud, muddy cluster on a fast-retriggered pattern).
         bass_cut = f'.cut({args.bass_cut})' if args.bass_cut else ''
-        bass_code = (
-            "stack(\n"
-            f'  note(cat(...bass)).s("{bass_sound}"){fx_no_gain(bass_fx)}{bass_cut}{gain_pattern(bass_env, bass_fx["gain"] * M)},\n'
-            f'  note(cat(...bass)){sub_transpose}.s("sine").lpf({sub_lpf}){gain_pattern(bass_env, sub_g * M)}\n'
-            ")"
-        )
+        # note shape (bass_shape.py): glide seconds per note (parallel to `bass`), sample loop table, own orbit
+        if bass_glide_bars:
+            L += [js_array("bassGlide", bass_glide_bars), ""]
+        glide = '.glide(cat(...bassGlide))' if bass_glide_bars else ''
+        orbit = f'.orbit({BASS_ORBIT})' if bass_duck else ''
+        main_row = f'note(cat(...bass)).s("{bass_sound}")'
+        if bass_loop_table:
+            L += [f"// sample loop [begin, end] (fractions of the grain) per written pitch (midi), measured on the grains:",
+                  f"// held notes sustain inside it. Delete a pitch to play its grain once.",
+                  "const bassLoop = {" + ", ".join(f"{p}: [{b}, {e}]" for p, (b, e) in sorted(bass_loop_table.items())) + "}",
+                  "const withLoop = p => p.withValue(v => { const l = bassLoop[Math.round(noteToMidi(v.note))]; "
+                  "return l ? { ...v, loop: 1, loopBegin: l[0], loopEnd: l[1] } : v })", ""]
+            main_row = f'withLoop({main_row})'
+        rows = [f'  {main_row}{fx_no_gain(bass_fx)}{bass_cut}{glide}{orbit}{gain_pattern(bass_env, bass_fx["gain"] * M)}',
+                f'  note(cat(...bass)){sub_transpose}.s("sine").lpf({sub_lpf}){glide}{orbit}{gain_pattern(bass_env, sub_g * M)}']
+        if bass_duck:
+            # the duck target orbit must exist before the first kick of any render window: a silent keeper voice
+            rows.append(f'  note("c1").s("sine").orbit({BASS_ORBIT}).gain(0)')
+        bass_code = "stack(\n" + ",\n".join(rows) + "\n)"
         channels.append(("BASS", "low end — root/sub. edit notes in `bass`", bass_code))
     if lead_bars:
         L += [js_array("lead", lead_bars), ""]
@@ -1010,6 +1067,11 @@ def main() -> int:
             drum_lpf = f'.lpf({args.drum_lpf})' if args.drum_lpf else ''
             drum_lpf += f'.hpf({args.drum_hpf})' if args.drum_hpf else ''
             dlines = list(detected)
+            if bass_duck:
+                # kick -> bass sidechain: every bd hit ducks the bass orbit by the measured depth/onset/attack
+                duck = (f'.duckorbit({BASS_ORBIT}).duckdepth({bass_duck.depth}).duckonset({bass_duck.onset_s})'
+                        f'.duckattack({bass_duck.attack_s})')
+                dlines = [d + duck if re.search(r's\("[^"]*\bbd\b', d) else d for d in dlines]
             if args.hat_gain > 0:
                 dlines.append(f'  s("hh*8").gain({args.hat_gain})')
             if args.drum_mode == "extracted":
@@ -1109,6 +1171,9 @@ def main() -> int:
                       "lead_bars": len(lead_bars or []), "drums": bool(detected),
                       "drum_mode": args.drum_mode,
                       "bass_sound": bass_sound, "lead_sound": lead_sound,
+                      "bass_shape": shape_info, "bass_loops": loop_stats, "bass_duck_diag": duck_diag,
+                      "bass_duck": ({k: getattr(bass_duck, k) for k in ("depth_db", "onset_s", "attack_s", "depth", "sigma", "kicks")}
+                                    if bass_duck else None),
                       # effective bass low-pass + its bounds, fed back to calibrate_dynamic.py
                       "bass_lpf": int(bass_fx.get("lpf") or 0), "bass_lpf_analysis": bass_lpf_analysis,
                       "bass_note_max_hz": bars_max_hz(bass_bars),
