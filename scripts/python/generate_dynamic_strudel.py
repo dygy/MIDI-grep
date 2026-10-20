@@ -190,6 +190,109 @@ def onset_driven_bars(stem_path: Path, midi_path: Path, bpm: float, nbars: int, 
     return bars
 
 
+def partial_intervals(max_partial: int | None = None) -> set[int]:
+    """Semitone intervals (rounded) from a note's fundamental to its harmonic partials 2..K: round(12*log2(k)) =
+    12 (octave), 19 (12th), 24, 28, 31, 34, 36 ... K is not typed: it is the first partial whose interval no
+    longer rounds to a NEW semitone distance below the next one's, i.e. the partials that are distinguishable
+    from each other (k and k+1 map to different semitones only for k < 1/(2^(1/12)-1) ~ 16.8). ``max_partial``
+    overrides it for tests."""
+    k_max = max_partial or int(1.0 / (2 ** (1.0 / 12.0) - 1.0))
+    return {int(round(12.0 * np.log2(k))) for k in range(2, k_max + 1)}
+
+
+def otsu_threshold(values) -> float:
+    """Otsu's between-class-variance threshold of ``values`` (the split that best separates a quiet cluster from a
+    loud one). No parameters: the cut comes from the distribution itself. Returns min(values) when the sample is
+    constant/too small to split."""
+    v = np.sort(np.asarray(values, dtype=float))
+    if v.size < 2 or v[0] == v[-1]:
+        return float(v[0]) if v.size else 0.0
+    best_t, best_var = float(v[0]), -1.0
+    for i in range(1, v.size):
+        if v[i] == v[i - 1]:
+            continue
+        w0, w1 = i / v.size, 1.0 - i / v.size
+        var = w0 * w1 * (v[:i].mean() - v[i:].mean()) ** 2
+        if var > best_var:
+            best_var, best_t = var, float(v[i])
+    return best_t
+
+
+def harmony_notes(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16, lo: int = 0, hi: int = 127
+                  ) -> tuple[dict[int, list[int]], dict]:
+    """The REAL harmony under the lead's top line, per quantised step: {step: [pitches below the top note]}.
+
+    The lead keeps ONE note per step (the highest, after folding into [lo,hi]); the transcription holds
+    2.6-7.8 on average. A transcribed note is kept as harmony only when it is
+      1. salient: its velocity (the transcriber's amplitude) is at/above the Otsu split of the stem's own velocity
+         distribution (the quiet cluster is bleed / ghost notes), and
+      2. not a harmonic partial of a LOUDER simultaneous note: pitch - other pitch in ``partial_intervals()``
+         (octave, 12th, 2 octaves ...) with the other note louder - a partial is the same instrument's overtone,
+         not a second voice.
+    The kept notes are octave-folded into [lo,hi] (the lead's own window) and deduplicated against each other and
+    the top note. Returns (steps, info) - info carries the derived salience floor and counts for the summary.
+    """
+    pm = pretty_midi.PrettyMIDI(str(midi_path))
+    notes = [n for inst in pm.instruments for n in inst.notes]
+    info = {"salience_floor": None, "notes": len(notes), "kept": 0, "rejected_quiet": 0, "rejected_partial": 0,
+            "gain_ratio": 1.0}
+    kept_vel: list[int] = []
+    top_vel: list[int] = []
+    if not notes:
+        return {}, info
+    # Otsu on log-velocity: loudness is perceived (and the transcriber's amplitude is distributed) on a log scale,
+    # so the split sits between the ghost-note cluster and the played notes instead of inside the played ones.
+    floor = float(np.exp(otsu_threshold(np.log([max(1, n.velocity) for n in notes]))))
+    info["salience_floor"] = floor
+    ivals = partial_intervals()
+    step_dur = 60.0 / bpm * 4 / quantize
+    total = nbars * quantize
+    groups: dict[int, list] = {}
+    for n in notes:
+        s = int(round(n.start / step_dur))
+        if 0 <= s < total:
+            groups.setdefault(s, []).append(n)
+    out: dict[int, list[int]] = {}
+    for s, g in groups.items():
+        top = max(BR.fold_into(n.pitch, lo, hi) for n in g)
+        keep: list[int] = []
+        top_vel.append(max(n.velocity for n in g if BR.fold_into(n.pitch, lo, hi) == top))
+        for n in g:
+            if n.velocity < floor:
+                info["rejected_quiet"] += 1
+                continue
+            if any(m is not n and m.velocity > n.velocity and (n.pitch - m.pitch) in ivals for m in g):
+                info["rejected_partial"] += 1
+                continue
+            p = BR.fold_into(n.pitch, lo, hi)
+            if p != top and p not in keep:
+                keep.append(p)
+                kept_vel.append(n.velocity)
+        if keep:
+            out[s] = sorted(keep)
+            info["kept"] += len(keep)
+    if kept_vel and top_vel:
+        # Each chord note plays at the lead sample's level, so the voice's loudness relative to the top line is the
+        # ratio of the transcriber's amplitudes (median kept harmony velocity / median top-note velocity).
+        info["gain_ratio"] = float(np.median(kept_vel) / np.median(top_vel))
+    return out, info
+
+
+def harmony_bars(steps: dict[int, list[int]], nbars: int, *, quantize: int = 16) -> list[str] | None:
+    """Per-bar 16-step strings of chord tokens (``[c3,e3,g3]``; one pitch -> a plain name; ``~`` rests)."""
+    if not steps:
+        return None
+    bars = []
+    for b in range(nbars):
+        slots = []
+        for s in range(quantize):
+            ps = steps.get(b * quantize + s)
+            slots.append("~" if not ps else (midi_name(ps[0]) if len(ps) == 1
+                                             else "[" + ",".join(midi_name(p) for p in ps) + "]"))
+        bars.append(" ".join(slots))
+    return bars
+
+
 def fmt_bpm(bpm: float) -> str:
     """BPM with the precision of the value ``cps`` is derived from (4 decimals, trailing zeros trimmed)."""
     return f"{bpm:.4f}".rstrip("0").rstrip(".")
@@ -477,6 +580,10 @@ def main() -> int:
     ap.add_argument("--cal-bass", type=float, default=1.0)
     ap.add_argument("--cal-lead", type=float, default=1.0)
     ap.add_argument("--cal-drums", type=float, default=1.0)
+    ap.add_argument("--cal-chord", type=float, default=1.0,
+                    help="multiplier on the harmony voice's derived gain (calibrator lever; 1.0 = as derived)")
+    ap.add_argument("--no-harmony", action="store_true",
+                    help="omit the harmony (chord) voice: the lead keeps one note per step, as before")
     ap.add_argument("--master-gain", type=float, default=1.0,
                     help="master gain on the whole stack to back off the recorder's 0 dBFS limiter (~0.6)")
     ap.add_argument("--env-steps", type=int, default=4,
@@ -632,6 +739,14 @@ def main() -> int:
     if not bass_bars and not lead_bars:
         print("ERROR: no note material extracted", file=sys.stderr)
         return 1
+    # HARMONY: the notes under the lead's top line (editable chord bars), derived from the same transcription.
+    chord_bars, harmony_info = None, None
+    if lead_bars and not args.no_harmony and args.lead_midi.exists():
+        try:
+            hsteps, harmony_info = harmony_notes(args.lead_midi, args.bpm, nbars, lo=llo, hi=lhi)
+            chord_bars = harmony_bars(hsteps, nbars)
+        except Exception as exc:  # noqa: BLE001 - unreadable midi must not lose the rest of the piece
+            print(f"WARNING harmony: could not derive ({exc}); no harmony voice", file=sys.stderr)
 
     # effects aligned to the original stems
     ref_rms = max((H.stem_features(args.stems_dir / f"{s}.wav", dur) or {"rms": 1e-6})["rms"]
@@ -849,6 +964,15 @@ def main() -> int:
                      f'.lpf({args.lead_lpf}).hpf({args.lead_hpf}).clip(1.3).room({lead_fx["room"]})'
                      f'{gain_pattern(lead_env, lead_g * M)}')
         channels.append(("LEAD", "melody/harmony — edit notes in `lead`", lead_code))
+    if chord_bars:
+        L += [js_array("chords", chord_bars), ""]
+        # same instrument, filters, room and loudness contour as the lead; the base gain is the lead's scaled by the
+        # transcribed harmony-vs-melody amplitude ratio (harmony_notes), then the calibrator's cal-chord lever.
+        chord_g = round(lead_g * harmony_info["gain_ratio"] * args.cal_chord, 4)
+        chord_code = (f'note(cat(...chords)).s("{lead_sound}")'
+                      f'.lpf({args.lead_lpf}).hpf({args.lead_hpf}).clip(1.3).room({lead_fx["room"]})'
+                      f'{gain_pattern(lead_env, chord_g * M)}')
+        channels.append(("CHORDS", "harmony under the lead — edit chords in `chords`", chord_code))
 
     if drum_realstem:
         # The real drum stem, played gaplessly via Strudel slice playback → rendered drums are
@@ -887,7 +1011,7 @@ def main() -> int:
     def assemble(chs: list[tuple]) -> str:
         lines = list(L)
         # counts of what THIS piece plays (bars / detected drum pattern are final by now)
-        lines[2:2] = count_header_lines(args.genre, count_note_events(bass_bars, lead_bars),
+        lines[2:2] = count_header_lines(args.genre, count_note_events(bass_bars, lead_bars, chord_bars),
                                         count_drum_hits(detected if isinstance(detected, list) else None))
         if args.dj_flow:
             # --- Performance header: arrangement map + how to play it live ---
@@ -956,6 +1080,7 @@ def main() -> int:
                       "bass_lpf": int(bass_fx.get("lpf") or 0), "bass_lpf_analysis": bass_lpf_analysis,
                       "bass_note_max_hz": bars_max_hz(bass_bars),
                       "sub_up": int(sub_up),
+                      "harmony": harmony_info, "chord_bars": len(chord_bars or []),
                       "lead_octave": lead_oct, "lead_octave_decision": lead_dec,
                       "lead_partial_log2": lead_partial,
                       "lead_hpf": int(args.lead_hpf), "lead_note_min_hz": bars_min_hz(lead_bars),
