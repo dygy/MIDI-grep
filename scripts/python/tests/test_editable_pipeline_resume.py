@@ -38,6 +38,7 @@ STUBS = {
         'open(Path(__file__).parent / "calls.log", "a").write("instruments\\n")\n'
         'out.mkdir(parents=True, exist_ok=True)\n(out / "samples.json").write_text(json.dumps({"_base": base}))\n'
         '(out / "verification.json").write_text("{}")\n(out / "bass.wav").write_bytes(b"x")\n',
+    "bass_register.py": 'import sys\na = sys.argv[1:]\nopen(a[a.index("--out") + 1], "w").write("{}")\n',   # stage 3b (real one needs a real stem)
     "upload_r2.py": 'from pathlib import Path\nopen(Path(__file__).parent / "calls.log", "a").write("upload\\n")\n',
     "compare_audio.py": 'import sys\nsys.exit(9)\n',        # stops the pipeline right after stage 7 (stage 8 dies)
     "transcribe.py": 'import sys\nopen(sys.argv[2], "w").write("mid")\n',
@@ -178,3 +179,12 @@ def test_synth_does_not_start_from_an_old_format_sample_instrument_params(repo):
     (repo.calls).write_text("")
     run(repo, "--local", "--mode", "synth")
     assert f"--start {NEW}" in [c for c in calls(repo) if c.startswith("auto-calibrate")][0]
+
+
+def test_synth_is_seeded_with_the_sample_magnitudes_but_not_its_sub_octave(repo):
+    """The 9th knob (sub-sine octave up) is a per-instrument decision: synth must re-trial it, not inherit su=1."""
+    _seed_best(repo, "sample-instrument", NEW + " 1")                 # BM..MG BL LH SU=1 (9 fields)
+    (repo.calls).write_text("")
+    run(repo, "--local", "--mode", "synth")
+    ac = [c for c in calls(repo) if c.startswith("auto-calibrate")][0]
+    assert f"--start {NEW}" in ac and f"--start {NEW} 1" not in ac, ac

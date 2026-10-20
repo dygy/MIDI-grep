@@ -18,7 +18,8 @@ Subcommands (stdout is machine-read by auto-calibrate.sh):
   max-iters | patience
   select <iters.tsv>                      -> best tag
   next   <iters.tsv> --cap N              -> "STOP <reason>" | "CONTINUE <parent-tag> <alpha>"
-  blend  --parent "<8 knobs>" --prop "<8 knobs>" --eff "<bass_lpf lead_hpf>" --alpha A -> 8 knobs
+  blend  --parent "<9 knobs>" --prop "<9 knobs>" --eff "<bass_lpf lead_hpf>" --alpha A -> 9 knobs
+         (BM SG CL LLPF HG MG BL LH SU; SU = sub-sine octave up, 0/1, not interpolated)
   blend-env --used <json|-> --new <json> --alpha A --out <json>
 iters.tsv columns: tag overall margin gate_out params envused sa parent alpha
 """
@@ -118,6 +119,9 @@ def blend_knobs(parent: list[str], prop: list[str], eff: list[float], alpha: flo
     out = []
     for i, (p, q) in enumerate(zip(parent, prop)):
         pf, qf = float(p), float(q)
+        if i == 8:                              # SU, the sub-sine octave (0/1): a hypothesis, not a magnitude - taken whole
+            out.append(q if alpha >= 1.0 else p)   # at a full step, or kept at the parent's value on a shortened retry
+            continue
         if i >= 6 and qf == pf:                 # BL / LH override untouched by the calibrator: keep (0 = default)
             out.append(p)
             continue

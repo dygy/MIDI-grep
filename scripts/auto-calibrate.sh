@@ -62,7 +62,7 @@ STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" BARS="78"
 ENV_START=""; ITERS="" DUR="170" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
 WORK="${TMPDIR:-/tmp}/auto-calibrate.$$"
 # starting knobs (generator defaults are sane cold-start values)
-BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" BL="0" LH="0"   # BL = bass low-pass override Hz, LH = lead high-pass Hz; 0 = generator/analysis default
+BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" BL="0" LH="0" SU="0"   # BL = bass low-pass override Hz, LH = lead high-pass Hz; 0 = generator/analysis default
 
 while [ $# -gt 0 ]; do case "$1" in
   --stems) STEMS="$2"; shift 2;; --base) BASE="$2"; shift 2;; --inst) INST="$2"; shift 2;;
@@ -72,10 +72,11 @@ while [ $# -gt 0 ]; do case "$1" in
   --vocal-mode) echo "--vocal-mode was removed: vocals are never generated" >&2; exit 64;;
   --mode) MODE="$2"; shift 2;;
   --workdir) WORK="$2"; shift 2;;
-  --start) BL=0; LH=0; read -r BM SG CL LLPF HG MG BL LH EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH]]" (6, 7 or 8 fields)
+  --start) BL=0; LH=0; SU=0; read -r BM SG CL LLPF HG MG BL LH SU EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH [SU]]]" (6 to 9 fields; SU = sub-sine octave up 0/1)
     # The pre-"no vocals" format had a CV field after MG ("... MG CV [BL [LH]]"). A 9-field start is that old format;
     # 7/8 fields would silently shift CV into BL, but a real bass/lead cutoff is 0 or >= 20 Hz, a cal-vocal is ~1.
-    [ -z "${EXTRA:-}" ] || { echo "--start: more than 8 fields - the old CV (cal-vocal) field was removed; drop the 7th value" >&2; exit 64; }
+    [ -z "${EXTRA:-}" ] || { echo "--start: more than 9 fields - the old CV (cal-vocal) field was removed; drop the 7th value" >&2; exit 64; }
+    case "$SU" in 0|1) ;; *) echo "--start: SU (9th field) must be 0 or 1 (got $SU) - old format with the removed CV field?" >&2; exit 64;; esac
     for _v in "$BL" "$LH"; do awk -v v="$_v" 'BEGIN{exit !(v==0 || v>=20)}' || { echo "--start: BL/LH must be 0 or >= 20 Hz (got $_v) - old format with the removed CV field? drop the 7th value" >&2; exit 64; }; done
     shift 2;;
   --env-start) ENV_START="$2"; shift 2;;                        # per-bar env-correction JSON to apply from iteration 1
@@ -108,6 +109,7 @@ esac
 mkdir -p "$WORK"
 echo "workdir: $WORK"
 
+SULOCK=0   # 1 once an octave-up step lost to its parent: the calibrator must not propose it again in this run
 best=-1; best_params=""; best_tag=""; best_gate="n/a"; : >"$WORK/iters.tsv"
 rm -f "$WORK/best.env.json"   # never report a stale env from a previous run
 PREV_ENV="${ENV_START:-}"   # env-correction JSON measured from the previous iteration (fed to the next generation); --env-start seeds it
@@ -127,16 +129,17 @@ while [ "$i" -lt "$ITERS" ]; do
     --drums-json "$PACK/drums_bands.json" --base-url "$BASE" ${inst_arg[@]+"${inst_arg[@]}"} ${snd_arg[@]+"${snd_arg[@]}"} \
     --mode "$MODE" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --num-bars "$BARS" \
     --drum-mode "$DRUM_MODE" \
-    --bass-mult "$BM" --sub-gain "$SG" --cal-lead "$CL" --lead-lpf "$LLPF" \
+    --bass-mult "$BM" --sub-gain "$SG" --sub-up "$SU" --cal-lead "$CL" --lead-lpf "$LLPF" \
     --hat-gain "$HG" --master-gain "$MG" --bass-lpf "$BL" ${lh_arg[@]+"${lh_arg[@]}"} ${env_arg[@]+"${env_arg[@]}"} --out "$STRU" \
     >"$WORK/$TAG.gen.json" 2>"$WORK/$TAG.gen.log" \
     || { echo "[$TAG] GEN FAILED"; RC=70; break; }
   # the generator reports the EFFECTIVE bass cutoff + its bounds (analysis value, top bass note);
   # the calibrator needs them to move the cutoff by measurement (0 = unreported -> lever off)
-  if ! read -r EBL EBLMAX EBHZ ELH ELHZ < <("$PY" -c "import json;d=json.load(open('$WORK/$TAG.gen.json'));print(d['bass_lpf'],d['bass_lpf_analysis'],d['bass_note_max_hz'],d['lead_hpf'],d['lead_note_min_hz'])" 2>/dev/null); then
+  if ! read -r EBL EBLMAX EBHZ ELH ELHZ ESU < <("$PY" -c "import json;d=json.load(open('$WORK/$TAG.gen.json'));print(d['bass_lpf'],d['bass_lpf_analysis'],d['bass_note_max_hz'],d['lead_hpf'],d['lead_note_min_hz'],d.get('sub_up',0))" 2>/dev/null); then
     echo "[$TAG] WARNING: cannot parse the generator summary $WORK/$TAG.gen.json - bass-lpf/lead-hpf levers are OFF this step"
-    EBL=0 EBLMAX=0 EBHZ=0 ELH=0 ELHZ=0
+    EBL=0 EBLMAX=0 EBHZ=0 ELH=0 ELHZ=0 ESU=0
   fi
+  echo "$ESU" >"$WORK/$TAG.su"   # the octave the generator ACTUALLY used (it refuses an octave-up its low-pass would filter away)
 
   # Never pkill -9 the capture right before a render: on 2026-10-09 that left BlackHole/avfoundation
   # wedged (every following capture produced no file). Wait for any live recorder to finish instead.
@@ -159,7 +162,7 @@ while [ "$i" -lt "$ITERS" ]; do
 
   "$PY" "$CMP" "$ORIG" "$WAV" -d 135 -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$CJ" 2>/dev/null || { echo "[$TAG] CMP FAILED"; RC=70; break; }
   read -r OVER SECT < <("$PY" -c "import json,sys;d=json.load(open('$CJ'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
-  echo "[$TAG] mode=$MODE overall=$OVER section_aware=$SECT  (bm=$BM sg=$SG cl=$CL llpf=$LLPF hg=$HG mg=$MG bl=$BL eff_bl=$EBL lh=$LH eff_lh=$ELH)"
+  echo "[$TAG] mode=$MODE overall=$OVER section_aware=$SECT  (bm=$BM sg=$SG cl=$CL llpf=$LLPF hg=$HG mg=$MG su=$ESU bl=$BL eff_bl=$EBL lh=$LH eff_lh=$ELH)"
 
   # Record this iteration; BEST is chosen AFTER the loop (see below) so the ordering is one consistent rule.
   # Gate margin = smallest margin to the eval-gate floors (eval/thresholds.yaml via eval/gate.py, per
@@ -172,7 +175,7 @@ while [ "$i" -lt "$ITERS" ]; do
   fi
   echo "[$TAG] gate: $GATE_OUT"
   ENVUSED="-"; if [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ]; then cp "$PREV_ENV" "$WORK/$TAG.envused.json"; ENVUSED="$WORK/$TAG.envused.json"; fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$TAG" "$OVER" "$MARG" "$GATE_OUT" "$BM $SG $CL $LLPF $HG $MG $BL $LH" "$ENVUSED" "$SECT" "${PARENT:--}" "$ALPHA" >>"$WORK/iters.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$TAG" "$OVER" "$MARG" "$GATE_OUT" "$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU" "$ENVUSED" "$SECT" "${PARENT:--}" "$ALPHA" >>"$WORK/iters.tsv"
   echo "$EBL $ELH" >"$WORK/$TAG.eff"
 
   # calibrate -> next knobs
@@ -181,7 +184,7 @@ while [ "$i" -lt "$ITERS" ]; do
   parent_arg=(); if [ -n "$PARENT" ] && [ -f "$WORK/$PARENT.cmp.json" ]; then
     read -r PEBL PELH <"$WORK/$PARENT.eff"; parent_arg=(--parent-comparison "$WORK/$PARENT.cmp.json" --parent-bass-lpf "$PEBL" --parent-lead-hpf "$PELH"); fi
   CLI=$("$PY" "$CAL" --comparison "$CJ" ${parent_arg[@]+"${parent_arg[@]}"} --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
-    --bass-mult "$BM" --sub-gain "$SG" --cal-lead "$CL" --lead-lpf "$LLPF" \
+    --bass-mult "$BM" --sub-gain "$SG" --sub-up "$ESU" --sub-up-locked "$SULOCK" --cal-lead "$CL" --lead-lpf "$LLPF" \
     --hat-gain "$HG" --master-gain "$MG" \
     --mode "$MODE" --bass-lpf "$EBL" --bass-lpf-max "$EBLMAX" --bass-note-max-hz "$EBHZ" \
     --lead-hpf "$ELH" --lead-note-min-hz "$ELHZ" 2>"$WORK/$TAG.cal.log")
@@ -189,9 +192,9 @@ while [ "$i" -lt "$ITERS" ]; do
   set -- $CLI
   while [ $# -gt 0 ]; do case "$1" in
     --bass-mult) BM="$2";; --sub-gain) SG="$2";; --cal-lead) CL="$2";;
-    --lead-lpf) LLPF="$2";; --hat-gain) HG="$2";; --master-gain) MG="$2";; --bass-lpf) BL="$2";; --lead-hpf) LH="$2";;
+    --lead-lpf) LLPF="$2";; --hat-gain) HG="$2";; --master-gain) MG="$2";; --bass-lpf) BL="$2";; --lead-hpf) LH="$2";; --sub-up) SU="$2";;
   esac; shift 2; done
-  echo "$BM $SG $CL $LLPF $HG $MG $BL $LH" >"$WORK/$TAG.prop"
+  echo "$BM $SG $CL $LLPF $HG $MG $BL $LH $SU" >"$WORK/$TAG.prop"
 
   # next step: continue from this iteration, or revert to the best and shorten the step; stop when nothing improves
   NEXT="$("$PY" "$LOOP" next "$WORK/iters.tsv" --cap "$ITERS")" || { echo "[$TAG] loop control FAILED"; RC=70; break; }
@@ -199,12 +202,14 @@ while [ "$i" -lt "$ITERS" ]; do
   if [ "$DECISION" != "CONTINUE" ]; then echo "[$TAG] stop: ${NEXT#STOP }"; break; fi
   if [ "$NPARENT" != "$TAG" ]; then
     echo "[$TAG] regressed vs best $NPARENT beyond noise - next step restarts from $NPARENT at ${NALPHA} of its proposed step"
+    # the lost step flipped the sub octave -> that hypothesis is answered (rejected): do not propose it again
+    [ "$(cat "$WORK/$TAG.su")" != "$(cat "$WORK/$NPARENT.su")" ] && SULOCK=1
   fi
   PARENT="$NPARENT"; ALPHA="$NALPHA"
   prow=$(awk -F'\t' -v t="$PARENT" '$1==t{print $5"\t"$6}' "$WORK/iters.tsv")
   pknobs="${prow%%$'\t'*}"; penv="${prow##*$'\t'}"
   read -r PEBL PELH <"$WORK/$PARENT.eff"
-  read -r BM SG CL LLPF HG MG BL LH < <("$PY" "$LOOP" blend --parent "$pknobs" --prop "$(cat "$WORK/$PARENT.prop")" --eff "$PEBL $PELH" --alpha "$ALPHA")
+  read -r BM SG CL LLPF HG MG BL LH SU < <("$PY" "$LOOP" blend --parent "$pknobs" --prop "$(cat "$WORK/$PARENT.prop")" --eff "$PEBL $PELH" --alpha "$ALPHA")
   PREV_ENV=""
   if [ -s "$WORK/$PARENT.env.json" ]; then
     "$PY" "$LOOP" blend-env --used "$penv" --new "$WORK/$PARENT.env.json" --alpha "$ALPHA" --out "$WORK/cal$((i+1)).envin.json" && PREV_ENV="$WORK/cal$((i+1)).envin.json"

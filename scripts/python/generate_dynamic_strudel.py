@@ -50,11 +50,18 @@ import pretty_midi
 sys.path.insert(0, str(Path(__file__).parent))
 import generate_hybrid_strudel as H  # noqa: E402
 import partial_register as PR  # noqa: E402
+import bass_register as BR  # noqa: E402  (stem-measured register + octave snap)
 from editability_check import check_editability  # noqa: E402  (spec 003 detector)
 from sound_selector import pick_palette_sound  # noqa: E402  (genre palette — no hardcoded names)
 from strudel_validation import VALID_SOUNDS  # noqa: E402  (library sound catalog)
 
 GENERATION_MODES = ("sample-instrument", "synth")
+
+# Typed registers of the pre-2026-10-19 generator (bass E1-C3, lead C3-G5). Used ONLY when the stem
+# measurement (bass_register.py) is missing/stale, with a warning: they put a C#1 sub an octave up.
+LEGACY_BASS_WINDOW = (28, 48)
+LEGACY_LEAD_WINDOW = (48, 79)
+SUB_LPF_HZ = 90            # low-pass of the sine sub layer (the sub_bass band is 20-60 Hz; 90 keeps one octave of margin)
 
 NOTE_NAMES = ["c", "cs", "d", "ds", "e", "f", "fs", "g", "gs", "a", "as", "b"]
 
@@ -63,13 +70,19 @@ def midi_name(pitch: int) -> str:
     return f"{NOTE_NAMES[pitch % 12]}{pitch // 12 - 1}"
 
 
-def _bars_hz(bars: list[str] | None, pick) -> float:
+def _bars_pitches(bars: list[str] | None) -> list[int]:
+    """MIDI pitches of the note names in ``bars`` (rests skipped)."""
     pitches = []
     for bar in bars or []:
         for tok in bar.split():
             m = re.fullmatch(r"([a-g]s?)(-?\d+)", tok)
             if m and m.group(1) in NOTE_NAMES:
                 pitches.append((int(m.group(2)) + 1) * 12 + NOTE_NAMES.index(m.group(1)))
+    return pitches
+
+
+def _bars_hz(bars: list[str] | None, pick) -> float:
+    pitches = _bars_pitches(bars)
     return round(440.0 * 2 ** ((pick(pitches) - 69) / 12), 2) if pitches else 0.0
 
 
@@ -86,22 +99,27 @@ def bars_min_hz(bars: list[str] | None) -> float:
 
 
 def fold_pitch(pitch: int, lo: int, hi: int) -> int:
-    """Fold an out-of-range pitch into [lo,hi] by octaves (kills basic-pitch
-    octave errors while preserving the pitch class / melodic contour)."""
-    while pitch > hi:
-        pitch -= 12
-    while pitch < lo:
-        pitch += 12
-    return max(lo, min(hi, pitch))
+    """Fold an out-of-range pitch into [lo,hi] by octaves (the unvoiced / no-measurement fallback;
+    the window itself comes from the stem, see bass_register.py)."""
+    return BR.fold_into(pitch, lo, hi)
+
+
+def _step_pitch(cands: list[int], t: float, step_dur: float, pick: str, lo: int, hi: int,
+                register: "BR.Register | None") -> int:
+    """The note for one step. With a measured stem register: snap to the stem's local octave and take the
+    candidate nearest the stem f0 (BR.resolve); without (lead, or no measurement): fold into [lo,hi], then
+    lowest/highest. The f0 is read around the step: a quarter step before to 1.5 steps after the onset."""
+    loc = register.local(t - step_dur / 4, t + 1.5 * step_dur) if register is not None else None
+    return BR.resolve(cands, loc, (lo, hi), pick)
 
 
 def midi_to_bars(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16,
-                 pick: str = "low", lo: int = 0, hi: int = 127) -> list[str] | None:
+                 pick: str = "low", lo: int = 0, hi: int = 127,
+                 register: "BR.Register | None" = None) -> list[str] | None:
     """Quantise a MIDI file into per-bar 16-step note strings (monophonic line).
 
-    pick='low' keeps the lowest note per step (bass line); 'high' keeps the
-    highest (melody/lead). Out-of-range pitches are FOLDED into [lo,hi] by
-    octaves so transcription octave-jumps don't create spurious highs/lows.
+    All notes quantised to a step are candidates; ``_step_pitch`` decides the octave and the winner
+    (stem-measured register when ``register`` is given, else window fold + lowest/highest per ``pick``).
     Returns one string per bar, or None if empty.
     """
     if not midi_path.exists():
@@ -113,20 +131,14 @@ def midi_to_bars(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16,
     bar_dur = 60.0 / bpm * 4
     step_dur = bar_dur / quantize
     total = nbars * quantize
-    chosen: dict[int, int] = {}  # step -> folded pitch
+    cands: dict[int, list[int]] = {}
     for n in notes:
         step = int(round(n.start / step_dur))
-        if not (0 <= step < total):
-            continue
-        p = fold_pitch(n.pitch, lo, hi)
-        if step not in chosen:
-            chosen[step] = p
-        else:
-            better = p < chosen[step] if pick == "low" else p > chosen[step]
-            if better:
-                chosen[step] = p
-    if not chosen:
+        if 0 <= step < total:
+            cands.setdefault(step, []).append(n.pitch)
+    if not cands:
         return None
+    chosen = {s: _step_pitch(c, s * step_dur, step_dur, pick, lo, hi, register) for s, c in cands.items()}
     bars = []
     for b in range(nbars):
         slots = [midi_name(chosen[b * quantize + s]) if (b * quantize + s) in chosen else "~"
@@ -136,15 +148,15 @@ def midi_to_bars(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16,
 
 
 def onset_driven_bars(stem_path: Path, midi_path: Path, bpm: float, nbars: int, *,
-                      quantize: int = 16, pick: str = "low", lo: int = 0, hi: int = 127) -> list[str] | None:
+                      quantize: int = 16, pick: str = "low", lo: int = 0, hi: int = 127,
+                      register: "BR.Register | None" = None) -> list[str] | None:
     """Per-bar note strings whose RHYTHM comes from the stem's actual audio onsets and whose
-    PITCH comes from the transcription.
+    PITCH comes from the transcription (octave/winner decided as in ``midi_to_bars``).
 
     basic-pitch over-produces notes (~5x the real onsets — 1238 vs 237 for this bass), so
     grid-quantising ALL of them fills nearly every step → a continuous line where the original
     is sparse → the groove (onset correlation) is wrong. Instead we detect the stem's real
-    onsets (the true rhythm), and at each onset read the transcribed pitch active then. Result:
-    the original's sparse groove with the right notes.
+    onsets (the true rhythm), and at each onset read the transcribed pitch active then.
     """
     if not stem_path.exists() or not midi_path.exists():
         return None
@@ -167,8 +179,7 @@ def onset_driven_bars(stem_path: Path, midi_path: Path, bpm: float, nbars: int, 
         active = [n.pitch for n in notes if n.start - 0.06 <= t < n.end + 0.03]
         if not active:
             active = [min(notes, key=lambda n: abs(n.start - t)).pitch]
-        raw = min(active) if pick == "low" else max(active)
-        chosen[step] = fold_pitch(raw, lo, hi)
+        chosen[step] = _step_pitch(active, float(t), step_dur, pick, lo, hi, register)
     if not chosen:
         return None
     bars = []
@@ -500,6 +511,10 @@ def main() -> int:
                          "polyphonic pile-up. Pair with a long, flat bass sample.")
     ap.add_argument("--sub-octave", type=int, default=0,
                     help="octaves to drop the sub-sine so its fundamental lands in sub_bass (1 = -12 semis)")
+    ap.add_argument("--sub-up", type=int, choices=[0, 1], default=0,
+                    help="1 = play the sub-sine an octave ABOVE the written bass note (a calibrator lever: it moves the "
+                         "layer's energy from the sub_bass band into the bass band; its low-pass moves up an octave too). "
+                         "Refused (0, warning) when the median written note an octave up would leave the bass band")
     ap.add_argument("--dj-flow", action="store_true", default=True,
                     help="emit mutable per-voice $: channels + a section/arrangement map (normal "
                          "live-play DJ layout: comment a channel to mute, solo by soloing, slice to a drop)")
@@ -508,6 +523,10 @@ def main() -> int:
                     help="drum envelope floor (0=deepest dynamics→best shape corr; higher=louder average)")
     ap.add_argument("--hat-gain", type=float, default=0.0,
                     help="steady TR808 hh*8 layer inside the drum bus (smooths envelope for shape + lifts centroid)")
+    ap.add_argument("--bass-f0", type=Path, default=None, metavar="PATH",
+                    help="bass_register.py f0 track of bass.wav (default <stems-dir>/.pipeline/bass_f0.json, written by "
+                         "editable-pipeline.sh). Gives the bass window + per-note octave; absent/stale -> loud "
+                         "fallback to the legacy typed windows")
     ap.add_argument("--rhythm", choices=["onset", "grid"], default="grid",
                     help="grid=quantise MIDI (better pitch/timbre fidelity); onset=stem onsets drive timing "
                          "(sparser but librosa bass onset detection is unreliable -> worse mfcc)")
@@ -571,18 +590,44 @@ def main() -> int:
         dec = PR.octave_decision(stat, sound, table, pw)
         return dec["shift"], stat, dec
 
+    # --- registers MEASURED from the stems (bass_register.py); legacy typed windows only as a loud fallback
+    bass_f0_path = args.bass_f0 or (args.stems_dir / ".pipeline" / "bass_f0.json")
+    bass_reg = None
+    bass_win = LEGACY_BASS_WINDOW
+    try:
+        data = json.loads(bass_f0_path.read_text())
+        want = BR.stem_hash(args.stems_dir / "bass.wav")
+        if data.get("key", {}).get("sha1") != want:
+            raise ValueError("cached f0 is for a different bass.wav (stale)")
+        bass_reg = BR.Register(data)
+        bass_win = bass_reg.window()
+    except Exception as exc:  # noqa: BLE001 - any failure -> the old behaviour, never silently
+        print(f"WARNING bass register: {bass_f0_path} unusable ({exc}); FALLING BACK to the legacy typed bass "
+              f"window {LEGACY_BASS_WINDOW} (octave errors expected). Run: bass_register.py measure --stem "
+              f"{args.stems_dir / 'bass.wav'} --out {bass_f0_path}", file=sys.stderr)
+        bass_reg = None
+        bass_win = LEGACY_BASS_WINDOW
+    try:
+        lead_win = BR.melodic_window(args.lead_midi, args.stems_dir / "melodic.wav",
+                                     bass_win[1] if bass_reg is not None else LEGACY_BASS_WINDOW[1])
+    except Exception as exc:  # noqa: BLE001
+        print(f"WARNING lead register: could not derive from the melodic stem ({exc}); using the legacy "
+              f"window {LEGACY_LEAD_WINDOW}", file=sys.stderr)
+        lead_win = LEGACY_LEAD_WINDOW
+    blo, bhi = bass_win
+
     lead_oct, lead_partial, lead_dec = _octave(args.lead_octave, args.stems_dir / "melodic.wav", args.lead_midi,
-                                     48, 79, lead_sound)
-    llo, lhi = 48 + 12 * lead_oct, 79 + 12 * lead_oct
+                                     lead_win[0], lead_win[1], lead_sound)
+    llo, lhi = lead_win[0] + 12 * lead_oct, lead_win[1] + 12 * lead_oct
     if args.rhythm == "onset":
         bass_bars = onset_driven_bars(args.stems_dir / "bass.wav", args.bass_midi, args.bpm, nbars,
-                                      pick="low", lo=28, hi=48) \
-            or midi_to_bars(args.bass_midi, args.bpm, nbars, pick="low", lo=28, hi=48)
+                                      pick="low", lo=blo, hi=bhi, register=bass_reg) \
+            or midi_to_bars(args.bass_midi, args.bpm, nbars, pick="low", lo=blo, hi=bhi, register=bass_reg)
         lead_bars = onset_driven_bars(args.stems_dir / "melodic.wav", args.lead_midi, args.bpm, nbars,
                                       pick="high", lo=llo, hi=lhi) \
             or midi_to_bars(args.lead_midi, args.bpm, nbars, pick="high", lo=llo, hi=lhi)
     else:
-        bass_bars = midi_to_bars(args.bass_midi, args.bpm, nbars, pick="low", lo=28, hi=48)
+        bass_bars = midi_to_bars(args.bass_midi, args.bpm, nbars, pick="low", lo=blo, hi=bhi, register=bass_reg)
         lead_bars = midi_to_bars(args.lead_midi, args.bpm, nbars, pick="high", lo=llo, hi=lhi)
     if not bass_bars and not lead_bars:
         print("ERROR: no note material extracted", file=sys.stderr)
@@ -677,7 +722,32 @@ def main() -> int:
     lead_g = round(lead_fx["gain"] * 0.60 * args.cal_lead, 2)            # restore some mid body
     drums_fx["gain"] = round(drums_fx["gain"] * args.cal_drums, 2)       # inter-stem balance
     sub_g = round(args.sub_gain * args.cal_bass, 2)
-    sub_transpose = f".add(note({-12 * args.sub_octave}))" if args.sub_octave else ""
+    # The sub layer may drop octaves only while its LOWEST written note stays at/above the project's sub-bass
+    # band floor (compare_audio.FREQ_BANDS sub_bass = 20 Hz, BR.SUB_FLOOR_HZ): below it nothing is audible or
+    # measured, so a layer there is wasted (a C#1 sub dropped an octave = 17 Hz).
+    sub_octave = args.sub_octave
+    if sub_octave and bass_bars:
+        lowest = min(_bars_pitches(bass_bars))
+        floor_midi = 69.0 + 12.0 * np.log2(BR.SUB_FLOOR_HZ / 440.0)
+        while sub_octave > 0 and lowest - 12 * sub_octave < floor_midi:
+            sub_octave -= 1
+        if sub_octave != args.sub_octave:
+            print(f"WARNING --sub-octave {args.sub_octave} would put the sub layer under {BR.SUB_FLOOR_HZ:g} Hz "
+                  f"(lowest written MIDI {lowest}); using {sub_octave}", file=sys.stderr)
+    # sub-up: the whole sine layer (note AND its low-pass) moves one octave up, so it is the same layer shifted into
+    # the bass band. Refused only when the median written note an octave up would leave the bass band (its top edge,
+    # BR.BASS_CEIL_HZ = compare_audio.FREQ_BANDS bass 250 Hz): then there is no band left for it to land in.
+    sub_up = args.sub_up
+    if sub_up and bass_bars:
+        med = float(np.median(_bars_pitches(bass_bars)))
+        up_hz = 440.0 * 2 ** ((med + 12 - sub_octave * 12 - 69) / 12.0)
+        if up_hz > BR.BASS_CEIL_HZ:
+            print(f"WARNING --sub-up refused: the median bass note an octave up ({up_hz:.0f} Hz) is above the bass band "
+                  f"({BR.BASS_CEIL_HZ:g} Hz)", file=sys.stderr)
+            sub_up = 0
+    sub_lpf = SUB_LPF_HZ * 2 ** sub_up
+    sub_shift = 12 * sub_up - 12 * sub_octave
+    sub_transpose = f".add(note({sub_shift}))" if sub_shift else ""
     # --- Arrangement dynamics: bake each original stem's per-bar loudness envelope into
     # its render voice so the render follows the original's drops/breakdowns (SHAPE metric).
     # floor keeps voices musically present; drums get floor 0 so they truly drop out in
@@ -766,7 +836,7 @@ def main() -> int:
         bass_code = (
             "stack(\n"
             f'  note(cat(...bass)).s("{bass_sound}"){fx_no_gain(bass_fx)}{bass_cut}{gain_pattern(bass_env, bass_fx["gain"] * M)},\n'
-            f'  note(cat(...bass)){sub_transpose}.s("sine").lpf(90){gain_pattern(bass_env, sub_g * M)}\n'
+            f'  note(cat(...bass)){sub_transpose}.s("sine").lpf({sub_lpf}){gain_pattern(bass_env, sub_g * M)}\n'
             ")"
         )
         channels.append(("BASS", "low end — root/sub. edit notes in `bass`", bass_code))
@@ -885,6 +955,7 @@ def main() -> int:
                       # effective bass low-pass + its bounds, fed back to calibrate_dynamic.py
                       "bass_lpf": int(bass_fx.get("lpf") or 0), "bass_lpf_analysis": bass_lpf_analysis,
                       "bass_note_max_hz": bars_max_hz(bass_bars),
+                      "sub_up": int(sub_up),
                       "lead_octave": lead_oct, "lead_octave_decision": lead_dec,
                       "lead_partial_log2": lead_partial,
                       "lead_hpf": int(args.lead_hpf), "lead_note_min_hz": bars_min_hz(lead_bars),

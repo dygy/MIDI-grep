@@ -199,6 +199,13 @@ if stage_done "$PACK/drums_bands.json" && built_at "$PW/drums_bands.bpm"; then l
   echo "$BPM" > "$PW/drums_bands.bpm"
 fi
 
+# ---------------------------------------------------------------- stage 3b: bass register (f0 of the bass stem)
+# bass_register.py measure is a no-op when $PW/bass_f0.json already matches the stem's content hash; the generator
+# reads it for the bass window + per-note octave and falls back LOUDLY to the legacy typed window without it.
+log "stage 3b: bass f0 / register"
+"$PY" "$SP/bass_register.py" measure --stem "$TRACK/bass.wav" --out "$PW/bass_f0.json" >&2 \
+  || die "stage 3b bass_register measure failed"
+
 # ---------------------------------------------------------------- stage 4: sample pack
 if stage_done "$PACK/pack.json" "$PACK/samples.json" "$PACK/strudel.json" && base_ok "$PACK/samples.json" "$BASE/" \
    && built_at "$PW/pack.bpm"; then
@@ -332,7 +339,10 @@ run_synth() {
   # (knobs + per-bar env correction measured on SYNTH renders), writing $W/best.env.json for stage 9.
   local start_arg=() knobs=""
   if [ -s "$PW/sample-instrument/best.params" ] && params_ok "$PW/sample-instrument/best.params"; then
-    knobs="$(cat "$PW/sample-instrument/best.params")"
+    # Seed the magnitudes (fields 1-8) but NOT the sub-sine octave (9th): whether the sine layer sounds better an
+    # octave up depends on the main layer (a recorded sample vs a sawtooth) - Regime CLT synth seeded with the sample's
+    # su=1 scored 0.682 and FAILED the gate, while its own octave trial from su=0 reached 0.763. Synth re-trials it.
+    knobs="$(cut -d' ' -f1-8 "$PW/sample-instrument/best.params")"
     start_arg=(--start "$knobs")
     log "stage 7: synth calibration starts from the sample-instrument knobs: $knobs"
   else

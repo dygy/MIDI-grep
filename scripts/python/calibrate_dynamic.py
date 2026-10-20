@@ -11,7 +11,11 @@ mix: every knob delta is a damped proportional correction of an OBSERVED band ra
 any track/genre because it only ever reacts to that render's own measured gap.
 
 Levers (all multiply the *current* value, sqrt-damped + clamped to avoid oscillation):
-  sub-gain   <- sub_bass band   (raise to fill 20-60 Hz, lower if booming)
+  sub-gain   <- sub_bass band   (raise to fill 20-60 Hz, lower if booming; no absolute cap - each step is the
+                                 damped correction that closes the observed band ratio)
+  sub-up     <- sub_bass band   (0/1: the sine layer an octave above the bass note. Tried ONCE as its own step
+                                 when the render's sub_bass share exceeds the original's;
+                                 the loop's tie/revert rule keeps whichever scores better)
   bass-mult  <- bass band       (60-250 Hz body of the pitched bass sample)
   cal-lead   <- low_mid+mid     (lead/melodic body; the usual deficit)
   lead-lpf   <- high+high_mid   (excess brightness -> lower the cutoff)
@@ -175,6 +179,11 @@ def main() -> int:
     # generator's own defaults so the calibrator is usable from a cold start.
     ap.add_argument("--bass-mult", type=float, default=0.40)
     ap.add_argument("--sub-gain", type=float, default=0.7)
+    ap.add_argument("--sub-up", type=int, choices=[0, 1], default=0,
+                    help="EFFECTIVE sub-sine octave of the last render (generator summary 'sub_up'): 1 = an octave above "
+                         "the written bass note")
+    ap.add_argument("--sub-up-locked", type=int, choices=[0, 1], default=0,
+                    help="1 = the octave-up step was already tried in this run and lost: do not propose it again")
     ap.add_argument("--cal-lead", type=float, default=1.0)
     ap.add_argument("--lead-lpf", type=int, default=5000)
     ap.add_argument("--hat-gain", type=float, default=0.0)
@@ -224,6 +233,7 @@ def main() -> int:
     cur = {
         "bass_mult": args.bass_mult,
         "sub_gain": args.sub_gain,
+        "sub_up": int(args.sub_up),
         "cal_lead": args.cal_lead,
         "lead_lpf": float(args.lead_lpf),
         "hat_gain": args.hat_gain,
@@ -267,7 +277,31 @@ def main() -> int:
 
     nxt = dict(cur)
     # --- sub_bass: fill or tame the 20-60 Hz sine layer -----------------------------------
-    nxt["sub_gain"] = round(clamp(cur["sub_gain"] * damp(r_sub), 0.2, 1.6), 3)
+    # No absolute cap: a fixed 0.2-1.6 range saturated at 1.6 on VAGABUNDO (sub_bass still short) and left the
+    # lever blind. The step is the damped correction that closes the OBSERVED ratio (sqrt = amplitude from an
+    # energy share ratio, further damped by damp() and limited to damp()'s per-step bounds); positive by construction.
+    #
+    # Octave: when the render's sub_bass share is OVER the original's, more gain cannot help; moving the sine an
+    # octave up shifts its energy from sub_bass into bass. That is a different hypothesis, so it is its own step (gain
+    # unchanged) and is scored by the loop like any other (revert / tie rules, then locked for the run). It is NOT
+    # behind the share dead band: that band guards levers that act silently on noise, this one is a trial the loop
+    # scores - and Regime CLT sample (render sub 49.7% vs original 40.4%, ratio 0.81, inside the band) gained
+    # +0.042 overall (0.7510 -> 0.7933) from exactly this step, which the dead band had kept shut.
+    sub_over = r_sub < 1.0
+    nxt["sub_up"] = int(args.sub_up)
+    flipping = sub_over and not args.sub_up and not args.sub_up_locked
+    # WHICH BAND EACH LAYER FEEDS depends on the octave. Octave 0: the sine sits at the bass fundamental, inside
+    # sub_bass (20-60 Hz), and the main layer carries the bass band. Octave up: the sine (note +12, low-pass x2) lands in
+    # the bass band, and the sub_bass share is left to the main layer. So the two gains swap their driving ratios:
+    # sub-gain follows `bass` and bass-mult follows `sub_bass`. Driving sub-gain by sub_bass with the octave up (what
+    # this did) raises a layer that no longer feeds that band: Regime CLT synth cal2->cal3 raised it 0.70 -> 0.95 while
+    # render bass was already 55% vs the original's 41% -> bass 79%, overall 0.7446 -> 0.6566, and the loop's patience
+    # (2 strikes: that step and its shortened retry) ended the run with sub_bass still 18 points off.
+    if flipping:
+        nxt["sub_up"] = 1
+        nxt["sub_gain"] = round(cur["sub_gain"], 3)
+    else:
+        nxt["sub_gain"] = round(cur["sub_gain"] * damp(r_bass if args.sub_up else r_sub), 3)
     synth = args.mode == "synth"
     r_lm_bass = float("nan")
     cur_blpf, cur_lhpf = int(cur["bass_lpf"]), int(cur["lead_hpf"])
@@ -337,7 +371,9 @@ def main() -> int:
     # --- bass (60-250 Hz): body of the pitched bass sample --------------------------------
     # One lever per step: while the cutoff moves, bass-mult may fall but not rise (a rise would
     # re-inflate the very harmonics the cutoff is removing; cal2->cal3 did exactly that: +3%).
-    bass_corr = damp(r_bass)
+    bass_corr = damp(r_sub if args.sub_up else r_bass)     # see the layer/band assignment at the sub-gain step
+    if flipping:
+        bass_corr = 1.0       # the octave flip IS this step's bass/sub rebalance (it moved ~30 points of share in one go)
     if bass_lpf_moved:
         bass_corr = min(bass_corr, 1.0)
     nxt["bass_mult"] = round(clamp(cur["bass_mult"] * bass_corr, 0.2, 1.3), 3)
@@ -430,13 +466,13 @@ def main() -> int:
     print("== knob deltas ==", file=sys.stderr)
     print(f"   low_mid/bass share ratio {r_lm_bass:.2f}, low_mid/mid {r_lm_mid:.2f} "
           f"(orig/rend; nan = lever off)", file=sys.stderr)
-    for k in ["sub_gain", "bass_mult", "cal_lead", "lead_lpf", "hat_gain", "master_gain",
+    for k in ["sub_gain", "sub_up", "bass_mult", "cal_lead", "lead_lpf", "hat_gain", "master_gain",
               "bass_lpf", "lead_hpf"]:
         a, b = cur[k], nxt[k]
         arrow = "->" if a != b else "=="
         print(f"   {k:12s} {a} {arrow} {b}", file=sys.stderr)
 
-    cli = (f"--bass-mult {nxt['bass_mult']} --sub-gain {nxt['sub_gain']} "
+    cli = (f"--bass-mult {nxt['bass_mult']} --sub-gain {nxt['sub_gain']} --sub-up {nxt['sub_up']} "
            f"--cal-lead {nxt['cal_lead']} --lead-lpf {nxt['lead_lpf']} "
            f"--hat-gain {nxt['hat_gain']} --master-gain {nxt['master_gain']}")
     if cur_blpf > 0 and nxt["bass_lpf"] != cur_blpf:

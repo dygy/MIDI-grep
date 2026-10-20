@@ -685,7 +685,7 @@ def control_track_path(genre: str, exclude_key: str, repo_root: Path | None = No
     return None
 
 
-CALIBRATION_FIELDS = (6, 8)   # auto-calibrate.sh --start / BEST params: "BM SG CL LLPF HG MG [BL [LH]]"
+CALIBRATION_FIELDS = (6, 9)   # auto-calibrate.sh --start / BEST params: "BM SG CL LLPF HG MG [BL [LH [SU]]]" (SU = sub octave up 0/1)
 
 
 def params_valid(text: str) -> bool:
@@ -698,10 +698,15 @@ def params_valid(text: str) -> bool:
     if not CALIBRATION_FIELDS[0] <= len(fields) <= CALIBRATION_FIELDS[1]:
         return False
     try:
-        for f in fields:
-            float(f)
+        vals = [float(f) for f in fields]
     except ValueError:
         return False
+    if len(vals) == 9:
+        # The 9th field is SU (0/1) after BL/LH. The removed pre-branch layout also had 9 fields, with the cal-vocal
+        # CV (~1) in 7th place where a cutoff must be 0 or >= 20 Hz - that is how the two are told apart.
+        bl, lh, su = vals[6], vals[7], vals[8]
+        if su not in (0.0, 1.0) or any(v != 0 and v < 20 for v in (bl, lh)):
+            return False
     return True
 
 

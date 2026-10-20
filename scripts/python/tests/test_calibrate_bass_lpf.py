@@ -98,16 +98,19 @@ def test_hat_stays_off_when_lead_below_high_mid_edge():
     assert float(got["--hat-gain"]) == 0.0
 
 
-# golden next-knob fragments from the calibrator BEFORE bug #11 (same inputs: KNOBS)
+# golden next-knob fragments from the calibrator BEFORE bug #11 (same inputs: KNOBS). Since the sub-octave lever
+# (2026-10-20) each stored render has its sine layer over the original's (orig/rend sub_bass 0.96 / 0.90 / 0.84), so the
+# step is the octave-up TRIAL: --sub-up 1 with sub-gain AND bass-mult unchanged (0.8 / 0.5: the flip is that step's
+# bass/sub rebalance); the lead / hat / master knobs are the pre-bug-#11 values.
 GOLDEN = {
     "vagabundo_sample_v004.json":
-        "--bass-mult 0.521 --sub-gain 0.784 --cal-lead 1.082 --lead-lpf 6300 --hat-gain 0.1 "
+        "--bass-mult 0.5 --sub-gain 0.8 --sub-up 1 --cal-lead 1.082 --lead-lpf 6300 --hat-gain 0.1 "
         "--master-gain 0.728",
     "vagabundo_sample_v002.json":
-        "--bass-mult 0.526 --sub-gain 0.759 --cal-lead 1.142 --lead-lpf 6255 --hat-gain 0.1 "
+        "--bass-mult 0.5 --sub-gain 0.8 --sub-up 1 --cal-lead 1.142 --lead-lpf 6255 --hat-gain 0.1 "
         "--master-gain 0.728",
     "regime_sample_v026.json":
-        "--bass-mult 0.541 --sub-gain 0.732 --cal-lead 1.46 --lead-lpf 6652 --hat-gain 0.1 "
+        "--bass-mult 0.5 --sub-gain 0.8 --sub-up 1 --cal-lead 1.46 --lead-lpf 6652 --hat-gain 0.1 "
         "--master-gain 0.728",
 }
 
@@ -127,12 +130,12 @@ def test_sample_instrument_never_emits_bass_lpf_or_new_hat(name):
     assert "--bass-lpf" not in got                      # inside the dead band on stored comparisons
 
 
-def test_auto_calibrate_syntax_and_8_field_contract():
+def test_auto_calibrate_syntax_and_9_field_contract():
     subprocess.run(["bash", "-n", str(AUTO)], check=True)
     src = AUTO.read_text()
     assert 'read -r BM SG CL LLPF HG MG BL LH' in src                       # 6, 7 or 8 fields, BL/LH default 0
     assert '--bass-lpf "$BL"' in src and '--bass-lpf) BL="$2"' in src and '--lead-hpf) LH="$2"' in src
-    assert '"$BM $SG $CL $LLPF $HG $MG $BL $LH"' in src and "iters.tsv" in src          # 8 fields recorded per iteration
+    assert '"$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU"' in src and "iters.tsv" in src     # 9 fields recorded per iteration (SU last)
     assert '--cal-vocal "$CV"' not in src and '--vocal-mode "$VOCAL_MODE"' not in src      # the vocal knob is gone
 
 
@@ -227,8 +230,8 @@ def test_driver_runs_under_set_u_with_stubs(tmp_path, extra):
     assert r.returncode == 0, r.stderr
     best = [ln for ln in r.stdout.splitlines() if ln.startswith("BEST:")][0]
     params = best.split("params:")[1].split()
-    assert len(params) == 8, best
-    assert params[-2:] == ["0", "0"]   # BL, LH (the overrides that went INTO the best render)
+    assert len(params) == 9, best
+    assert params[-3:] == ["0", "0", "0"]   # BL, LH (the overrides that went INTO the best render), SU (sub octave up)
 
 
 def test_driver_failure_exit_code_and_best_line(tmp_path):
