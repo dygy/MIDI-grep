@@ -16,12 +16,24 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+def shared_root(checkout: Path) -> Path:
+    """The MAIN checkout of the repo `checkout` belongs to. A git worktree has its own tree but no binary and no
+    database; the learning memory must be ONE store shared by every checkout, not an empty one per worktree."""
+    try:
+        g = subprocess.run(["git", "-C", str(checkout), "rev-parse", "--path-format=absolute", "--git-common-dir"],
+                           capture_output=True, text=True, timeout=10, stdin=subprocess.DEVNULL)
+        common = Path(g.stdout.strip()) if g.returncode == 0 and g.stdout.strip() else None
+    except (OSError, subprocess.SubprocessError):
+        common = None
+    return common.parent if common is not None and common.name == ".git" else checkout
+
+
 # ClickHouse connection
-CLICKHOUSE_BIN = Path(__file__).parent.parent.parent / "bin" / "clickhouse"
+_ROOT = shared_root(Path(__file__).resolve().parent.parent.parent)
+CLICKHOUSE_BIN = _ROOT / "bin" / "clickhouse"
 # MIDIGREP_CLICKHOUSE_DB points the store at another database directory (tests, scratch runs); the default is the
-# repo's own .clickhouse/db.
-CLICKHOUSE_DB = Path(os.environ.get("MIDIGREP_CLICKHOUSE_DB")
-                     or Path(__file__).parent.parent.parent / ".clickhouse" / "db")
+# main checkout's .clickhouse/db.
+CLICKHOUSE_DB = Path(os.environ.get("MIDIGREP_CLICKHOUSE_DB") or _ROOT / ".clickhouse" / "db")
 
 # Import extract_parameters_from_code from strudel_params when available.
 # Fall back to the local definition below if strudel_params.py does not exist yet.
