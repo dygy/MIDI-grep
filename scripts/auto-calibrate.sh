@@ -18,7 +18,7 @@
 #     --bpm 136 --key "C# minor" --genre brazilian_funk --bars 78 \
 #     [--iters N] [--mode sample-instrument|synth] \
 #     [--bass-sound regime_bass --lead-sound regime_lead] \
-#     [--dur <seconds>] [--workdir <tmp>] [--no-mix-dynamics]
+#     [--dur <seconds>] [--workdir <tmp>] [--no-mix-dynamics] [--bass-shape stem|off] [--no-shape-trial]
 #
 # After BEST, a loudness stage (mix_dynamics.py) moves --master-gain onto the instrumental's RMS (the score is level-
 # invariant, the loop cannot see loudness); --no-mix-dynamics skips it. The final gain is written to <workdir>/best.master.
@@ -38,6 +38,14 @@
 # largest minimum margin to the gate floors, margins within noise of each other counting as tied (higher overall
 # wins, then section-aware); the loop stops after PATIENCE steps without a beyond-noise improvement, or at the cap
 # (--iters N; default MAX_ITERS from calibrate_loop.py).
+#
+# Bass shape (generate_dynamic_strudel.py --bass-shape stem|off) is a scored choice, not a constant: a fixed default won on three of
+# four pieces and lost on the fourth. After the loop, when the memory is on and this track+mode has not answered the question for the
+# CURRENT code version, the BEST knobs (and env) are rendered ONCE with the other shape; the default (stem) is kept unless the other
+# shape improves on it beyond calibration noise (calibrate_loop.py shape). The trial is recorded (kind 'shape') and a winner also as
+# the run BEST, so the next run warm-starts with the chosen shape and does not re-test until the generator/calibrator code changes.
+# --bass-shape X pins the shape (no trial); --no-shape-trial keeps the warm-started/default shape untested; AC_SHAPE_TRIAL=0 (tests).
+# The chosen shape is the 10th token of the BEST params line ("... SU stem|off") and of --start.
 #
 # Requires: BlackHole device + Multi-Output selected (see CLAUDE.md preflight), node recorder
 # built (scripts/node/dist), the sample pack + bass/lead MIDI present in <stems>/sample_pack,
@@ -69,6 +77,7 @@ PGREP="${AC_PGREP:-pgrep}"; WAIT_MAX="${AC_RECORDER_WAIT_S:-120}"   # tests: AC_
 RC=0   # exit status: 70 when any iteration failed (GEN/RENDER/CMP FAILED, recorder wait abort); BEST is still printed
 
 STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" BARS="78"
+BSHAPE="stem"; SHAPE_PIN=0; SHAPE_TESTED=0; SHAPE_TRIAL="${AC_SHAPE_TRIAL:-1}"   # generator --bass-shape; see header
 MIXDYN=1; ENV_START=""; ITERS=""; START_GIVEN=0; SEED=""; WARM_SOURCE="cold" DUR="" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
 WORK="${TMPDIR:-/tmp}/auto-calibrate.$$"
 # starting knobs (generator defaults are sane cold-start values)
@@ -84,11 +93,14 @@ while [ $# -gt 0 ]; do case "$1" in
   --no-mix-dynamics) MIXDYN=0; shift;;
   --workdir) WORK="$2"; shift 2;;
   --no-memory) MEM_ON=0; shift;;
+  --bass-shape) case "$2" in stem|off) BSHAPE="$2"; SHAPE_PIN=1;; *) echo "--bass-shape must be stem or off" >&2; exit 64;; esac; shift 2;;
+  --no-shape-trial) SHAPE_TRIAL=0; shift;;
   --seed) SEED="$2"; shift 2;;     # fallback knobs ("BM SG CL LLPF HG MG [BL [LH]]"): used only when the memory has neither this track nor a neighbour
-  --start) START_GIVEN=1; BL=0; LH=0; SU=0; read -r BM SG CL LLPF HG MG BL LH SU EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH [SU]]]" (6 to 9 fields; SU = sub-sine octave up 0/1)
+  --start) START_GIVEN=1; BL=0; LH=0; SU=0; read -r BM SG CL LLPF HG MG BL LH SU SHP EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH [SU [stem|off]]]]" (6 to 10 fields; SU = sub-sine octave up 0/1; the 10th = bass shape)
     # The pre-"no vocals" format had a CV field after MG ("... MG CV [BL [LH]]"). A 9-field start is that old format;
     # 7/8 fields would silently shift CV into BL, but a real bass/lead cutoff is 0 or >= 20 Hz, a cal-vocal is ~1.
-    [ -z "${EXTRA:-}" ] || { echo "--start: more than 9 fields - the old CV (cal-vocal) field was removed; drop the 7th value" >&2; exit 64; }
+    [ -z "${EXTRA:-}" ] || { echo "--start: more than 10 fields - the old CV (cal-vocal) field was removed; drop the 7th value" >&2; exit 64; }
+    if [ -n "${SHP:-}" ]; then case "$SHP" in stem|off) [ "$SHAPE_PIN" = 1 ] || BSHAPE="$SHP";; *) echo "--start: the 10th field is the bass shape stem|off (got $SHP)" >&2; exit 64;; esac; fi
     case "$SU" in 0|1) ;; *) echo "--start: SU (9th field) must be 0 or 1 (got $SU) - old format with the removed CV field?" >&2; exit 64;; esac
     for _v in "$BL" "$LH"; do awk -v v="$_v" 'BEGIN{exit !(v==0 || v>=20)}' || { echo "--start: BL/LH must be 0 or >= 20 Hz (got $_v) - old format with the removed CV field? drop the 7th value" >&2; exit 64; }; done
     shift 2;;
@@ -144,10 +156,13 @@ RESP_ARG=()
 if [ "$START_GIVEN" = 0 ] && [ "$MEM_ON" = 1 ]; then
   WARM="$("$PY" "$MEM" warm-start "${MEM_ARGS[@]}" --track-key "$TRACK_KEY" --env-out "$WORK/warm.env.json" 2> >(grep -v '^  \[ClickHouse\]' >&2))" || WARM=""
   if [ -n "$WARM" ]; then
-    IFS=$'\t' read -r WARM_SOURCE WARM_CAP WARM_KNOBS WARM_ENV WARM_DETAIL <<<"$WARM"
+    IFS=$'\t' read -r WARM_SOURCE WARM_CAP WARM_KNOBS WARM_ENV WARM_DETAIL WARM_SHAPE WARM_SHAPE_TESTED <<<"$WARM"
     if [ "$WARM_SOURCE" != cold ]; then
       read -r BM SG CL LLPF HG MG BL LH SU <<<"$WARM_KNOBS"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"
       [ -z "$ENV_START" ] && [ "$WARM_ENV" != "-" ] && ENV_START="$WARM_ENV"
+      if [ "$SHAPE_PIN" = 0 ]; then   # the recorded shape decision of this track+mode (a neighbour's is never copied: stem, untested)
+        case "${WARM_SHAPE:-stem}" in stem|off) BSHAPE="${WARM_SHAPE:-stem}";; esac; SHAPE_TESTED="${WARM_SHAPE_TESTED:-0}"
+      fi
     fi
     echo "warm start: $WARM_SOURCE - $WARM_DETAIL"
   else
@@ -161,7 +176,7 @@ fi
 [ "$START_GIVEN" = 1 ] && WARM_SOURCE=explicit
 # Budget from history: a warm start earns calibrate_loop.WARM_ITERS, anything else the full MAX_ITERS; --iters N always wins.
 if [ -z "$ITERS_GIVEN" ]; then ITERS="$("$PY" "$LOOP" cap "$([ "$WARM_SOURCE" = explicit ] && echo cold || echo "$WARM_SOURCE")")" || exit 2; fi
-echo "start: $WARM_SOURCE; knobs: $BM $SG $CL $LLPF $HG $MG $BL $LH $SU; iteration cap: $ITERS"
+echo "start: $WARM_SOURCE; knobs: $BM $SG $CL $LLPF $HG $MG $BL $LH $SU; bass shape: $BSHAPE (tested for this code version: $SHAPE_TESTED, pinned: $SHAPE_PIN); iteration cap: $ITERS"
 MEM_ARGS+=(--warm-source "$WARM_SOURCE")
 if [ "$MEM_ON" = 1 ]; then   # learned per-knob damping exponents (empty file / no history = the fixed sqrt damping)
   memcall responses --mode "$MODE" --out "$WORK/responses.json"
@@ -184,7 +199,7 @@ gen_piece() {
     --mode "$MODE" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --num-bars "$BARS" \
     --drum-mode "$DRUM_MODE" \
     --bass-mult "$BM" --sub-gain "$SG" --sub-up "$SU" --cal-lead "$CL" --lead-lpf "$LLPF" \
-    --hat-gain "$HG" --master-gain "$MG" --bass-lpf "$BL" ${lh_arg[@]+"${lh_arg[@]}"} "$@" --out "$out" \
+    --hat-gain "$HG" --master-gain "$MG" --bass-lpf "$BL" --bass-shape "$BSHAPE" ${lh_arg[@]+"${lh_arg[@]}"} "$@" --out "$out" \
     >"$sum" 2>"$log"
 }
 
@@ -242,7 +257,7 @@ while [ "$i" -lt "$ITERS" ]; do
   fi
   echo "[$TAG] gate: $GATE_OUT"
   ENVUSED="-"; if [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ]; then cp "$PREV_ENV" "$WORK/$TAG.envused.json"; ENVUSED="$WORK/$TAG.envused.json"; fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$TAG" "$OVER" "$MARG" "$GATE_OUT" "$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU" "$ENVUSED" "$SECT" "${PARENT:--}" "$ALPHA" >>"$WORK/iters.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$TAG" "$OVER" "$MARG" "$GATE_OUT" "$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU" "$ENVUSED" "$SECT" "${PARENT:--}" "$ALPHA" "$BSHAPE" >>"$WORK/iters.tsv"
   echo "$EBL $ELH" >"$WORK/$TAG.eff"
   memcall record-step "${MEM_ARGS[@]}" --workdir "$WORK" --run-id "$RUN_ID" --tag "$TAG"
 
@@ -301,7 +316,41 @@ if [ -n "$SEL" ]; then
   fi
   rm -f "$WORK/best.env.json"; [ "$best_envused" != "-" ] && [ -s "$best_envused" ] && cp "$best_envused" "$WORK/best.env.json"
   cp "$WORK/$best_tag.strudel" "$WORK/best.strudel"; cp "$WORK/$best_tag.wav" "$WORK/best.wav"; cp "$WORK/$best_tag.cmp.json" "$WORK/best.cmp.json"
-  memcall record-best "${MEM_ARGS[@]}" --workdir "$WORK" --run-id "$RUN_ID" --tag "$best_tag" --best-env "$WORK/best.env.json"
+  # ---- bass-shape trial: the BEST knobs once more with the OTHER --bass-shape (header); decided by measurement ----
+  BEST_TSV="iters.tsv"; BEST_REC_TAG="$best_tag"
+  if [ "$MEM_ON" = 1 ] && [ "$SHAPE_PIN" = 0 ] && [ "$SHAPE_TRIAL" != 0 ] && [ "$SHAPE_TESTED" = 0 ] && [ "$RC" -eq 0 ]; then
+    [ "$BSHAPE" = stem ] && ALT=off || ALT=stem; STAG="shape_$ALT"; KEPT_SHAPE="$BSHAPE"
+    echo "[$STAG] bass-shape trial: BEST $best_tag knobs ($best_params) rendered once with --bass-shape $ALT (the loop ran $BSHAPE)"
+    read -r BM SG CL LLPF HG MG BL LH SU <<<"$best_params"
+    s_env=(); [ -s "$WORK/best.env.json" ] && s_env=(--env-correction "$WORK/best.env.json")
+    SW="$WORK/$STAG.wav"; SC="$WORK/$STAG.cmp.json"; BSHAPE="$ALT"; srcok=1
+    gen_piece "$WORK/$STAG.strudel" "$WORK/$STAG.gen.json" "$WORK/$STAG.gen.log" ${s_env[@]+"${s_env[@]}"} || { echo "[$STAG] GEN FAILED"; srcok=0; }
+    if [ "$srcok" = 1 ]; then
+      rm -f "$SW"; rrc=0; "$NODE_BIN" "$REC" "$WORK/$STAG.strudel" -o "$SW" -d "$DUR" >"$WORK/$STAG.render.log" 2>&1 || rrc=$?
+      if [ "$rrc" -ne 0 ] || [ ! -f "$SW" ]; then rm -f "$SW"; echo "[$STAG] RENDER FAILED (rc=$rrc, see $WORK/$STAG.render.log)"; srcok=0; fi
+    fi
+    [ "$srcok" = 1 ] && { "$PY" "$CMP" "$ORIG" "$SW" -d "$SONG_S" -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$SC" 2>/dev/null || { echo "[$STAG] CMP FAILED"; srcok=0; }; }
+    BSHAPE="$KEPT_SHAPE"
+    if [ "$srcok" = 1 ]; then
+      read -r SOVER SSECT < <("$PY" -c "import json,sys;d=json.load(open('$SC'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
+      if SGATE=$("$PY" "$GATE" --comparison "$SC" --genre "$GENRE" --mode "$MODE" 2>"$WORK/$STAG.gate.log"); then read -r SMARG _ <<<"$SGATE"
+      else SMARG="n/a"; SGATE="n/a"; echo "[$STAG] WARNING: gate margin unavailable"; fi
+      echo "[$STAG] overall=$SOVER section_aware=$SSECT gate: $SGATE  (BEST $best_tag: overall=$best gate: $best_gate)"
+      senv="-"; [ -s "$WORK/best.env.json" ] && senv="$WORK/best.env.json"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$STAG" "$SOVER" "$SMARG" "$SGATE" "$best_params" "$senv" "$SSECT" "$best_tag" 1 "$ALT" >"$WORK/shape.tsv"
+      memcall record-step "${MEM_ARGS[@]}" --workdir "$WORK" --run-id "$RUN_ID" --tag "$STAG" --tsv shape.tsv --kind shape
+      if SPICK="$("$PY" "$LOOP" shape "$WORK/iters.tsv" "$best_tag" "$WORK/shape.tsv")"; then
+        read -r WIN_SHAPE WIN_TAG <<<"$SPICK"
+        if [ "$WIN_TAG" = "$STAG" ]; then
+          echo "[$STAG] bass shape $ALT beats $KEPT_SHAPE beyond noise ($SOVER vs $best) -> --bass-shape $ALT"
+          cp "$WORK/$STAG.strudel" "$WORK/best.strudel"; cp "$SW" "$WORK/best.wav"; cp "$SC" "$WORK/best.cmp.json"
+          best="$SOVER"; best_gate="$SGATE"; BSHAPE="$ALT"; BEST_TSV="shape.tsv"; BEST_REC_TAG="$STAG"
+        else echo "[$STAG] bass shape $ALT does not beat $KEPT_SHAPE beyond noise ($SOVER vs $best) -> keeping --bass-shape $KEPT_SHAPE"; fi
+      else echo "[$STAG] shape selection FAILED - keeping --bass-shape $KEPT_SHAPE"; RC=70; fi
+    else RC=70; echo "[$STAG] trial failed - keeping --bass-shape $KEPT_SHAPE (not recorded as tested)"; fi
+  elif [ "$SHAPE_TESTED" = 1 ]; then echo "bass shape: $BSHAPE restored from the memory (the other shape was already measured for this code version)"
+  fi
+  memcall record-best "${MEM_ARGS[@]}" --workdir "$WORK" --run-id "$RUN_ID" --tag "$BEST_REC_TAG" --tsv "$BEST_TSV" --best-env "$WORK/best.env.json"
 fi
 
 # ---- loudness stage (scripts/python/mix_dynamics.py) -----------------------------------------------------------
@@ -386,7 +435,7 @@ if [ "$MIXDYN" = 1 ] && [ -n "$best_tag" ] && [ -s "$WORK/best.wav" ] && "$PY" "
     echo "[bus] probe/derive FAILED (see $WORK/bus.probe.*.log) - the clip-limited result stays"
   fi
 fi
-echo "BEST: $best_tag overall=$best  params: $best_params"
+echo "BEST: $best_tag overall=$best  params: $best_params $BSHAPE"
 echo "  gate:    $best_gate  (margin PASS/FAIL overall section_aware floor sa_floor; BEST = largest minimum margin to the floors)"
 echo "  strudel: $WORK/best.strudel"
 [ -s "$WORK/best.master" ] && echo "  master:  $(cat "$WORK/best.master")  (final --master-gain, set by the loudness stage; the params above are the loop's)"

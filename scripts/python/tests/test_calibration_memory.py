@@ -64,7 +64,8 @@ def run_driver(tmp_path, scores, *args, mem_db: Path | None = None, extra_env=No
            "AC_CAL": str(tmp_path / "cal.py"), "AC_GATE": str(tmp_path / "gate.py"), "AC_REC": str(tmp_path / "rec.sh"),
            "AC_NODE": "/bin/bash", "AC_SETTLE_S": "0", "AC_PGREP": "false", "AC_RECORDER_WAIT_S": "0",
            "AC_REF": str(stems / "instrumental.wav"), "AC_SCORES": str(tmp_path / "scores.txt"), "AC_LOG": str(tmp_path / "gen.log"),
-           "AC_NOISE": "0.005", "AC_MEM": str(MEM), "MIDIGREP_CLICKHOUSE_DB": str(mem_db or tmp_path / "chdb")}
+           "AC_NOISE": "0.005", "AC_MEM": str(MEM), "MIDIGREP_CLICKHOUSE_DB": str(mem_db or tmp_path / "chdb"),
+           "AC_SHAPE_TRIAL": "0"}   # these tests count generator calls; the bass-shape trial has its own tests (test_bass_shape_trial.py)
     env.update(extra_env or {})
     r = subprocess.run(["/bin/bash", "-u", str(AUTO), "--stems", str(stems), "--base", "http://x/", "--mode", "synth",
                         "--bpm", "130", "--key", "C# minor", "--bars", "81", "--workdir", str(tmp_path / "work"), *args],

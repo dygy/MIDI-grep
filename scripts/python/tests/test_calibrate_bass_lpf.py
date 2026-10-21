@@ -230,8 +230,8 @@ def test_driver_runs_under_set_u_with_stubs(tmp_path, extra):
     assert r.returncode == 0, r.stderr
     best = [ln for ln in r.stdout.splitlines() if ln.startswith("BEST:")][0]
     params = best.split("params:")[1].split()
-    assert len(params) == 9, best
-    assert params[-3:] == ["0", "0", "0"]   # BL, LH (the overrides that went INTO the best render), SU (sub octave up)
+    assert len(params) == 10 and params[-1] in ("stem", "off"), best   # 9 knobs + the bass shape the best render used
+    assert params[-4:-1] == ["0", "0", "0"]   # BL, LH (the overrides that went INTO the best render), SU (sub octave up)
 
 
 def test_driver_failure_exit_code_and_best_line(tmp_path):

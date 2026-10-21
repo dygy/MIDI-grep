@@ -43,6 +43,8 @@ import clickhouse_store as CS  # noqa: E402
 
 TABLE = "midi_grep.calibration_steps"
 KNOBS = ("bass_mult", "sub_gain", "cal_lead", "lead_lpf", "hat_gain", "master_gain", "bass_lpf", "lead_hpf", "sub_up")
+SHAPES = CL.SHAPES              # generate_dynamic_strudel.py --bass-shape; the first is the generator default (wins ties)
+DEFAULT_SHAPE = SHAPES[0]
 BANDS = ("sub_bass", "bass", "low_mid", "mid", "high_mid", "high")
 MIN_PAIRS = 3                  # pairs a knob needs before its learned exponent replaces the sqrt damping
 MIN_LOG_STEP = 0.05            # same threshold calibrate_dynamic.measured_exponent uses: smaller moves are noise
@@ -105,6 +107,14 @@ def parse_knobs(text: str) -> dict[str, float]:
     return {k: float(x) for k, x in zip(KNOBS, v[:9])}
 
 
+def split_shape(text: str) -> tuple[str, str]:
+    """'BM ... SU [stem|off]' -> (the numeric knob fields, the bass shape; the generator default when absent)."""
+    v = text.split()
+    if v and v[-1] in SHAPES:
+        return " ".join(v[:-1]), v[-1]
+    return text, DEFAULT_SHAPE
+
+
 def format_knobs(k: dict[str, float]) -> str:
     out = []
     for name in KNOBS:
@@ -120,7 +130,7 @@ def step_key(run_id: str, tag: str, kind: str) -> str:
 def make_row(*, kind: str, run_id: str, tag: str, track_key: str, mode: str, knobs: dict[str, float], ctx: dict,
              cmp_json: dict | None, margin, passed, parent: str = "", alpha: float = 1.0, env: dict | None = None,
              is_best: bool = False, source: str = "live", created_at: str | None = None,
-             code: tuple[str, str] | None = None) -> dict:
+             code: tuple[str, str] | None = None, bass_shape: str = DEFAULT_SHAPE) -> dict:
     comp = (cmp_json or {}).get("comparison") or {}
     temporal = comp.get("temporal") or {}
     ob = ((cmp_json or {}).get("original") or {}).get("bands") or {}
@@ -134,6 +144,7 @@ def make_row(*, kind: str, run_id: str, tag: str, track_key: str, mode: str, kno
         "parent_tag": parent if parent not in ("-", None) else "", "alpha": _f(alpha, 1.0),
         "warm_source": ctx.get("warm_source", ""),
         **{k: _f(knobs.get(k)) for k in KNOBS[:-1]}, "sub_up": int(_f(knobs.get("sub_up"))),
+        "bass_shape": bass_shape if bass_shape in SHAPES else DEFAULT_SHAPE,
         "env_json": json.dumps(env, separators=(",", ":")) if env else "",
         "env_bars": int(env.get("bars", 0)) if env else 0,
         "overall": _f(comp.get("overall_similarity")), "section_aware": _f(comp.get("section_aware_similarity")),
@@ -256,11 +267,15 @@ def warm_start(track_key: str, mode: str, genre: str, bpm: float, key: str, bars
     cur = current_code or code_version()[0]
     own = history(track_key, mode)
     if own:
-        best = rank_best(pick_version_group(own, cur))
+        # kind 'shape' rows (the extra render of the OTHER bass shape) never seed a start by themselves: a winning one
+        # is also written as a 'best' row. They only say that the shape question was answered for this code version.
+        shape_tested = any(r["kind"] == "shape" and r["code_version"] == cur for r in own)
+        best = rank_best(pick_version_group([r for r in own if r["kind"] != "shape"] or own, cur))
         env = json.loads(best["env_json"]) if best["env_json"] else None
         if env and int(env.get("bars", 0)) != bars:
             env = None
         return {"source": "track", "knobs": format_knobs(best), "env": env,
+                "bass_shape": best.get("bass_shape") or DEFAULT_SHAPE, "shape_tested": shape_tested,
                 "detail": f"{track_key}/{mode} best {best['kind']} {best['tag']} code {best['code_version']} "
                           f"overall {best['overall']:.4f} margin {best['margin']} ({len(own)} recorded rows)"}
     cands = [r for r in history(None, mode, genre) if r["track_key"] != track_key]
@@ -276,9 +291,11 @@ def warm_start(track_key: str, mode: str, genre: str, bpm: float, key: str, bars
         knobs = parse_knobs(format_knobs(best))
         knobs["bass_lpf"] = knobs["lead_hpf"] = knobs["sub_up"] = 0   # note-bound / hypothesis knobs: re-derived, not copied
         return {"source": "neighbour", "knobs": format_knobs(knobs), "env": None,
+                "bass_shape": DEFAULT_SHAPE, "shape_tested": False,   # a per-piece decision: re-measured, never copied
                 "detail": f"nearest {genre}/{mode} track '{near}' (distance {distance(me, _profile(by_track[near])):.3f}) "
                           f"best {best['tag']} overall {best['overall']:.4f}"}
-    return {"source": "cold", "knobs": "", "env": None, "detail": f"no recorded {genre}/{mode} history"}
+    return {"source": "cold", "knobs": "", "env": None, "bass_shape": DEFAULT_SHAPE, "shape_tested": False,
+            "detail": f"no recorded {genre}/{mode} history"}
 
 
 # ---------------------------------------------------------------- learned step sizes
@@ -345,15 +362,15 @@ def track_ctx(track_dir: Path) -> dict:
 
 def rows_from_workdir(workdir: Path, track_key: str, mode: str, ctx: dict, run_id: str, *, only_tag: str | None = None,
                       source: str = "live", created_at: str | None = None, code_version_override: str | None = None,
-                      best_tag: str | None = None) -> list[dict]:
-    tsv = workdir / "iters.tsv"
+                      best_tag: str | None = None, tsv_name: str = "iters.tsv", kind: str = "step") -> list[dict]:
+    tsv = workdir / tsv_name
     rows = []
     cv = code_version()
     if code_version_override:
         ctx = {**ctx, "code_version": code_version_override}
     for ln in tsv.read_text().splitlines():
-        f = ln.split("\t") + [""] * 9
-        tag, overall, margin, gate, params, envused, sa, parent, alpha = f[:9]
+        f = ln.split("\t") + [""] * 10
+        tag, overall, margin, gate, params, envused, sa, parent, alpha, shape = f[:10]
         if only_tag and tag != only_tag:
             continue
         cmp_json = _read_json(workdir / f"{tag}.cmp.json")
@@ -369,15 +386,16 @@ def rows_from_workdir(workdir: Path, track_key: str, mode: str, ctx: dict, run_i
         passed = None if m is None or len(g) < 2 else g[1] == "PASS"
         if cmp_json is None:
             cmp_json = {"comparison": {"overall_similarity": float(overall), "section_aware_similarity": _f(sa)}}
-        rows.append(make_row(kind="step", run_id=run_id, tag=tag, track_key=track_key, mode=mode, knobs=knobs, ctx=ctx,
+        rows.append(make_row(kind=kind, run_id=run_id, tag=tag, track_key=track_key, mode=mode, knobs=knobs, ctx=ctx,
                              cmp_json=cmp_json, margin=m, passed=passed, parent=parent, alpha=_f(alpha, 1.0), env=env,
-                             is_best=(tag == best_tag), source=source, created_at=created_at, code=cv))
+                             is_best=(tag == best_tag), source=source, created_at=created_at, code=cv,
+                             bass_shape=shape or DEFAULT_SHAPE))
         if best_tag and tag == best_tag:
             rows.append({**rows[-1], "kind": "best", "step_key": step_key(run_id, tag, "best"), "is_run_best": 1})
     return rows
 
 
-_GEN_KNOBS = re.compile(r"calibrate_dynamic\.py: ([0-9. ]+?)[;)]")
+_GEN_KNOBS = re.compile(r"calibrate_dynamic\.py: ([0-9. ]+?(?: (?:stem|off))?)[;)]")
 
 
 def promoted_row(track_dir: Path, version: str, *, source: str = "live", created_at: str | None = None) -> dict | None:
@@ -388,8 +406,9 @@ def promoted_row(track_dir: Path, version: str, *, source: str = "live", created
     m = _GEN_KNOBS.search(meta.get("generator", ""))
     if not m:
         return None
+    numeric, shape = split_shape(m.group(1))
     try:
-        knobs = parse_knobs(m.group(1))
+        knobs = parse_knobs(numeric)
     except ValueError:
         return None
     mode, ctx = meta["generation_mode"], track_ctx(track_dir)
@@ -403,7 +422,8 @@ def promoted_row(track_dir: Path, version: str, *, source: str = "live", created
         warn(f"{track_dir.name}/{version}: gate margin unavailable ({e})")
     return make_row(kind="promoted", run_id=f"promoted:{version}", tag=version, track_key=track_dir.name, mode=mode, knobs=knobs,
                     ctx=ctx, cmp_json=cmp_json, margin=margin, passed=passed, env=_read_json(vdir / "env_correction.json"),
-                    is_best=True, source=source, created_at=created_at or meta.get("created_at", "")[:19].replace("T", " ") or None)
+                    is_best=True, source=source, created_at=created_at or meta.get("created_at", "")[:19].replace("T", " ") or None,
+                    bass_shape=shape)
 
 
 # Scores before this date are on the OLD scale (time-averaged, full-mix reference, BlackHole pitch shift; CLAUDE.md
@@ -482,6 +502,8 @@ def _main() -> int:
         p = sp.add_parser(name); common(p)
         p.add_argument("--workdir", required=True); p.add_argument("--run-id", required=True)
         p.add_argument("--tag", required=True, help="the step (record-step) or the run BEST (record-best)")
+        p.add_argument("--tsv", default="iters.tsv", help="rows file inside --workdir (shape.tsv for the bass-shape trial)")
+        p.add_argument("--kind", default="step", choices=("step", "shape"), help="shape = the other-bass-shape trial render")
         if name == "record-best":
             p.add_argument("--best-env", default="")
     p = sp.add_parser("record-promoted"); p.add_argument("--track-dir", required=True); p.add_argument("--version", required=True)
@@ -496,8 +518,8 @@ def _main() -> int:
     if a.cmd in ("record-step", "record-best"):
         try:
             wd = Path(a.workdir); key = Path(a.stems).name
-            rows = rows_from_workdir(wd, key, a.mode, _ctx_from_args(a), a.run_id, only_tag=a.tag,
-                                     best_tag=a.tag if a.cmd == "record-best" else None)
+            rows = rows_from_workdir(wd, key, a.mode, _ctx_from_args(a), a.run_id, only_tag=a.tag, tsv_name=a.tsv,
+                                     kind=a.kind, best_tag=a.tag if a.cmd == "record-best" else None)
             if a.cmd == "record-best":
                 rows = [r for r in rows if r["kind"] == "best"]
                 env = _read_json(Path(a.best_env)) if a.best_env else None
@@ -527,7 +549,8 @@ def _main() -> int:
         env_path = "-"
         if w["env"] and a.env_out:
             Path(a.env_out).write_text(json.dumps(w["env"], indent=2) + "\n"); env_path = a.env_out
-        emit("\t".join([w["source"], str(CL.iteration_cap(w["source"])), w["knobs"] or "-", env_path, w["detail"]]))
+        emit("\t".join([w["source"], str(CL.iteration_cap(w["source"])), w["knobs"] or "-", env_path, w["detail"],
+                         w.get("bass_shape", DEFAULT_SHAPE), "1" if w.get("shape_tested") else "0"]))
         return 0
     if a.cmd == "responses":
         try:

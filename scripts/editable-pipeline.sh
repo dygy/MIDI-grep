@@ -328,7 +328,8 @@ run_sample_instrument() {
   [ "$cal_rc" -eq 0 ] || die "sample-instrument auto-calibrate exited $cal_rc (see $W/calibrate.log)"
   local best; best="$(grep '^BEST:' "$W/calibrate.log" | tail -1)"
   [ -n "$best" ] && [ -s "$W/best.wav" ] || die "auto-calibrate produced no BEST render (see $W/calibrate.log)"
-  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG BL LH" (8 values; BL = bass-lpf, LH = lead high-pass Hz; 0 = generator default)
+  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG BL LH SU stem|off" (BL = bass-lpf, LH = lead high-pass Hz; 0 = generator default;
+  # SU = sub octave up; the last token = the calibrator-chosen --bass-shape, carried into the stage-9 generator note below)
   echo "${best##*params: }" > "$W/best.params"
   sleep 3
 }
@@ -363,7 +364,7 @@ run_synth() {
   [ "$cal_rc" -eq 0 ] || die "synth auto-calibrate exited $cal_rc (see $W/calibrate.log)"
   local best; best="$(grep '^BEST:' "$W/calibrate.log" | tail -1)"
   [ -n "$best" ] && [ -s "$W/best.wav" ] || die "synth auto-calibrate produced no BEST render (see $W/calibrate.log)"
-  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG [BL [LH]]" (6, 7 or 8 values)
+  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG BL LH SU stem|off" (the chosen bass shape is the last token)
   echo "${best##*params: }" > "$W/best.params"
   sleep 3
 }

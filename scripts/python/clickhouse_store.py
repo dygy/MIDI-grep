@@ -141,6 +141,12 @@ MIGRATIONS = [
         ) ENGINE = MergeTree()
         ORDER BY (track_key, mode, created_at)""",
     ]),
+    # Bass shape as a calibrator-scored choice (auto-calibrate.sh): the generator's --bass-shape (stem|off) a row ran with.
+    # Old rows read back as the generator default. kind 'shape' = the one extra render that tried the other shape for
+    # the current code version (so a later run does not repeat it).
+    (3, "Calibration memory bass shape column", [
+        "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS bass_shape String DEFAULT 'stem'",
+    ]),
 ]
 
 

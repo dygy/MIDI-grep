@@ -695,7 +695,9 @@ def control_track_path(genre: str, exclude_key: str, repo_root: Path | None = No
     return None
 
 
-CALIBRATION_FIELDS = (6, 9)   # auto-calibrate.sh --start / BEST params: "BM SG CL LLPF HG MG [BL [LH [SU]]]" (SU = sub octave up 0/1)
+CALIBRATION_FIELDS = (6, 9)   # auto-calibrate.sh --start / BEST params: "BM SG CL LLPF HG MG [BL [LH [SU [stem|off]]]]" (SU = sub octave up 0/1;
+                              # the optional 10th token is the calibrator-chosen --bass-shape, only after all 9 numbers)
+BASS_SHAPES = ("stem", "off")
 
 
 def params_valid(text: str) -> bool:
@@ -705,6 +707,8 @@ def params_valid(text: str) -> bool:
     --start`` rejects it (exit 64). Such a file is stale, not migratable: the best.wav / comparison next to it
     were rendered by the old recorder and scored on the old scale, so the whole stage is rerun."""
     fields = text.split()
+    if len(fields) == CALIBRATION_FIELDS[1] + 1 and fields[-1] in BASS_SHAPES:
+        fields = fields[:-1]
     if not CALIBRATION_FIELDS[0] <= len(fields) <= CALIBRATION_FIELDS[1]:
         return False
     try:

@@ -21,7 +21,10 @@ Subcommands (stdout is machine-read by auto-calibrate.sh):
   blend  --parent "<9 knobs>" --prop "<9 knobs>" --eff "<bass_lpf lead_hpf>" --alpha A -> 9 knobs
          (BM SG CL LLPF HG MG BL LH SU; SU = sub-sine octave up, 0/1, not interpolated)
   blend-env --used <json|-> --new <json> --alpha A --out <json>
-iters.tsv columns: tag overall margin gate_out params envused sa parent alpha
+  shape  <iters.tsv> <best-tag> <shape.tsv> -> "<winner-shape> <winner-tag>": the bass-shape trial (the BEST knobs
+         rendered once with the other --bass-shape). The non-default shape wins only if it improves on the default
+         one beyond NOISE (same rule as a step); a tie keeps the default.
+iters.tsv columns: tag overall margin gate_out params envused sa parent alpha shape
 """
 from __future__ import annotations
 
@@ -44,7 +47,8 @@ MAX_ITERS = 8
 # 3 = cal1 + the two steps PATIENCE needs to see (a full step and the shortened retry after a regression).
 WARM_ITERS = 3
 WARM_SOURCES = ("track", "neighbour")      # sources that earn the short budget; "seed" / "cold" run the full MAX_ITERS
-FIELDS = ("tag", "overall", "margin", "gate_out", "params", "envused", "sa", "parent", "alpha")
+FIELDS = ("tag", "overall", "margin", "gate_out", "params", "envused", "sa", "parent", "alpha", "shape")
+SHAPES = ("stem", "off")        # generate_dynamic_strudel.py --bass-shape; the first is the generator default (wins ties)
 
 
 def iteration_cap(source: str) -> int:
@@ -74,6 +78,7 @@ class Row:
         self.passed = None if self.margin is None or len(g) < 2 else g[1] == "PASS"
         self.sa = float(d["sa"]) if d["sa"] not in ("", "n/a", "-") else 0.0
         self.alpha = float(d["alpha"]) if d["alpha"] else 1.0
+        self.shape = d["shape"] if d["shape"] in SHAPES else SHAPES[0]
 
 
 def rows_of(path: str) -> list[Row]:
@@ -125,6 +130,13 @@ def next_step(rows: list[Row], cap: int, patience: int, n: float) -> tuple:
     return ("CONTINUE", last.tag, "1")
 
 
+def choose_shape(best: Row, trial: Row, n: float) -> Row:
+    """Of the loop's BEST render and the other-bass-shape trial, the one to keep: the default shape unless the
+    other improves on it beyond noise."""
+    default, other = (best, trial) if best.shape == SHAPES[0] else (trial, best)
+    return other if improves(other, default, n) else default
+
+
 def blend_knobs(parent: list[str], prop: list[str], eff: list[float], alpha: float) -> list[str]:
     out = []
     for i, (p, q) in enumerate(zip(parent, prop)):
@@ -164,6 +176,7 @@ def main() -> int:
     x.add_argument("--patience", type=int, default=None)
     b = sp.add_parser("blend"); b.add_argument("--parent", required=True); b.add_argument("--prop", required=True)
     b.add_argument("--eff", default="0 0"); b.add_argument("--alpha", type=float, required=True)
+    h = sp.add_parser("shape"); h.add_argument("tsv"); h.add_argument("best_tag"); h.add_argument("shape_tsv")
     e = sp.add_parser("blend-env"); e.add_argument("--used", required=True); e.add_argument("--new", required=True)
     e.add_argument("--alpha", type=float, required=True); e.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -182,6 +195,10 @@ def main() -> int:
         print(*next_step(rows_of(a.tsv), a.cap, pat, noise()))
     elif a.cmd == "blend":
         print(*blend_knobs(a.parent.split(), a.prop.split(), [float(v) for v in a.eff.split()], a.alpha))
+    elif a.cmd == "shape":
+        best = next(r for r in rows_of(a.tsv) if r.tag == a.best_tag)
+        win = choose_shape(best, rows_of(a.shape_tsv)[0], noise())
+        print(win.shape, win.tag)
     elif a.cmd == "blend-env":
         new = json.loads(Path(a.new).read_text())
         used = json.loads(Path(a.used).read_text()) if a.used != "-" and Path(a.used).is_file() else None
