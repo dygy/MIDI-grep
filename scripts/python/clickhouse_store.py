@@ -18,7 +18,10 @@ from typing import Any, Dict, List, Optional
 
 # ClickHouse connection
 CLICKHOUSE_BIN = Path(__file__).parent.parent.parent / "bin" / "clickhouse"
-CLICKHOUSE_DB = Path(__file__).parent.parent.parent / ".clickhouse" / "db"
+# MIDIGREP_CLICKHOUSE_DB points the store at another database directory (tests, scratch runs); the default is the
+# repo's own .clickhouse/db.
+CLICKHOUSE_DB = Path(os.environ.get("MIDIGREP_CLICKHOUSE_DB")
+                     or Path(__file__).parent.parent.parent / ".clickhouse" / "db")
 
 # Import extract_parameters_from_code from strudel_params when available.
 # Fall back to the local definition below if strudel_params.py does not exist yet.
@@ -87,8 +90,57 @@ MIGRATIONS = [
         ) ENGINE = MergeTree()
         ORDER BY (parameter_name, created_at)""",
     ]),
-    # Add future migrations here:
-    # (2, "Add new column", ["ALTER TABLE midi_grep.runs ADD COLUMN foo String"]),
+    # Calibration memory (scripts/python/calibration_memory.py): one row per calibration step / run BEST / promoted
+    # version of scripts/auto-calibrate.sh, so the next run starts from what earlier runs learned instead of cold.
+    # `kind`: step | best | promoted. Band columns are JSON objects {band: share} (orig_bands / rend_bands).
+    # `margin` is NULL when the gate was unreadable. `step_key` = sha1(run_id|tag|kind): re-recording is a no-op.
+    (2, "Calibration memory table", [
+        """CREATE TABLE IF NOT EXISTS midi_grep.calibration_steps (
+            step_key String,
+            created_at DateTime DEFAULT now(),
+            kind String,
+            track_key String,
+            track_hash String,
+            title String,
+            genre String,
+            bpm Float64,
+            key String,
+            mode String,
+            bars UInt32,
+            code_version String,
+            git_commit String,
+            run_id String,
+            tag String,
+            parent_tag String,
+            alpha Float64,
+            warm_source String,
+            bass_mult Float64,
+            sub_gain Float64,
+            cal_lead Float64,
+            lead_lpf Float64,
+            hat_gain Float64,
+            master_gain Float64,
+            bass_lpf Float64,
+            lead_hpf Float64,
+            sub_up UInt8,
+            env_json String,
+            env_bars UInt32,
+            overall Float64,
+            section_aware Float64,
+            static_similarity Float64,
+            temporal_similarity Float64,
+            margin Nullable(Float64),
+            gate_pass Int8,
+            margin_over_chance Float64,
+            orig_bands String,
+            rend_bands String,
+            centroid_orig Float64,
+            centroid_rend Float64,
+            is_run_best UInt8,
+            source String
+        ) ENGINE = MergeTree()
+        ORDER BY (track_key, mode, created_at)""",
+    ]),
 ]
 
 
@@ -103,7 +155,8 @@ def _run_clickhouse_query(query: str) -> subprocess.CompletedProcess:
         "--path", str(CLICKHOUSE_DB),
         "--query", query
     ]
-    return subprocess.run(cmd, capture_output=True, text=True)
+    # stdin=DEVNULL: `clickhouse local` otherwise reads an inherited stdin (a pipe/heredoc) as data and can hang or fail
+    return subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
 
 def _get_schema_version() -> int:
@@ -203,7 +256,7 @@ def clickhouse_query(query: str, format: str = "JSONEachRow") -> List[Dict]:
         "--query", query,
         "--format", format
     ]
-    result = subprocess.run(cmd, capture_output=True, text=True)
+    result = subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
     if result.returncode != 0:
         print(f"ClickHouse error: {result.stderr}", file=sys.stderr)
         return []
@@ -218,26 +271,38 @@ def clickhouse_query(query: str, format: str = "JSONEachRow") -> List[Dict]:
     return rows
 
 
+def _sql_literal(v: Any) -> str:
+    """One Python value as a ClickHouse VALUES literal (None -> NULL, str escaped, bool -> 0/1, else JSON string)."""
+    if v is None:
+        return "NULL"
+    if isinstance(v, str):
+        return f"'{sanitize_sql_value(v)}'"
+    if isinstance(v, bool):
+        return str(1 if v else 0)
+    if isinstance(v, (int, float)):
+        return str(v)
+    return f"'{sanitize_sql_value(json.dumps(v))}'"
+
+
 def clickhouse_insert(table: str, data: Dict[str, Any]):
-    """Insert a row into ClickHouse. Raises RuntimeError on failure."""
+    """Insert a row into ClickHouse. Raises RuntimeError on failure; a no-op when ClickHouse is unavailable."""
     if not _ensure_clickhouse():
         return
-    cols = list(data.keys())
-    vals = []
-    for k in cols:
-        v = data[k]
-        if v is None:
-            vals.append("NULL")
-        elif isinstance(v, str):
-            vals.append(f"'{sanitize_sql_value(v)}'")
-        elif isinstance(v, bool):
-            vals.append(str(1 if v else 0))
-        elif isinstance(v, (int, float)):
-            vals.append(str(v))
-        else:
-            vals.append(f"'{sanitize_sql_value(json.dumps(v))}'")
+    clickhouse_insert_many(table, [data])
 
-    query = f"INSERT INTO {table} ({', '.join(cols)}) VALUES ({', '.join(vals)})"
+
+def clickhouse_insert_many(table: str, rows: List[Dict[str, Any]]):
+    """Insert several rows (same columns) in ONE statement. Raises RuntimeError on failure."""
+    if not rows:
+        return
+    if not _ensure_clickhouse():
+        raise RuntimeError("ClickHouse is not available (initialisation failed, see the message above)")
+    cols = list(rows[0].keys())
+    for r in rows:
+        if list(r.keys()) != cols:
+            raise ValueError("clickhouse_insert_many: rows must share the same columns")
+    values = ", ".join("(" + ", ".join(_sql_literal(r[k]) for k in cols) + ")" for r in rows)
+    query = f"INSERT INTO {table} ({', '.join(cols)}) VALUES {values}"
 
     result = _run_clickhouse_query(query)
     if result.returncode != 0:

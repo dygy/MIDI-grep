@@ -349,8 +349,8 @@ run_synth() {
     # octave up depends on the main layer (a recorded sample vs a sawtooth) - Regime CLT synth seeded with the sample's
     # su=1 scored 0.682 and FAILED the gate, while its own octave trial from su=0 reached 0.763. Synth re-trials it.
     knobs="$(cut -d' ' -f1-8 "$PW/sample-instrument/best.params")"
-    start_arg=(--start "$knobs")
-    log "stage 7: synth calibration starts from the sample-instrument knobs: $knobs"
+    start_arg=(--seed "$knobs")   # a FALLBACK: ClickHouse (this track's synth best, else the nearest track's) wins when it has one
+    log "stage 7: synth calibration seed (used only when ClickHouse has no synth history for it): sample-instrument knobs $knobs"
   else
     log "stage 7: no sample-instrument calibration found; synth calibration starts from cold-start defaults"
   fi
@@ -423,6 +423,9 @@ score_and_promote() {
     --render "$RENDER_NOTE; -d $DUR; pack served from $BASE/" \
     --compare "compare_audio.py -d $COMPARE_SECONDS --strudel vs instrumental.wav (detector-stamped)" ${env_arg[@]+"${env_arg[@]}"})" \
     || die "stage 9 promote failed for $mode"
+  # calibration memory: the promoted version (knobs + scores + env) becomes a recorded row; a failure here never stops the run
+  "$PY" "$SP/calibration_memory.py" record-promoted --track-dir "$TRACK" --version "$(basename "$vdir")" 2>&1 | grep -v '^  \[ClickHouse\]' >&2 \
+    || log "stage 9: WARNING - could not record $(basename "$vdir") in ClickHouse"
   "$PY" - "$W/result.json" "$mode" "$vdir" "$STR" "$WAV" "$CJ" "$edit_rc" "$gate_rc" "$W/gate.txt" <<'PYR'
 import json, sys
 out, mode, vdir, strudel, wav, cj, edit_rc, gate_rc, gate_txt = sys.argv[1:10]

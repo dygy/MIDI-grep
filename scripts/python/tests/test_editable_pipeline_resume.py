@@ -179,11 +179,11 @@ def test_synth_does_not_start_from_an_old_format_sample_instrument_params(repo):
     _seed_best(repo, "sample-instrument", OLD)
     run(repo, "--local", "--mode", "synth")
     ac = [c for c in calls(repo) if c.startswith("auto-calibrate")]
-    assert ac and "--start" not in ac[0], ac            # auto-calibrate --start would exit 64 on the 9-field line
+    assert ac and "--seed" not in ac[0], ac            # auto-calibrate --seed would exit 64 on the 9-field line
     _seed_best(repo, "sample-instrument", NEW)
     (repo.calls).write_text("")
     run(repo, "--local", "--mode", "synth")
-    assert f"--start {NEW}" in [c for c in calls(repo) if c.startswith("auto-calibrate")][0]
+    assert f"--seed {NEW}" in [c for c in calls(repo) if c.startswith("auto-calibrate")][0]
 
 
 def test_synth_is_seeded_with_the_sample_magnitudes_but_not_its_sub_octave(repo):
@@ -192,4 +192,4 @@ def test_synth_is_seeded_with_the_sample_magnitudes_but_not_its_sub_octave(repo)
     (repo.calls).write_text("")
     run(repo, "--local", "--mode", "synth")
     ac = [c for c in calls(repo) if c.startswith("auto-calibrate")][0]
-    assert f"--start {NEW}" in ac and f"--start {NEW} 1" not in ac, ac
+    assert f"--seed {NEW}" in ac and f"--seed {NEW} 1" not in ac, ac

@@ -15,7 +15,7 @@ Rules (all comparisons use ``NOISE`` = eval/thresholds.yaml ``calibration_noise`
                 (the caller's ``--iters N`` replaces MAX_ITERS as the hard cap).
 
 Subcommands (stdout is machine-read by auto-calibrate.sh):
-  max-iters | patience
+  max-iters | patience | cap <track|neighbour|seed|cold>   (cap: the budget a warm start earns, WARM_ITERS)
   select <iters.tsv>                      -> best tag
   next   <iters.tsv> --cap N              -> "STOP <reason>" | "CONTINUE <parent-tag> <alpha>"
   blend  --parent "<9 knobs>" --prop "<9 knobs>" --eff "<bass_lpf lead_hpf>" --alpha A -> 9 knobs
@@ -39,7 +39,17 @@ PATIENCE = 2
 # MAX_ITERS = 8: the repo's VAGABUNDO/Regime runs reached their best by iteration 3-5 at ~1.5 min per
 # generate+render+compare; 8 leaves room for a revert-and-retry cycle or two and bounds a mode to ~12 min.
 MAX_ITERS = 8
+# WARM_ITERS = 3: a warm start (this track's own recorded best, or the nearest recorded track's) renders that best
+# as cal1 and needs only a verifying step plus one correction; the observed warm-vs-cold cost was 5-8 renders.
+# 3 = cal1 + the two steps PATIENCE needs to see (a full step and the shortened retry after a regression).
+WARM_ITERS = 3
+WARM_SOURCES = ("track", "neighbour")      # sources that earn the short budget; "seed" / "cold" run the full MAX_ITERS
 FIELDS = ("tag", "overall", "margin", "gate_out", "params", "envused", "sa", "parent", "alpha")
+
+
+def iteration_cap(source: str) -> int:
+    """Iteration budget implied by where cal1's knobs came from (see WARM_ITERS)."""
+    return min(WARM_ITERS, MAX_ITERS) if source in WARM_SOURCES else MAX_ITERS
 
 
 def noise() -> float:
@@ -147,6 +157,7 @@ def main() -> int:
     sp = ap.add_subparsers(dest="cmd", required=True)
     sp.add_parser("max-iters")
     sp.add_parser("patience")
+    c = sp.add_parser("cap"); c.add_argument("source", help="warm-start source: track | neighbour | seed | cold")
     sp.add_parser("noise")
     s = sp.add_parser("select"); s.add_argument("tsv")
     x = sp.add_parser("next"); x.add_argument("tsv"); x.add_argument("--cap", type=int, required=True)
@@ -160,6 +171,8 @@ def main() -> int:
         print(MAX_ITERS)
     elif a.cmd == "patience":
         print(int(os.environ.get("AC_PATIENCE", PATIENCE)))
+    elif a.cmd == "cap":
+        print(iteration_cap(a.source))
     elif a.cmd == "select":
         print(select(rows_of(a.tsv), noise()).tag)
     elif a.cmd == "noise":

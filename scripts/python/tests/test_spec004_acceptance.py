@@ -943,9 +943,9 @@ def test_synth_stage_runs_its_own_calibration_loop():
 
 
 def test_synth_start_knobs_pass_through_unsplit_for_7_8_or_9_fields():
-    """Static: best.params (7, 8 or 9 fields) goes to --start intact; the driver never splits it."""
+    """Static: best.params (7, 8 or 9 fields) goes to --seed (the fallback of --start) intact; the driver never splits it."""
     body = _run_synth_body()
-    assert '--start "$knobs"' in body
+    assert '--seed "$knobs"' in body
     assert not re.search(r"set -- \$knobs|--bass-mult|--bass-lpf|--lead-hpf|read -r", body)
 
 

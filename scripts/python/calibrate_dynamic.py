@@ -224,6 +224,10 @@ def main() -> int:
                          "section_windows) as JSON here")
     ap.add_argument("--env-correction-in", type=Path, default=None,
                     help="previous env-correction JSON; new curves are multiplied onto it")
+    ap.add_argument("--responses", type=Path, default=None,
+                    help="JSON {knob: damping exponent} LEARNED from recorded (knob change -> band share change) pairs "
+                         "(calibration_memory.py responses): replaces the fixed 0.5 (sqrt) exponent of sub_gain / "
+                         "bass_mult / cal_lead where present. Absent file or knob = the sqrt damping, unchanged")
     ap.add_argument("--bpm", type=float, default=None,
                     help="generator BPM for bar mapping (default: measured original tempo)")
     ap.add_argument("--bars", type=int, default=None,
@@ -253,6 +257,16 @@ def main() -> int:
     comp = data["comparison"]
 
     eps = 1e-4
+
+    learned: dict[str, float] = {}
+    if args.responses is not None:
+        try:
+            learned = {k: float(v) for k, v in json.loads(args.responses.read_text()).items()}
+        except (OSError, ValueError, AttributeError) as e:
+            print(f"WARNING: --responses {args.responses} unreadable ({e}); using the fixed sqrt damping", file=sys.stderr)
+
+    def strength(knob: str) -> float:
+        return learned.get(knob, 0.5)
 
     def ratio(band_keys: list[str]) -> float:
         o = sum(ob.get(k, 0.0) for k in band_keys)
@@ -301,7 +315,7 @@ def main() -> int:
         nxt["sub_up"] = 1
         nxt["sub_gain"] = round(cur["sub_gain"], 3)
     else:
-        nxt["sub_gain"] = round(cur["sub_gain"] * damp(r_bass if args.sub_up else r_sub), 3)
+        nxt["sub_gain"] = round(cur["sub_gain"] * damp(r_bass if args.sub_up else r_sub, strength=strength("sub_gain")), 3)
     synth = args.mode == "synth"
     r_lm_bass = float("nan")
     cur_blpf, cur_lhpf = int(cur["bass_lpf"]), int(cur["lead_hpf"])
@@ -371,14 +385,14 @@ def main() -> int:
     # --- bass (60-250 Hz): body of the pitched bass sample --------------------------------
     # One lever per step: while the cutoff moves, bass-mult may fall but not rise (a rise would
     # re-inflate the very harmonics the cutoff is removing; cal2->cal3 did exactly that: +3%).
-    bass_corr = damp(r_sub if args.sub_up else r_bass)     # see the layer/band assignment at the sub-gain step
+    bass_corr = damp(r_sub if args.sub_up else r_bass, strength=strength("bass_mult"))     # see the layer/band assignment at the sub-gain step
     if flipping:
         bass_corr = 1.0       # the octave flip IS this step's bass/sub rebalance (it moved ~30 points of share in one go)
     if bass_lpf_moved:
         bass_corr = min(bass_corr, 1.0)
     nxt["bass_mult"] = round(clamp(cur["bass_mult"] * bass_corr, 0.2, 1.3), 3)
     # --- lead/melodic body: raise gain when low_mid+mid is deficient -----------------------
-    nxt["cal_lead"] = round(clamp(cur["cal_lead"] * damp(r_body, hi=1.6), 0.4, 3.0), 3)
+    nxt["cal_lead"] = round(clamp(cur["cal_lead"] * damp(r_body, strength=strength("cal_lead"), hi=1.6), 0.4, 3.0), 3)
     # --- brightness: move the lead low-pass toward centroid parity ------------------------
     # GENTLE + dead-banded: the lead is only ONE source of the highs (hats/drums live there
     # too), and over-darkening tanks the brightness metric hard (a 28% lpf cut dropped it

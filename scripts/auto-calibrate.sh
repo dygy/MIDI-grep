@@ -52,6 +52,12 @@ CMP="${AC_CMP:-$ROOT/scripts/python/compare_audio.py}"
 GATE="${AC_GATE:-$ROOT/scripts/python/gate_margin.py}"
 LOOP="${AC_LOOP:-$ROOT/scripts/python/calibrate_loop.py}"
 MIXD="${AC_MIXD:-$ROOT/scripts/python/mix_dynamics.py}"
+# Calibration memory (ClickHouse, scripts/python/calibration_memory.py): warm start, per-step records, learned step sizes.
+# AC_MEM=off (or --no-memory) disables it; every failure inside it is logged loudly and the run continues cold/unrecorded.
+# When the compare tool is stubbed (AC_CMP, the tests) and AC_MEM is not given, the memory is OFF: a stub run must never
+# write its rows into the real database. Tests of the memory itself pass AC_MEM=<script> and MIDIGREP_CLICKHOUSE_DB=<tmp>.
+[ -z "${AC_MEM:-}" ] && [ -n "${AC_CMP:-}" ] && AC_MEM=off
+MEM="${AC_MEM:-$ROOT/scripts/python/calibration_memory.py}"; MEM_ON=1; [ "$MEM" = off ] && MEM_ON=0
 # Renderer selection lives in ONE place (scripts/python/renderer.py: MIDIGREP_RENDERER, default offline = exact
 # Strudel OfflineAudioContext render; blackhole = real-time capture). A bad value exits 2 there.
 RENDERER_PY="${AC_RENDERER_PY:-$ROOT/scripts/python/renderer.py}"
@@ -63,7 +69,7 @@ PGREP="${AC_PGREP:-pgrep}"; WAIT_MAX="${AC_RECORDER_WAIT_S:-120}"   # tests: AC_
 RC=0   # exit status: 70 when any iteration failed (GEN/RENDER/CMP FAILED, recorder wait abort); BEST is still printed
 
 STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" BARS="78"
-MIXDYN=1; ENV_START=""; ITERS="" DUR="" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
+MIXDYN=1; ENV_START=""; ITERS=""; START_GIVEN=0; SEED=""; WARM_SOURCE="cold" DUR="" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
 WORK="${TMPDIR:-/tmp}/auto-calibrate.$$"
 # starting knobs (generator defaults are sane cold-start values)
 BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" BL="0" LH="0" SU="0"   # BL = bass low-pass override Hz, LH = lead high-pass Hz; 0 = generator/analysis default
@@ -77,7 +83,9 @@ while [ $# -gt 0 ]; do case "$1" in
   --mode) MODE="$2"; shift 2;;
   --no-mix-dynamics) MIXDYN=0; shift;;
   --workdir) WORK="$2"; shift 2;;
-  --start) BL=0; LH=0; SU=0; read -r BM SG CL LLPF HG MG BL LH SU EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH [SU]]]" (6 to 9 fields; SU = sub-sine octave up 0/1)
+  --no-memory) MEM_ON=0; shift;;
+  --seed) SEED="$2"; shift 2;;     # fallback knobs ("BM SG CL LLPF HG MG [BL [LH]]"): used only when the memory has neither this track nor a neighbour
+  --start) START_GIVEN=1; BL=0; LH=0; SU=0; read -r BM SG CL LLPF HG MG BL LH SU EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH [SU]]]" (6 to 9 fields; SU = sub-sine octave up 0/1)
     # The pre-"no vocals" format had a CV field after MG ("... MG CV [BL [LH]]"). A 9-field start is that old format;
     # 7/8 fields would silently shift CV into BL, but a real bass/lead cutoff is 0 or >= 20 Hz, a cal-vocal is ~1.
     [ -z "${EXTRA:-}" ] || { echo "--start: more than 9 fields - the old CV (cal-vocal) field was removed; drop the 7th value" >&2; exit 64; }
@@ -115,9 +123,50 @@ esac
 # the compare window (compare_audio reads min(window, both files)).
 SONG_S="$("$PY" -c 'import math, sys; print(f"{math.floor(int(sys.argv[1]) * 240 / float(sys.argv[2]) * 1000) / 1000:g}")' "$BARS" "$BPM")" || exit 2
 [ -n "$DUR" ] || DUR="$SONG_S"
-[ -n "$ITERS" ] || ITERS="$("$PY" "$LOOP" max-iters)" || exit 2
+ITERS_GIVEN="$ITERS"
 mkdir -p "$WORK"
 echo "workdir: $WORK"
+
+# memcall SUBCOMMAND ...: run a memory subcommand; its stderr (progress + WARNINGs) is shown, its failure never stops the run.
+memcall() {
+  [ "$MEM_ON" = 1 ] || return 0
+  local out rc; out="$("$PY" "$MEM" "$@" 2>&1)"; rc=$?
+  [ -z "$out" ] || printf '%s\n' "$out" | grep -v '^  \[ClickHouse\]' >&2
+  [ "$rc" -eq 0 ] || echo "[memory] WARNING: '$1' exited $rc - continuing without it" >&2
+  return 0
+}
+TRACK_KEY="$(basename "$STEMS")"; RUN_ID="$(date +%Y%m%dT%H%M%S).$$"
+MEM_ARGS=(--stems "$STEMS" --mode "$MODE" --genre "$GENRE" --bpm "$BPM" --bars "$BARS")
+[ -n "$KEY" ] && MEM_ARGS+=(--key "$KEY")
+RESP_ARG=()
+# Warm start: knobs (+ per-bar env correction) from ClickHouse - this track+mode's best, else the nearest recorded track's,
+# else --seed, else the cold defaults above. An explicit --start / --env-start from the caller wins over the memory.
+if [ "$START_GIVEN" = 0 ] && [ "$MEM_ON" = 1 ]; then
+  WARM="$("$PY" "$MEM" warm-start "${MEM_ARGS[@]}" --track-key "$TRACK_KEY" --env-out "$WORK/warm.env.json" 2> >(grep -v '^  \[ClickHouse\]' >&2))" || WARM=""
+  if [ -n "$WARM" ]; then
+    IFS=$'\t' read -r WARM_SOURCE WARM_CAP WARM_KNOBS WARM_ENV WARM_DETAIL <<<"$WARM"
+    if [ "$WARM_SOURCE" != cold ]; then
+      read -r BM SG CL LLPF HG MG BL LH SU <<<"$WARM_KNOBS"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"
+      [ -z "$ENV_START" ] && [ "$WARM_ENV" != "-" ] && ENV_START="$WARM_ENV"
+    fi
+    echo "warm start: $WARM_SOURCE - $WARM_DETAIL"
+  else
+    echo "[memory] WARNING: warm-start produced no answer - cold start" >&2
+  fi
+fi
+if [ "$WARM_SOURCE" = cold ] && [ -n "$SEED" ]; then
+  WARM_SOURCE=seed; read -r BM SG CL LLPF HG MG BL LH SU <<<"$SEED"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"
+  echo "warm start: seed - caller's fallback knobs: $SEED"
+fi
+[ "$START_GIVEN" = 1 ] && WARM_SOURCE=explicit
+# Budget from history: a warm start earns calibrate_loop.WARM_ITERS, anything else the full MAX_ITERS; --iters N always wins.
+if [ -z "$ITERS_GIVEN" ]; then ITERS="$("$PY" "$LOOP" cap "$([ "$WARM_SOURCE" = explicit ] && echo cold || echo "$WARM_SOURCE")")" || exit 2; fi
+echo "start: $WARM_SOURCE; knobs: $BM $SG $CL $LLPF $HG $MG $BL $LH $SU; iteration cap: $ITERS"
+MEM_ARGS+=(--warm-source "$WARM_SOURCE")
+if [ "$MEM_ON" = 1 ]; then   # learned per-knob damping exponents (empty file / no history = the fixed sqrt damping)
+  memcall responses --mode "$MODE" --out "$WORK/responses.json"
+  [ -s "$WORK/responses.json" ] && RESP_ARG=(--responses "$WORK/responses.json")
+fi
 
 # gen_piece OUT SUMMARY_JSON LOG [extra generator args]: one generation with the CURRENT knob variables
 # (BM SG CL LLPF HG MG BL LH SU) - the loop and the final mix-dynamics stage share it, so they cannot drift apart.
@@ -195,13 +244,14 @@ while [ "$i" -lt "$ITERS" ]; do
   ENVUSED="-"; if [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ]; then cp "$PREV_ENV" "$WORK/$TAG.envused.json"; ENVUSED="$WORK/$TAG.envused.json"; fi
   printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$TAG" "$OVER" "$MARG" "$GATE_OUT" "$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU" "$ENVUSED" "$SECT" "${PARENT:--}" "$ALPHA" >>"$WORK/iters.tsv"
   echo "$EBL $ELH" >"$WORK/$TAG.eff"
+  memcall record-step "${MEM_ARGS[@]}" --workdir "$WORK" --run-id "$RUN_ID" --tag "$TAG"
 
   # calibrate -> next knobs
   ENV_OUT="$WORK/$TAG.env.json"
   envin_arg=(); [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && envin_arg=(--env-correction-in "$PREV_ENV")
   parent_arg=(); if [ -n "$PARENT" ] && [ -f "$WORK/$PARENT.cmp.json" ]; then
     read -r PEBL PELH <"$WORK/$PARENT.eff"; parent_arg=(--parent-comparison "$WORK/$PARENT.cmp.json" --parent-bass-lpf "$PEBL" --parent-lead-hpf "$PELH"); fi
-  CLI=$("$PY" "$CAL" --comparison "$CJ" ${parent_arg[@]+"${parent_arg[@]}"} --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
+  CLI=$("$PY" "$CAL" --comparison "$CJ" ${parent_arg[@]+"${parent_arg[@]}"} ${RESP_ARG[@]+"${RESP_ARG[@]}"} --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
     --bass-mult "$BM" --sub-gain "$SG" --sub-up "$ESU" --sub-up-locked "$SULOCK" --cal-lead "$CL" --lead-lpf "$LLPF" \
     --hat-gain "$HG" --master-gain "$MG" \
     --mode "$MODE" --bass-lpf "$EBL" --bass-lpf-max "$EBLMAX" --bass-note-max-hz "$EBHZ" \
@@ -251,6 +301,7 @@ if [ -n "$SEL" ]; then
   fi
   rm -f "$WORK/best.env.json"; [ "$best_envused" != "-" ] && [ -s "$best_envused" ] && cp "$best_envused" "$WORK/best.env.json"
   cp "$WORK/$best_tag.strudel" "$WORK/best.strudel"; cp "$WORK/$best_tag.wav" "$WORK/best.wav"; cp "$WORK/$best_tag.cmp.json" "$WORK/best.cmp.json"
+  memcall record-best "${MEM_ARGS[@]}" --workdir "$WORK" --run-id "$RUN_ID" --tag "$best_tag" --best-env "$WORK/best.env.json"
 fi
 
 # ---- loudness stage (scripts/python/mix_dynamics.py) -----------------------------------------------------------
