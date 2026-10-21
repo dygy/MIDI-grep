@@ -107,6 +107,17 @@ fresh() { [ "$("${PH[@]}" newer "$@" 2>/dev/null)" = fresh ]; }
 # CV field) and makes `auto-calibrate.sh --start` exit 64; it is STALE, not migrated: the best.wav/comparison beside it
 # came from the old recorder and the old score, so dropping the CV field would only keep a result nobody can trust.
 params_ok() { [ "$("${PH[@]}" params-valid "$1" 2>/dev/null)" = ok ]; }
+# code_ok <workdir>: the best render there was calibrated by the CURRENT generator/calibrator/metric code (best.code,
+# calibration_memory.py code-version). A best from older code is rerun - otherwise a code change never reaches the output.
+CODE_VER=""
+code_ok() {
+  [ -n "$CODE_VER" ] || CODE_VER="$("$PY" "$SP/calibration_memory.py" code-version 2>/dev/null)"
+  [ -n "$CODE_VER" ] && [ "$(cat "$1/best.code" 2>/dev/null)" = "$CODE_VER" ]
+}
+stale_reason() {
+  if [ -s "$1/best.params" ] && ! params_ok "$1/best.params"; then echo "best.params is in the old (CV) format"
+  elif [ -s "$1/best.params" ]; then echo "best render is from other code (stamp '$(cat "$1/best.code" 2>/dev/null)', now '$CODE_VER')"; fi
+}
 # base_ok <samples.json> <expected-base>: the baked _base matches the hosting we are about to use
 base_ok() { [ -s "$1" ] && [ "$("$PY" -c "import json,sys;print(json.load(open(sys.argv[1])).get('_base',''))" "$1")" = "$2" ]; }
 
@@ -313,9 +324,9 @@ preflight_render() {
 # ---------------------------------------------------------------- stage 7: generate + calibrate
 run_sample_instrument() {
   local W="$PW/sample-instrument"; mkdir -p "$W"
-  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params"; then
+  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params" && code_ok "$W"; then
     log "stage 7 skip (sample-instrument): best render exists in $W"; return 0; fi
-  [ ! -s "$W/best.params" ] || params_ok "$W/best.params" || log "stage 7: $W/best.params is in the old (CV) format - stale, rerunning"
+  local why; why="$(stale_reason "$W")"; [ -z "$why" ] || log "stage 7 (sample-instrument): $why - stale, rerunning"
   rm -f "$W/result.json"   # a rerun invalidates what stages 8-9 derived from the old best render
   preflight_render
   log "stage 7: auto-calibrate sample-instrument (iters cap=${ITERS:-default})"
@@ -331,14 +342,15 @@ run_sample_instrument() {
   # "BEST: calN overall=X  params: BM SG CL LLPF HG MG BL LH SU stem|off" (BL = bass-lpf, LH = lead high-pass Hz; 0 = generator default;
   # SU = sub octave up; the last token = the calibrator-chosen --bass-shape, carried into the stage-9 generator note below)
   echo "${best##*params: }" > "$W/best.params"
+  code_ok "$W" || echo "$CODE_VER" > "$W/best.code"
   sleep 3
 }
 
 run_synth() {
   local W="$PW/synth"; mkdir -p "$W"
-  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params"; then
+  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params" && code_ok "$W"; then
     log "stage 7 skip (synth): best render exists in $W"; return 0; fi
-  [ ! -s "$W/best.params" ] || params_ok "$W/best.params" || log "stage 7: $W/best.params is in the old (CV) format - stale, rerunning"
+  local why; why="$(stale_reason "$W")"; [ -z "$why" ] || log "stage 7 (synth): $why - stale, rerunning"
   rm -f "$W/result.json"
   preflight_render
   # Start from the sample-instrument BEST knobs when present (6, 7 or 8 fields, passed to --start UNSPLIT);
@@ -366,6 +378,7 @@ run_synth() {
   [ -n "$best" ] && [ -s "$W/best.wav" ] || die "synth auto-calibrate produced no BEST render (see $W/calibrate.log)"
   # "BEST: calN overall=X  params: BM SG CL LLPF HG MG BL LH SU stem|off" (the chosen bass shape is the last token)
   echo "${best##*params: }" > "$W/best.params"
+  code_ok "$W" || echo "$CODE_VER" > "$W/best.code"
   sleep 3
 }
 
@@ -374,6 +387,7 @@ run_synth() {
 # report.html (idempotent per artifact). The mode's calibration workdir supplies the iteration history.
 report_stage() {
   local mode="$1" vdir="$2" W="$PW/$1" gate_arg=()
+  [ -z "$vdir" ] || vdir="$TRACK/$(basename "$vdir")"   # result.json may hold another checkout's absolute path
   [ -n "$vdir" ] && [ -d "$vdir" ] || die "stage 10 ($mode): promoted version dir missing: '$vdir'"
   [ -s "$W/gate.txt" ] && gate_arg=(--gate-verdict "$(jget "$W/result.json" gate_verdict)" \
     --gate-message "$(tr '\n' ' ' < "$W/gate.txt")")

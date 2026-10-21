@@ -75,10 +75,15 @@ def _local_imports(path: Path, seen: set[Path]) -> None:
 
 
 def code_version() -> tuple[str, str]:
-    """(content hash of the generator + calibrator and their local imports, git short commit)."""
+    """(content hash of everything that decides a calibrated render - generator, calibrator, the loop driver, the
+    mix stage, the metric - and their local imports, git short commit)."""
     seen: set[Path] = set()
-    for f in ("generate_dynamic_strudel.py", "calibrate_dynamic.py"):
+    for f in ("generate_dynamic_strudel.py", "calibrate_dynamic.py", "calibrate_loop.py", "mix_dynamics.py",
+              "compare_audio.py"):
         _local_imports(HERE / f, seen)
+    driver = ROOT / "scripts" / "auto-calibrate.sh"
+    if driver.is_file():
+        seen.add(driver)
     h = hashlib.sha1()
     for p in sorted(seen):
         h.update(p.name.encode()); h.update(p.read_bytes())
@@ -576,7 +581,12 @@ def _main() -> int:
     p = sp.add_parser("responses"); p.add_argument("--mode", required=True); p.add_argument("--out", required=True)
     p = sp.add_parser("backfill"); p.add_argument("--cache", default=str(ROOT / ".cache" / "stems"))
     sp.add_parser("summary")
+    sp.add_parser("code-version", help="print the code hash a calibrated render is stamped with")
     a = ap.parse_args()
+
+    if a.cmd == "code-version":
+        print(code_version()[0], file=sys.__stdout__)   # main() sends stdout to stderr; this is the one machine-read line
+        return 0
 
     if a.cmd in ("record-step", "record-best"):
         try:

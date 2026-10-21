@@ -152,11 +152,16 @@ OLD = "0.4 0.7 1.0 5000 0.1 0.6 1.0 422 300"
 NEW = "0.4 0.7 1.0 5000 0.1 0.6 422 300"
 
 
-def _seed_best(repo, mode: str, params: str) -> Path:
+def _code_version() -> str:
+    return subprocess.run([sys.executable, str(SCRIPTS / "calibration_memory.py"), "code-version"],
+                          capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _seed_best(repo, mode: str, params: str, code: str | None = None) -> Path:
     w = repo.pw / mode
     w.mkdir(parents=True, exist_ok=True)
     for n, body in (("best.strudel", "//"), ("best.wav", "w"), ("best.cmp.json", "{}"), ("best.params", params + "\n"),
-                    ("result.json", "{}")):
+                    ("result.json", "{}"), ("best.code", (code if code is not None else _code_version()) + "\n")):
         (w / n).write_text(body)
     return w
 
@@ -193,3 +198,14 @@ def test_synth_is_seeded_with_the_sample_magnitudes_but_not_its_sub_octave(repo)
     run(repo, "--local", "--mode", "synth")
     ac = [c for c in calls(repo) if c.startswith("auto-calibrate")][0]
     assert f"--seed {NEW}" in ac and f"--seed {NEW} 1" not in ac, ac
+
+
+# --- a best render calibrated by other code is rerun (a code change must reach the output) ----------------
+@pytest.mark.parametrize("stamp", ["0000000000", ""])
+def test_best_from_other_code_reruns_the_stage_and_invalidates_its_result(repo, stamp):
+    w = _seed_best(repo, "synth", NEW, code=stamp)
+    if not stamp:
+        (w / "best.code").unlink()                    # a best written before renders were stamped
+    r = run(repo, "--local", "--mode", "synth")
+    assert any(c.startswith("auto-calibrate") for c in calls(repo)), r.stderr
+    assert "from other code" in r.stderr and not (w / "result.json").exists()
