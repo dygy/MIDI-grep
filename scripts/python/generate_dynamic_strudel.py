@@ -585,6 +585,10 @@ def main() -> int:
     ap.add_argument("--lead-sound", default=None,
                     help="tracklead (custom, sample-instrument default) or a library sound "
                          "(synth default: the genre palette's lead pick)")
+    ap.add_argument("--lead-synth", type=Path, default=None,
+                    help="synth mode: JSON lead spec fitted by fit_lead_synth.py (lead_synth.spec_from) — the lead and "
+                         "harmony voices play a plain oscillator with the fitted unison/detune/ADSR/filter-envelope "
+                         "controls instead of the palette preset; its lpf replaces --lead-lpf, its gain scales the lead")
     ap.add_argument("--drum-mode", choices=["extracted", "bank", "realstem"], default="extracted",
                     help="extracted=DRUMS GENERATOR — the track's OWN extracted kick/snare/hat one-shots "
                          "(bd/sd/hh/oh) triggered by the detected, editable rhythm pattern (real sounds + "
@@ -702,6 +706,17 @@ def main() -> int:
     else:
         bass_sound = args.bass_sound or "trackbass"
         lead_sound = args.lead_sound or "tracklead"
+
+    # the lead's sound + low-pass as one chain: the palette preset, or the fitted synth controls
+    lead_voice = f'.s("{lead_sound}").lpf({args.lead_lpf})'
+    lead_synth_gain = 1.0
+    if args.lead_synth is not None:
+        if not synth:
+            ap.error("--lead-synth needs --mode synth")
+        import lead_synth as LS
+        spec = json.loads(args.lead_synth.read_text())
+        lead_voice = LS.lead_chain(spec)
+        lead_synth_gain = float(spec.get("gain", 1.0))
 
     nbars = args.num_bars
     cps = args.bpm / 60 / 4
@@ -1040,18 +1055,18 @@ def main() -> int:
         # lpf tames high-mid top while keeping mid body; hpf clears low bleed.
         # clip(1.3) sustains notes slightly past their step so the monophonic lead's envelope
         # is smoother (closer to the original melodic's sustained contour, lifting shape corr).
-        lead_code = (f'note(cat(...lead)).s("{lead_sound}")'
-                     f'.lpf({args.lead_lpf}).hpf({args.lead_hpf}).clip(1.3).room({lead_fx["room"]})'
-                     f'{gain_pattern(lead_env, lead_g * M)}')
+        lead_code = (f'note(cat(...lead)){lead_voice}'
+                     f'.hpf({args.lead_hpf}).clip(1.3).room({lead_fx["room"]})'
+                     f'{gain_pattern(lead_env, lead_g * lead_synth_gain * M)}')
         channels.append(("LEAD", "melody/harmony — edit notes in `lead`", lead_code))
     if chord_bars:
         L += [js_array("chords", chord_bars), ""]
         # same instrument, filters, room and loudness contour as the lead; the base gain is the lead's scaled by the
         # transcribed harmony-vs-melody amplitude ratio (harmony_notes), then the calibrator's cal-chord lever.
         chord_g = round(lead_g * harmony_info["gain_ratio"] * args.cal_chord, 4)
-        chord_code = (f'note(cat(...chords)).s("{lead_sound}")'
-                      f'.lpf({args.lead_lpf}).hpf({args.lead_hpf}).clip(1.3).room({lead_fx["room"]})'
-                      f'{gain_pattern(lead_env, chord_g * M)}')
+        chord_code = (f'note(cat(...chords)){lead_voice}'
+                      f'.hpf({args.lead_hpf}).clip(1.3).room({lead_fx["room"]})'
+                      f'{gain_pattern(lead_env, chord_g * lead_synth_gain * M)}')
         channels.append(("CHORDS", "harmony under the lead — edit chords in `chords`", chord_code))
 
     if drum_realstem:

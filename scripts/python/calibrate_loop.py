@@ -21,6 +21,8 @@ Subcommands (stdout is machine-read by auto-calibrate.sh):
   blend  --parent "<9 knobs>" --prop "<9 knobs>" --eff "<bass_lpf lead_hpf>" --alpha A -> 9 knobs
          (BM SG CL LLPF HG MG BL LH SU; SU = sub-sine octave up, 0/1, not interpolated)
   blend-env --used <json|-> --new <json> --alpha A --out <json>
+  leadfit <palette.tsv> <trial.tsv> -> "keep|palette <tag>": the synth lead-fit trial (fitted oscillator lead vs the
+         palette lead of the BEST render); kept only if overall > palette + noise and section-aware >= palette - 0.005.
   shape  <iters.tsv> <best-tag> <shape.tsv> -> "<winner-shape> <winner-tag>": the bass-shape trial (the BEST knobs
          rendered once with the other --bass-shape). The non-default shape wins only if it improves on the default
          one beyond NOISE (same rule as a step); a tie keeps the default.
@@ -48,6 +50,7 @@ MAX_ITERS = 8
 WARM_ITERS = 3
 WARM_SOURCES = ("track", "neighbour")      # sources that earn the short budget; "seed" / "cold" run the full MAX_ITERS
 FIELDS = ("tag", "overall", "margin", "gate_out", "params", "envused", "sa", "parent", "alpha", "shape")
+LEAD_FIT_SA_TOLERANCE = 0.005   # a fitted lead may cost at most this much section-aware vs the palette lead (coordinator's gate)
 SHAPES = ("stem", "off")        # generate_dynamic_strudel.py --bass-shape; the first is the generator default (wins ties)
 
 
@@ -137,6 +140,14 @@ def choose_shape(best: Row, trial: Row, n: float) -> Row:
     return other if improves(other, default, n) else default
 
 
+def choose_lead_fit(palette: Row, trial: Row, n: float) -> Row:
+    """The fitted synth lead is kept only if its full-song overall beats the palette lead's by MORE than calibration
+    noise AND its section-aware is no worse than the palette's minus LEAD_FIT_SA_TOLERANCE; otherwise the palette."""
+    if trial.overall - palette.overall > n and trial.sa >= palette.sa - LEAD_FIT_SA_TOLERANCE:
+        return trial
+    return palette
+
+
 def blend_knobs(parent: list[str], prop: list[str], eff: list[float], alpha: float) -> list[str]:
     out = []
     for i, (p, q) in enumerate(zip(parent, prop)):
@@ -177,6 +188,7 @@ def main() -> int:
     b = sp.add_parser("blend"); b.add_argument("--parent", required=True); b.add_argument("--prop", required=True)
     b.add_argument("--eff", default="0 0"); b.add_argument("--alpha", type=float, required=True)
     h = sp.add_parser("shape"); h.add_argument("tsv"); h.add_argument("best_tag"); h.add_argument("shape_tsv")
+    lf = sp.add_parser("leadfit"); lf.add_argument("palette_tsv"); lf.add_argument("trial_tsv")
     e = sp.add_parser("blend-env"); e.add_argument("--used", required=True); e.add_argument("--new", required=True)
     e.add_argument("--alpha", type=float, required=True); e.add_argument("--out", required=True)
     a = ap.parse_args()
@@ -199,6 +211,10 @@ def main() -> int:
         best = next(r for r in rows_of(a.tsv) if r.tag == a.best_tag)
         win = choose_shape(best, rows_of(a.shape_tsv)[0], noise())
         print(win.shape, win.tag)
+    elif a.cmd == "leadfit":
+        pal = rows_of(a.palette_tsv)[0]
+        win = choose_lead_fit(pal, rows_of(a.trial_tsv)[0], noise())
+        print("keep" if win.tag != pal.tag else "palette", win.tag)
     elif a.cmd == "blend-env":
         new = json.loads(Path(a.new).read_text())
         used = json.loads(Path(a.used).read_text()) if a.used != "-" and Path(a.used).is_file() else None

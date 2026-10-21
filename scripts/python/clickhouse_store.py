@@ -147,6 +147,12 @@ MIGRATIONS = [
     (3, "Calibration memory bass shape column", [
         "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS bass_shape String DEFAULT 'stem'",
     ]),
+    # Synth lead as fitted synthesis parameters (auto-calibrate.sh lead-fit stage): JSON {"decision": "keep"|"palette",
+    # "spec": <lead_synth.spec_from vector>, "evals": N, "palette": {...}, "fit": {...}} on kind 'leadfit' rows (the trial)
+    # and on the run's 'best' row; '' = never tried. Old rows read back as ''.
+    (4, "Calibration memory lead fit column", [
+        "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS lead_fit String DEFAULT ''",
+    ]),
 ]
 
 

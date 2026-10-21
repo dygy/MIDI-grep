@@ -45,6 +45,7 @@ TABLE = "midi_grep.calibration_steps"
 KNOBS = ("bass_mult", "sub_gain", "cal_lead", "lead_lpf", "hat_gain", "master_gain", "bass_lpf", "lead_hpf", "sub_up")
 SHAPES = CL.SHAPES              # generate_dynamic_strudel.py --bass-shape; the first is the generator default (wins ties)
 DEFAULT_SHAPE = SHAPES[0]
+AUX_KINDS = ("shape", "leadfit")   # extra trial renders: they answer a question, they never seed a knob start
 BANDS = ("sub_bass", "bass", "low_mid", "mid", "high_mid", "high")
 MIN_PAIRS = 3                  # pairs a knob needs before its learned exponent replaces the sqrt damping
 MIN_LOG_STEP = 0.05            # same threshold calibrate_dynamic.measured_exponent uses: smaller moves are noise
@@ -130,7 +131,7 @@ def step_key(run_id: str, tag: str, kind: str) -> str:
 def make_row(*, kind: str, run_id: str, tag: str, track_key: str, mode: str, knobs: dict[str, float], ctx: dict,
              cmp_json: dict | None, margin, passed, parent: str = "", alpha: float = 1.0, env: dict | None = None,
              is_best: bool = False, source: str = "live", created_at: str | None = None,
-             code: tuple[str, str] | None = None, bass_shape: str = DEFAULT_SHAPE) -> dict:
+             code: tuple[str, str] | None = None, bass_shape: str = DEFAULT_SHAPE, lead_fit: str = "") -> dict:
     comp = (cmp_json or {}).get("comparison") or {}
     temporal = comp.get("temporal") or {}
     ob = ((cmp_json or {}).get("original") or {}).get("bands") or {}
@@ -145,6 +146,7 @@ def make_row(*, kind: str, run_id: str, tag: str, track_key: str, mode: str, kno
         "warm_source": ctx.get("warm_source", ""),
         **{k: _f(knobs.get(k)) for k in KNOBS[:-1]}, "sub_up": int(_f(knobs.get("sub_up"))),
         "bass_shape": bass_shape if bass_shape in SHAPES else DEFAULT_SHAPE,
+        "lead_fit": lead_fit,
         "env_json": json.dumps(env, separators=(",", ":")) if env else "",
         "env_bars": int(env.get("bars", 0)) if env else 0,
         "overall": _f(comp.get("overall_similarity")), "section_aware": _f(comp.get("section_aware_similarity")),
@@ -270,7 +272,7 @@ def warm_start(track_key: str, mode: str, genre: str, bpm: float, key: str, bars
         # kind 'shape' rows (the extra render of the OTHER bass shape) never seed a start by themselves: a winning one
         # is also written as a 'best' row. They only say that the shape question was answered for this code version.
         shape_tested = any(r["kind"] == "shape" and r["code_version"] == cur for r in own)
-        best = rank_best(pick_version_group([r for r in own if r["kind"] != "shape"] or own, cur))
+        best = rank_best(pick_version_group([r for r in own if r["kind"] not in AUX_KINDS] or own, cur))
         env = json.loads(best["env_json"]) if best["env_json"] else None
         if env and int(env.get("bars", 0)) != bars:
             env = None
@@ -278,7 +280,7 @@ def warm_start(track_key: str, mode: str, genre: str, bpm: float, key: str, bars
                 "bass_shape": best.get("bass_shape") or DEFAULT_SHAPE, "shape_tested": shape_tested,
                 "detail": f"{track_key}/{mode} best {best['kind']} {best['tag']} code {best['code_version']} "
                           f"overall {best['overall']:.4f} margin {best['margin']} ({len(own)} recorded rows)"}
-    cands = [r for r in history(None, mode, genre) if r["track_key"] != track_key]
+    cands = [r for r in history(None, mode, genre) if r["track_key"] != track_key and r["kind"] not in AUX_KINDS]
     if cands:
         if orig_bands is None and stems is not None and (stems / "instrumental.wav").is_file():
             orig_bands = orig_bands_of_audio(stems / "instrumental.wav")
@@ -296,6 +298,62 @@ def warm_start(track_key: str, mode: str, genre: str, bpm: float, key: str, bars
                           f"best {best['tag']} overall {best['overall']:.4f}"}
     return {"source": "cold", "knobs": "", "env": None, "bass_shape": DEFAULT_SHAPE, "shape_tested": False,
             "detail": f"no recorded {genre}/{mode} history"}
+
+
+# ---------------------------------------------------------------- fitted synth lead (auto-calibrate.sh lead-fit stage)
+def _read_text(path: Path) -> str:
+    try:
+        return path.read_text()
+    except OSError as e:
+        warn(f"cannot read {path} ({e})")
+        return ""
+
+
+def _lead_fit_of(row: dict) -> dict | None:
+    try:
+        d = json.loads(row.get("lead_fit") or "")
+    except ValueError:
+        return None
+    return d if isinstance(d, dict) and d.get("decision") in ("keep", "palette") else None
+
+
+def lead_warm(track_key: str, mode: str, genre: str, bpm: float, key: str, *, orig_bands: dict | None = None,
+              stems: Path | None = None, current_code: str | None = None) -> dict:
+    """What the memory knows about the fitted synth lead.
+    source: 'track-keep'   this track's fitted vector for the CURRENT code version won -> one verify render of it
+            'track-palette' this track already answered 'palette' for the current code version -> nothing to test
+            'track'        this track has a vector from an older code version -> warm start, short search
+            'neighbour'    nearest same-genre track's KEPT vector -> warm start, short search
+            'none'         nothing recorded -> cold search from the measured values
+    spec: the vector to start from (None for 'none' / 'track-palette')."""
+    cur = current_code or code_version()[0]
+    own = [r for r in history(track_key, mode) if r["kind"] == "leadfit" and _lead_fit_of(r)]
+    if own:
+        same = [r for r in own if r["code_version"] == cur]
+        row = max(same or own, key=lambda r: r["created"])
+        d = _lead_fit_of(row)
+        if same:
+            if d["decision"] == "keep":
+                return {"source": "track-keep", "spec": d["spec"], "detail": f"{track_key}/{mode} kept vector, code {row['code_version']}"}
+            return {"source": "track-palette", "spec": None, "detail": f"{track_key}/{mode} answered palette for code {cur}"}
+        kept = [r for r in own if _lead_fit_of(r)["decision"] == "keep"]
+        if kept:
+            return {"source": "track", "spec": _lead_fit_of(max(kept, key=lambda r: r["created"]))["spec"],
+                    "detail": f"{track_key}/{mode} vector from older code {row['code_version']}"}
+    cands = [r for r in history(None, mode, genre) if r["track_key"] != track_key and r["kind"] == "leadfit"
+             and (_lead_fit_of(r) or {}).get("decision") == "keep"]
+    if cands:
+        if orig_bands is None and stems is not None and (stems / "instrumental.wav").is_file():
+            orig_bands = orig_bands_of_audio(stems / "instrumental.wav")
+        me = {"bpm": bpm, "key": key, "bands": orig_bands or {}}
+        by_track: dict[str, list[dict]] = {}
+        for r in cands:
+            by_track.setdefault(r["track_key"], []).append(r)
+        near = min(by_track, key=lambda t: (distance(me, _profile(by_track[t])), t))
+        row = max(by_track[near], key=lambda r: r["created"])
+        return {"source": "neighbour", "spec": _lead_fit_of(row)["spec"],
+                "detail": f"nearest {genre}/{mode} track '{near}' kept vector"}
+    return {"source": "none", "spec": None, "detail": f"no recorded lead fit for {genre}/{mode}"}
 
 
 # ---------------------------------------------------------------- learned step sizes
@@ -362,7 +420,8 @@ def track_ctx(track_dir: Path) -> dict:
 
 def rows_from_workdir(workdir: Path, track_key: str, mode: str, ctx: dict, run_id: str, *, only_tag: str | None = None,
                       source: str = "live", created_at: str | None = None, code_version_override: str | None = None,
-                      best_tag: str | None = None, tsv_name: str = "iters.tsv", kind: str = "step") -> list[dict]:
+                      best_tag: str | None = None, tsv_name: str = "iters.tsv", kind: str = "step",
+                      lead_fit: str = "") -> list[dict]:
     tsv = workdir / tsv_name
     rows = []
     cv = code_version()
@@ -389,7 +448,7 @@ def rows_from_workdir(workdir: Path, track_key: str, mode: str, ctx: dict, run_i
         rows.append(make_row(kind=kind, run_id=run_id, tag=tag, track_key=track_key, mode=mode, knobs=knobs, ctx=ctx,
                              cmp_json=cmp_json, margin=m, passed=passed, parent=parent, alpha=_f(alpha, 1.0), env=env,
                              is_best=(tag == best_tag), source=source, created_at=created_at, code=cv,
-                             bass_shape=shape or DEFAULT_SHAPE))
+                             bass_shape=shape or DEFAULT_SHAPE, lead_fit=lead_fit))
         if best_tag and tag == best_tag:
             rows.append({**rows[-1], "kind": "best", "step_key": step_key(run_id, tag, "best"), "is_run_best": 1})
     return rows
@@ -503,13 +562,17 @@ def _main() -> int:
         p.add_argument("--workdir", required=True); p.add_argument("--run-id", required=True)
         p.add_argument("--tag", required=True, help="the step (record-step) or the run BEST (record-best)")
         p.add_argument("--tsv", default="iters.tsv", help="rows file inside --workdir (shape.tsv for the bass-shape trial)")
-        p.add_argument("--kind", default="step", choices=("step", "shape"), help="shape = the other-bass-shape trial render")
+        p.add_argument("--kind", default="step", choices=("step", "shape", "leadfit"),
+                       help="shape = the other-bass-shape trial render; leadfit = the fitted-synth-lead trial")
+        p.add_argument("--lead-fit", default="", help="JSON file (decision + fitted vector) stored in the lead_fit column")
         if name == "record-best":
             p.add_argument("--best-env", default="")
     p = sp.add_parser("record-promoted"); p.add_argument("--track-dir", required=True); p.add_argument("--version", required=True)
     p = sp.add_parser("warm-start"); common(p)
     p.add_argument("--track-key", required=True); p.add_argument("--env-out", default="")
     p.add_argument("--orig-bands-json", default="")
+    p = sp.add_parser("lead-warm"); common(p)
+    p.add_argument("--track-key", required=True); p.add_argument("--spec-out", required=True)
     p = sp.add_parser("responses"); p.add_argument("--mode", required=True); p.add_argument("--out", required=True)
     p = sp.add_parser("backfill"); p.add_argument("--cache", default=str(ROOT / ".cache" / "stems"))
     sp.add_parser("summary")
@@ -519,7 +582,8 @@ def _main() -> int:
         try:
             wd = Path(a.workdir); key = Path(a.stems).name
             rows = rows_from_workdir(wd, key, a.mode, _ctx_from_args(a), a.run_id, only_tag=a.tag, tsv_name=a.tsv,
-                                     kind=a.kind, best_tag=a.tag if a.cmd == "record-best" else None)
+                                     kind=a.kind, best_tag=a.tag if a.cmd == "record-best" else None,
+                                     lead_fit=_read_text(Path(a.lead_fit)) if a.lead_fit else "")
             if a.cmd == "record-best":
                 rows = [r for r in rows if r["kind"] == "best"]
                 env = _read_json(Path(a.best_env)) if a.best_env else None
@@ -551,6 +615,16 @@ def _main() -> int:
             Path(a.env_out).write_text(json.dumps(w["env"], indent=2) + "\n"); env_path = a.env_out
         emit("\t".join([w["source"], str(CL.iteration_cap(w["source"])), w["knobs"] or "-", env_path, w["detail"],
                          w.get("bass_shape", DEFAULT_SHAPE), "1" if w.get("shape_tested") else "0"]))
+        return 0
+    if a.cmd == "lead-warm":
+        try:
+            w = lead_warm(a.track_key, a.mode, a.genre, a.bpm, a.key or "", stems=Path(a.stems))
+        except Exception as e:      # noqa: BLE001 - the memory must never break a run
+            warn(f"lead-warm failed ({type(e).__name__}: {e}); cold search")
+            w = {"source": "none", "spec": None, "detail": "memory unavailable"}
+        if w["spec"]:
+            Path(a.spec_out).write_text(json.dumps(w["spec"], indent=1) + "\n")
+        emit("\t".join([w["source"], a.spec_out if w["spec"] else "-", w["detail"]]))
         return 0
     if a.cmd == "responses":
         try:

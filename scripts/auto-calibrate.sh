@@ -18,7 +18,7 @@
 #     --bpm 136 --key "C# minor" --genre brazilian_funk --bars 78 \
 #     [--iters N] [--mode sample-instrument|synth] \
 #     [--bass-sound regime_bass --lead-sound regime_lead] \
-#     [--dur <seconds>] [--workdir <tmp>] [--no-mix-dynamics] [--bass-shape stem|off] [--no-shape-trial]
+#     [--dur <seconds>] [--workdir <tmp>] [--no-mix-dynamics] [--bass-shape stem|off] [--no-shape-trial] [--no-lead-fit] [--lead-fit-evals N]
 #
 # After BEST, a loudness stage (mix_dynamics.py) moves --master-gain onto the instrumental's RMS (the score is level-
 # invariant, the loop cannot see loudness); --no-mix-dynamics skips it. The final gain is written to <workdir>/best.master.
@@ -46,6 +46,15 @@
 # the run BEST, so the next run warm-starts with the chosen shape and does not re-test until the generator/calibrator code changes.
 # --bass-shape X pins the shape (no trial); --no-shape-trial keeps the warm-started/default shape untested; AC_SHAPE_TRIAL=0 (tests).
 # The chosen shape is the 10th token of the BEST params line ("... SU stem|off") and of --start.
+#
+# Synth lead fit (synth mode only; scripts/python/lead_synth.py): the palette lead is a fixed soundfont preset. After BEST (and the bass-shape
+# trial) the lead is rendered as a plain oscillator whose lpf / filter-envelope depth / detune / gain are searched (Nelder-Mead, the REAL
+# full-song mix score = mean(overall, section-aware), start = values measured on the melodic stem) for at most --lead-fit-evals renders
+# (default 10). The fit is kept only if its overall beats the palette lead's by more than calibration noise AND its section-aware is no worse
+# than the palette's - 0.005 (calibrate_loop.py leadfit); else the palette lead stays. The decision + vector are recorded (kind 'leadfit',
+# lead_fit column, migration 4). Warm start: this track's vector for the current code version = ONE verify render; a vector from older code or
+# from the nearest same-genre track = 3 renders; a recorded 'palette' answer for the current code version = no renders.
+# --no-lead-fit / AC_LEAD_FIT=0 skip it. A kept fit is written to <workdir>/best.leadsynth.json and baked into best.strudel.
 #
 # Requires: BlackHole device + Multi-Output selected (see CLAUDE.md preflight), node recorder
 # built (scripts/node/dist), the sample pack + bass/lead MIDI present in <stems>/sample_pack,
@@ -77,6 +86,7 @@ PGREP="${AC_PGREP:-pgrep}"; WAIT_MAX="${AC_RECORDER_WAIT_S:-120}"   # tests: AC_
 RC=0   # exit status: 70 when any iteration failed (GEN/RENDER/CMP FAILED, recorder wait abort); BEST is still printed
 
 STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" BARS="78"
+LEAD_FIT="${AC_LEAD_FIT:-1}"; LEAD_EVALS=10; LEAD_ARG=(); LSYN="${AC_LEAD_SYNTH:-$ROOT/scripts/python/lead_synth.py}"   # synth lead fit; see header
 BSHAPE="stem"; SHAPE_PIN=0; SHAPE_TESTED=0; SHAPE_TRIAL="${AC_SHAPE_TRIAL:-1}"   # generator --bass-shape; see header
 MIXDYN=1; ENV_START=""; ITERS=""; START_GIVEN=0; SEED=""; WARM_SOURCE="cold" DUR="" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
 WORK="${TMPDIR:-/tmp}/auto-calibrate.$$"
@@ -95,6 +105,8 @@ while [ $# -gt 0 ]; do case "$1" in
   --no-memory) MEM_ON=0; shift;;
   --bass-shape) case "$2" in stem|off) BSHAPE="$2"; SHAPE_PIN=1;; *) echo "--bass-shape must be stem or off" >&2; exit 64;; esac; shift 2;;
   --no-shape-trial) SHAPE_TRIAL=0; shift;;
+  --no-lead-fit) LEAD_FIT=0; shift;;
+  --lead-fit-evals) LEAD_EVALS="$2"; shift 2;;
   --seed) SEED="$2"; shift 2;;     # fallback knobs ("BM SG CL LLPF HG MG [BL [LH]]"): used only when the memory has neither this track nor a neighbour
   --start) START_GIVEN=1; BL=0; LH=0; SU=0; read -r BM SG CL LLPF HG MG BL LH SU SHP EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH [SU [stem|off]]]]" (6 to 10 fields; SU = sub-sine octave up 0/1; the 10th = bass shape)
     # The pre-"no vocals" format had a CV field after MG ("... MG CV [BL [LH]]"). A 9-field start is that old format;
@@ -199,13 +211,13 @@ gen_piece() {
     --mode "$MODE" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --num-bars "$BARS" \
     --drum-mode "$DRUM_MODE" \
     --bass-mult "$BM" --sub-gain "$SG" --sub-up "$SU" --cal-lead "$CL" --lead-lpf "$LLPF" \
-    --hat-gain "$HG" --master-gain "$MG" --bass-lpf "$BL" --bass-shape "$BSHAPE" ${lh_arg[@]+"${lh_arg[@]}"} "$@" --out "$out" \
+    --hat-gain "$HG" --master-gain "$MG" --bass-lpf "$BL" --bass-shape "$BSHAPE" ${lh_arg[@]+"${lh_arg[@]}"} ${LEAD_ARG[@]+"${LEAD_ARG[@]}"} "$@" --out "$out" \
     >"$sum" 2>"$log"
 }
 
 SULOCK=0   # 1 once an octave-up step lost to its parent: the calibrator must not propose it again in this run
 best=-1; best_params=""; best_tag=""; best_gate="n/a"; : >"$WORK/iters.tsv"
-rm -f "$WORK/best.env.json" "$WORK/best.master"   # never report a stale env / level from a previous run
+rm -f "$WORK/best.env.json" "$WORK/best.master" "$WORK/best.leadsynth.json"   # never report a stale env / level from a previous run
 PREV_ENV="${ENV_START:-}"   # env-correction JSON measured from the previous iteration (fed to the next generation); --env-start seeds it
 PARENT=""; ALPHA="1"   # the iteration these knobs were stepped from, and the fraction of its proposed step taken
 i=0
@@ -350,7 +362,74 @@ if [ -n "$SEL" ]; then
     else RC=70; echo "[$STAG] trial failed - keeping --bass-shape $KEPT_SHAPE (not recorded as tested)"; fi
   elif [ "$SHAPE_TESTED" = 1 ]; then echo "bass shape: $BSHAPE restored from the memory (the other shape was already measured for this code version)"
   fi
-  memcall record-best "${MEM_ARGS[@]}" --workdir "$WORK" --run-id "$RUN_ID" --tag "$BEST_REC_TAG" --tsv "$BEST_TSV" --best-env "$WORK/best.env.json"
+  # ---- synth lead fit (header): fitted oscillator lead vs the palette lead of the BEST render, decided by measurement ----
+  if [ "$MODE" = synth ] && [ "$LEAD_FIT" != 0 ] && [ "$RC" -eq 0 ] && [ -s "$STEMS/melodic.wav" ]; then
+    LF_SRC=none; LF_WARM=""; LF_DETAIL=""
+    if [ "$MEM_ON" = 1 ]; then
+      LW="$("$PY" "$MEM" lead-warm "${MEM_ARGS[@]}" --track-key "$TRACK_KEY" --spec-out "$WORK/leadfit.warm.json" 2> >(grep -v '^  \[ClickHouse\]' >&2))" || LW=""
+      [ -z "$LW" ] || IFS=$'\t' read -r LF_SRC LF_WARM LF_DETAIL <<<"$LW"
+    fi
+    case "$LF_SRC" in
+      track-keep) LF_CAP=1;; track|neighbour) LF_CAP=3;; track-palette) LF_CAP=0;; *) LF_CAP="$LEAD_EVALS"; LF_SRC=none;;
+    esac
+    [ "$LF_CAP" -le "$LEAD_EVALS" ] || LF_CAP="$LEAD_EVALS"
+    echo "lead fit: start $LF_SRC${LF_DETAIL:+ ($LF_DETAIL)}; render budget $LF_CAP"
+    if [ "$LF_CAP" -gt 0 ]; then
+      read -r BM SG CL LLPF HG MG BL LH SU <<<"$best_params"
+      lf_env=(); [ -s "$WORK/best.env.json" ] && lf_env=(--env-correction "$WORK/best.env.json")
+      lf_warm=(); [ "$LF_WARM" != "-" ] && [ -n "$LF_WARM" ] && [ -s "$LF_WARM" ] && lf_warm=(--warm "$LF_WARM")
+      LHIST="$WORK/leadfit.hist.json"; rm -f "$LHIST" "$WORK/leadfit.tsv"; lf_best=-1; lf_tag=""; lf_n=0; lf_ok=1
+      read -r PSA < <("$PY" -c "import json;print(round(json.load(open('$WORK/best.cmp.json'))['comparison'].get('section_aware_similarity',0),4))")
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' palette "$best" "n/a" "n/a" "$best_params" "-" "$PSA" "-" 1 "$BSHAPE" >"$WORK/leadfit.palette.tsv"
+      while [ "$lf_n" -lt "$LF_CAP" ]; do
+        ASK="$("$PY" "$LSYN" ask --history "$LHIST" --melodic "$STEMS/melodic.wav" --bpm "$BPM" --cap "$LF_CAP" ${lf_warm[@]+"${lf_warm[@]}"} --out "$WORK/leadfit.cand.json")" \
+          || { echo "[leadfit] ask FAILED - keeping the palette lead"; lf_ok=0; break; }
+        read -r LST _ <<<"$ASK"; [ "$LST" = EVAL ] || break
+        lf_n=$((lf_n+1)); LTAG="leadfit_$lf_n"; cp "$WORK/leadfit.cand.json" "$WORK/$LTAG.leadsynth.json"
+        LW_="$WORK/$LTAG.wav"; LC_="$WORK/$LTAG.cmp.json"; srcok=1
+        gen_piece "$WORK/$LTAG.strudel" "$WORK/$LTAG.gen.json" "$WORK/$LTAG.gen.log" ${lf_env[@]+"${lf_env[@]}"} --lead-synth "$WORK/$LTAG.leadsynth.json" \
+          || { echo "[$LTAG] GEN FAILED"; srcok=0; }
+        if [ "$srcok" = 1 ]; then
+          rm -f "$LW_"; rrc=0; "$NODE_BIN" "$REC" "$WORK/$LTAG.strudel" -o "$LW_" -d "$DUR" >"$WORK/$LTAG.render.log" 2>&1 || rrc=$?
+          if [ "$rrc" -ne 0 ] || [ ! -f "$LW_" ]; then rm -f "$LW_"; echo "[$LTAG] RENDER FAILED (rc=$rrc)"; srcok=0; fi
+        fi
+        [ "$srcok" = 1 ] && { "$PY" "$CMP" "$ORIG" "$LW_" -d "$SONG_S" -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$LC_" 2>/dev/null || { echo "[$LTAG] CMP FAILED"; srcok=0; }; }
+        if [ "$srcok" != 1 ]; then lf_ok=0; "$PY" "$LSYN" tell --history "$LHIST" --score 0; continue; fi
+        read -r LOVER LSECT < <("$PY" -c "import json;d=json.load(open('$LC_'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
+        if LGATE=$("$PY" "$GATE" --comparison "$LC_" --genre "$GENRE" --mode "$MODE" 2>/dev/null); then read -r LMARG _ <<<"$LGATE"; else LMARG="n/a"; LGATE="n/a"; fi
+        LSCORE="$("$PY" -c "print(round(($LOVER+$LSECT)/2,5))")"
+        echo "[$LTAG] overall=$LOVER section_aware=$LSECT score=$LSCORE (palette: overall=$best section_aware=$PSA)"
+        "$PY" "$LSYN" tell --history "$LHIST" --score "$LSCORE"
+        if awk -v a="$LSCORE" -v b="$lf_best" 'BEGIN{exit !(a>b)}'; then
+          lf_best="$LSCORE"; lf_tag="$LTAG"; lf_gate="$LGATE"
+          printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$LTAG" "$LOVER" "$LMARG" "$LGATE" "$best_params" "-" "$LSECT" "-" 1 "$BSHAPE" >"$WORK/leadfit.tsv"
+        fi
+      done
+      if [ -n "$lf_tag" ]; then
+        LDEC=palette
+        if LPICK="$("$PY" "$LOOP" leadfit "$WORK/leadfit.palette.tsv" "$WORK/leadfit.tsv")"; then read -r LDEC _ <<<"$LPICK"
+        else echo "[leadfit] decision FAILED - keeping the palette lead"; RC=70; fi
+        read -r FOVER FSECT < <("$PY" -c "import json;d=json.load(open('$WORK/$lf_tag.cmp.json'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
+        "$PY" - "$WORK/leadfit.json" "$LDEC" "$WORK/$lf_tag.leadsynth.json" "$lf_n" "$LF_SRC" "$best" "$PSA" "$FOVER" "$FSECT" <<'PYL'
+import json, sys
+out, dec, spec, n, src, po, ps, fo, fs = sys.argv[1:10]
+json.dump({"decision": dec, "spec": json.load(open(spec)), "evals": int(n), "source": src,
+           "palette": {"overall": float(po), "section_aware": float(ps)}, "fit": {"overall": float(fo), "section_aware": float(fs)}},
+          open(out, "w"), indent=1)
+PYL
+        memcall record-step "${MEM_ARGS[@]}" --workdir "$WORK" --run-id "$RUN_ID" --tag "$lf_tag" --tsv leadfit.tsv --kind leadfit --lead-fit "$WORK/leadfit.json"
+        if [ "$LDEC" = keep ]; then
+          echo "[leadfit] fitted lead beats the palette lead beyond noise (overall $FOVER vs $best, section-aware $FSECT vs $PSA) -> --lead-synth"
+          cp "$WORK/$lf_tag.strudel" "$WORK/best.strudel"; cp "$WORK/$lf_tag.wav" "$WORK/best.wav"; cp "$WORK/$lf_tag.cmp.json" "$WORK/best.cmp.json"
+          cp "$WORK/$lf_tag.leadsynth.json" "$WORK/best.leadsynth.json"; LEAD_ARG=(--lead-synth "$WORK/best.leadsynth.json")
+          best="$FOVER"; best_gate="$lf_gate"; BEST_TSV="leadfit.tsv"; BEST_REC_TAG="$lf_tag"
+        else echo "[leadfit] fitted lead does not beat the palette lead (overall $FOVER vs $best, section-aware $FSECT vs $PSA; need > noise and >= palette-0.005) -> palette lead kept"; fi
+        LEAD_FIT_JSON="$WORK/leadfit.json"
+      else echo "[leadfit] no candidate scored - palette lead kept (not recorded)"; [ "$lf_ok" = 1 ] || RC=70; fi
+    fi
+  elif [ "$MODE" = synth ] && [ "$LEAD_FIT" = 0 ]; then echo "lead fit: skipped (--no-lead-fit / AC_LEAD_FIT=0)"
+  fi
+  memcall record-best "${MEM_ARGS[@]}" --workdir "$WORK" --run-id "$RUN_ID" --tag "$BEST_REC_TAG" --tsv "$BEST_TSV" --best-env "$WORK/best.env.json" ${LEAD_FIT_JSON:+--lead-fit "$LEAD_FIT_JSON"}
 fi
 
 # ---- loudness stage (scripts/python/mix_dynamics.py) -----------------------------------------------------------
@@ -437,6 +516,7 @@ if [ "$MIXDYN" = 1 ] && [ -n "$best_tag" ] && [ -s "$WORK/best.wav" ] && "$PY" "
 fi
 echo "BEST: $best_tag overall=$best  params: $best_params $BSHAPE"
 echo "  gate:    $best_gate  (margin PASS/FAIL overall section_aware floor sa_floor; BEST = largest minimum margin to the floors)"
+[ -s "$WORK/best.leadsynth.json" ] && echo "  leadsynth: $WORK/best.leadsynth.json  (fitted synth lead kept over the palette lead; baked into best.strudel)"
 echo "  strudel: $WORK/best.strudel"
 [ -s "$WORK/best.master" ] && echo "  master:  $(cat "$WORK/best.master")  (final --master-gain, set by the loudness stage; the params above are the loop's)"
 [ -s "$WORK/best.env.json" ] && echo "  env:     $WORK/best.env.json  (per-bar bass/lead/master correction used by the best render; pass --env-correction)"
