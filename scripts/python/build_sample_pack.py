@@ -37,6 +37,8 @@ import librosa
 import numpy as np
 import soundfile as sf
 
+import detect_drums_bands
+import drum_oneshots
 from pitched_grains import pyin_geometry
 
 
@@ -86,6 +88,18 @@ def write_wav(path: Path, y: np.ndarray, sr: int = SR, fade_ms: float = FADE_MS)
     path.parent.mkdir(parents=True, exist_ok=True)
     out = peak_normalize(apply_fade(y, fade_ms=fade_ms, sr=sr))
     sf.write(str(path), out.astype(np.float32), sr, subtype="PCM_16")
+
+
+def write_oneshot(path: Path, y: np.ndarray, sr: int = SR) -> None:
+    """Normalise and write a drum one-shot whose attack is at sample 0: only a ~1.5 ms fade-in (the 10 ms
+    ``write_wav`` fade would swallow the transient), the usual fade-out."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    n_in = min(max(1, int(drum_oneshots.EDGE_FADE_IN_S * sr)), len(y) // 4)
+    n_out = min(max(1, int(drum_oneshots.EDGE_FADE_OUT_S * sr)), len(y) // 4)
+    out = y.copy()
+    out[:n_in] *= np.linspace(0.0, 1.0, n_in)
+    out[-n_out:] *= np.linspace(1.0, 0.0, n_out)
+    sf.write(str(path), peak_normalize(out).astype(np.float32), sr, subtype="PCM_16")
 
 
 def write_wav_raw(path: Path, y: np.ndarray, sr: int = SR, edge_fade_ms: int = 2) -> None:
@@ -255,33 +269,43 @@ def build_drums(stems_dir: Path, out_dir: Path) -> dict[str, str]:
     print("[drums] loading …", file=sys.stderr)
     y, sr = load_mono(drums_path)
 
-    window_samples = int(0.250 * sr)  # 250 ms onset window
-
-    onset_frames = librosa.onset.onset_detect(y=y, sr=sr, units="samples", backtrack=True)
-    print(f"[drums] {len(onset_frames)} onsets detected", file=sys.stderr)
-
-    if len(onset_frames) < 4:
-        print("[drums] too few onsets — skipping", file=sys.stderr)
-        return {}
-
-    features = _compute_onset_features(y, sr, onset_frames, window_samples)
-    classes  = _classify_onsets(features)
-
-    counts = {k: len(v) for k, v in classes.items()}
-    print(f"[drums] classification counts: {counts}", file=sys.stderr)
-
     drum_out = out_dir / "drums"
     drum_out.mkdir(parents=True, exist_ok=True)
-
     out_map: dict[str, str] = {}
-    for label, group in classes.items():
-        sample = _pick_representative(group, y, window_samples)
+
+    # bd / sd / hh: cut from the SAME hits that place the pattern (detect_drums_bands), each from its true
+    # attack, so the one-shot's classes match the rhythm's and its transient sits at sample 0
+    hits = detect_drums_bands.detect(drums_path, None)["hits"]
+    floor = drum_oneshots.stem_noise_floor(y, sr)
+    for label in drum_oneshots.CLASS_BANDS:
+        sample = drum_oneshots.cut_class(y, sr, hits, label, floor)
         if sample is None:
             continue
-        fpath = drum_out / f"{label}.wav"
-        write_wav(fpath, sample, sr=sr)
+        write_oneshot(drum_out / f"{label}.wav", sample, sr=sr)
         out_map[label] = f"drums/{label}.wav"
-        print(f"[drums]   {label}.wav  ({len(group)} onsets)", file=sys.stderr)
+        print(f"[drums]   {label}.wav  ({sum(h['type'] == label for h in hits)} hits, "
+              f"{len(sample) / sr * 1000:.0f} ms, onset at {drum_oneshots.onset_in_file(sample, sr) * 1000:.1f} ms)",
+              file=sys.stderr)
+
+    # oh (the band detector has no open-hat stream) and any class the detector found <2 hits of: the percentile
+    # classifier's pick, cut from its attack
+    window_samples = int(0.250 * sr)
+    onset_frames = librosa.onset.onset_detect(y=y, sr=sr, units="samples", backtrack=True)
+    print(f"[drums] {len(onset_frames)} onsets detected", file=sys.stderr)
+    if len(onset_frames) >= 4:
+        legacy = _classify_onsets(_compute_onset_features(y, sr, onset_frames, window_samples))
+        for label in ("bd", "sd", "hh", "oh"):
+            if label in out_map:
+                continue
+            sample = _pick_representative(legacy[label], y, window_samples)
+            if sample is None:
+                continue
+            sample = drum_oneshots.trim_to_decay(drum_oneshots.start_at_attack(sample, sr), sr, floor)
+            write_oneshot(drum_out / f"{label}.wav", sample, sr=sr)
+            out_map[label] = f"drums/{label}.wav"
+            print(f"[drums]   {label}.wav  ({len(legacy[label])} onsets, percentile classifier, "
+                  f"{len(sample) / sr * 1000:.0f} ms, onset at {drum_oneshots.onset_in_file(sample, sr) * 1000:.1f} ms)",
+                  file=sys.stderr)
 
     return out_map
 
