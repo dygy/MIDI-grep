@@ -320,6 +320,7 @@ guard_no_recorder() {
 }
 preflight_render() {
   [ -f "$REC" ] || die "node renderer not built: (cd scripts/node && npm run build)"
+  "$PY" "$RENDERER_PY" browser >/dev/null || die "renderer browser missing (see above)"
   [ "$RENDERER" = blackhole ] || return 0   # offline: no device to guard or probe
   guard_no_recorder; probe_blackhole
 }

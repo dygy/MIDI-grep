@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -66,12 +67,26 @@ def needs_device_guard(env: dict[str, str] | None = None) -> bool:
     return renderer_name(env) == "blackhole"
 
 
+def browser_path() -> Path | None:
+    """The Chromium the renderer will launch (puppeteer's resolved executable), or None if it is not installed.
+    Both renderers launch it; a missing one (e.g. a cleared ~/.cache/puppeteer) otherwise fails only at the first
+    render, after the earlier stages have run."""
+    js = "import('puppeteer').then(m => console.log(m.default.executablePath()))"
+    try:
+        r = subprocess.run(["node", "-e", js], cwd=NODE_DIST.parent, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    exe = Path(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else None
+    return exe if exe and exe.exists() else None
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Which Strudel renderer is selected (MIDIGREP_RENDERER)")
-    ap.add_argument("what", choices=("name", "script", "busy-pattern", "needs-device", "bundle", "master-bus"),
+    ap.add_argument("what", choices=("name", "script", "busy-pattern", "needs-device", "bundle", "master-bus", "browser"),
                     help="name: offline|blackhole; script: absolute path of the renderer .js; busy-pattern: pgrep -f "
                          "regex of live capture processes; needs-device: exit 0 when renders need BlackHole, else 1; "
-                         "bundle: the engine bundle path; master-bus: exit 0 when that engine has setMasterLimiter/Compressor")
+                         "bundle: the engine bundle path; master-bus: exit 0 when that engine has setMasterLimiter/Compressor; "
+                         "browser: the Chromium path, exit 1 when it is not installed")
     what = ap.parse_args(argv).what
     try:
         if what == "name":
@@ -82,6 +97,13 @@ def main(argv: list[str] | None = None) -> int:
             print(BLACKHOLE_BUSY)
         elif what == "bundle":
             print(engine_bundle())
+        elif what == "browser":
+            exe = browser_path()
+            if exe is None:
+                print("Chromium for the renderer is not installed: (cd scripts/node && npx puppeteer browsers install chrome)",
+                      file=sys.stderr)
+                return 1
+            print(exe)
         elif what == "master-bus":
             return 0 if supports_master_bus() else 1
         else:

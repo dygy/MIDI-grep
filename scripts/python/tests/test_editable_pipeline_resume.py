@@ -81,6 +81,7 @@ def repo(tmp_path: Path):
     (root / "eval" / "gate.py").write_text("")
     bindir = tmp_path / "bin"
     _exe(bindir / "curl", "#!/bin/bash\nexit 0\n")
+    _exe(bindir / "node", "#!/bin/bash\necho /bin/sh\n")   # renderer.py browser: puppeteer's Chromium "is installed"
     track = root / ".cache" / "stems" / TITLE
     track.mkdir(parents=True)
     for n in ("original", "bass", "drums", "melodic", "vocals"):
@@ -226,3 +227,11 @@ def test_pack_from_other_builder_code_is_rebuilt_and_its_calibration_rerun(repo)
     r = run(repo, "--local", "--mode", "synth")
     assert any(c.startswith("sample_pack") for c in calls(repo)), r.stderr
     assert any(c.startswith("auto-calibrate") for c in calls(repo)), "a best render on the old pack was kept"
+
+
+# --- a missing renderer browser stops the run before calibration, with the install command ---------------
+def test_missing_renderer_browser_stops_before_calibration(repo):
+    _exe(repo.bin / "node", "#!/bin/bash\necho /nonexistent/chrome\n")   # a cleared ~/.cache/puppeteer
+    r = run(repo, "--local", "--mode", "synth")
+    assert r.returncode != 0 and "puppeteer browsers install" in r.stderr, r.stderr
+    assert not any(c.startswith("auto-calibrate") for c in calls(repo))
