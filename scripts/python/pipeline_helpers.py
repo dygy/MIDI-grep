@@ -294,6 +294,8 @@ def record_mode_floor(thresholds_path: Path, *, mode: str, genre: str, compariso
 # ----------------------------------------------------------------------------- stage 10: report
 SCRIPTS_DIR = Path(__file__).resolve().parent
 RENDER_STEMS: tuple[str, ...] = ("melodic", "drums", "bass")
+RENDER_STEMS_MODES: tuple[str, ...] = ("solo", "demucs")
+DEFAULT_RENDER_STEMS = "solo"     # Demucs on our own render is only for work on the separation stage itself
 ITERATION_PHASE = "calibration"
 
 Runner = Callable[[Sequence[str]], None]
@@ -483,15 +485,49 @@ def _need_stem(vdir: Path, name: str) -> Path:
     return p
 
 
+def solo_render_stems(vdir: Path, render: Path, *, run: Runner) -> None:
+    """``render_{melodic,drums,bass}.wav`` from the renderer (one voice group sounding per render) and
+    ``render_vocals.wav`` as silence (we never generate vocals). Only files that are missing are produced; the
+    measured sum-vs-render check is printed to stderr and stored in ``metadata.json`` (``render_stems_check``)."""
+    import soundfile as sf
+
+    import renderer
+    import solo_stems
+    code = (vdir / "output.strudel").read_text(encoding="utf-8")
+    info = sf.info(str(render))
+    seconds = info.frames / info.samplerate
+    with tempfile.TemporaryDirectory(dir=vdir, prefix=".solo_") as tmp:
+        for g in RENDER_STEMS:
+            out = vdir / f"render_{g}.wav"
+            solo = solo_stems.solo_code(code, g)
+            if solo is None:                                  # the generator emitted no channel for this group
+                solo_stems.write_silence(out, info.frames, info.samplerate, info.channels)
+                continue
+            src = Path(tmp) / f"{g}.strudel"
+            src.write_text(solo, encoding="utf-8")
+            run(["node", renderer.renderer_script(), src, "-o", out, "-d", f"{seconds:.3f}"])
+            _need(out, out.name)
+    solo_stems.write_silence(vdir / "render_vocals.wav", info.frames, info.samplerate, info.channels)
+    chk = solo_stems.sum_check(render, [vdir / f"render_{g}.wav" for g in RENDER_STEMS])
+    print(f"render stems (solo): sum(bass+drums+melodic) vs render.wav: correlation {chk.correlation:.5f}, "
+          f"residual {chk.residual_db:.1f} dB, gain ratio {chk.gain_ratio:.4f}", file=sys.stderr)
+    meta_path = vdir / "metadata.json"
+    meta = json.loads(meta_path.read_text(encoding="utf-8")) if meta_path.is_file() else {}
+    meta["render_stems_check"] = {"source": "solo", **chk.model_dump()}
+    meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
+
+
 def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_workdir: Path | None = None,
                  iteration_stems: bool = True, force: bool = False, config: Path | None = None,
                  gate: GateVerdict | None = None, run: Runner = subprocess_runner,
-                 python: str = sys.executable) -> ReportResult:
+                 python: str = sys.executable, render_stems: str = DEFAULT_RENDER_STEMS) -> ReportResult:
     """Stage 10: make a promoted ``vNNN`` complete and write ``vNNN/report.html``. Idempotent.
 
     1. charts: ``compare_audio.py --chart`` into a temp dir; only ``comparison.png`` + ``chart_*.png`` are copied
        (that CLI path also writes ``<chart dir>/comparison.json`` — the stamped one in vNNN must not be touched);
-    2. render stems: ``separate.py render.wav --prefix render`` -> ``render_{melodic,drums,bass,vocals}``;
+    2. render stems -> ``render_{melodic,drums,bass,vocals}``: ``render_stems="solo"`` (default) renders
+       ``output.strudel`` once per voice group with the other groups' ``$:`` channels commented out (see
+       ``solo_stems.py``) and writes silence for vocals; ``"demucs"`` runs ``separate.py render.wav --prefix render``;
     3. per-stem comparison: ``compare_audio.py --stems`` -> ``stem_comparison.json`` + ``chart_stem_*.png``;
     4. iteration history from ``calib_workdir`` (``iterations.json`` + ``iterations/``); untouched when None;
     5. ``generate_report.py`` -> ``report.html``.
@@ -503,6 +539,8 @@ def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_wo
     if not _VERSION_RE.match(vdir.name):
         raise ValueError(f"version dir must be named vNNN, got {vdir.name!r}")
     version = int(vdir.name[1:])
+    if render_stems not in RENDER_STEMS_MODES:
+        raise ValueError(f"render_stems must be one of {RENDER_STEMS_MODES}, got {render_stems!r}")
     render = vdir / "render.wav"
     if not render.is_file():
         raise FileNotFoundError(f"report: {render} not found")
@@ -531,7 +569,10 @@ def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_wo
 
     if force or any(_find_audio(vdir, f"render_{s}") is None for s in RENDER_STEMS):
         rebuilt = True
-        run([python, SCRIPTS_DIR / "separate.py", render, vdir, "--mode", "full", "--prefix", "render"])
+        if render_stems == "demucs":
+            run([python, SCRIPTS_DIR / "separate.py", render, vdir, "--mode", "full", "--prefix", "render"])
+        else:
+            solo_render_stems(vdir, render, run=run)
     for s_ in RENDER_STEMS:
         _need_stem(vdir, f"render_{s_}")
 
@@ -794,6 +835,10 @@ def main(argv: list[str] | None = None) -> int:
     rp.add_argument("--no-iteration-stems", action="store_true", help="skip Demucs on each iteration render")
     rp.add_argument("--force", action="store_true", help="redo every artifact")
     rp.add_argument("--config", type=Path, default=None, help="synth_config.json for compare_audio.py")
+    rp.add_argument("--render-stems", choices=RENDER_STEMS_MODES, default=DEFAULT_RENDER_STEMS,
+                    help="how render_{melodic,drums,bass,vocals} are made: solo = the renderer, one voice group "
+                         "sounding per render (vocals = silence); demucs = separate.py on render.wav (only when "
+                         "working on the separation stage)")
     rp.add_argument("--gate-verdict", choices=("PASS", "FAIL"), default=None)
     rp.add_argument("--gate-message", default="")
     args = ap.parse_args(argv)
@@ -803,7 +848,8 @@ def main(argv: list[str] | None = None) -> int:
             gate = GateVerdict(verdict=args.gate_verdict, message=args.gate_message) if args.gate_verdict else None
             res = build_report(args.track_dir, args.track_dir / vname, seconds=args.seconds,
                                calib_workdir=args.calib_workdir, iteration_stems=not args.no_iteration_stems,
-                               force=args.force, config=args.config, gate=gate)
+                               force=args.force, config=args.config, gate=gate,
+                               render_stems=args.render_stems)
             print(res.report)
         elif args.cmd == "slug":
             print(slug_from_title(args.title))

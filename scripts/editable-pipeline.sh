@@ -18,13 +18,14 @@
 #   8 score + gate     compare_audio.py -d <whole-bar seconds> --strudel ; eval/gate.py ; editability_check.py
 #   9 promote          pipeline_helpers.py promote -> vNNN/{output.strudel,render.wav,comparison.json,metadata.json}
 #  10 report           pipeline_helpers.py report -> vNNN/{report.html,comparison.png,chart_*.png,render_*.wav,
-#                      stem_comparison.json,iterations.json,iterations/}; Demucs on the render + each calibration
-#                      iteration render (~2 min each). A missing/failed report is an ERROR, never a skip.
+#                      stem_comparison.json,iterations.json,iterations/}; render stems = the renderer with one voice
+#                      group sounding (default; --render-stems demucs = Demucs on the render) + Demucs on each
+#                      calibration iteration render (~2 min each). A missing/failed report is an ERROR, never a skip.
 #
 # Usage:
 #   scripts/editable-pipeline.sh --url <youtube> [--title "<cache folder title>"] [--prefix <slug>]
 #       [--genre <g>] [--mode sample-instrument|synth|both] [--iters N] [--synth-iters N] [--dur <seconds>]
-#       [--r2 | --local] [--no-iteration-stems] [--force]
+#       [--r2 | --local] [--no-iteration-stems] [--render-stems solo|demucs] [--force]
 #
 #   --url      YouTube link (required unless --title names an already-extracted track dir)
 #   --title    locate an already-extracted track dir .cache/stems/<title> (skips stage 1 when complete)
@@ -38,6 +39,9 @@
 #              song end, so the pattern cannot loop back to bar 0)
 #   --r2       host on the project's public R2 bucket (default); --local serves on localhost:5555
 #   --no-iteration-stems  stage 10: skip Demucs on each calibration iteration (report keeps the mixes only)
+#   --render-stems  stage 10: how vNNN/render_{melodic,drums,bass,vocals} are made. solo (default) = the renderer,
+#              one voice group sounding per render (vocals = silence); demucs = Demucs on render.wav (only
+#              when working on the separation stage itself)
 #   --force    redo every stage even if its output exists
 #
 # Requires (checked per stage, not up front): BlackHole + Multi-Output selected, node recorder built
@@ -66,7 +70,7 @@ else
   RENDER_NOTE="record-strudel-blackhole.js RAW capture + uniform speed correction (ffmpeg wallclock restamp)"
 fi
 
-URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="" SYNTH_ITERS="" DUR="" HOSTING="r2" FORCE="" ITER_STEMS_ARG=()
+URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="" SYNTH_ITERS="" DUR="" HOSTING="r2" FORCE="" ITER_STEMS_ARG=() RENDER_STEMS_ARG=()
 
 usage() { sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
 log() { echo "[editable-pipeline] $*" >&2; }
@@ -84,6 +88,7 @@ while [ $# -gt 0 ]; do case "$1" in
   --r2) HOSTING="r2"; shift;;
   --local) HOSTING="local"; shift;;
   --no-iteration-stems) ITER_STEMS_ARG=(--no-iteration-stems); shift;;
+  --render-stems) RENDER_STEMS_ARG=(--render-stems "${2:?--render-stems needs solo|demucs}"); shift 2;;
   --force) FORCE="1"; shift;;
   -h|--help) usage; exit 0;;
   *) echo "unknown arg: $1 (see --help)" >&2; exit 64;;
@@ -397,7 +402,7 @@ report_stage() {
     --gate-message "$(tr '\n' ' ' < "$W/gate.txt")")
   log "stage 10: report $mode -> $vdir"
   "${PH[@]}" report --track-dir "$TRACK" --version "$(basename "$vdir")" --seconds "$COMPARE_SECONDS" \
-    --calib-workdir "$W" ${ITER_STEMS_ARG[@]+"${ITER_STEMS_ARG[@]}"} ${FORCE:+--force} ${gate_arg[@]+"${gate_arg[@]}"} >&2 \
+    --calib-workdir "$W" ${ITER_STEMS_ARG[@]+"${ITER_STEMS_ARG[@]}"} ${RENDER_STEMS_ARG[@]+"${RENDER_STEMS_ARG[@]}"} ${FORCE:+--force} ${gate_arg[@]+"${gate_arg[@]}"} >&2 \
     || die "stage 10 report failed for $mode ($vdir)"
   [ -s "$vdir/report.html" ] || die "stage 10 produced no $vdir/report.html"
 }

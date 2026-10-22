@@ -34,6 +34,7 @@ class FakeRunner:
 
     def __init__(self, fail_on: str | None = None, ffmpeg_writes: bool = True) -> None:
         self.calls: list[list[str]] = []
+        self.solo_sources: dict[str, str] = {}
         self.fail_on = fail_on
         self.ffmpeg_writes = ffmpeg_writes
 
@@ -57,6 +58,9 @@ class FakeRunner:
             out, prefix = Path(a[3]), a[a.index("--prefix") + 1]
             for s in ("melodic", "drums", "bass", "vocals"):
                 (out / f"{prefix}_{s}.mp3").write_bytes(b"demucs-mp3")     # the real separate.py leaves mp3 only
+        elif tool == "render-strudel-offline.js":                 # the renderer: one solo group per call
+            self.solo_sources[Path(a[a.index("-o") + 1]).name] = Path(a[2]).read_text()
+            _sine(Path(a[a.index("-o") + 1]), 200.0)
         elif tool == "generate_report.py":
             Path(a[a.index("-o") + 1]).write_text("<html>report</html>")
         elif tool == "ffmpeg" and self.ffmpeg_writes:
@@ -66,6 +70,15 @@ class FakeRunner:
         return [Path(c[0]).name if Path(c[0]).name == "ffmpeg" else Path(c[1]).name for c in self.calls]
 
 
+STRUDEL = """let bass = ["c2"]
+$: note(cat(...bass)).s("sine")  // BASS — low end
+$: note("c4").s("sawtooth")  // LEAD — melody
+$: stack(
+  note("e4").s("sawtooth"),
+  note("g4").s("sawtooth")
+)  // texture — CHORDS — harmony
+$: s("bd").bank("RolandTR808")  // DRUMS — groove
+"""
 STAMPED = '{"editability": "pass", "generation_mode": "sample-instrument", "comparison": {"overall_similarity": 0.9}}'
 
 
@@ -84,7 +97,7 @@ def track(tmp_path: Path) -> tuple[Path, Path, Path]:
     (v / "render.wav").write_bytes((w / "cal2.wav").read_bytes())      # promoted render == cal2 (the best)
     (v / "comparison.json").write_text(STAMPED)
     (v / "metadata.json").write_text(json.dumps({"version": 2, "generation_mode": "sample-instrument"}))
-    (v / "output.strudel").write_text("$: note('c2')")
+    (v / "output.strudel").write_text(STRUDEL)
     for n, sim in ((1, 0.80), (2, 0.91)):
         (w / f"cal{n}.strudel").write_text(f"// cal{n}")
         (w / f"cal{n}.cmp.json").write_text(json.dumps({"comparison": {"overall_similarity": sim,
@@ -100,7 +113,7 @@ def _sha(p: Path) -> str:
 def test_creates_every_artifact_and_declares_report(track: tuple[Path, Path, Path]) -> None:
     t, v, w = track
     run = FakeRunner()
-    res = build_report(t, v, seconds=1, calib_workdir=w, run=run)
+    res = build_report(t, v, seconds=1, calib_workdir=w, run=run, render_stems="demucs")
     assert res.report == v / "report.html" and (v / "report.html").is_file()
     for name in ("comparison.png", "chart_frequency.png", "chart_waveform.png", "stem_comparison.json",
                  "chart_stem_overview.png", "render_melodic.mp3", "render_drums.mp3", "render_bass.mp3",
@@ -136,7 +149,7 @@ def test_rerun_is_idempotent_and_force_redoes(track: tuple[Path, Path, Path]) ->
 def test_iterations_json_marks_best_and_paths_resolve(track: tuple[Path, Path, Path]) -> None:
     t, v, w = track
     run = FakeRunner()
-    build_report(t, v, seconds=1, calib_workdir=w, run=run, gate=GateVerdict(verdict="PASS", message="ok"))
+    build_report(t, v, seconds=1, calib_workdir=w, run=run, gate=GateVerdict(verdict="PASS", message="ok"), render_stems="demucs")
     doc = json.loads((v / "iterations.json").read_text())
     its = {i["version"]: i for i in doc["iterations"]}
     assert [i["was_best"] for i in doc["iterations"]] == [False, True]
@@ -153,7 +166,7 @@ def test_iterations_json_marks_best_and_paths_resolve(track: tuple[Path, Path, P
 def test_no_iteration_stems_skips_demucs_on_iterations(track: tuple[Path, Path, Path]) -> None:
     t, v, w = track
     run = FakeRunner()
-    build_report(t, v, seconds=1, calib_workdir=w, iteration_stems=False, run=run)
+    build_report(t, v, seconds=1, calib_workdir=w, iteration_stems=False, run=run, render_stems="demucs")
     assert [c[c.index("--prefix") + 1] for c in run.calls if c[1].endswith("separate.py")] == ["render"]
     it = json.loads((v / "iterations.json").read_text())["iterations"][0]
     assert it["stem_bass_path"] is None and it["render_path"] == "iterations/cal1.mp3"
@@ -198,7 +211,7 @@ def _ffmpeg_targets(run: FakeRunner) -> list[str]:
 def test_demucs_mp3s_are_compared_directly_and_nothing_pre_existing_is_deleted(track: tuple[Path, Path, Path]) -> None:
     t, v, w = track
     run = FakeRunner()
-    build_report(t, v, seconds=1, calib_workdir=w, run=run)
+    build_report(t, v, seconds=1, calib_workdir=w, run=run, render_stems="demucs")
     cmp = next(c for c in run.calls if "--stems" in c)
     assert [Path(x).name for x in cmp if x.endswith(".mp3")] == ["render_melodic.mp3", "render_drums.mp3", "render_bass.mp3"]
     assert not any(c[-1].endswith(".wav") for c in run.calls if Path(c[0]).name == "ffmpeg"), "no mp3->wav decode"
@@ -274,7 +287,7 @@ def test_lineage_mismatch_marks_no_best_and_warns(track: tuple[Path, Path, Path]
     assert str(w) in err and "byte-identical" in err
     # no free ride on the best-iteration shortcut: both iterations are separated by Demucs
     run = FakeRunner()
-    build_report(t, v, seconds=1, calib_workdir=w, run=run, force=True)
+    build_report(t, v, seconds=1, calib_workdir=w, run=run, force=True, render_stems="demucs")
     assert [c[c.index("--prefix") + 1] for c in run.calls if c[1].endswith("separate.py")] == ["render", "cal1", "cal2"]
 
 
@@ -398,3 +411,45 @@ def test_new_gate_on_an_already_reported_version_rebuilds_the_report(track: tupl
     again = FakeRunner()
     build_report(t, v, seconds=1, calib_workdir=w, run=again, gate=GateVerdict(verdict="PASS", message="ok"))
     assert again.tools() == ["generate_report.py"]
+
+
+# ---- render stems from the renderer (default) vs Demucs (opt-in) ----
+
+def test_default_makes_no_separate_call_and_renders_one_voice_group_per_stem(track: tuple[Path, Path, Path]) -> None:
+    t, v, w = track
+    run = FakeRunner()
+    build_report(t, v, seconds=1, calib_workdir=w, run=run, iteration_stems=False)
+    assert not [c for c in run.calls if c[1].endswith("separate.py")], "Demucs is opt-in"
+    live = {f: [ln for ln in src.splitlines() if ln.startswith("$:")] for f, src in run.solo_sources.items()}
+    assert set(live) == {"render_melodic.wav", "render_drums.wav", "render_bass.wav"}
+    assert [len(x) for x in (live["render_bass.wav"], live["render_drums.wav"], live["render_melodic.wav"])] == [1, 1, 2]
+    assert "BASS" in live["render_bass.wav"][0] and "DRUMS" in live["render_drums.wav"][0]
+    assert all("BASS" not in ln and "DRUMS" not in ln for ln in live["render_melodic.wav"])
+    data, _ = sf.read(str(v / "render_vocals.wav"))
+    assert not np.any(data) and len(data) == SR, "vocals = silence of the render's length"
+    meta = json.loads((v / "metadata.json").read_text())
+    assert meta["render_stems_check"]["source"] == "solo" and "correlation" in meta["render_stems_check"]
+
+
+def test_solo_splitter_keeps_exactly_one_group_and_rejects_unlabelled_channels() -> None:
+    import solo_stems
+    only_bass = solo_stems.solo_code(STRUDEL, "bass")
+    assert only_bass is not None
+    assert [ln for ln in only_bass.splitlines() if ln.startswith("$:")] == ['$: note(cat(...bass)).s("sine")  // BASS — low end']
+    assert 'e4' not in only_bass.replace("// [muted]   note(\"e4\")", "") and "let bass" in only_bass
+    assert solo_stems.solo_code("$: s('bd')  // DRUMS — x\n", "bass") is None, "no channel for the group -> None"
+    with pytest.raises(solo_stems.StemSplitError, match="no role label"):
+        solo_stems.solo_code("$: note('c2')\n", "bass")
+
+
+def test_demucs_opt_in_still_separates(track: tuple[Path, Path, Path]) -> None:
+    t, v, w = track
+    run = FakeRunner()
+    build_report(t, v, seconds=1, run=run, render_stems="demucs")
+    assert [c[c.index("--prefix") + 1] for c in run.calls if c[1].endswith("separate.py")] == ["render"]
+    assert not run.solo_sources
+
+
+def test_cli_render_stems_flag_defaults_to_solo() -> None:
+    import pipeline_helpers
+    assert pipeline_helpers.DEFAULT_RENDER_STEMS == "solo"
