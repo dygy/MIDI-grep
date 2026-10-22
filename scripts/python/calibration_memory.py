@@ -27,6 +27,7 @@ import contextlib
 import hashlib
 import json
 import math
+import os
 import re
 import statistics
 import subprocess
@@ -60,7 +61,7 @@ def warn(msg: str) -> None:
 
 
 # ---------------------------------------------------------------- identity of the code that produced a step
-def _local_imports(path: Path, seen: set[Path]) -> None:
+def _local_imports(path: Path, seen: set[Path], src: Path) -> None:
     if path in seen or not path.is_file():
         return
     seen.add(path)
@@ -71,18 +72,26 @@ def _local_imports(path: Path, seen: set[Path]) -> None:
     for n in ast.walk(tree):
         names = [a.name for a in n.names] if isinstance(n, ast.Import) else [n.module or ""] if isinstance(n, ast.ImportFrom) else []
         for nm in names:
-            _local_imports(HERE / (nm.split(".")[0] + ".py"), seen)
+            _local_imports(src / (nm.split(".")[0] + ".py"), seen, src)
 
 
-def code_version() -> tuple[str, str]:
-    """(content hash of everything that decides a calibrated render - generator, calibrator, the loop driver, the
-    mix stage, the metric - and their local imports, git short commit)."""
+# what decides the sample pack's audio (stage 4) - and so, through it, every render calibrated on that pack
+PACK_ROOTS = ("build_sample_pack.py",)
+CALIBRATE_ROOTS = ("generate_dynamic_strudel.py", "calibrate_dynamic.py", "calibrate_loop.py", "mix_dynamics.py",
+                   "compare_audio.py") + PACK_ROOTS
+
+
+def code_version(stage: str = "calibrate") -> tuple[str, str]:
+    """(content hash of everything that decides a stage's output, git short commit). "calibrate": a calibrated
+    render - generator, calibrator, the loop driver, the mix stage, the metric, the pack builder (the drum one-shots
+    it cuts are what the render plays) - and their local imports; "pack": the pack builder and its local imports."""
+    # the scripts as they were invoked (not symlink-resolved): a checkout hashes its own files
+    src = Path(os.path.abspath(__file__)).parent
     seen: set[Path] = set()
-    for f in ("generate_dynamic_strudel.py", "calibrate_dynamic.py", "calibrate_loop.py", "mix_dynamics.py",
-              "compare_audio.py"):
-        _local_imports(HERE / f, seen)
-    driver = ROOT / "scripts" / "auto-calibrate.sh"
-    if driver.is_file():
+    for f in (PACK_ROOTS if stage == "pack" else CALIBRATE_ROOTS):
+        _local_imports(src / f, seen, src)
+    driver = src.parents[1] / "scripts" / "auto-calibrate.sh"
+    if stage != "pack" and driver.is_file():
         seen.add(driver)
     h = hashlib.sha1()
     for p in sorted(seen):
@@ -581,11 +590,12 @@ def _main() -> int:
     p = sp.add_parser("responses"); p.add_argument("--mode", required=True); p.add_argument("--out", required=True)
     p = sp.add_parser("backfill"); p.add_argument("--cache", default=str(ROOT / ".cache" / "stems"))
     sp.add_parser("summary")
-    sp.add_parser("code-version", help="print the code hash a calibrated render is stamped with")
+    p = sp.add_parser("code-version", help="print the code hash a calibrated render (or the sample pack) is stamped with")
+    p.add_argument("--stage", choices=("calibrate", "pack"), default="calibrate")
     a = ap.parse_args()
 
     if a.cmd == "code-version":
-        print(code_version()[0], file=sys.__stdout__)   # main() sends stdout to stderr; this is the one machine-read line
+        print(code_version(a.stage)[0], file=sys.__stdout__)   # main() sends stdout to stderr; this is the one machine-read line
         return 0
 
     if a.cmd in ("record-step", "record-best"):

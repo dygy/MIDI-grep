@@ -152,16 +152,17 @@ OLD = "0.4 0.7 1.0 5000 0.1 0.6 1.0 422 300"
 NEW = "0.4 0.7 1.0 5000 0.1 0.6 422 300"
 
 
-def _code_version() -> str:
-    return subprocess.run([sys.executable, str(SCRIPTS / "calibration_memory.py"), "code-version"],
-                          capture_output=True, text=True, check=True).stdout.strip()
+def _code_version(repo, stage: str = "calibrate") -> str:
+    # hashed in the hermetic copy: its stubbed pack builder is part of what a calibrated render depends on
+    return subprocess.run([sys.executable, str(repo.root / "scripts" / "python" / "calibration_memory.py"),
+                           "code-version", "--stage", stage], capture_output=True, text=True, check=True).stdout.strip()
 
 
 def _seed_best(repo, mode: str, params: str, code: str | None = None) -> Path:
     w = repo.pw / mode
     w.mkdir(parents=True, exist_ok=True)
     for n, body in (("best.strudel", "//"), ("best.wav", "w"), ("best.cmp.json", "{}"), ("best.params", params + "\n"),
-                    ("result.json", "{}"), ("best.code", (code if code is not None else _code_version()) + "\n")):
+                    ("result.json", "{}"), ("best.code", (code if code is not None else _code_version(repo)) + "\n")):
         (w / n).write_text(body)
     return w
 
@@ -209,3 +210,19 @@ def test_best_from_other_code_reruns_the_stage_and_invalidates_its_result(repo, 
     r = run(repo, "--local", "--mode", "synth")
     assert any(c.startswith("auto-calibrate") for c in calls(repo)), r.stderr
     assert "from other code" in r.stderr and not (w / "result.json").exists()
+
+
+# --- a sample pack cut by other builder code is rebuilt (a one-shot fix must reach the pack) ---------------
+def test_pack_from_other_builder_code_is_rebuilt_and_its_calibration_rerun(repo):
+    run(repo, "--local", "--mode", "synth")
+    assert (repo.pw / "pack.code").read_text().strip() == _code_version(repo, "pack")
+    _seed_best(repo, "synth", NEW)
+    (repo.calls).write_text("")
+    r = run(repo, "--local", "--mode", "synth")
+    assert not [c for c in calls(repo) if c.startswith(("sample_pack", "auto-calibrate"))], r.stderr   # same code: reuse
+    builder = repo.root / "scripts" / "python" / "build_sample_pack.py"
+    builder.write_text(builder.read_text() + "# one-shot cut changed\n")
+    (repo.calls).write_text("")
+    r = run(repo, "--local", "--mode", "synth")
+    assert any(c.startswith("sample_pack") for c in calls(repo)), r.stderr
+    assert any(c.startswith("auto-calibrate") for c in calls(repo)), "a best render on the old pack was kept"

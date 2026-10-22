@@ -222,16 +222,19 @@ log "stage 3b: bass f0 / register"
   || die "stage 3b bass_register measure failed"
 
 # ---------------------------------------------------------------- stage 4: sample pack
+# the pack is stamped with the code that cut it (pack.code): a builder change must reach the one-shots
+PACK_VER="$("$PY" "$SP/calibration_memory.py" code-version --stage pack 2>/dev/null)"
 if stage_done "$PACK/pack.json" "$PACK/samples.json" "$PACK/strudel.json" && base_ok "$PACK/samples.json" "$BASE/" \
-   && built_at "$PW/pack.bpm"; then
+   && built_at "$PW/pack.bpm" && [ -n "$PACK_VER" ] && [ "$(cat "$PW/pack.code" 2>/dev/null)" = "$PACK_VER" ]; then
   log "stage 4 skip: sample pack exists for $BASE/ (built at bpm $BPM)"
 else
-  log "stage 4: build sample pack (bpm $BPM)"
-  rm -f "$PW/pack.bpm"
+  log "stage 4: build sample pack (bpm $BPM, code ${PACK_VER:-?}, was $(cat "$PW/pack.code" 2>/dev/null || echo none))"
+  rm -f "$PW/pack.bpm" "$PW/pack.code"
   key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
   "$PY" "$SP/build_sample_pack.py" --stems-dir "$TRACK" --out "$PACK" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} \
     --prefix "$SND" --base-url "$BASE/" >&2 || die "stage 4 build_sample_pack failed"   # SND: sound names never carry '-' 
   echo "$BPM" > "$PW/pack.bpm"
+  [ -z "$PACK_VER" ] || echo "$PACK_VER" > "$PW/pack.code"
 fi
 [ -s "$PACK/drums/bd.wav" ] || die "stage 4 pack has no drums/ one-shots in $PACK/drums"
 
