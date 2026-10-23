@@ -90,6 +90,31 @@ def find_channels(lines: list[str]) -> list[Channel]:
     return chans
 
 
+def _silence(last_line: str) -> str:
+    """Append ``.gain(0)`` to a channel's expression, ahead of its trailing ``// LABEL`` comment.
+
+    Gain is last-wins in Strudel, so the channel keeps its orbits (a duck target such as the bass' orbit is
+    defined by the BASS channel and ducked by the DRUMS one; commenting a channel out would make the engine fail
+    with "duck target orbit N does not exist") and its haps still fire (ducking), but it is silent."""
+    depth, in_str, cut = 0, None, len(last_line)
+    i = 0
+    while i < len(last_line):          # position of the trailing `//` comment, outside strings
+        ch = last_line[i]
+        if in_str:
+            if ch == "\\":
+                i += 1
+            elif ch == in_str:
+                in_str = None
+        elif ch in "\"'`":
+            in_str = ch
+        elif last_line.startswith("//", i):
+            cut = i
+            break
+        i += 1
+    code, comment = last_line[:cut].rstrip(), last_line[cut:]
+    return code + ".gain(0)" + ("  " + comment if comment else "")
+
+
 def solo_code(code: str, group: str) -> str | None:
     """``code`` with every channel outside ``group`` commented out; None when ``group`` has no channel."""
     if group not in GROUPS:
@@ -100,8 +125,7 @@ def solo_code(code: str, group: str) -> str | None:
         return None
     for c in chans:
         if c.group != group:
-            for k in range(c.first, c.last + 1):
-                lines[k] = "// [muted] " + lines[k]
+            lines[c.last] = _silence(lines[c.last])
     return "\n".join(lines)
 
 

@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sys
 from collections.abc import Sequence
 from pathlib import Path
@@ -59,7 +60,12 @@ class FakeRunner:
             for s in ("melodic", "drums", "bass", "vocals"):
                 (out / f"{prefix}_{s}.mp3").write_bytes(b"demucs-mp3")     # the real separate.py leaves mp3 only
         elif tool == "render-strudel-offline.js":                 # the renderer: one solo group per call
-            self.solo_sources[Path(a[a.index("-o") + 1]).name] = Path(a[2]).read_text()
+            src = Path(a[2]).read_text()
+            self.solo_sources[Path(a[a.index("-o") + 1]).name] = src
+            live = "\n".join(ln for ln in src.splitlines() if not ln.lstrip().startswith("//"))
+            for n in re.findall(r"duckorbit\((\d+)\)", live):    # the engine's own refusal
+                if f"orbit({n})" not in live.replace(f"duckorbit({n})", ""):
+                    raise RuntimeError(f"duck target orbit {n} does not exist; no output written")
             _sine(Path(a[a.index("-o") + 1]), 200.0)
         elif tool == "generate_report.py":
             Path(a[a.index("-o") + 1]).write_text("<html>report</html>")
@@ -71,13 +77,13 @@ class FakeRunner:
 
 
 STRUDEL = """let bass = ["c2"]
-$: note(cat(...bass)).s("sine")  // BASS — low end
+$: note(cat(...bass)).s("sine").orbit(2)  // BASS — low end
 $: note("c4").s("sawtooth")  // LEAD — melody
 $: stack(
   note("e4").s("sawtooth"),
   note("g4").s("sawtooth")
 )  // texture — CHORDS — harmony
-$: s("bd").bank("RolandTR808")  // DRUMS — groove
+$: s("bd").bank("RolandTR808").duckorbit(2).duckdepth(0.5)  // DRUMS — groove
 """
 STAMPED = '{"editability": "pass", "generation_mode": "sample-instrument", "comparison": {"overall_similarity": 0.9}}'
 
@@ -415,28 +421,46 @@ def test_new_gate_on_an_already_reported_version_rebuilds_the_report(track: tupl
 
 # ---- render stems from the renderer (default) vs Demucs (opt-in) ----
 
+def _audible(src: str) -> list[str]:
+    """Channel last lines that are NOT silenced with a trailing .gain(0) before their label comment."""
+    return [ln for ln in src.splitlines() if re.search(r"\)  // (texture — )?[A-Z]+ — ", ln) and ".gain(0)  //" not in ln]
+
+
 def test_default_makes_no_separate_call_and_renders_one_voice_group_per_stem(track: tuple[Path, Path, Path]) -> None:
     t, v, w = track
     run = FakeRunner()
     build_report(t, v, seconds=1, calib_workdir=w, run=run, iteration_stems=False)
     assert not [c for c in run.calls if c[1].endswith("separate.py")], "Demucs is opt-in"
-    live = {f: [ln for ln in src.splitlines() if ln.startswith("$:")] for f, src in run.solo_sources.items()}
-    assert set(live) == {"render_melodic.wav", "render_drums.wav", "render_bass.wav"}
-    assert [len(x) for x in (live["render_bass.wav"], live["render_drums.wav"], live["render_melodic.wav"])] == [1, 1, 2]
-    assert "BASS" in live["render_bass.wav"][0] and "DRUMS" in live["render_drums.wav"][0]
-    assert all("BASS" not in ln and "DRUMS" not in ln for ln in live["render_melodic.wav"])
+    assert set(run.solo_sources) == {"render_melodic.wav", "render_drums.wav", "render_bass.wav"}
+    heard = {f: [ln.split("  // ")[-1].split(" — ")[-2] for ln in _audible(src)] for f, src in run.solo_sources.items()}
+    assert heard["render_bass.wav"] == ["BASS"] and heard["render_drums.wav"] == ["DRUMS"]
+    assert sorted(heard["render_melodic.wav"]) == ["CHORDS", "LEAD"]
     data, _ = sf.read(str(v / "render_vocals.wav"))
     assert not np.any(data) and len(data) == SR, "vocals = silence of the render's length"
     meta = json.loads((v / "metadata.json").read_text())
     assert meta["render_stems_check"]["source"] == "solo" and "correlation" in meta["render_stems_check"]
 
 
-def test_solo_splitter_keeps_exactly_one_group_and_rejects_unlabelled_channels() -> None:
+def test_muted_group_keeps_its_orbit_so_the_duck_target_exists() -> None:
+    """Regression: commenting the BASS channel out made the drums' `.duckorbit(2)` fail the render."""
+    import solo_stems
+    drums_only = solo_stems.solo_code(STRUDEL, "drums")
+    assert drums_only is not None
+    bass_line = next(ln for ln in drums_only.splitlines() if "// BASS" in ln)
+    assert not bass_line.startswith("//") and ".orbit(2).gain(0)  // BASS" in bass_line
+    bass_only = solo_stems.solo_code(STRUDEL, "bass")
+    assert bass_only is not None and ".duckorbit(2).duckdepth(0.5).gain(0)  // DRUMS" in bass_only, \
+        "the muted kick still fires, so it still ducks the bass"
+
+
+def test_solo_splitter_silences_other_groups_and_rejects_unlabelled_channels() -> None:
     import solo_stems
     only_bass = solo_stems.solo_code(STRUDEL, "bass")
-    assert only_bass is not None
-    assert [ln for ln in only_bass.splitlines() if ln.startswith("$:")] == ['$: note(cat(...bass)).s("sine")  // BASS — low end']
-    assert 'e4' not in only_bass.replace("// [muted]   note(\"e4\")", "") and "let bass" in only_bass
+    assert only_bass is not None and "let bass" in only_bass
+    assert only_bass.count(".gain(0)") == 3          # lead, the chords stack, drums
+    assert 'e4' in only_bass, "muted channels stay in the code (orbits, ducks)"
+    multi = [ln for ln in only_bass.splitlines() if ln.endswith("// texture — CHORDS — harmony")]
+    assert multi == [")" + ".gain(0)" + "  // texture — CHORDS — harmony"]
     assert solo_stems.solo_code("$: s('bd')  // DRUMS — x\n", "bass") is None, "no channel for the group -> None"
     with pytest.raises(solo_stems.StemSplitError, match="no role label"):
         solo_stems.solo_code("$: note('c2')\n", "bass")
