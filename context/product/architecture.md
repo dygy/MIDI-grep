@@ -287,10 +287,30 @@ driven by generated/edited `note()` bar arrays — the "dynamic Strudel" path in
 
 **Editable pipeline stage 10 (report).** `scripts/editable-pipeline.sh` ends every promoted `vNNN/` with
 `pipeline_helpers.py report` (`build_report`): charts (made in a temp dir — `compare_audio.py --chart`
-overwrites `comparison.json`), Demucs render stems, `stem_comparison.json`, `iterations.json` from the
+overwrites `comparison.json`), render stems (`solo_stems.py`: the renderer plays one voice group at a time, the others muted with a trailing `.gain(0)` so orbits and ducking survive; `--render-stems demucs` keeps Demucs on the render), `stem_comparison.json`, `iterations.json` from the
 calibration workdir (`was_best` only for a byte-identical render) and `report.html`. Report audio is 128k mp3
 twins (`render.mp3`, `embed/`, `iterations/`), reused only while newer than their source. The report is
 mandatory: a failed or missing `report.html` aborts the driver.
+
+**Build-stage freshness and preflight.** Stage 4 (sample pack) and stage 5 (instrument models) are stamped with
+`calibration_memory.py code-version --stage pack|instruments` (`pack.code`, per-model `.code`: hash of the builders and
+their local imports) and rebuilt when the stamp differs; the calibrate hash includes those builders, so a changed
+one-shot/grain cutter reruns calibration. The render preflight also calls `renderer.py browser` and stops before
+calibration when puppeteer's Chromium is missing.
+
+**Pack/instrument cutting.** Drum one-shots come from `drum_oneshots.py` (cut from the same `detect_drums_bands` hits
+that drive the pattern, attack at sample 0); pitched note grains (`pitched_grains.py`) end where the stem stops sounding
+the note (`ring_end`) so bass samples keep their sub tail.
+
+**Generator note shape.** `melodic_shape.py` (lead/chords strike at stem onsets, hold to the next; chroma-confirmed
+pitch changes inside a hold = `leadLegato`/`chordsLegato`), the loudest-note lead pick, `bass_register.harmonic_of`
+(a transcribed non-octave partial is written as the stem f0) and the `bassLegato` loop-start entry are generator-side
+and render through the same sample instruments.
+
+**Solo measurements in calibration.** `auto-calibrate.sh` renders the BASS channel (`bass_solo.py`, `--bass-solo`,
+`AC_BSOLO=off`) and, sample-instrument only, LEAD+CHORDS (`melodic_solo.py`, `--melodic-solo`, `AC_MSOLO=off`) alone each
+iteration; `calibrate_dynamic.py` sets bass-mult, cal-lead and lead-lpf from those absolute levels/centroids, falling back to
+mix shares on failure. `--lead-hpf 0` = derived from the lowest lead/chord note.
 
 ### Generative Mode (`generative` / `gen` / `rave`)
 
@@ -503,7 +523,9 @@ midi-grep/
 │       ├── compare_audio.py         # MAE similarity + section-aware + per-stem
 │       ├── calibrate_dynamic.py     # Data-driven mix calibrator
 │       ├── generate_dynamic_strudel.py # Editable note-material Strudel on sample-instruments
-│       ├── build_sample_pack.py, generate_sample_strudel.py, upload_r2.py  # Sample-pack mode
+│       ├── build_sample_pack.py, drum_oneshots.py, generate_sample_strudel.py, upload_r2.py  # Sample-pack mode
+│       ├── melodic_shape.py, bass_shape.py, bass_register.py  # Generator note shape
+│       ├── solo_stems.py, bass_solo.py, melodic_solo.py  # Voice-group solo renders (report stems, calibration)
 │       ├── stem_match.py, cross_track_eval.py, analyze_synth_params.py, synth_profiles.py
 │       ├── sound_selector.py, spectrogram_analyzer.py, thin_patterns.py, generate_report.py
 │       ├── test_*.py                # Root-level pytest files
@@ -672,7 +694,8 @@ workstation.
 - **Report E2E:** `midi-grep report <cache-dir>` (Go `internal/report`) or `generate_report.py`
   producing a self-contained `report.html`.
   The editable driver's stage 10 (`pipeline_helpers.py report`, covered by `tests/test_report_stage.py` with
-  injected fake runners — no Demucs/BlackHole) builds it for every promoted version.
+  injected fake runners — no Demucs/BlackHole) builds it for every promoted version; the stamp/preflight logic of the
+  driver is covered by `tests/test_editable_pipeline_resume.py`.
 
 ### Browser Automation
 

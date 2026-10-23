@@ -60,9 +60,9 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   The old time-averaged score scored a different song 0.876 vs our 0.932 — pre-2026-10-18 numbers are old-scale.
 - **`scripts/editable-pipeline.sh`** — ONE command from a YouTube link to both editable pieces, scored on
   real playback (spec 004): extract → MIDI per stem (bass/melodic; never vocals) → drum bands → sample pack → granular
-  instruments (one grain per transcribed note, every sample pitch-verified; `build_instruments.py` manifest + `verification.json`) → R2/local host → `auto-calibrate.sh` (N iters) then `auto-calibrate.sh --mode synth`
+  instruments (one grain per transcribed note, bass grains keep the stem's ring/808 tail, every sample pitch-verified; `build_instruments.py` manifest + `verification.json`) → R2/local host → `auto-calibrate.sh` (N iters) then `auto-calibrate.sh --mode synth`
   (starts from those knobs, own env correction) → `compare_audio --strudel` → `eval/gate.py` → `vNNN/` promotion → stage 10 report (`pipeline_helpers.py report`: charts, Demucs
-  render + iteration stems, per-stem comparison, `iterations.json`, `report.html`; mandatory, `--no-iteration-stems`). Reads bpm/key/genre from the
+  per-stem comparison, `iterations.json`, `report.html`; mandatory, `--no-iteration-stems`). Render stems come from the renderer itself (`solo_stems.py`: one voice group sounding per render), Demucs on the render only with `--render-stems demucs`. Pack and instruments are stamped with the code that built them (`calibration_memory.py code-version --stage pack|instruments`) and rebuilt when it changes; a missing renderer Chromium (`renderer.py browser`) stops the run before calibration. Reads bpm/key/genre from the
   track `metadata.json` (stamped by `pipeline_helpers.py stamp`, incl. CLAP genre with the bpm prior);
   `--genre` overrides are logged. Renders are OFFLINE by default (`render-strudel-offline.js`, Strudel's own
   renderPatternAudio; `MIDIGREP_RENDERER=blackhole` = cross-check, known ~2.5-semitone-flat defect) and are scored
@@ -74,7 +74,9 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   them with `--env-correction PATH`; `auto-calibrate.sh` chains it per iteration and keeps `best.env.json`.
 - **`scripts/python/generate_dynamic_strudel.py`** — the editable generator (spec 003). `--mode
   {sample-instrument,synth}` (default sample-instrument; synth = palette sounds, no `samples()`),
-  no vocal voice in either mode. Header line `// generation_mode:`; runs
+  no vocal voice in either mode. Lead = the loudest transcribed note per step; `melodic_shape.py` strikes lead/chords
+  only at the stem's onsets and holds to the next (`--melodic-shape stem|off`), stem pitch changes inside a hold are
+  `leadLegato`/`chordsLegato` notes (no new attack); sample bass notes without a stem attack go to `bassLegato`. Header line `// generation_mode:`; runs
   `strudel_validation.validate_code` on its own output.
 - **`scripts/python/calibrate_dynamic.py`** — data-driven mix calibrator: reads a render's
   `comparison.json` and emits the NEXT `generate_dynamic_strudel.py` knobs (sub-gain, bass-mult,
@@ -90,10 +92,14 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   `--master-gain`, is moved onto the instrumental's RMS in up to 3 render→measure rounds (the output
   clips at full scale - superdough has no master bus); kept only if RMS and crest match the
   reference and neither score drops more than `calibration_noise`; `--no-mix-dynamics` skips it.
+  Each iteration also renders the BASS channel alone (`bass_solo.py`, `--bass-solo`, `AC_BSOLO=off` skips) and, in
+  sample-instrument mode, LEAD+CHORDS alone (`melodic_solo.py`, `--melodic-solo`, `AC_MSOLO=off` skips): bass-mult,
+  cal-lead and lead-lpf follow the voice's own level/centroid vs its stem, not whole-mix shares. `--lead-hpf 0` = derived
+  from the lowest note the lead/chords play.
 
 ## Sample-pack → R2 (highest similarity)
 
-- `scripts/python/build_sample_pack.py` — stems → drum one-shots + pitched bass/melodic + raw
+- `scripts/python/build_sample_pack.py` — stems → drum one-shots (`drum_oneshots.py`: cut from the pattern's own detected hits, attack at sample 0) + pitched bass/melodic + raw
   beat-aligned per-bar **loops** (drums/bass/melodic; never vocals). Loops are written RAW (un-normalized)
   to preserve dynamics + inter-stem balance — normalizing them drops reconstruction 99%→70%.
 - `scripts/python/generate_sample_strudel.py` — writes host-resolved `samples.json` (absolute
