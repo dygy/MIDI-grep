@@ -61,6 +61,11 @@ def damp(ratio: float, *, strength: float = 0.5, lo: float = 0.7, hi: float = 1.
     return max(lo, min(hi, corr))
 
 
+# One step of a bass layer measured ALONE (no kick in the number): the amplitude correction is the exact sqrt of the
+# power ratio; the bounds only guard against a bad estimate (a 20 dB gap closes in two steps, not one).
+VOICE_STEP_LO, VOICE_STEP_HI = 0.5, 2.0
+
+
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
 
@@ -224,6 +229,10 @@ def main() -> int:
                          "section_windows) as JSON here")
     ap.add_argument("--env-correction-in", type=Path, default=None,
                     help="previous env-correction JSON; new curves are multiplied onto it")
+    ap.add_argument("--bass-solo", type=Path, default=None,
+                    help="bass_solo.py measure JSON for the LAST render: the bass voice rendered alone vs the original bass "
+                         "stem, as a share of its mix, per band. When present the bass layers (sub-gain / bass-mult) follow "
+                         "THAT ratio instead of the whole-mix band shares, which the kick also fills")
     ap.add_argument("--responses", type=Path, default=None,
                     help="JSON {knob: damping exponent} LEARNED from recorded (knob change -> band share change) pairs "
                          "(calibration_memory.py responses): replaces the fixed 0.5 (sqrt) exponent of sub_gain / "
@@ -275,6 +284,26 @@ def main() -> int:
 
     r_sub = ratio(["sub_bass"])
     r_bass = ratio(["bass"])
+    # The bass voice measured ALONE (bass_solo.py). The kick fills sub_bass/bass too, so the mix shares cannot say
+    # whether the BASS is right: VAGABUNDO's mix sub read 34.7 % vs 34.1 % while the bass voice sat 8.5 dB under its
+    # stem, and the loop lowered it. It sets the SAMPLE layer (bass-mult), the one layer that carries the whole voice,
+    # and being one linear voice (power ratio -> amplitude = sqrt) it takes the full measured step, not the damped one.
+    # The sine layer (sub-gain) stays on the mix shares: both layers feed the 60-250 Hz band, so driving both from the
+    # same band overshoots (measured on VAGABUNDO: bass-band ratio 3.15 -> 0.90 in one step with both raised).
+    voice: dict[str, float] = {}
+    if args.bass_solo is not None:
+        try:
+            solo_ratio = json.loads(args.bass_solo.read_text()).get("ratio") or {}
+            voice = {b: float(v) for b, v in solo_ratio.items() if b in ("sub_bass", "bass") and v}
+        except (OSError, ValueError, AttributeError, TypeError) as e:
+            print(f"WARNING: --bass-solo {args.bass_solo} unreadable ({e}); bass layers follow the mix band shares",
+                  file=sys.stderr)
+
+    def sample_layer_step(band: str, knob: str) -> float:
+        """Multiplicative correction of the sample layer, driven by the voice's own level in `band` when measured."""
+        if band in voice:
+            return damp(voice[band], strength=0.5, lo=VOICE_STEP_LO, hi=VOICE_STEP_HI)
+        return damp(r_sub if band == "sub_bass" else r_bass, strength=strength(knob))
     r_body = ratio(["low_mid", "mid"])       # lead/melodic body
     # Brightness lever uses the spectral CENTROID, not the high bands: in bass-heavy genres
     # the high/high_mid bands sit at ~1% magnitude where demucs bleed + noise swamp the
@@ -385,7 +414,7 @@ def main() -> int:
     # --- bass (60-250 Hz): body of the pitched bass sample --------------------------------
     # One lever per step: while the cutoff moves, bass-mult may fall but not rise (a rise would
     # re-inflate the very harmonics the cutoff is removing; cal2->cal3 did exactly that: +3%).
-    bass_corr = damp(r_sub if args.sub_up else r_bass, strength=strength("bass_mult"))     # see the layer/band assignment at the sub-gain step
+    bass_corr = sample_layer_step("sub_bass" if args.sub_up else "bass", "bass_mult")     # see the layer/band assignment at the sub-gain step
     if flipping:
         bass_corr = 1.0       # the octave flip IS this step's bass/sub rebalance (it moved ~30 points of share in one go)
     if bass_lpf_moved:

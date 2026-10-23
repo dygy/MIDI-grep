@@ -69,6 +69,9 @@ CMP="${AC_CMP:-$ROOT/scripts/python/compare_audio.py}"
 GATE="${AC_GATE:-$ROOT/scripts/python/gate_margin.py}"
 LOOP="${AC_LOOP:-$ROOT/scripts/python/calibrate_loop.py}"
 MIXD="${AC_MIXD:-$ROOT/scripts/python/mix_dynamics.py}"
+# Bass voice level (scripts/python/bass_solo.py): after each render the BASS channel is rendered alone and measured against the
+# original bass stem, so the bass layers are set by the bass and not by band shares the kick also fills. AC_BSOLO=off skips it.
+BSOLO="${AC_BSOLO:-$ROOT/scripts/python/bass_solo.py}"
 # Calibration memory (ClickHouse, scripts/python/calibration_memory.py): warm start, per-step records, learned step sizes.
 # AC_MEM=off (or --no-memory) disables it; every failure inside it is logged loudly and the run continues cold/unrecorded.
 # When the compare tool is stubbed (AC_CMP, the tests) and AC_MEM is not given, the memory is OFF: a stub run must never
@@ -258,6 +261,20 @@ while [ "$i" -lt "$ITERS" ]; do
   read -r OVER SECT < <("$PY" -c "import json,sys;d=json.load(open('$CJ'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
   echo "[$TAG] mode=$MODE overall=$OVER section_aware=$SECT  (bm=$BM sg=$SG cl=$CL llpf=$LLPF hg=$HG mg=$MG su=$ESU bl=$BL eff_bl=$EBL lh=$LH eff_lh=$ELH)"
 
+  # Bass voice alone vs the original bass stem (see bass_solo.py). Any failure only keeps the mix-share levers for this step.
+  BSOLO_ARG=()
+  if [ "$BSOLO" != off ] && [ -f "$STEMS/bass.wav" ]; then
+    if "$PY" "$BSOLO" solo "$STRU" "$WORK/$TAG.bass.strudel" 2>/dev/null; then
+      if "$NODE_BIN" "$REC" "$WORK/$TAG.bass.strudel" -o "$WORK/$TAG.bass.wav" -d "$DUR" >"$WORK/$TAG.bass.render.log" 2>&1 \
+         && "$PY" "$BSOLO" measure --orig-bass "$STEMS/bass.wav" --solo "$WORK/$TAG.bass.wav" --master-gain "$MG" \
+              --seconds "$SONG_S" --out "$WORK/$TAG.bass.json" 2>"$WORK/$TAG.bass.log"; then
+        BSOLO_ARG=(--bass-solo "$WORK/$TAG.bass.json"); echo "[$TAG] $(tail -1 "$WORK/$TAG.bass.log")"
+      else
+        echo "[$TAG] WARNING: bass-alone measurement failed (see $WORK/$TAG.bass.render.log, $WORK/$TAG.bass.log) - bass layers follow the mix band shares this step"
+      fi
+    fi
+  fi
+
   # Record this iteration; BEST is chosen AFTER the loop (see below) so the ordering is one consistent rule.
   # Gate margin = smallest margin to the eval-gate floors (eval/thresholds.yaml via eval/gate.py, per
   # --mode/--genre); "n/a" when the gate cannot be read for this iteration.
@@ -278,7 +295,7 @@ while [ "$i" -lt "$ITERS" ]; do
   envin_arg=(); [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && envin_arg=(--env-correction-in "$PREV_ENV")
   parent_arg=(); if [ -n "$PARENT" ] && [ -f "$WORK/$PARENT.cmp.json" ]; then
     read -r PEBL PELH <"$WORK/$PARENT.eff"; parent_arg=(--parent-comparison "$WORK/$PARENT.cmp.json" --parent-bass-lpf "$PEBL" --parent-lead-hpf "$PELH"); fi
-  CLI=$("$PY" "$CAL" --comparison "$CJ" ${parent_arg[@]+"${parent_arg[@]}"} ${RESP_ARG[@]+"${RESP_ARG[@]}"} --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
+  CLI=$("$PY" "$CAL" --comparison "$CJ" ${BSOLO_ARG[@]+"${BSOLO_ARG[@]}"} ${parent_arg[@]+"${parent_arg[@]}"} ${RESP_ARG[@]+"${RESP_ARG[@]}"} --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
     --bass-mult "$BM" --sub-gain "$SG" --sub-up "$ESU" --sub-up-locked "$SULOCK" --cal-lead "$CL" --lead-lpf "$LLPF" \
     --hat-gain "$HG" --master-gain "$MG" \
     --mode "$MODE" --bass-lpf "$EBL" --bass-lpf-max "$EBLMAX" --bass-note-max-hz "$EBHZ" \
