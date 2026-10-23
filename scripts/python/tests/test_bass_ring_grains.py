@@ -111,6 +111,18 @@ def test_a_pitch_is_represented_by_a_grain_at_the_level_the_stem_plays_it() -> N
     assert chosen[28].rms >= 0.20 and chosen[28].quality == 3.0      # quiet outlier skipped; best of the typical-or-louder
 
 
+def test_the_pitch_level_is_the_median_of_all_its_grains_not_of_the_long_ones() -> None:
+    """Regime d#1: the grains long enough to carry the note were mostly quiet passages (rms 0.01-0.18) while the
+    pitch's other grains sat at 0.4-0.6; the pool's own median licensed a 0.18 grain and every d#1 note rendered
+    8 dB under the stem."""
+    def g(q, rms, dur):
+        return pg.Grain(np.zeros(10, np.float32), 27, 27, "salience", q, 0.0, dur, True, rms)
+    grains = [g(1.0, 0.01, 0.6), g(6.0, 0.06, 0.6), g(1.0, 0.18, 0.5), g(0.7, 0.52, 0.5),     # long: mostly quiet
+              g(2.0, 0.45, 0.2), g(2.0, 0.50, 0.2), g(2.0, 0.55, 0.2), g(2.0, 0.60, 0.2)]   # short: the usual level
+    chosen = pg.select_per_pitch(grains, 0.45, 0.0)
+    assert chosen[27].rms == 0.52, chosen[27].rms
+
+
 def test_attack_is_at_sample_zero() -> None:
     """VAGABUNDO c#1 started 79 ms into its file (transcribed onset ahead of the stem's hit)."""
     y = np.concatenate([np.zeros(int(0.08 * SR), np.float32), _808(25, 0.4)])

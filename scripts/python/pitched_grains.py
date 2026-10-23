@@ -382,8 +382,13 @@ def select_per_pitch(grains: list[Grain], target_len_s: float, min_len_s: float 
         pool = long_enough or gs
         # A sample stands for every time the stem plays this pitch: take the loudness the stem usually plays it
         # at (at or above the pitch's median grain level), not the quietest passage that happened to be cleanest.
-        med = float(np.median([g.rms for g in pool]))
-        pool = [g for g in pool if g.rms >= med]
+        # The reference is the median over ALL of the pitch's grains: the long pool alone can be mostly quiet passages
+        # (a transcribed note held over a faded/ducked stem), whose own median then licenses a quiet grain (Regime d#1:
+        # chosen rms 0.18 vs the pitch's median 0.41 -> every d#1 note rendered 8 dB under the stem). When no pool
+        # member reaches the pitch's level, the loudest one stands for it.
+        med = float(np.median([g.rms for g in gs]))
+        loud = [g for g in pool if g.rms >= med]
+        pool = loud or [max(pool, key=lambda g: g.rms)]
         best[note] = (max(pool, key=lambda g: g.quality) if long_enough
                       else max(pool, key=lambda g: (g.duration_s, g.quality)))
     return best
