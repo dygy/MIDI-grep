@@ -233,6 +233,10 @@ def main() -> int:
                     help="bass_solo.py measure JSON for the LAST render: the bass voice rendered alone vs the original bass "
                          "stem, as a share of its mix, per band. When present the bass layers (sub-gain / bass-mult) follow "
                          "THAT ratio instead of the whole-mix band shares, which the kick also fills")
+    ap.add_argument("--melodic-solo", type=Path, default=None,
+                    help="melodic_solo.py measure JSON for the LAST render: the LEAD+CHORDS voices rendered alone vs the "
+                         "original melodic stem. When present cal-lead follows THAT absolute body level and lead-lpf THAT "
+                         "centroid, instead of the whole-mix low_mid+mid share and centroid the bass/kick/hats also fill")
     ap.add_argument("--responses", type=Path, default=None,
                     help="JSON {knob: damping exponent} LEARNED from recorded (knob change -> band share change) pairs "
                          "(calibration_memory.py responses): replaces the fixed 0.5 (sqrt) exponent of sub_gain / "
@@ -305,6 +309,23 @@ def main() -> int:
             return damp(voice[band], strength=0.5, lo=VOICE_STEP_LO, hi=VOICE_STEP_HI)
         return damp(r_sub if band == "sub_bass" else r_bass, strength=strength(knob))
     r_body = ratio(["low_mid", "mid"])       # lead/melodic body
+    # The melodic voices measured ALONE (melodic_solo.py): the same body bands, but as an absolute level of the voices
+    # against the melodic stem, not a share of a mix the bass, kick and hats also fill. One linear voice group, so the
+    # full measured step (power ratio -> amplitude = sqrt) with the bass-solo bounds; brightness is the voices' own
+    # centroid ratio (> 1 = too dark), which replaces the mix centroid for the lead low-pass only.
+    r_body_voice, r_cent_voice = None, None
+    if args.melodic_solo is not None:
+        try:
+            msolo = json.loads(args.melodic_solo.read_text())
+            lo_o, lo_r = (sum(float(msolo[k][b]) for b in ("low_mid", "mid")) for k in ("level_orig", "level_render"))
+            if all(msolo["ratio"].get(b) for b in ("low_mid", "mid")) and lo_r > 0:
+                r_body_voice = lo_o / lo_r
+            c_o, c_r = msolo["centroid"]["orig"], msolo["centroid"]["render"]
+            if c_o and c_r:
+                r_cent_voice = float(c_o) / float(c_r)
+        except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
+            print(f"WARNING: --melodic-solo {args.melodic_solo} unreadable ({e}); lead level/brightness follow the mix",
+                  file=sys.stderr)
     # Brightness lever uses the spectral CENTROID, not the high bands: in bass-heavy genres
     # the high/high_mid bands sit at ~1% magnitude where demucs bleed + noise swamp the
     # signal, so their ratio is unreliable (it kept lead-lpf pinned while the centroid said
@@ -421,7 +442,9 @@ def main() -> int:
         bass_corr = min(bass_corr, 1.0)
     nxt["bass_mult"] = round(clamp(cur["bass_mult"] * bass_corr, 0.2, 1.3), 3)
     # --- lead/melodic body: raise gain when low_mid+mid is deficient -----------------------
-    nxt["cal_lead"] = round(clamp(cur["cal_lead"] * damp(r_body, strength=strength("cal_lead"), hi=1.6), 0.4, 3.0), 3)
+    lead_corr = (damp(r_body_voice, strength=0.5, lo=VOICE_STEP_LO, hi=VOICE_STEP_HI) if r_body_voice is not None
+                 else damp(r_body, strength=strength("cal_lead"), hi=1.6))
+    nxt["cal_lead"] = round(clamp(cur["cal_lead"] * lead_corr, 0.4, 3.0), 3)
     # --- brightness: move the lead low-pass toward centroid parity ------------------------
     # GENTLE + dead-banded: the lead is only ONE source of the highs (hats/drums live there
     # too), and over-darkening tanks the brightness metric hard (a 28% lpf cut dropped it
@@ -449,13 +472,14 @@ def main() -> int:
     over_raw = r_dhigh < 1 / HAT_HI_DEAD_BAND
     hat_via_drums = (r_cent > 1.15 and cur["lead_lpf"] >= HIGH_MID_TOP_HZ and r_hi > HAT_HI_DEAD_BAND
                      and r_high >= 1 / SHARE_DEAD_BAND and not over_raw)
+    r_lead_cent = r_cent if r_cent_voice is None else r_cent_voice   # the lead cutoff follows the lead's own brightness
     if hat_via_drums:
         nxt["lead_lpf"] = int(cur["lead_lpf"])
-    elif r_cent > 1.08:        # rendered too DARK -> open the cutoff a little
-        lpf_corr = clamp(r_cent ** 0.4, 1.0, 1.25)
+    elif r_lead_cent > 1.08:        # rendered too DARK -> open the cutoff a little
+        lpf_corr = clamp(r_lead_cent ** 0.4, 1.0, 1.25)
         nxt["lead_lpf"] = int(clamp(cur["lead_lpf"] * lpf_corr, 3500, 9000))
-    elif r_cent < 0.92:      # rendered too BRIGHT -> shrink the cutoff a little
-        lpf_corr = clamp(r_cent ** 0.4, 0.8, 1.0)
+    elif r_lead_cent < 0.92:      # rendered too BRIGHT -> shrink the cutoff a little
+        lpf_corr = clamp(r_lead_cent ** 0.4, 0.8, 1.0)
         nxt["lead_lpf"] = int(clamp(cur["lead_lpf"] * lpf_corr, 3500, 9000))
     else:
         nxt["lead_lpf"] = int(cur["lead_lpf"])

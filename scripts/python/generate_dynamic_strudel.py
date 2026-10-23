@@ -63,6 +63,7 @@ GENERATION_MODES = ("sample-instrument", "synth")
 # measurement (bass_register.py) is missing/stale, with a warning: they put a C#1 sub an octave up.
 LEGACY_BASS_WINDOW = (28, 48)
 LEGACY_LEAD_WINDOW = (48, 79)
+SYNTH_LEAD_HPF_START = 300   # synth mode only: first guess of the calibrator's lead-hpf lever (sample modes derive it)
 BASS_ORBIT = 2             # the bass' own audio bus: the kick's duck targets it (everything else stays on orbit 1)
 SUB_LPF_HZ = 90            # low-pass of the sine sub layer (the sub_bass band is 20-60 Hz; 90 keeps one octave of margin)
 
@@ -96,6 +97,17 @@ def _chord_bars_pitches(bars: list[str] | None) -> list[int]:
 def _bars_hz(bars: list[str] | None, pick) -> float:
     pitches = _bars_pitches(bars)
     return round(440.0 * 2 ** ((pick(pitches) - 69) / 12), 2) if pitches else 0.0
+
+
+def sample_lead_hpf(*bar_sets: list[str] | None) -> int:
+    """High-pass (Hz) for a sampled lead/chord voice: the lowest fundamental among everything it plays (0 = no notes).
+
+    A cutoff above that removes the body of the lowest notes. VAGABUNDO's lead/chords reach cs3 (139 Hz) while the
+    old fixed 300 Hz cut the 100-300 Hz region where the melodic stem is strongest: the voice rendered alone matched
+    the stem's per-frame log-mel shape at 0.638 with hpf 300, 0.680 with hpf = the lowest fundamental, 0.686 with
+    the filter off. The grains already carry the instrument's own spectrum; nothing here is shaped by hand."""
+    pitches = [p for bars in bar_sets for p in _chord_bars_pitches(bars)]
+    return int(440.0 * 2 ** ((min(pitches) - 69) / 12)) if pitches else 0
 
 
 def bars_max_hz(bars: list[str] | None) -> float:
@@ -666,8 +678,10 @@ def main() -> int:
                     help="high-pass the drum bus (Hz); ~55 removes the 808 kick's stray sub (orig drums carry almost no sub)")
     ap.add_argument("--lead-lpf", type=int, default=5000,
                     help="lead low-pass (Hz); raise toward ~7000 to restore himid sparkle")
-    ap.add_argument("--lead-hpf", type=int, default=300,
-                    help="lead high-pass (Hz); lower toward ~150 to restore lowmid body")
+    ap.add_argument("--lead-hpf", type=int, default=0,
+                    help="lead high-pass (Hz); 0 = derive: sample-instrument modes use the lowest fundamental the lead "
+                         "and chords play (sample_lead_hpf); synth mode starts at SYNTH_LEAD_HPF_START and the "
+                         "calibrator moves it")
     ap.add_argument("--partial-reference", type=Path, default=None,
                     help="sound register table (default data/partial_reference.json, written by "
                          "probe_sound_register.py); empty/missing -> warn and apply no octave shift")
@@ -856,6 +870,10 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 print(f"WARNING melodic-shape: no loop points ({exc}); held lead notes play their grain once",
                       file=sys.stderr)
+
+    if args.lead_hpf <= 0:
+        args.lead_hpf = (SYNTH_LEAD_HPF_START if synth else
+                         sample_lead_hpf(lead_bars, chord_bars, lead_legato, chord_legato) or SYNTH_LEAD_HPF_START)
 
     # BASS NOTE SHAPE (bass_shape.py): the original bass is one continuous tone, the transcription a row of hits.
     bass_glide_bars, bass_loop_table, bass_duck, shape_info, loop_stats, duck_diag = None, {}, None, None, None, {}

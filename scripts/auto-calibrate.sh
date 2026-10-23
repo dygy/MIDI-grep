@@ -72,6 +72,9 @@ MIXD="${AC_MIXD:-$ROOT/scripts/python/mix_dynamics.py}"
 # Bass voice level (scripts/python/bass_solo.py): after each render the BASS channel is rendered alone and measured against the
 # original bass stem, so the bass layers are set by the bass and not by band shares the kick also fills. AC_BSOLO=off skips it.
 BSOLO="${AC_BSOLO:-$ROOT/scripts/python/bass_solo.py}"
+# Melodic voice level + brightness (scripts/python/melodic_solo.py): same idea for LEAD+CHORDS against melodic.wav, setting
+# cal-lead (absolute body level) and lead-lpf (the voices' own centroid) instead of whole-mix shares. AC_MSOLO=off skips it.
+MSOLO="${AC_MSOLO:-$ROOT/scripts/python/melodic_solo.py}"
 # Calibration memory (ClickHouse, scripts/python/calibration_memory.py): warm start, per-step records, learned step sizes.
 # AC_MEM=off (or --no-memory) disables it; every failure inside it is logged loudly and the run continues cold/unrecorded.
 # When the compare tool is stubbed (AC_CMP, the tests) and AC_MEM is not given, the memory is OFF: a stub run must never
@@ -275,6 +278,20 @@ while [ "$i" -lt "$ITERS" ]; do
     fi
   fi
 
+  # Melodic voices (LEAD+CHORDS) alone vs the original melodic stem (see melodic_solo.py). Same fallback as the bass.
+  MSOLO_ARG=()
+  if [ "$MSOLO" != off ] && [ "$MODE" = sample-instrument ] && [ -f "$STEMS/melodic.wav" ]; then   # measured on sample-instrument only
+    if "$PY" "$MSOLO" solo "$STRU" "$WORK/$TAG.mel.strudel" 2>/dev/null; then
+      if "$NODE_BIN" "$REC" "$WORK/$TAG.mel.strudel" -o "$WORK/$TAG.mel.wav" -d "$DUR" >"$WORK/$TAG.mel.render.log" 2>&1 \
+         && "$PY" "$MSOLO" measure --orig-melodic "$STEMS/melodic.wav" --solo "$WORK/$TAG.mel.wav" --master-gain "$MG" \
+              --seconds "$SONG_S" --out "$WORK/$TAG.mel.json" 2>"$WORK/$TAG.mel.log"; then
+        MSOLO_ARG=(--melodic-solo "$WORK/$TAG.mel.json"); echo "[$TAG] $(tail -1 "$WORK/$TAG.mel.log")"
+      else
+        echo "[$TAG] WARNING: melodic-alone measurement failed (see $WORK/$TAG.mel.render.log, $WORK/$TAG.mel.log) - cal-lead/lead-lpf follow the mix this step"
+      fi
+    fi
+  fi
+
   # Record this iteration; BEST is chosen AFTER the loop (see below) so the ordering is one consistent rule.
   # Gate margin = smallest margin to the eval-gate floors (eval/thresholds.yaml via eval/gate.py, per
   # --mode/--genre); "n/a" when the gate cannot be read for this iteration.
@@ -295,7 +312,7 @@ while [ "$i" -lt "$ITERS" ]; do
   envin_arg=(); [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && envin_arg=(--env-correction-in "$PREV_ENV")
   parent_arg=(); if [ -n "$PARENT" ] && [ -f "$WORK/$PARENT.cmp.json" ]; then
     read -r PEBL PELH <"$WORK/$PARENT.eff"; parent_arg=(--parent-comparison "$WORK/$PARENT.cmp.json" --parent-bass-lpf "$PEBL" --parent-lead-hpf "$PELH"); fi
-  CLI=$("$PY" "$CAL" --comparison "$CJ" ${BSOLO_ARG[@]+"${BSOLO_ARG[@]}"} ${parent_arg[@]+"${parent_arg[@]}"} ${RESP_ARG[@]+"${RESP_ARG[@]}"} --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
+  CLI=$("$PY" "$CAL" --comparison "$CJ" ${BSOLO_ARG[@]+"${BSOLO_ARG[@]}"} ${MSOLO_ARG[@]+"${MSOLO_ARG[@]}"} ${parent_arg[@]+"${parent_arg[@]}"} ${RESP_ARG[@]+"${RESP_ARG[@]}"} --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
     --bass-mult "$BM" --sub-gain "$SG" --sub-up "$ESU" --sub-up-locked "$SULOCK" --cal-lead "$CL" --lead-lpf "$LLPF" \
     --hat-gain "$HG" --master-gain "$MG" \
     --mode "$MODE" --bass-lpf "$EBL" --bass-lpf-max "$EBLMAX" --bass-note-max-hz "$EBHZ" \

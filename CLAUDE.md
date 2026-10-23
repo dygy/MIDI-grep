@@ -192,6 +192,13 @@ voice alone was 8.5 dB under its stem, 20-45 Hz -14 dB, and the loop lowered bas
 alone (~8 s) and its absolute band power vs the bass stem (x master-gain^2) sets bass-mult (`--bass-solo`; full sqrt step,
 bounded 0.5-2x); sub-gain stays on the mix shares (both layers feed 60-250 Hz). `AC_BSOLO=off` skips it.
 
+**Melodic voice level + brightness (2026-10-23, `scripts/python/melodic_solo.py`, run by `auto-calibrate.sh` every
+sample-instrument iteration):** the LEAD+CHORDS channels are rendered alone and compared to `melodic.wav` (absolute low_mid+mid
+power x master-gain^2, and spectral centroid). cal-lead takes the full sqrt step (bounded 0.5-2x) from that body level and
+lead-lpf follows the voices' own centroid, instead of whole-mix shares the bass/kick/hats also fill (VAGABUNDO: voices 7-9 dB
+under the stem at 200 Hz-1.3 kHz). The sampled lead/chord high-pass is now derived (the lowest fundamental played, `sample_lead_hpf`),
+not a fixed 300 Hz. `AC_MSOLO=off` skips it.
+
 **CRITICAL: Similarity Calculation Fix (Feb 2026)**
 The old cosine-based frequency balance was HIDING massive errors (25% sub_bass, 20% mid differences showed as 95%!).
 Now uses MAE (Mean Absolute Error) with per-band penalty:
