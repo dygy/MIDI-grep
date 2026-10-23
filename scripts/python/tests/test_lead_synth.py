@@ -104,7 +104,7 @@ def test_generator_emits_the_fitted_lead_on_lead_and_chords(tmp_path):
         outs[tag] = o.read_text()
 
     def line(txt, name):
-        return next(l for l in txt.splitlines() if l.startswith(f"$: note(cat(...{name}))"))
+        return next(l for l in txt.splitlines() if l.startswith("$: ") and f"note(cat(...{name}))" in l.split(".s(")[0])
 
     def gains(l):
         return [float(v) for v in re.findall(r"\d+\.\d+", l.split(".gain(", 1)[1])]

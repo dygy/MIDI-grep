@@ -837,10 +837,13 @@ def main() -> int:
 
     # MELODIC NOTE SHAPE (melodic_shape.py): the written lead retriggers every 16th; the stem plays a note and lets it ring.
     lead_loop_table, melodic_info, lead_loop_stats = {}, None, None
+    lead_legato, chord_legato = None, None
     if args.melodic_shape == "stem" and lead_bars:
         try:
             mev = MS.load_evidence(args.stems_dir / "melodic.wav")
             lead_bars, chord_bars, melodic_info = MS.shape_melodic(lead_bars, chord_bars, args.bpm, mev)
+            lead_legato = ((melodic_info or {}).get("lead") or {}).pop("legato_bars", None)
+            chord_legato = ((melodic_info or {}).get("chords") or {}).pop("legato_bars", None)
         except Exception as exc:  # noqa: BLE001 - an unmeasurable stem must not lose the piece
             print(f"WARNING melodic-shape: cannot measure melodic.wav ({exc}); lead stays a 1-step stream",
                   file=sys.stderr)
@@ -848,7 +851,8 @@ def main() -> int:
             try:
                 lead_loop_table, lead_loop_stats = BS.sample_loops(
                     args.pack_dir / "instruments" / "samples.json", lead_sound,
-                    _chord_bars_pitches(lead_bars) + _chord_bars_pitches(chord_bars))
+                    _chord_bars_pitches(lead_bars) + _chord_bars_pitches(chord_bars)
+                    + _chord_bars_pitches(lead_legato) + _chord_bars_pitches(chord_legato))
             except Exception as exc:  # noqa: BLE001
                 print(f"WARNING melodic-shape: no loop points ({exc}); held lead notes play their grain once",
                       file=sys.stderr)
@@ -1109,15 +1113,28 @@ def main() -> int:
         bass_code = "stack(\n" + ",\n".join(rows) + "\n)"
         channels.append(("BASS", "low end — root/sub. edit notes in `bass`", bass_code))
     lead_row, chord_row = "note(cat(...lead))", "note(cat(...chords))"
-    if lead_bars and lead_loop_table:
+    if lead_legato:
+        lead_row = f"stack({lead_row}, noLoopAttack(note(cat(...leadLegato))))"
+    if chord_legato:
+        chord_row = f"stack({chord_row}, noLoopAttack(note(cat(...chordsLegato))))"
+    if lead_bars and (lead_loop_table or lead_legato or chord_legato):
         L += ["// sample loop [begin, end] (fractions of the grain) per written pitch (midi), measured on the grains:",
               "// held lead/chord notes sustain inside it. Delete a pitch to play its grain once.",
               "const leadLoop = {" + ", ".join(f"{p}: [{b}, {e}]" for p, (b, e) in sorted(lead_loop_table.items())) + "}",
               "const withLeadLoop = p => p.withValue(v => { const l = leadLoop[Math.round(noteToMidi(v.note))]; "
-              "return l ? { ...v, loop: 1, loopBegin: l[0], loopEnd: l[1] } : v })", ""]
+              "return l ? { ...v, loop: 1, loopBegin: l[0], loopEnd: l[1] } : v })"]
+        if lead_legato or chord_legato:
+            L += ["// a pitch change inside a held note (leadLegato / chordsLegato): the same instrument entered at the",
+                  "// start of its loop, so it has no new attack. Delete a pitch from leadLoop to retrigger it instead.",
+                  f"const legatoAttack = {round(60.0 / args.bpm / 4, 4)}  // s: one grid step to fade the entry in",
+                  "const noLoopAttack = p => p.withValue(v => { const l = leadLoop[Math.round(noteToMidi(v.note))]; "
+                  "return l ? { ...v, begin: l[0], attack: legatoAttack } : { ...v, attack: legatoAttack } })"]
+        L += [""]
         lead_row, chord_row = f"withLeadLoop({lead_row})", f"withLeadLoop({chord_row})"
     if lead_bars:
         L += [js_array("lead", lead_bars), ""]
+        if lead_legato:
+            L += [js_array("leadLegato", lead_legato), ""]
         # lpf tames high-mid top while keeping mid body; hpf clears low bleed.
         # clip(1.3) sustains notes slightly past their step so the monophonic lead's envelope
         # is smoother (closer to the original melodic's sustained contour, lifting shape corr).
@@ -1127,6 +1144,8 @@ def main() -> int:
         channels.append(("LEAD", "melody/harmony — edit notes in `lead`", lead_code))
     if chord_bars:
         L += [js_array("chords", chord_bars), ""]
+        if chord_legato:
+            L += [js_array("chordsLegato", chord_legato), ""]
         # same instrument, filters, room and loudness contour as the lead; the base gain is the lead's scaled by the
         # transcribed harmony-vs-melody amplitude ratio (harmony_notes), then the calibrator's cal-chord lever.
         chord_g = round(lead_g * harmony_info["gain_ratio"] * args.cal_chord, 4)
