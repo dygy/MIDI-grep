@@ -86,6 +86,8 @@ class StemEvidence:
 
     def __init__(self, y: np.ndarray):
         import librosa
+        self._y = y
+        self._chroma = None
         self.hop_s = self.HOP / self.SR
         self.rms = librosa.feature.rms(y=y, frame_length=2048, hop_length=self.HOP)[0]
         self.ostr = librosa.onset.onset_strength(y=y, sr=self.SR, hop_length=self.HOP)
@@ -96,6 +98,25 @@ class StemEvidence:
         strengths = np.array([self.strength_at(float(t)) for t in onset_times])
         self.thr = reattack_threshold(strengths)
         self.attacks = onset_times[strengths >= self.thr] if onset_times.size else onset_times
+        # ATTACK-time onsets. ``backtrack=True`` puts each onset at the previous energy minimum (25-60 ms before the
+        # attack, a different distance per stem and note) and the onset-strength peak lags it by a window (~30 ms
+        # after): neither can be compared with a written step. The audible attack is the steepest rise of the
+        # fine-resolution log level between the two.
+        peak_frames = librosa.onset.onset_detect(y=y, sr=self.SR, hop_length=self.HOP, units="frames",
+                                                 backtrack=False, onset_envelope=self.ostr)
+        back_frames = librosa.onset.onset_backtrack(peak_frames, self.ostr) if len(peak_frames) else peak_frames
+        fine_hop = max(self.HOP // 4, 1)
+        rise = np.gradient(np.log(librosa.feature.rms(y=y, frame_length=2 * self.HOP, hop_length=fine_hop)[0] + 1e-6))
+        k = self.HOP // fine_hop
+        times, pk_str = [], []
+        for pf, bf in zip(peak_frames, back_frames):
+            i0, i1 = int(bf) * k, min(len(rise), int(pf) * k + k)
+            if i1 <= i0:
+                i0, i1 = max(0, int(pf) * k - k), min(len(rise), int(pf) * k + k)
+            times.append((i0 + int(np.argmax(rise[i0:i1]))) * fine_hop / self.SR)
+            pk_str.append(float(self.ostr[max(0, int(pf) - 2):int(pf) + 3].max()))
+        self.peak_onsets = np.array(times, dtype=float)
+        self.peak_attacks = self.peak_onsets[np.array(pk_str) >= self.thr] if len(times) else self.peak_onsets
         self.fall = self._typical_fall(onset_times)
 
     @classmethod
@@ -104,20 +125,42 @@ class StemEvidence:
         y, _ = librosa.load(str(stem_path), sr=cls.SR, mono=True)
         return cls(y)
 
-    def claim_attacks(self, times: list[float], tol_s: float) -> list[bool]:
+    def claim_attacks(self, times: list[float], tol_s: float, peak: bool = False) -> list[bool]:
         """Which triggers carry an audible attack: every strong stem onset is claimed by the ONE trigger nearest
-        to it (within ``tol_s``); the rest are transcription echoes. No strong onsets -> every trigger counts."""
+        to it (within ``tol_s``); the rest are transcription echoes. No strong onsets -> every trigger counts.
+        ``peak``: the onsets are the envelope peaks (``peak_attacks``), not the backtracked ``attacks``."""
+        attacks = self.peak_attacks if peak else self.attacks
         flags = [False] * len(times)
-        if self.attacks.size == 0:
+        if attacks.size == 0:
             return [True] * len(times)
         ts = np.asarray(times, dtype=float)
-        for a in self.attacks:
+        for a in attacks:
             if ts.size == 0:
                 break
             j = int(np.argmin(np.abs(ts - a)))
             if abs(ts[j] - a) <= tol_s:
                 flags[j] = True
         return flags
+
+    def chroma_over(self, t0: float, t1: float, lo: int, hi: int) -> np.ndarray | None:
+        """Mean 12-class chroma of the stem between ``t0`` and ``t1`` (CQT spanning the register [lo, hi]); None when
+        the span holds no frame."""
+        import librosa
+        if self._chroma is None:
+            base = 12 * (lo // 12)
+            self._chroma = librosa.feature.chroma_cqt(
+                y=self._y, sr=self.SR, hop_length=512, fmin=float(librosa.midi_to_hz(base)), bins_per_octave=36,
+                n_octaves=max(2, (hi - base) // 12 + 1))
+        fr = np.arange(self._chroma.shape[1]) * 512 / self.SR
+        sel = (fr >= t0) & (fr <= t1)
+        return self._chroma[:, sel].mean(axis=1) if sel.any() else None
+
+    def unclaimed_attacks(self, times: list[float], tol_s: float) -> list[float]:
+        """Peak-time strong attacks that NO trigger is within ``tol_s`` of (the transcription missed them)."""
+        ts = np.asarray(times, dtype=float)
+        if ts.size == 0:
+            return [float(a) for a in self.peak_attacks]
+        return [float(a) for a in self.peak_attacks if float(np.min(np.abs(ts - a))) > tol_s]
 
     def strength_at(self, t: float) -> float:
         f = int(round(t / self.hop_s))
@@ -275,6 +318,62 @@ def parse_bar(bar: str) -> list[tuple[int, int, int]]:
     return out
 
 
+def stem_pitch_after(ev: StemEvidence, register, t: float, step_dur: float, lo: int, hi: int,
+                     near: int | None) -> int | None:
+    """MIDI pitch of the stem's note struck at ``t`` where the transcription has none.
+
+    Pitch CLASS: the f0 track's, when the stem's own chroma over the next two steps supports it (that class lies in
+    the strong class of the 12 chroma values, split by Otsu) - pyin locks onto a harmonic on some stems, the chroma
+    does not name the octave; otherwise the chroma's strongest class. OCTAVE: the one nearest the f0 (else nearest
+    ``near``, the previous written pitch), inside the stem's register window [lo, hi]."""
+    v = ev.chroma_over(t + 0.03, t + 2 * step_dur, lo, hi)
+    f = register.local(t, t + step_dur)
+    if v is None:
+        return None if f is None else _fold(int(round(f)), lo, hi)
+    pc = int(np.argmax(v))
+    thr = otsu(v)
+    if f is not None and thr is not None and v[int(round(f)) % 12] >= thr:
+        pc = int(round(f)) % 12
+    ref = f if f is not None else near
+    cands = [m for m in range(lo, hi + 1) if m % 12 == pc]
+    if not cands:
+        return None
+    return min(cands, key=lambda m: abs(m - ref)) if ref is not None else cands[len(cands) // 2]
+
+
+def _fold(p: int, lo: int, hi: int) -> int | None:
+    while p > hi:
+        p -= 12
+    while p < lo:
+        p += 12
+    return p if lo <= p <= hi else None
+
+
+def add_missed_attacks(trigs: list[Trigger], ev: StemEvidence, register, step_dur: float, total_steps: int) -> int:
+    """The transcription misses some of the stem's strong attacks (no Basic Pitch note within a step). Where the
+    stem re-attacks and no trigger is within half a step, write an attack on the step nearest to it, its pitch
+    from the stem's f0 track; a step already holding a trigger is never doubled. Returns the number added."""
+    try:
+        lo, hi = register.window()
+    except ValueError:
+        return 0
+    taken = {tr.step for tr in trigs}
+    n = 0
+    for a in ev.unclaimed_attacks([tr.t for tr in trigs], step_dur / 2):
+        step = int(round(a / step_dur))
+        if step in taken or not 0 <= step < total_steps:
+            continue
+        prev = [tr.pitch for tr in sorted(trigs, key=lambda x: x.step) if tr.step < step]
+        pitch = stem_pitch_after(ev, register, a, step_dur, lo, hi, prev[-1] if prev else None)
+        if pitch is None:
+            continue
+        t = step * step_dur
+        trigs.append(Trigger(step=step, t=t, pitch=pitch, end=ev.end_after(t, step_dur * 16), attack=True))
+        taken.add(step)
+        n += 1
+    return n
+
+
 def shape_bars(bars: list[str], bpm: float, ev: StemEvidence, register, quantize: int = 16
                ) -> tuple[list[Note], dict]:
     """Written 1-step bars -> held notes with glides. ``register`` is a bass_register.Register (f0 track)."""
@@ -286,17 +385,19 @@ def shape_bars(bars: list[str], bpm: float, ev: StemEvidence, register, quantize
             steps.append(b * quantize + slot)
             pitches.append(p)
     times = [s * step_dur for s in steps]
-    # a written onset sits on the 16th grid, the stem's attack within +-half a step of it
-    flags = ev.claim_attacks(times, step_dur / 2)
+    # a written onset sits on the 16th grid, the stem's attack (at its envelope PEAK, not the backtracked minimum)
+    # within +-half a step of it
+    flags = ev.claim_attacks(times, step_dur / 2, peak=True)
     trigs = [Trigger(step=s, t=t, pitch=p, end=ev.end_after(t, bar_dur), attack=a)
              for s, t, p, a in zip(steps, times, pitches, flags)]
     total = len(bars) * quantize
+    added = add_missed_attacks(trigs, ev, register, step_dur, total) if register is not None else 0
     notes = plan_notes(trigs, step_dur, quantize, total)
     n_gl = measure_glides(notes, register.midi, register.times, register.active, step_dur) if register is not None else 0
     lens = [n.length * step_dur for n in notes]
     info = {"triggers_in": len(trigs), "notes": len(notes), "median_len_s": float(np.median(lens)) if lens else 0.0,
             "median_len_steps": float(np.median([n.length for n in notes])) if notes else 0.0,
-            "merged": len(trigs) - len(notes), "glides": n_gl, "glide_s_median": float(np.median([n.glide for n in notes if n.glide])) if n_gl else 0.0}
+            "merged": len(trigs) - len(notes), "attacks_added": added, "glides": n_gl, "glide_s_median": float(np.median([n.glide for n in notes if n.glide])) if n_gl else 0.0}
     return notes, info
 
 

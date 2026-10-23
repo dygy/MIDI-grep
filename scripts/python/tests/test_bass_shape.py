@@ -234,3 +234,51 @@ def test_synth_mode_gets_held_notes_without_sample_loops(tmp_path):
     code, summary = _generate(tmp_path, mode="synth")
     assert any("@" in t for t in _bass_tokens(code))
     assert "bassLoop" not in code and "samples(" not in code
+
+
+# ---- attacks follow the stem ---------------------------------------------------------------------------------
+def _register(spans, hop=0.01, dur=2.0):
+    """A bass_register.Register whose f0 track holds [(t0, t1, midi)]."""
+    import bass_register as BR
+    n = int(dur / hop)
+    midi, rms = [None] * n, [0.0] * n
+    for t0, t1, m in spans:
+        for i in range(int(t0 / hop), min(n, int(t1 / hop))):
+            midi[i], rms[i] = float(m), 0.3
+    return BR.Register({"hop_s": hop, "midi": midi, "rms": rms})
+
+
+def _add_ripples(path, times, amp=0.03):
+    y, sr = sf.read(str(path))
+    rng = np.random.default_rng(2)
+    for t in times:
+        i = int(t * sr)
+        y[i:i + 200] += amp * rng.standard_normal(200) * np.exp(-np.arange(200) / 40)
+    sf.write(str(path), y, sr)
+
+
+def test_a_strong_stem_attack_the_transcription_missed_is_written_with_the_f0_pitch(tmp_path):
+    bpm = 120.0                                    # step = 0.125 s
+    # the stem re-attacks A1 at steps 0, 4, 8, 12 (a gap between each); the transcription has no note at step 8
+    stem = _stem(tmp_path, [(0.0, 0.4, 55.0), (0.5, 0.9, 55.0), (1.0, 1.4, 55.0), (1.5, 1.9, 55.0)])
+    _add_ripples(stem, [0.25, 0.75, 1.25, 1.7])      # weak bumps inside the notes: the stem's non-attack onset class
+    reg = _register([(0.0, 0.4, 33), (0.5, 0.9, 33), (1.0, 1.4, 33), (1.5, 1.9, 33)])
+    ev = BS.StemEvidence.load(stem)
+    notes, info = BS.shape_bars(["a1 ~ ~ ~ a1 ~ ~ ~ ~ ~ ~ ~ a1 ~ ~ ~"], bpm, ev, reg)
+    by_step = {n.step: n for n in notes}
+    assert 8 in by_step, f"the stem's attack at step 8 (t=1.0 s) was not written; written steps {sorted(by_step)}"
+    assert by_step[8].attack and by_step[8].pitch == 33
+    assert info["attacks_added"] == 1
+
+
+def test_attack_time_is_the_rise_not_the_backtracked_minimum(tmp_path):
+    # a note that swells for 60 ms before its sharp rise: the attack is where the level jumps (steepest rise), 1.0 s
+    sr = 22050
+    y = np.zeros(int(sr * 2.0))
+    t = np.arange(len(y)) / sr
+    env = np.where(t < 0.94, 0.0, np.where(t < 1.0, 0.03, np.where(t < 1.4, 0.5, 0.0)))
+    env = np.convolve(env, np.ones(int(0.004 * sr)) / int(0.004 * sr), mode="same")
+    y = env * np.sin(2 * np.pi * 55.0 * t)
+    sf.write(str(tmp_path / "bass.wav"), y, sr)
+    ev = BS.StemEvidence.load(tmp_path / "bass.wav")
+    assert float(np.min(np.abs(ev.peak_attacks - 1.0))) < 0.02, ev.peak_attacks

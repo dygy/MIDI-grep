@@ -48,6 +48,7 @@ def load_evidence(stem_path, *, strong_only: bool = False) -> StemEvidence:
     ev = StemEvidence.load(stem_path)
     if not strong_only:
         ev.attacks = ev.onsets
+        ev.peak_attacks = ev.peak_onsets
     y, _ = librosa.load(str(stem_path), sr=ev.SR, mono=True)
     hop = ev.HOP * 2
     ev.chroma = librosa.feature.chroma_cqt(y=y, sr=ev.SR, hop_length=hop, bins_per_octave=36)
@@ -88,7 +89,7 @@ def parse_events(bars: list[str], quantize: int = 16) -> list[Event]:
 def attack_steps(events: list[Event], ev: StemEvidence, step_dur: float) -> set[int]:
     """The steps whose written trigger carries an audible stem attack (each strong stem onset is claimed by the ONE
     trigger nearest to it within half a step). A stem with no strong onsets claims every trigger."""
-    flags = ev.claim_attacks([e.step * step_dur for e in events], step_dur / 2)
+    flags = ev.claim_attacks([e.step * step_dur for e in events], step_dur / 2, peak=True)
     return {e.step for e, f in zip(events, flags) if f}
 
 
