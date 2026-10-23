@@ -115,13 +115,26 @@ def _step_pitch(cands: list[int], t: float, step_dur: float, pick: str, lo: int,
     return BR.resolve(cands, loc, (lo, hi), pick)
 
 
+def loudest_pitches(group) -> list[int]:
+    """The transcribed notes of one step that carry the most amplitude (Basic Pitch velocity), as pitches.
+
+    A polyphonic stem transcribes 2-8 notes per step; the one the stem actually sounds is the loudest, not the
+    highest. Measured against the melodic stem's own chroma (Regime CLT / VAGABUNDO): the highest note names the
+    stem's pitch class 23% / 67% of the time, the loudest 52% / 80%. ``group`` holds objects with ``pitch`` and
+    ``velocity``; ties keep every tied pitch (the window fold then takes the highest)."""
+    top = max(n.velocity for n in group)
+    return [n.pitch for n in group if n.velocity == top]
+
+
 def midi_to_bars(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16,
                  pick: str = "low", lo: int = 0, hi: int = 127,
-                 register: "BR.Register | None" = None) -> list[str] | None:
+                 register: "BR.Register | None" = None, sustain: bool = False) -> list[str] | None:
     """Quantise a MIDI file into per-bar 16-step note strings (monophonic line).
 
     All notes quantised to a step are candidates; ``_step_pitch`` decides the octave and the winner
     (stem-measured register when ``register`` is given, else window fold + lowest/highest per ``pick``).
+    ``sustain``: a step no note STARTS on is written with the loudest note still SOUNDING there (a held note keeps
+    its pitch for its duration, as the stem does) instead of a rest/the next onset's pitch.
     Returns one string per bar, or None if empty.
     """
     if not midi_path.exists():
@@ -133,14 +146,25 @@ def midi_to_bars(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16,
     bar_dur = 60.0 / bpm * 4
     step_dur = bar_dur / quantize
     total = nbars * quantize
-    cands: dict[int, list[int]] = {}
+    groups: dict[int, list] = {}
     for n in notes:
         step = int(round(n.start / step_dur))
         if 0 <= step < total:
-            cands.setdefault(step, []).append(n.pitch)
-    if not cands:
+            groups.setdefault(step, []).append(n)
+    if not groups:
         return None
-    chosen = {s: _step_pitch(c, s * step_dur, step_dur, pick, lo, hi, register) for s, c in cands.items()}
+    if sustain:
+        for st in range(total):
+            if st in groups:
+                continue
+            t_now = st * step_dur
+            held = [n for n in notes if n.start < t_now < n.end]
+            if held:
+                groups[st] = held
+    # pick="loud": the loudest transcribed note names the step (see loudest_pitches); the window fold decides its octave
+    cands = {s: loudest_pitches(g) if pick == "loud" else [n.pitch for n in g] for s, g in groups.items()}
+    fold_pick = "high" if pick == "loud" else pick
+    chosen = {s: _step_pitch(c, s * step_dur, step_dur, fold_pick, lo, hi, register) for s, c in cands.items()}
     bars = []
     for b in range(nbars):
         slots = [midi_name(chosen[b * quantize + s]) if (b * quantize + s) in chosen else "~"
@@ -178,10 +202,11 @@ def onset_driven_bars(stem_path: Path, midi_path: Path, bpm: float, nbars: int, 
         step = int(round(t / step_dur))
         if not (0 <= step < total):
             continue
-        active = [n.pitch for n in notes if n.start - 0.06 <= t < n.end + 0.03]
-        if not active:
-            active = [min(notes, key=lambda n: abs(n.start - t)).pitch]
-        chosen[step] = _step_pitch(active, float(t), step_dur, pick, lo, hi, register)
+        active_notes = [n for n in notes if n.start - 0.06 <= t < n.end + 0.03]
+        if not active_notes:
+            active_notes = [min(notes, key=lambda n: abs(n.start - t))]
+        active = loudest_pitches(active_notes) if pick == "loud" else [n.pitch for n in active_notes]
+        chosen[step] = _step_pitch(active, float(t), step_dur, "high" if pick == "loud" else pick, lo, hi, register)
     if not chosen:
         return None
     bars = []
@@ -256,7 +281,8 @@ def harmony_notes(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16
             groups.setdefault(s, []).append(n)
     out: dict[int, list[int]] = {}
     for s, g in groups.items():
-        top = max(BR.fold_into(n.pitch, lo, hi) for n in g)
+        # the lead's note (the step's loudest, as written by midi_to_bars(pick="loud")) is not harmony
+        top = max(BR.fold_into(p, lo, hi) for p in loudest_pitches(g))
         keep: list[int] = []
         top_vel.append(max(n.velocity for n in g if BR.fold_into(n.pitch, lo, hi) == top))
         for n in g:
@@ -778,11 +804,11 @@ def main() -> int:
                                       pick="low", lo=blo, hi=bhi, register=bass_reg) \
             or midi_to_bars(args.bass_midi, args.bpm, nbars, pick="low", lo=blo, hi=bhi, register=bass_reg)
         lead_bars = onset_driven_bars(args.stems_dir / "melodic.wav", args.lead_midi, args.bpm, nbars,
-                                      pick="high", lo=llo, hi=lhi) \
-            or midi_to_bars(args.lead_midi, args.bpm, nbars, pick="high", lo=llo, hi=lhi)
+                                      pick="loud", lo=llo, hi=lhi) \
+            or midi_to_bars(args.lead_midi, args.bpm, nbars, pick="loud", lo=llo, hi=lhi)
     else:
         bass_bars = midi_to_bars(args.bass_midi, args.bpm, nbars, pick="low", lo=blo, hi=bhi, register=bass_reg)
-        lead_bars = midi_to_bars(args.lead_midi, args.bpm, nbars, pick="high", lo=llo, hi=lhi)
+        lead_bars = midi_to_bars(args.lead_midi, args.bpm, nbars, pick="loud", lo=llo, hi=lhi)
     if not bass_bars and not lead_bars:
         print("ERROR: no note material extracted", file=sys.stderr)
         return 1

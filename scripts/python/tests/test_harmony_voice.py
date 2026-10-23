@@ -55,10 +55,10 @@ def test_two_note_chord_is_emitted_as_a_chord(tmp_path):
 
 
 def test_harmonic_partial_of_a_louder_note_is_rejected(tmp_path):
-    # C3 (loud) with its octave C4 (quieter overtone) and G4 (12th = the top note) and a real E4
+    # C3 (loudest = the lead's note) with its octave C4 (quieter overtone), a real E4 and its 12th G4
     mid = _midi(tmp_path, {0: [(48, 100), (60, 80), (67, 70), (64, 90)]})
     steps, info = G.harmony_notes(mid, BPM, 1, lo=36, hi=79)
-    assert steps[0] == [48, 64]          # C3 and E4 kept; C4 is C3's octave partial -> rejected; G4 is the lead's top note
+    assert steps[0] == [64]              # E4 kept; C4 (octave) and G4 (12th) are C3's partials -> rejected; C3 is the lead's note
     assert info["rejected_partial"] >= 1
 
 
