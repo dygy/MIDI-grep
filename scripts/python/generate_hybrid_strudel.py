@@ -162,12 +162,17 @@ def hit_velocities(hits: list[dict], bpm: float, nbars: int, quantize: int = 16,
 
 
 def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int = 16,
-                         velocity: str | None = None) -> list[str] | None:
+                         velocity: str | None = None,
+                         pitch: dict[str, dict[float, float]] | None = None) -> list[str] | None:
     """Turn detected drum hits into per-bar TR808 mini-notation (library sounds).
 
     Plays the TRACK'S OWN groove with library drum-machine sounds — library-first
     (no upload) but rhythmically matched, unlike the fixed canonical batidao.
     Returns one ``stack(...)`` voice line per drum type, or None if unusable.
+
+    ``pitch`` ({class: {hit time -> playback-rate ratio}}, `drum_pitch.hit_ratios`) is the measured pitch each hit of a
+    tuned class (the 808 kick) sounds in the stem relative to its one-shot: written as a parallel ``.speed()`` pattern
+    (1 on a hit whose pitch could not be read), only for a class where at least one hit differs from the one-shot.
     """
     if not drums_json.exists():
         return None
@@ -187,6 +192,14 @@ def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int
     if not grid:
         return None
     vel = hit_velocities(hits, bpm, nbars, quantize, velocity) if velocity else {}
+    # measured pitch ratio per (class, step); the first hit on a step wins
+    rate: dict[tuple[str, int], float] = {}
+    for h in sorted(hits, key=lambda h: h["time"]):
+        r = (pitch or {}).get(h["type"], {}).get(h["time"])
+        step = int(round(h["time"] / step_dur))
+        if r is not None and 0 <= step < total_steps:
+            rate.setdefault((h["type"], step), r)
+    tuned = {t for (t, _), r in rate.items() if abs(r - 1.0) > 1e-9}
     # Emit a voice per type as cat() of per-bar 16-step strings.
     order = ["bd", "sd", "cp", "hh", "oh"]
     voices = []
@@ -203,6 +216,11 @@ def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int
                       for s, slot in enumerate(slots)]
                 if all((v != "~") == (sl != "~") for v, sl in zip(vs, slots)) and any(v != "~" for v in vs):
                     line += f'.velocity("{" ".join(vs)}")'
+            if t in tuned:
+                rs = [f"{rate.get((t, b * quantize + s), 1.0):.4g}" if slot != "~" else "~"
+                      for s, slot in enumerate(slots)]
+                if any(r not in ("~", "1") for r in rs):
+                    line += f'.speed("{" ".join(rs)}")'
             bars.append(line)
         cat = ", ".join(bars)
         voices.append(f"  cat({cat})")

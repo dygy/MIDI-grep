@@ -53,6 +53,7 @@ import partial_register as PR  # noqa: E402
 import bass_register as BR  # noqa: E402  (stem-measured register + octave snap)
 import bass_shape as BS  # noqa: E402  (bass note shape from the stem: hold, glide, sample loop, kick duck)
 import melodic_shape as MS  # noqa: E402  (lead/chords: retrigger only on stem attacks, hold between)
+import drum_pitch as DP  # noqa: E402  (the pitch each stem kick sounds, written per hit)
 from editability_check import check_editability  # noqa: E402  (spec 003 detector)
 from sound_selector import pick_palette_sound  # noqa: E402  (genre palette — no hardcoded names)
 from strudel_validation import VALID_SOUNDS  # noqa: E402  (library sound catalog)
@@ -598,6 +599,32 @@ def section_map(mix_path: Path, nbars: int, bpm: float):
     return spark, named
 
 
+def measured_drum_pitch(args) -> dict | None:
+    """{class: {hit time: rate ratio}} for the kick, measured on the drums stem against the extracted one-shot the
+    pattern plays (the kit entry of the pack's instruments/samples.json, else drums/bd.wav); None when either is missing."""
+    import soundfile as sf
+    stem = args.stems_dir / "drums.wav"
+    shot = None
+    sj = args.pack_dir / "instruments" / "samples.json"
+    if sj.exists():
+        ent = json.loads(sj.read_text()).get("bd")
+        if ent:
+            shot = args.pack_dir / "instruments" / (ent[0] if isinstance(ent, list) else ent)
+    if shot is None or not shot.exists():
+        shot = args.pack_dir / "drums" / "bd.wav"
+    if not stem.exists() or not shot.exists() or not args.drums_json.exists():
+        return None
+    y, sr = sf.read(str(stem), always_2d=True)
+    x, sr2 = sf.read(str(shot), always_2d=True)
+    y, x = y.mean(1), x.mean(1)
+    if sr2 != sr:
+        import scipy.signal as sps
+        x = sps.resample_poly(x, sr, sr2)
+    hits = json.loads(args.drums_json.read_text()).get("hits", [])
+    ratios = DP.hit_ratios(y, sr, hits, "bd", x)
+    return {"bd": ratios} if ratios else None
+
+
 def pitched_map(pack_dir: Path, base: str) -> dict:
     """Note-keyed pitched-instrument maps (trackbass/tracklead) + absolute _base."""
     sm = json.loads((pack_dir / "strudel.json").read_text())
@@ -642,6 +669,9 @@ def main() -> int:
                          "(bd/sd/hh/oh) triggered by the detected, editable rhythm pattern (real sounds + "
                          "real notes); bank=same groove on a library drum machine; realstem=replay the whole "
                          "drum stem (not a generator — identical audio but un-editable)")
+    ap.add_argument("--drum-pitch", choices=["off", "auto"], default="auto",
+                    help="auto: a tuned kick (808) is written with the pitch each stem hit sounds, as a per-hit .speed() "
+                         "pattern relative to the extracted one-shot (drum_pitch.py); hits whose pitch cannot be read play it as is")
     ap.add_argument("--drum-velocity", choices=["off", "bar", "global"], default="bar",
                     help="per-hit drum velocity measured from the drums stem (detect_drums_bands 'strength'): "
                          "bar=hit strength / its class median in the same bar, global=/ the piece median, off=none")
@@ -1198,7 +1228,8 @@ def main() -> int:
         channels.append(("DRUMS", "REAL drum stem (your track's drums, 100% — via Strudel samples)", drum_code))
         detected = True  # for the summary flag
     else:
-        detected = H.build_detected_drums(args.drums_json, args.bpm, nbars, velocity=None if args.drum_velocity == "off" else args.drum_velocity) if args.drums_json else None
+        pitch = measured_drum_pitch(args) if args.drums_json and args.drum_mode == "extracted" and args.drum_pitch == "auto" else None
+        detected = H.build_detected_drums(args.drums_json, args.bpm, nbars, velocity=None if args.drum_velocity == "off" else args.drum_velocity, pitch=pitch) if args.drums_json else None
         if detected:
             drum_lpf = f'.lpf({args.drum_lpf})' if args.drum_lpf else ''
             drum_lpf += f'.hpf({args.drum_hpf})' if args.drum_hpf else ''
