@@ -148,11 +148,27 @@ def snap_octave(p: int, loc: float) -> int | None:
     return p - 12 * o if abs(d - 12 * o) <= PITCH_CLASS_TOL_ST else None
 
 
+def harmonic_of(p: float, loc: float) -> int | None:
+    """k (>= 2) when ``p`` sits within PITCH_CLASS_TOL_ST of the k-th harmonic of the fundamental ``loc``
+    (k*f0 = 12*log2(k) semitones up), else None. Only harmonics distinguishable from their neighbours count:
+    the gap to BOTH neighbours, 12*log2((k+1)/k) and 12*log2(k/(k-1)), must be >= 2 tolerances (k <= 8 at 1 semitone) - above that
+    a "harmonic" would match almost any pitch. Octaves (k=2,4) never reach here (``snap_octave`` takes them)."""
+    d = p - loc
+    if d <= 0:
+        return None
+    k = round(2.0 ** (d / 12.0))
+    if k < 2 or 12.0 * math.log2((k + 1) / k) < 2 * PITCH_CLASS_TOL_ST or 12.0 * math.log2(k / (k - 1)) < 2 * PITCH_CLASS_TOL_ST:
+        return None
+    return k if abs(d - 12.0 * math.log2(k)) <= PITCH_CLASS_TOL_ST else None
+
+
 def resolve(cands: list[int], loc: float | None, window: tuple[int, int], pick: str = "low") -> int:
     """The note written for one step from the transcribed ``cands``.
 
-    loc known   -> each candidate snapped to the stem's octave (a candidate whose pitch class disagrees is only
-                   folded into the window), the candidate nearest ``loc`` wins (ties: the lower).
+    loc known   -> each candidate snapped to the stem's octave; a candidate that is a (non-octave) harmonic of the
+                   stem f0 is a transcription of the sub's PARTIAL (Basic Pitch hears the 3rd/5th of an 808), so
+                   it becomes the fundamental round(loc); any other disagreeing pitch class is only folded into
+                   the window. The candidate nearest ``loc`` wins (ties: the lower).
     loc unknown -> window fold, then lowest (``pick='low'``) / highest.
     """
     lo, hi = window
@@ -162,6 +178,8 @@ def resolve(cands: list[int], loc: float | None, window: tuple[int, int], pick: 
     out = []
     for p in cands:
         s = snap_octave(p, loc)
+        if s is None and harmonic_of(p, loc) is not None:
+            s = int(round(loc))
         out.append(s if s is not None else fold_into(p, lo, hi))
     return min(out, key=lambda q: (abs(q - loc), q))
 

@@ -187,3 +187,31 @@ def test_sub_octave_never_goes_under_the_sub_floor(tmp_path):
     BR.measure(STEMS / "bass.wav", f0)
     _, err, txt = _gen(tmp_path, "--bass-f0", str(f0), "--sub-octave", "2")
     assert "sub layer under" in err and ".add(note(-24))" not in txt
+
+
+# --- non-octave partials: the 3rd/5th harmonic of the sub is a transcription of the PARTIAL, not a note ---
+
+def test_non_octave_partial_resolves_to_the_stem_fundamental(tmp_path):
+    """Basic Pitch hears the 3rd (+19) and 5th (+28) partial of a C#1 808 as G#2 (44) / F3 (53). Neither shares a
+    pitch class with the stem f0 (25.5), so the old fold wrote G#1 (32) / F1 (29) = a wrong note under a sub that
+    sounds C#1. The stem's f0 is the fundamental: write it."""
+    reg = _register([(0.0, 8.0, 25.4)])
+    mid = _mid(tmp_path, [(0.0, 44), (0.5, 53), (1.0, 37)])
+    got = _flat(G.midi_to_bars(mid, BPM, 4, pick="low", lo=25, hi=37, register=reg))
+    assert got == {0: 25, 4: 25, 8: 25}
+
+
+def test_unrelated_wrong_pitch_class_is_still_folded(tmp_path):
+    """A candidate that is NOT a harmonic of the stem f0 keeps the old window fold (a real note change)."""
+    reg = _register([(0.0, 8.0, 30.1)])
+    mid = _mid(tmp_path, [(0.0, 33)])                      # +2.9 st: no integer harmonic within a semitone
+    assert _flat(G.midi_to_bars(mid, BPM, 4, pick="low", lo=25, hi=37, register=reg)) == {0: 33}
+
+
+def test_harmonic_interval_table_is_derived_not_typed():
+    """k * f0 sits at 12*log2(k) semitones; only harmonics whose neighbours are >= 2 tolerances apart count."""
+    assert BR.harmonic_of(30.0 + 19.02, 30.0) == 3        # 3rd harmonic
+    assert BR.harmonic_of(30.0 + 12.0, 30.0) == 2
+    assert BR.harmonic_of(30.0 + 12 * np.log2(10), 30.0) is None  # the 10th is within 2 st of the 9th: ambiguous
+    assert BR.harmonic_of(30.0 + 12 * np.log2(5), 30.0) == 5
+    assert BR.harmonic_of(30.0 + 2.9, 30.0) is None
