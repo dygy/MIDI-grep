@@ -357,16 +357,31 @@ def test_hat_drums_path_shut_when_full_mix_high_already_above_original(tmp_path)
                          "--hat-gain", "0.0")["--hat-gain"]) > 0.0
 
 
+def _synth_floors() -> tuple[float, float]:
+    """Live synth floors from thresholds.yaml (never retyped, so a floor change cannot silently invert these cases)."""
+    sys.path.insert(0, str(REPO))
+    from eval import gate
+    thr = gate.load_thresholds()
+    return (gate.floor_for_genre("brazilian_funk", thr, "synth"),
+            gate.section_aware_floor_for_genre("brazilian_funk", thr, "synth"))
+
+
+def _cal_rows() -> tuple[tuple[float, float], tuple[float, float]]:
+    """Run 2's shape, anchored to the live floors: cal2 has the higher overall but cal1 sits nearer the floors' margin
+    (offsets above the floors: cal1 +0.1229/+0.1155, cal2 +0.1269/+0.0970 - the original 0.70/0.68 floors' values)."""
+    f, sf = _synth_floors()
+    return (round(f + 0.1229, 4), round(sf + 0.1155, 4)), (round(f + 0.1269, 4), round(sf + 0.0970, 4))
+
+
 def test_gate_margin_picks_nearest_to_floors():
     sys.path.insert(0, str(SCRIPTS))
     import gate_margin
-    # real run 2: cal1 0.8229/0.7955 is nearer than cal2 0.8269/0.777 (floors read from thresholds.yaml, never retyped)
-    from eval import gate
-    thr = gate.load_thresholds()
-    f, sf = gate.floor_for_genre("brazilian_funk", thr, "synth"), gate.section_aware_floor_for_genre("brazilian_funk", thr, "synth")
+    # run 2 shape: cal1 is nearer the floors than cal2 although cal2 scores the higher overall
+    f, sf = _synth_floors()
     def m(o, sa):
         return min(o - f, sa - sf)
-    assert m(0.8229, 0.7955) > m(0.8269, 0.777) > m(0.7975, 0.7706)
+    cal1, cal2 = _cal_rows()
+    assert m(*cal1) > m(*cal2) > m(round(f + 0.0975, 4), round(sf + 0.0906, 4))
     got = gate_margin.margins(RUN2_CAL1, "brazilian_funk", "synth")
     assert got["floor"] == pytest.approx(f) and got["sa_floor"] == pytest.approx(sf)
     assert got["margin"] == pytest.approx(min(got["overall"] - f, got["sa"] - sf))
@@ -379,7 +394,7 @@ def _seq_cmp(tmp_path: Path, rows: list[tuple[float, float]]) -> str:
 
 
 def test_best_is_gate_aware_not_highest_overall(tmp_path):
-    cmp_src = _seq_cmp(tmp_path, [(0.8229, 0.7955), (0.8269, 0.777)])
+    cmp_src = _seq_cmp(tmp_path, list(_cal_rows()))
     global STUB_CMP
     old, STUB_CMP = STUB_CMP, cmp_src
     try:
@@ -394,7 +409,7 @@ def test_best_is_gate_aware_not_highest_overall(tmp_path):
 
 def test_best_falls_back_to_overall_with_warning_when_gate_unreadable(tmp_path):
     global STUB_CMP
-    old, STUB_CMP = STUB_CMP, _seq_cmp(tmp_path, [(0.8229, 0.7955), (0.8269, 0.777)])
+    old, STUB_CMP = STUB_CMP, _seq_cmp(tmp_path, list(_cal_rows()))
     try:
         r = run_driver(tmp_path, AUTO, "--mode", "synth", "--iters", "2", extra_env={"AC_GATE": "/usr/bin/false"})
     finally:

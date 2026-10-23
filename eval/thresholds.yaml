@@ -128,48 +128,51 @@ modes:
   # 0.70/0.68 (owner decision: follow the derivation rule; the old synth numbers were measured one bar off).
   # Previous (2026-10-18, BlackHole, full-mix reference): sample_instrument 0.64/0.60 (VAGABUNDO v004 0.6626/0.6223),
   # synth 0.54/0.53 (Regime v027 0.5589/0.5525, margin -0.0182 FAIL).
+  # 2026-10-23 RE-BASELINE (older versions were deleted from the cache): sample-instrument Regime v057 / VAGABUNDO v036,
+  # synth Regime v058 / VAGABUNDO v035; floors raised by the same rule. previous floors: sample 0.70/0.69, synth 0.70/0.68
+  # (VAGABUNDO v013 0.7170/0.7073, v014 0.7240/0.7007; Regime v031 0.7794/0.7744, v032 0.7479/0.7361).
   sample_instrument:
     genres:
-      brazilian_funk: 0.70
+      brazilian_funk: 0.80
     section_aware:
-      brazilian_funk: 0.69
+      brazilian_funk: 0.77
     measured:
       brazilian_funk:
-        overall: 0.7170            # binding track: VAGABUNDO v013 (Regime v031: 0.7794)
-        section_aware: 0.7073      # binding track: VAGABUNDO v013 (Regime v031: 0.7744)
-        static: 0.8408
-        temporal: 0.5932
-        margin_over_chance: 0.1421
-        frequency_balance: 0.7248
+        overall: 0.8181            # binding track: Regime v057 (VAGABUNDO v036: 0.8195); the other fields are from `run`
+        section_aware: 0.7886      # binding track: VAGABUNDO v036 (Regime v057: 0.8043)
+        static: 0.8970
+        temporal: 0.7391
+        margin_over_chance: 0.2419
+        frequency_balance: 0.8858
         tempo_similarity: 1.0000
-        run: "VAGABUNDO NÃO NAMORA/v013"
+        run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v057"
         margin: 0.02
         editability: pass
         tracks:
-          - { run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v031", overall: 0.7794, section_aware: 0.7744, static: 0.8747, temporal: 0.6841, margin_over_chance: 0.2043 }
-          - { run: "VAGABUNDO NÃO NAMORA/v013", overall: 0.7170, section_aware: 0.7073, static: 0.8408, temporal: 0.5932, margin_over_chance: 0.1421 }
+          - { run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v057", overall: 0.8181, section_aware: 0.8043, static: 0.8970, temporal: 0.7391, margin_over_chance: 0.2419 }
+          - { run: "VAGABUNDO NÃO NAMORA/v036", overall: 0.8195, section_aware: 0.7886, static: 0.9455, temporal: 0.6935, margin_over_chance: 0.2445 }
     # 2026-10-10 history (static scale) - VAGABUNDO v002 fell short on section-aware (0.8721 < 0.90); fix #10 (per-bar
     # bass/lead/master correction from the comparison's section_windows) -> v004.
   synth:
     # Pure palette synthesis (no stem samples) - inherently further from the master.
     genres:
-      brazilian_funk: 0.70
+      brazilian_funk: 0.79
     section_aware:
-      brazilian_funk: 0.68
+      brazilian_funk: 0.74
     measured:
       brazilian_funk:
-        overall: 0.7240            # binding track: VAGABUNDO v014 (Regime v032: 0.7479; was 0.6709 one bar mis-aligned)
-        section_aware: 0.7007      # binding track: VAGABUNDO v014 (Regime v032: 0.7361)
-        static: 0.8352
-        temporal: 0.6129
-        margin_over_chance: 0.1491
-        frequency_balance: 0.6800
+        overall: 0.8069            # binding track: VAGABUNDO v035 (Regime v058: 0.8823; v035 chosen over v037 0.8066)
+        section_aware: 0.7645      # binding track: VAGABUNDO v035 (Regime v058: 0.8698)
+        static: 0.9328
+        temporal: 0.6809
+        margin_over_chance: 0.2319
+        frequency_balance: 0.9078
         tempo_similarity: 1.0000
-        run: "VAGABUNDO NÃO NAMORA/v014"
+        run: "VAGABUNDO NÃO NAMORA/v035"
         margin: 0.02
         editability: pass
         tracks:
-          - { run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v032", overall: 0.7479, section_aware: 0.7361, static: 0.8815, temporal: 0.6142, margin_over_chance: 0.1728 }
-          - { run: "VAGABUNDO NÃO NAMORA/v014", overall: 0.7240, section_aware: 0.7007, static: 0.8352, temporal: 0.6129, margin_over_chance: 0.1491 }
+          - { run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v058", overall: 0.8823, section_aware: 0.8698, static: 0.9651, temporal: 0.7994, margin_over_chance: 0.3061 }
+          - { run: "VAGABUNDO NÃO NAMORA/v035", overall: 0.8069, section_aware: 0.7645, static: 0.9328, temporal: 0.6809, margin_over_chance: 0.2319 }
     # 2026-10-10 history (static scale) - VAGABUNDO v003 (sample-instrument knobs on synth) 0.7209 / 0.7520, worst band 30.07%;
     # fix #11 (own synth calibration pass) -> v007.

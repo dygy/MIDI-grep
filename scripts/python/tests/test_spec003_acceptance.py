@@ -7,13 +7,14 @@ The per-slice suites (test_editability_check, test_similarity_gate, test_generat
 test_vocal_modes, test_compare_audio_stamping, test_report_editability) prove each component.
 This file proves the contract holds ACROSS components, on whole deliverables:
 
-  deliverable (committed fixture or cached v026/v027 render output)
+  deliverable (committed fixture or cached Regime render output pinned by reference_tracks.yaml)
       -> editability_check -> strudel_validation -> compare_audio --strudel
       -> eval/gate -> loop MCP -> ai_improver -> generate_report
 
 Every positive case has a negative counterpart (see the comment above each test). Cases that need
 a live BlackHole render are out of CI scope: they read the CACHED renders under
-`.cache/stems/Regime CLT (Dj Brunin XM, Aurora Shukita)/v026|v027` and SKIP when absent.
+`.cache/stems/Regime CLT (Dj Brunin XM, Aurora Shukita)/<version>` (sample-instrument and synth versions come from
+eval/datasets/reference_tracks.yaml) and SKIP when absent.
 
 Criterion -> test map
   2.1 editable data per voice     test_21_every_voice_is_its_own_block_of_editable_data
@@ -86,6 +87,18 @@ REPORT_FIX = TESTS / "fixtures" / "report"
 CACHE = REPO / ".cache" / "stems" / "Regime CLT (Dj Brunin XM, Aurora Shukita)"
 COMPARE = SCRIPTS / "compare_audio.py"
 
+
+def _regime_run(mode: str) -> str:
+    """The Regime CLT version eval/datasets/reference_tracks.yaml pins for `mode` (single source of the current run)."""
+    ref = yaml.safe_load((REPO / "eval" / "datasets" / "reference_tracks.yaml").read_text(encoding="utf-8"))
+    for t in ref["tracks"]:
+        if t["cache_key"] == CACHE.name and t["mode"] == mode:
+            return t["version"]
+    raise LookupError(f"reference_tracks.yaml has no {mode} entry for {CACHE.name!r}")
+
+
+REGIME_SAMPLE_RUN, REGIME_SYNTH_RUN = _regime_run("sample-instrument"), _regime_run("synth")
+
 # ── deliverables under test ──────────────────────────────────────────────────────────────
 #   (id, path, expected generation_mode).  Fixtures are committed and always run; the cached
 #   renders are the real generator output measured in Slice 4 and skip when the cache is absent.
@@ -93,8 +106,9 @@ DELIVERABLES = [
     pytest.param(("fixture-sample-instrument", FIX / "v023_minus_vocal.strudel", "sample-instrument"),
                  id="fixture-sample-instrument"),
     pytest.param(("fixture-synth", FIX / "synth_pass.strudel", "synth"), id="fixture-synth"),
-    pytest.param(("cache-v026", CACHE / "v026" / "output.strudel", "sample-instrument"), id="cache-v026"),
-    pytest.param(("cache-v027", CACHE / "v027" / "output.strudel", "synth"), id="cache-v027"),
+    pytest.param(("cache-sample-instrument", CACHE / REGIME_SAMPLE_RUN / "output.strudel", "sample-instrument"),
+                 id="cache-sample-instrument"),
+    pytest.param(("cache-synth", CACHE / REGIME_SYNTH_RUN / "output.strudel", "synth"), id="cache-synth"),
 ]
 
 
@@ -212,8 +226,12 @@ def test_21_every_voice_is_its_own_block_of_editable_data(deliverable):
     decls = _array_decls(deliverable.code)
     used = {a for v in res.editable_voices for a in v.arrays}
     assert used, "no pitched voice is driven by a bar array"
+    # a numeric control array (e.g. `.glide(cat(...bassGlide))`: per-step glide amounts) is declared data, not a note array
+    control = set(re.findall(r"\.glide\(\s*cat\(\s*\.\.\.\s*(\w+)", deliverable.code))
     for name in used:
         assert decls.get(name), f"bar array {name!r} is referenced but not declared with bars"
+        if name in control:
+            continue
         assert any(_NOTE_TOKEN.search(bar) for bar in decls[name]), f"{name!r} holds no notes"
     assert any(v.line_start and re.match(r"^bd|^sd|^hh", v.label) for v in res.editable_voices) or any(
         set(v.sounds) & DRUM_ONESHOTS for v in res.editable_voices
@@ -810,7 +828,7 @@ def _headline(html: str) -> str | None:
 # AC: headline from a generated render, naming the mode
 @pytest.mark.parametrize(
     "run,mode",
-    [("v026", "sample-instrument"), ("v027", "synth")],
+    [(REGIME_SAMPLE_RUN, "sample-instrument"), (REGIME_SYNTH_RUN, "synth")],
 )
 def test_25_headline_states_the_generating_mode(run, mode):
     gr = _report_module()
