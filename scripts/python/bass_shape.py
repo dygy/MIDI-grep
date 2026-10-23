@@ -92,6 +92,7 @@ class StemEvidence:
         self.level = sounding_level(self.rms)
         onset_times = np.asarray(librosa.onset.onset_detect(y=y, sr=self.SR, hop_length=self.HOP, units="time",
                                                             backtrack=True, onset_envelope=self.ostr), dtype=float)
+        self.onsets = onset_times                      # every detected onset (the weak class included)
         strengths = np.array([self.strength_at(float(t)) for t in onset_times])
         self.thr = reattack_threshold(strengths)
         self.attacks = onset_times[strengths >= self.thr] if onset_times.size else onset_times

@@ -52,6 +52,7 @@ import generate_hybrid_strudel as H  # noqa: E402
 import partial_register as PR  # noqa: E402
 import bass_register as BR  # noqa: E402  (stem-measured register + octave snap)
 import bass_shape as BS  # noqa: E402  (bass note shape from the stem: hold, glide, sample loop, kick duck)
+import melodic_shape as MS  # noqa: E402  (lead/chords: retrigger only on stem attacks, hold between)
 from editability_check import check_editability  # noqa: E402  (spec 003 detector)
 from sound_selector import pick_palette_sound  # noqa: E402  (genre palette — no hardcoded names)
 from strudel_validation import VALID_SOUNDS  # noqa: E402  (library sound catalog)
@@ -80,6 +81,15 @@ def _bars_pitches(bars: list[str] | None) -> list[int]:
             m = re.fullmatch(r"([a-g]s?)(-?\d+)(?:@\d+)?", tok)
             if m and m.group(1) in NOTE_NAMES:
                 pitches.append((int(m.group(2)) + 1) * 12 + NOTE_NAMES.index(m.group(1)))
+    return pitches
+
+
+def _chord_bars_pitches(bars: list[str] | None) -> list[int]:
+    """MIDI pitches of every note name in ``bars``, chord tokens (``[c3,e3]``) included (rests skipped)."""
+    pitches = []
+    for bar in bars or []:
+        for name, octv in re.findall(r"([a-g]s?)(-?\d+)", bar.replace("@", " @")):
+            pitches.append((int(octv) + 1) * 12 + NOTE_NAMES.index(name))
     return pitches
 
 
@@ -699,6 +709,10 @@ def main() -> int:
     ap.add_argument("--rhythm", choices=["onset", "grid"], default="grid",
                     help="grid=quantise MIDI (better pitch/timbre fidelity); onset=stem onsets drive timing "
                          "(sparser but librosa bass onset detection is unreliable -> worse mfcc)")
+    ap.add_argument("--melodic-shape", choices=["stem", "off"], default="stem",
+                    help="stem=LEAD/CHORDS retrigger only where the melodic stem has a strong onset and hold the note "
+                         "(c4@3) until the next onset / the stem going quiet / the bar end (melodic_shape.py), sample "
+                         "loop points so a held note sustains; off=the 1-step retrigger stream as transcribed")
     ap.add_argument("--env-correction", type=Path, default=None, metavar="PATH",
                     help="JSON from calibrate_dynamic.py --env-correction-out: per-BAR multipliers "
                          "(voices.bass/lead/master) applied to the per-bar gain envelopes, so "
@@ -820,6 +834,24 @@ def main() -> int:
             chord_bars = harmony_bars(hsteps, nbars)
         except Exception as exc:  # noqa: BLE001 - unreadable midi must not lose the rest of the piece
             print(f"WARNING harmony: could not derive ({exc}); no harmony voice", file=sys.stderr)
+
+    # MELODIC NOTE SHAPE (melodic_shape.py): the written lead retriggers every 16th; the stem plays a note and lets it ring.
+    lead_loop_table, melodic_info, lead_loop_stats = {}, None, None
+    if args.melodic_shape == "stem" and lead_bars:
+        try:
+            mev = MS.load_evidence(args.stems_dir / "melodic.wav")
+            lead_bars, chord_bars, melodic_info = MS.shape_melodic(lead_bars, chord_bars, args.bpm, mev)
+        except Exception as exc:  # noqa: BLE001 - an unmeasurable stem must not lose the piece
+            print(f"WARNING melodic-shape: cannot measure melodic.wav ({exc}); lead stays a 1-step stream",
+                  file=sys.stderr)
+        if not synth and melodic_info and melodic_info.get("lead"):
+            try:
+                lead_loop_table, lead_loop_stats = BS.sample_loops(
+                    args.pack_dir / "instruments" / "samples.json", lead_sound,
+                    _chord_bars_pitches(lead_bars) + _chord_bars_pitches(chord_bars))
+            except Exception as exc:  # noqa: BLE001
+                print(f"WARNING melodic-shape: no loop points ({exc}); held lead notes play their grain once",
+                      file=sys.stderr)
 
     # BASS NOTE SHAPE (bass_shape.py): the original bass is one continuous tone, the transcription a row of hits.
     bass_glide_bars, bass_loop_table, bass_duck, shape_info, loop_stats, duck_diag = None, {}, None, None, None, {}
@@ -1076,12 +1108,20 @@ def main() -> int:
             rows.append(f'  note("c1").s("sine").orbit({BASS_ORBIT}).gain(0)')
         bass_code = "stack(\n" + ",\n".join(rows) + "\n)"
         channels.append(("BASS", "low end — root/sub. edit notes in `bass`", bass_code))
+    lead_row, chord_row = "note(cat(...lead))", "note(cat(...chords))"
+    if lead_bars and lead_loop_table:
+        L += ["// sample loop [begin, end] (fractions of the grain) per written pitch (midi), measured on the grains:",
+              "// held lead/chord notes sustain inside it. Delete a pitch to play its grain once.",
+              "const leadLoop = {" + ", ".join(f"{p}: [{b}, {e}]" for p, (b, e) in sorted(lead_loop_table.items())) + "}",
+              "const withLeadLoop = p => p.withValue(v => { const l = leadLoop[Math.round(noteToMidi(v.note))]; "
+              "return l ? { ...v, loop: 1, loopBegin: l[0], loopEnd: l[1] } : v })", ""]
+        lead_row, chord_row = f"withLeadLoop({lead_row})", f"withLeadLoop({chord_row})"
     if lead_bars:
         L += [js_array("lead", lead_bars), ""]
         # lpf tames high-mid top while keeping mid body; hpf clears low bleed.
         # clip(1.3) sustains notes slightly past their step so the monophonic lead's envelope
         # is smoother (closer to the original melodic's sustained contour, lifting shape corr).
-        lead_code = (f'note(cat(...lead)){lead_voice}'
+        lead_code = (f'{lead_row}{lead_voice}'
                      f'.hpf({args.lead_hpf}).clip(1.3).room({lead_fx["room"]})'
                      f'{gain_pattern(lead_env, lead_g * lead_synth_gain * M)}')
         channels.append(("LEAD", "melody/harmony — edit notes in `lead`", lead_code))
@@ -1090,7 +1130,7 @@ def main() -> int:
         # same instrument, filters, room and loudness contour as the lead; the base gain is the lead's scaled by the
         # transcribed harmony-vs-melody amplitude ratio (harmony_notes), then the calibrator's cal-chord lever.
         chord_g = round(lead_g * harmony_info["gain_ratio"] * args.cal_chord, 4)
-        chord_code = (f'note(cat(...chords)){lead_voice}'
+        chord_code = (f'{chord_row}{lead_voice}'
                       f'.hpf({args.lead_hpf}).clip(1.3).room({lead_fx["room"]})'
                       f'{gain_pattern(lead_env, chord_g * lead_synth_gain * M)}')
         channels.append(("CHORDS", "harmony under the lead — edit chords in `chords`", chord_code))
@@ -1212,7 +1252,7 @@ def main() -> int:
                       "lead_bars": len(lead_bars or []), "drums": bool(detected),
                       "drum_mode": args.drum_mode,
                       "bass_sound": bass_sound, "lead_sound": lead_sound,
-                      "bass_shape": shape_info, "bass_loops": loop_stats, "bass_duck_diag": duck_diag,
+                      "bass_shape": shape_info, "melodic_shape": melodic_info, "lead_loops": lead_loop_stats, "bass_loops": loop_stats, "bass_duck_diag": duck_diag,
                       "bass_duck": ({k: getattr(bass_duck, k) for k in ("depth_db", "onset_s", "attack_s", "depth", "sigma", "kicks")}
                                     if bass_duck else None),
                       # effective bass low-pass + its bounds, fed back to calibrate_dynamic.py
