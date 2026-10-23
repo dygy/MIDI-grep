@@ -859,11 +859,13 @@ def main() -> int:
 
     # BASS NOTE SHAPE (bass_shape.py): the original bass is one continuous tone, the transcription a row of hits.
     bass_glide_bars, bass_loop_table, bass_duck, shape_info, loop_stats, duck_diag = None, {}, None, None, None, {}
+    bass_legato_bars, bass_attack_bars, bass_shape_notes = None, None, None
     if args.bass_shape == "stem" and bass_bars:
         try:
             ev = BS.StemEvidence.load(args.stems_dir / "bass.wav")
             notes, shape_info = BS.shape_bars(bass_bars, args.bpm, ev, bass_reg)
             bass_bars = BS.format_bars(notes, nbars, 16, midi_name)
+            bass_shape_notes = notes
             if any(n.glide > 0 for n in notes):
                 bass_glide_bars = BS.format_bars(notes, nbars, 16, midi_name, glide=True)
         except Exception as exc:  # noqa: BLE001 - an unmeasurable stem must not lose the piece
@@ -875,6 +877,13 @@ def main() -> int:
             except Exception as exc:  # noqa: BLE001
                 print(f"WARNING bass-shape: no loop points ({exc}); held sample notes play their grain once",
                       file=sys.stderr)
+    # A bass note the stem plays WITHOUT a new attack (a pitch change inside its continuing tone) must not re-strike the
+    # sample: a 1-step note then plays only the grain's start - transient, pitch sweep, one-period fade-in - while the
+    # stem is on its steady tone (Regime: chroma 0.55 on those frames vs 0.80 for a held-tone synth). Those notes go
+    # to their own array, entered at the grain's loop (steady part) with a click-guard attack of one period of the note.
+    if bass_shape_notes and bass_loop_table and any(not n.attack for n in bass_shape_notes):
+        bass_legato_bars = BS.format_bars([n for n in bass_shape_notes if not n.attack], nbars, 16, midi_name)
+        bass_attack_bars = BS.format_bars([n for n in bass_shape_notes if n.attack], nbars, 16, midi_name)
     if args.bass_duck == "auto" and bass_bars and args.drums_json and args.drums_json.exists() \
             and args.drum_mode != "realstem":
         try:
@@ -1084,7 +1093,9 @@ def main() -> int:
     # material stays in the editable ``let`` arrays above; channels just voice it.
     channels = []  # (label, comment, code)  — code is a top-level pattern (no outer indent)
     if bass_bars:
-        L += [js_array("bass", bass_bars), ""]
+        L += [js_array("bass", bass_attack_bars if bass_legato_bars else bass_bars), ""]
+        if bass_legato_bars:
+            L += [js_array("bassLegato", bass_legato_bars), ""]
         # bass + sub-sine reinforcement kept together as ONE channel so muting bass mutes its sub.
         # Each line carries ONE baked gain = base * master * per-bar envelope.
         # cut(N): a cut group makes the bass MONOPHONIC — each note chokes the previous, so a
@@ -1104,9 +1115,16 @@ def main() -> int:
                   "const bassLoop = {" + ", ".join(f"{p}: [{b}, {e}]" for p, (b, e) in sorted(bass_loop_table.items())) + "}",
                   "const withLoop = p => p.withValue(v => { const l = bassLoop[Math.round(noteToMidi(v.note))]; "
                   "return l ? { ...v, loop: 1, loopBegin: l[0], loopEnd: l[1] } : v })", ""]
+            if bass_legato_bars:
+                L += ["// bassLegato: pitch changes inside a continuing tone - the sample entered at its loop (no new attack).",
+                      "// Move a note to `bass` to strike it instead. The click guard is one period of the note.",
+                      "const bassLegatoEntry = p => p.withValue(v => { const m = noteToMidi(v.note); const l = bassLoop[Math.round(m)]; "
+                      "const a = 1 / (440 * 2 ** ((m - 69) / 12)); return l ? { ...v, begin: l[0], attack: a } : { ...v, attack: a } })", ""]
+                main_row = f'stack(note(cat(...bass)), bassLegatoEntry(note(cat(...bassLegato)))).s("{bass_sound}")'
             main_row = f'withLoop({main_row})'
+        sub_notes = "stack(note(cat(...bass)), note(cat(...bassLegato)))" if bass_legato_bars else "note(cat(...bass))"
         rows = [f'  {main_row}{fx_no_gain(bass_fx)}{bass_cut}{glide}{orbit}{gain_pattern(bass_env, bass_fx["gain"] * M)}',
-                f'  note(cat(...bass)){sub_transpose}.s("sine").lpf({sub_lpf}){glide}{orbit}{gain_pattern(bass_env, sub_g * M)}']
+                f'  {sub_notes}{sub_transpose}.s("sine").lpf({sub_lpf}){glide}{orbit}{gain_pattern(bass_env, sub_g * M)}']
         if bass_duck:
             # the duck target orbit must exist before the first kick of any render window: a silent keeper voice
             rows.append(f'  note("c1").s("sine").orbit({BASS_ORBIT}).gain(0)')
