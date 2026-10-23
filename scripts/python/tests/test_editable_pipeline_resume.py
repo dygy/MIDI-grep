@@ -72,6 +72,10 @@ def repo(tmp_path: Path):
     for name, body in STUBS.items():
         (sp / name).write_text(body)
     _exe(sp / ".venv" / "bin" / "python", f'#!/bin/bash\nexec {sys.executable} "$@"\n')
+    _exe(root / "bin" / "midi-grep",                              # stage 5 trainer: logs, writes a note-grain model
+         '#!/bin/bash\nwhile [ $# -gt 0 ]; do case "$1" in --name) n="$2"; shift 2;; --output) o="$2"; shift 2;; '
+         '*) shift;; esac; done\necho "train $n" >> "$(dirname "$0")/../scripts/python/calls.log"\nmkdir -p "$o/$n"\n'
+         'echo \'{"grain_mode": "notes"}\' > "$o/$n/metadata.json"\necho x > "$o/$n/a.wav"\n')
     _exe(root / "scripts" / "auto-calibrate.sh",
          '#!/bin/bash\necho "auto-calibrate $*" >> "$(dirname "$0")/python/calls.log"\nexit 7\n')
     (root / "scripts" / "node" / "dist").mkdir(parents=True)
@@ -235,3 +239,20 @@ def test_missing_renderer_browser_stops_before_calibration(repo):
     r = run(repo, "--local", "--mode", "synth")
     assert r.returncode != 0 and "puppeteer browsers install" in r.stderr, r.stderr
     assert not any(c.startswith("auto-calibrate") for c in calls(repo))
+
+
+# --- an instrument model cut by other grain code is retrained (a grain fix must reach the instruments) -----
+def test_instrument_model_from_other_grain_code_is_retrained(repo):
+    run(repo, "--local", "--mode", "synth")
+    stamp = repo.root / "models" / f"{SLUG}_bass" / ".code"
+    assert stamp.read_text().strip() == _code_version(repo, "instruments")
+    (repo.calls).write_text("")
+    r = run(repo, "--local", "--mode", "synth")
+    assert not [c for c in calls(repo) if c.startswith("train")], r.stderr          # same code: reuse
+    grains = repo.root / "scripts" / "python" / "pitched_grains.py"
+    grains.unlink()                                               # the symlinked real module -> a changed copy
+    grains.write_text("# grain cut changed\n")
+    (repo.calls).write_text("")
+    r = run(repo, "--local", "--mode", "synth")
+    assert f"train {SLUG}_bass" in calls(repo) and f"train {SLUG}_lead" in calls(repo), r.stderr
+    assert any(c.startswith("auto-calibrate") for c in calls(repo)), "a best render on the old instruments was kept"

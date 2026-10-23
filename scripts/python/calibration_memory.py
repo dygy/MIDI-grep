@@ -77,21 +77,25 @@ def _local_imports(path: Path, seen: set[Path], src: Path) -> None:
 
 # what decides the sample pack's audio (stage 4) - and so, through it, every render calibrated on that pack
 PACK_ROOTS = ("build_sample_pack.py",)
+# what cuts the stem instruments (stage 5: the granular trainer, its note grains, the manifest)
+INSTRUMENT_ROOTS = ("rave/trainer.py", "pitched_grains.py", "build_instruments.py")
+STAGE_ROOTS = {"pack": PACK_ROOTS, "instruments": INSTRUMENT_ROOTS}
 CALIBRATE_ROOTS = ("generate_dynamic_strudel.py", "calibrate_dynamic.py", "calibrate_loop.py", "mix_dynamics.py",
-                   "compare_audio.py") + PACK_ROOTS
+                   "compare_audio.py") + PACK_ROOTS + INSTRUMENT_ROOTS
 
 
 def code_version(stage: str = "calibrate") -> tuple[str, str]:
     """(content hash of everything that decides a stage's output, git short commit). "calibrate": a calibrated
-    render - generator, calibrator, the loop driver, the mix stage, the metric, the pack builder (the drum one-shots
-    it cuts are what the render plays) - and their local imports; "pack": the pack builder and its local imports."""
+    render - generator, calibrator, the loop driver, the mix stage, the metric, the pack and instrument builders (the
+    one-shots and note grains they cut are what the render plays) - and their local imports; "pack" / "instruments":
+    that stage's builders and their local imports."""
     # the scripts as they were invoked (not symlink-resolved): a checkout hashes its own files
     src = Path(os.path.abspath(__file__)).parent
     seen: set[Path] = set()
-    for f in (PACK_ROOTS if stage == "pack" else CALIBRATE_ROOTS):
+    for f in STAGE_ROOTS.get(stage, CALIBRATE_ROOTS):
         _local_imports(src / f, seen, src)
     driver = src.parents[1] / "scripts" / "auto-calibrate.sh"
-    if stage != "pack" and driver.is_file():
+    if stage not in STAGE_ROOTS and driver.is_file():
         seen.add(driver)
     h = hashlib.sha1()
     for p in sorted(seen):
@@ -590,8 +594,8 @@ def _main() -> int:
     p = sp.add_parser("responses"); p.add_argument("--mode", required=True); p.add_argument("--out", required=True)
     p = sp.add_parser("backfill"); p.add_argument("--cache", default=str(ROOT / ".cache" / "stems"))
     sp.add_parser("summary")
-    p = sp.add_parser("code-version", help="print the code hash a calibrated render (or the sample pack) is stamped with")
-    p.add_argument("--stage", choices=("calibrate", "pack"), default="calibrate")
+    p = sp.add_parser("code-version", help="print the code hash a calibrated render (or the sample pack / instrument models) is stamped with")
+    p.add_argument("--stage", choices=("calibrate", "pack", "instruments"), default="calibrate")
     a = ap.parse_args()
 
     if a.cmd == "code-version":

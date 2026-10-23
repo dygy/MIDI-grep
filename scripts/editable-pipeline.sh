@@ -244,16 +244,20 @@ fi
 [ -s "$PACK/drums/bd.wav" ] || die "stage 4 pack has no drums/ one-shots in $PACK/drums"
 
 # ---------------------------------------------------------------- stage 5: instruments
+# each model is stamped with the code that cut its grains (.code): a trainer/grain fix must reach the instruments
+INST_VER="$("$PY" "$SP/calibration_memory.py" code-version --stage instruments 2>/dev/null)"
 for pair in "bass:bass.wav" "lead:melodic.wav"; do
-  role="${pair%%:*}"; src="${pair##*:}"
-  # a model trained before note-aligned grains (no grain_mode) is retrained
-  if stage_done "$ROOT/models/${SND}_$role/metadata.json" && [ "$(jget "$ROOT/models/${SND}_$role/metadata.json" grain_mode)" = notes ]; then
+  role="${pair%%:*}"; src="${pair##*:}"; mdir="$ROOT/models/${SND}_$role"
+  # a model trained before note-aligned grains (no grain_mode) or by other grain code is retrained
+  if stage_done "$mdir/metadata.json" && [ "$(jget "$mdir/metadata.json" grain_mode)" = notes ] \
+     && [ -n "$INST_VER" ] && [ "$(cat "$mdir/.code" 2>/dev/null)" = "$INST_VER" ]; then
     log "stage 5 skip: models/${SND}_$role trained"; continue; fi
   midi="$PACK/${src%.wav}.mid"   # the stem's transcribed notes (stage 2): one grain per note, length from the music
   log "stage 5: train granular ${SND}_$role from $src (note-aligned, $midi)"
   (cd "$ROOT" && ./bin/midi-grep generative train "$TRACK/$src" --name "${SND}_$role" --mode granular \
       --midi "$midi" --output "$ROOT/models") >&2 \
     || die "stage 5 train ${SND}_$role failed"
+  [ -z "$INST_VER" ] || echo "$INST_VER" > "$mdir/.code"
 done
 # the manifest is rebuilt when its inputs (the drum kit from stage 4, the models trained above) are newer than it
 if stage_done "$PACK/instruments/samples.json" "$PACK/instruments/verification.json" && base_ok "$PACK/instruments/samples.json" "$INST_BASE" \
