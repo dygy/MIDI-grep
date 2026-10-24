@@ -140,6 +140,24 @@ def test_no_pitch_change_means_no_legato_voice(tmp_path):
     assert info["lead"]["legato_bars"] is None and info["lead"]["legato_notes"] == 0
 
 
+def test_a_stem_attack_the_transcription_missed_is_written_with_the_pitch_the_stem_sounds(tmp_path):
+    """Regression (2026-10-24): the written lead takes its triggers from the transcription, so a strong stem attack
+    with no trigger within half a step stayed silent (VAGABUNDO melodic: 77 of 511 attacks unclaimed, 94 lost with
+    the double claims; ideal onset recall at +-50 ms 0.77, 0.90 with them written). It must be written on the nearest
+    free step with the pitch the stem's chroma sounds; a step where the stem does not attack stays a rest."""
+    import melodic_shape as MS
+    stem = _stem(tmp_path, [(0.25, 0.75, 440.0), (0.75, 1.25, 659.26), (1.25, 1.75, 440.0)])  # attacks at 2, 6, 10
+    lead = ["~ ~ a4 a4 a4 a4 e5 e5 e5 e5 ~ ~ ~ ~ ~ ~", "~ " * 15 + "~"]       # no trigger at step 10 (A4 re-attack)
+    ev = MS.load_evidence(stem)
+    out, _, info = MS.shape_melodic(lead, None, BPM, ev)
+    import melodic_shape as MS2
+    struck = {e.step: e.token for e in MS2.parse_events(out)}                   # step -> written token
+    assert struck.get(2) == "a4" and struck.get(6) == "e5", out
+    assert struck.get(10) == "a4", out                                          # the missed attack is written
+    assert info["attacks_added"] == 1, info
+    assert sorted(struck) == [2, 6, 10], out                                    # no attack, no note anywhere else
+
+
 # ---- generator output (needs the Regime CLT cache) ----------------------------------------------------------
 GEN = SCRIPTS / "generate_dynamic_strudel.py"
 ST = REPO / ".cache" / "stems" / "Regime CLT (Dj Brunin XM, Aurora Shukita)"

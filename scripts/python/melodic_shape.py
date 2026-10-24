@@ -31,7 +31,7 @@ from dataclasses import dataclass
 
 import numpy as np
 
-from bass_shape import StemEvidence
+from bass_shape import StemEvidence, otsu
 
 
 @dataclass
@@ -91,6 +91,73 @@ def attack_steps(events: list[Event], ev: StemEvidence, step_dur: float) -> set[
     trigger nearest to it within half a step). A stem with no strong onsets claims every trigger."""
     flags = ev.claim_attacks([e.step * step_dur for e in events], step_dur / 2, peak=True)
     return {e.step for e, f in zip(events, flags) if f}
+
+
+_NAMES = ["c", "cs", "d", "ds", "e", "f", "fs", "g", "gs", "a", "as", "b"]
+
+
+def token_midi(token: str) -> int | None:
+    """MIDI pitch of a single-note token (``cs4``); None for a chord or an unreadable token."""
+    m = re.fullmatch(r"([a-g]s?)(-?\d+)", token)
+    return None if not m else (int(m.group(2)) + 1) * 12 + _NAMES.index(m.group(1))
+
+
+def midi_token(p: int) -> str:
+    return f"{_NAMES[p % 12]}{p // 12 - 1}"
+
+
+def quiet_floor(rms: np.ndarray, level: float) -> float:
+    """RMS above which the stem is still SOUNDING, below its global sounding level (Otsu over the whole stem splits
+    loud from quiet-but-sounding): the same Otsu split over the frames below the level separates the quiet-but-sounding
+    cluster from silence."""
+    low = np.asarray(rms, dtype=float)
+    low = low[low < level]
+    thr = otsu(np.log(low + 1e-9)) if low.size > 2 else None
+    return level if thr is None else min(level, float(np.exp(thr)))
+
+
+def missed_attacks(events: list[Event], ev: StemEvidence, step_dur: float, total_steps: int) -> list[Event]:
+    """Strong stem attacks the transcription missed. The written line is built from the transcription's notes at the
+    stem's onsets; where the stem re-attacks and no trigger is within half a step (``unclaimed_attacks``; 15 % of
+    VAGABUNDO's melodic attacks), the attack is written on the step nearest to it (a step already holding a trigger
+    is never doubled). Pitch: the line's previous pitch while the stem's chroma over the next two steps still sounds
+    its class (in the strong class set of the 12 values, split by Otsu), else the chroma's strongest class; the
+    octave nearest the previous pitch, inside the span the line itself uses. A stem without chroma writes nothing."""
+    chroma = getattr(ev, "chroma", None)
+    singles = sorted((e for e in events if token_midi(e.token) is not None), key=lambda e: e.step)
+    if chroma is None or not singles:
+        return []
+    lo, hi = min(token_midi(e.token) for e in singles), max(token_midi(e.token) for e in singles)
+    taken = {e.step for e in events}
+    floor = quiet_floor(ev.rms, ev.level)
+    out: list[Event] = []
+    for a in ev.unclaimed_attacks([e.step * step_dur for e in events], step_dur / 2):
+        step = int(round(a / step_dur))
+        if step in taken or not 0 <= step < total_steps:
+            continue
+        r0, n = int(a / ev.hop_s), max(1, int(step_dur / ev.hop_s))
+        later = ev.rms[r0 + n:r0 + 2 * n]
+        if later.size == 0 or float(later.max()) < floor:
+            continue                                  # nothing still sounds a step later: a click, not a note
+        f0 = int(a / ev.chroma_hop_s)
+        seg = chroma[:, f0:max(f0 + 1, int((a + 2 * step_dur) / ev.chroma_hop_s))]
+        if seg.size == 0:
+            continue
+        v = seg.mean(axis=0) if seg.ndim == 1 else seg.mean(axis=1)
+        prev = [token_midi(e.token) for e in singles if e.step < step] + [token_midi(e.token) for e in out
+                                                                          if e.step < step]
+        ref = prev[-1] if prev else None
+        thr = otsu(v)
+        pc = int(np.argmax(v))
+        if ref is not None and thr is not None and v[ref % 12] >= thr:
+            pc = ref % 12
+        cands = [m for m in range(lo, hi + 1) if m % 12 == pc]
+        if not cands:
+            continue
+        pitch = min(cands, key=lambda m: abs(m - ref)) if ref is not None else cands[len(cands) // 2]
+        out.append(Event(step, midi_token(pitch)))
+        taken.add(step)
+    return out
 
 
 def _format(held: dict[int, tuple[str, int]], nbars: int, quantize: int) -> list[str]:
@@ -201,6 +268,9 @@ def shape_melodic(lead_bars: list[str], chord_bars: list[str] | None, bpm: float
     step_dur = 60.0 / bpm * 4 / quantize
     lead_ev = parse_events(lead_bars, quantize)
     att = attack_steps(lead_ev, ev, step_dur)
+    added = missed_attacks(lead_ev, ev, step_dur, nbars * quantize)
+    lead_ev = sorted(lead_ev + added, key=lambda e: e.step)
+    att = att | {e.step for e in added}
     if not att:                                   # nothing claimed -> leave the voice as transcribed
         return lead_bars, chord_bars, {"lead": None, "chords": None}
     lead_out, lead_info = shape_voice(lead_ev, att, att, ev, step_dur, nbars, quantize)
@@ -208,5 +278,5 @@ def shape_melodic(lead_bars: list[str], chord_bars: list[str] | None, bpm: float
     if chord_bars:
         chord_out, chord_info = shape_voice(parse_events(chord_bars, quantize), att, att, ev, step_dur, nbars,
                                             quantize)
-    return lead_out, chord_out, {"lead": lead_info, "chords": chord_info, "attacks": len(att),
+    return lead_out, chord_out, {"lead": lead_info, "chords": chord_info, "attacks": len(att), "attacks_added": len(added),
                                  "stem_attacks": int(len(ev.attacks))}
