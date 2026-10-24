@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { createRequire } from 'module';
-import { analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures, triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput } from './offline-helpers.js';
+import { analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures, triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput, isNetworkFailure, netWaitBudgetS, nextNetWaitS } from './offline-helpers.js';
 
 const SHIM = `const S = window.strudel;
 export const { noteToMidi, freqToMidi, getSoundIndex, getAudioContext, registerSound, getParamADSR, getADSRValues, getPitchEnvelope, getVibratoOscillator } = S;`;
@@ -170,12 +170,36 @@ async function main() {
   // browser if it is gone). Every attempt is reported with WHAT it held; after MAX_ATTEMPTS it fails loudly.
   const MAX_ATTEMPTS = 3;
   const quickClose = (pg: any) => Promise.race([pg.close().catch(() => {}), new Promise(r => setTimeout(r, 5000))]); // a dead page's close() must not hang the run
-  const attempt = async <T>(label: string, held: string, fn: () => Promise<T>): Promise<T> => {
-    for (let k = 1; ; k++) {
-      try { return await fn(); }
-      catch (err: any) {
+  // NETWORK outages (net::ERR_INTERNET_DISCONNECTED / TIMED_OUT / ... seen in the browser console, or in the error) are NOT
+  // crashes: they are waited out with exponential backoff (5 s, 10 s, ... cap 60 s) for a total of MIDIGREP_RENDER_NET_WAIT_S
+  // seconds (default 1800; 0 = fail at once), logged each time, then retried on a fresh page. They do not use up MAX_ATTEMPTS.
+  // Anything else keeps the fail-loudly path; the WAV is still only written after every check passed.
+  const netBudgetS = netWaitBudgetS(process.env.MIDIGREP_RENDER_NET_WAIT_S);
+  let netEvents = 0, netWaitedS = 0;
+  const sleep = (ms: number) => new Promise(r => setTimeout(r, ms));
+  const attempt = async <T>(label: string, held: string, fn: () => Promise<T>, sampleLogs?: (v: T) => string[]): Promise<T> => {
+    for (let k = 1, net = 0; ; ) {
+      const ev0 = netEvents;
+      try {
+        const v = await fn();
+        // a sample that failed to load while the network was down renders silently wrong: treat as network, retry
+        const bad = sampleLogs ? sampleFailures(sampleLogs(v)) : [];
+        if (bad.length && netEvents > ev0) throw new Error(`sample load failed during network outage: ${bad[0]}`);
+        return v;
+      } catch (err: any) {
+        const isNet = isNetworkFailure(err.message) || netEvents > ev0;
+        if (isNet) {
+          const w = nextNetWaitS(net, netWaitedS, netBudgetS);
+          console.log(`[NETWORK] ${label} (${held}): ${err.message.slice(0, 160)}; browser ${browser.connected ? 'alive' : 'gone'}; ` +
+            (w > 0 ? `waiting ${w} s (outage retry ${++net}, ${netWaitedS.toFixed(0)}/${netBudgetS} s of MIDIGREP_RENDER_NET_WAIT_S used)` : `wait budget ${netBudgetS} s (MIDIGREP_RENDER_NET_WAIT_S) exhausted`));
+          if (w <= 0) throw new Error(`${label} failed: network outage lasted beyond ${netBudgetS} s (${held}): ${err.message}`);
+          await sleep(w * 1000); netWaitedS += w;
+          if (!browser.connected) browser = await launch();
+          continue;
+        }
         console.log(`[CRASH] ${label} (${held}) attempt ${k}/${MAX_ATTEMPTS}: ${err.message}; browser ${browser.connected ? 'alive' : 'gone'}`);
         if (k >= MAX_ATTEMPTS) throw new Error(`${label} failed ${MAX_ATTEMPTS}x (${held}): ${err.message}`);
+        k++;
         if (!browser.connected) browser = await launch();
       }
     }
@@ -184,7 +208,7 @@ async function main() {
     const page = await browser.newPage();
     page.on('error', e => console.log(`[PAGE CRASH] ${e.message}`));
     page.on('pageerror', e => console.log(`[PAGE ERROR] ${e.message}`));
-    page.on('console', m => { const t = m.text(); if (process.env.OFFLINE_VERBOSE || /error|fail/i.test(t)) console.log(`[BROWSER] ${t.slice(0, 200)}`); });
+    page.on('console', m => { const t = m.text(); if (isNetworkFailure(t)) netEvents++; if (process.env.OFFLINE_VERBOSE || /error|fail/i.test(t)) console.log(`[BROWSER] ${t.slice(0, 200)}`); });
     await page.goto(`http://localhost:${port}/`, { waitUntil: 'load' });
     return page;
   };
@@ -233,7 +257,7 @@ async function main() {
           const bytes = await fetchBytes(page, rr.bytes);
           try { heapMb = (await page.metrics()).JSHeapUsedSize! / 1048576; } catch { /* page gone */ }
           return { r: rr, raw: bytes };
-        });
+        }, v => [...(v.r.logs || []), ...(v.r.errs || [])]);
         const f = new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
         // tail-truncation check: peak over the last 0.25 s of this chunk's tail margin (skip the last chunk: file ends there); measured on the context before trimming
         if (ci < wins.length - 1) for (let i = Math.max(0, len - Math.round(0.25 * sampleRate)); i < len; i++) tailEndPeak = Math.max(tailEndPeak, Math.abs(f[i]), Math.abs(f[len + i]));

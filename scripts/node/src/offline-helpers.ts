@@ -164,3 +164,29 @@ export function commitOutput(target: string, wav: Uint8Array, ok: () => boolean)
   fsSync.renameSync(tmp, target);
   return true;
 }
+
+// ---- transient network outage handling -------------------------------------------------------------------------
+/** Chromium net errors / fetch messages that mean "the network is down or flapping", not "the render is wrong". */
+const NETWORK_RE = /net::ERR_(INTERNET_DISCONNECTED|TIMED_OUT|NAME_NOT_RESOLVED|NETWORK_CHANGED|NETWORK_ACCESS_DENIED|ADDRESS_UNREACHABLE|CONNECTION_\w+|QUIC_\w+|SOCKET_NOT_CONNECTED|TUNNEL_CONNECTION_FAILED|PROXY_CONNECTION_FAILED|NETWORK_IO_SUSPENDED)|ERR_(INTERNET_DISCONNECTED|NAME_NOT_RESOLVED)|\b(ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENETUNREACH)\b|failed to fetch|networkerror|load failed/i;
+/** True when `text` (an error message or a browser console line) is a network failure. */
+export function isNetworkFailure(text: string): boolean { return NETWORK_RE.test(text || ''); }
+
+/** Default total seconds a render waits out a network outage before failing; override with MIDIGREP_RENDER_NET_WAIT_S (0 = never wait). */
+export const DEFAULT_NET_WAIT_S = 1800;
+/** Backoff schedule (s): first wait, doubling up to the cap. */
+export const NET_BACKOFF_FIRST_S = 5;
+export const NET_BACKOFF_CAP_S = 60;
+
+/** Parse MIDIGREP_RENDER_NET_WAIT_S: a non-negative number of seconds, else the default (invalid values are not silently used). */
+export function netWaitBudgetS(env: string | undefined): number {
+  if (env === undefined || env.trim() === '') return DEFAULT_NET_WAIT_S;
+  const v = Number(env);
+  return Number.isFinite(v) && v >= 0 ? v : DEFAULT_NET_WAIT_S;
+}
+
+/** Next backoff wait in seconds after `waitedS` already waited, for the `n`th (0-based) consecutive network retry; 0 when the budget is spent. The last wait is trimmed to fit the budget. */
+export function nextNetWaitS(n: number, waitedS: number, budgetS: number): number {
+  const left = budgetS - waitedS;
+  if (!(left > 0)) return 0;
+  return Math.min(NET_BACKOFF_FIRST_S * 2 ** n, NET_BACKOFF_CAP_S, left);
+}

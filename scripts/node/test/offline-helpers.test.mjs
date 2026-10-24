@@ -117,3 +117,23 @@ test('sampleFailures: a load that merely took 404 ms is not a failure, an HTTP 4
   assert.deepEqual(sampleFailures(['[sampler] load sound "x_bass:0:0"... done! loaded 54.9 KiB in 404ms']), []);
   assert.equal(sampleFailures(['GET https://host/x.wav 404 (Not Found)']).length, 1);
 });
+
+import { isNetworkFailure, netWaitBudgetS, nextNetWaitS, DEFAULT_NET_WAIT_S } from '../dist/offline-helpers.js';
+test('isNetworkFailure: network vs real', () => {
+  for (const t of ['Failed to load resource: net::ERR_INTERNET_DISCONNECTED', 'net::ERR_TIMED_OUT', 'net::ERR_NAME_NOT_RESOLVED',
+    'net::ERR_NETWORK_CHANGED', 'net::ERR_CONNECTION_RESET', 'net::ERR_CONNECTION_REFUSED', 'net::ERR_QUIC_PROTOCOL_ERROR.QUIC_PACKET_WRITE_ERROR',
+    'TypeError: Failed to fetch', 'getaddrinfo ENOTFOUND strudel.dygy.app']) assert.ok(isNetworkFailure(t), t);
+  for (const t of ['Target closed', 'Protocol error: Session closed', 'triggered 5 onsets but expected 6', 'error loading "x.json"', 'net::ERR_BLOCKED_BY_CLIENT', '', undefined])
+    assert.ok(!isNetworkFailure(t), String(t));
+});
+test('netWaitBudgetS: env override, default, invalid falls back', () => {
+  assert.equal(netWaitBudgetS(undefined), DEFAULT_NET_WAIT_S); assert.equal(netWaitBudgetS(''), DEFAULT_NET_WAIT_S);
+  assert.equal(netWaitBudgetS('90'), 90); assert.equal(netWaitBudgetS('0'), 0);
+  assert.equal(netWaitBudgetS('-5'), DEFAULT_NET_WAIT_S); assert.equal(netWaitBudgetS('abc'), DEFAULT_NET_WAIT_S);
+});
+test('nextNetWaitS: doubling, capped, trimmed to budget, 0 when spent', () => {
+  const seq = []; let w = 0;
+  for (let n = 0; ; n++) { const x = nextNetWaitS(n, w, 200); if (!x) break; seq.push(x); w += x; }
+  assert.deepEqual(seq, [5, 10, 20, 40, 60, 60, 5]); assert.equal(w, 200);
+  assert.equal(nextNetWaitS(0, 0, 0), 0);
+});
