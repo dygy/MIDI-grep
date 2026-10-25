@@ -140,7 +140,7 @@ code** — all codegen is Python/LLM.*
 
 **Since 2026-10-19 the default is `render-strudel-offline.ts`:** the same superdough engine rendered into
 OfflineAudioContexts in ~20 s whole-cycle chunks (fresh page each, discarded pre-roll of the previous tail so cut/duck/tails cross boundaries, polyphony 4096) — sample-exact
-timing and pitch, no audio device, ~5x faster than real time. The BlackHole recorder described below was found to
+timing and pitch, no audio device, ~5x faster than real time. A network outage is waited out with backoff (5→60 s, up to `MIDIGREP_RENDER_NET_WAIT_S`, default 1800 s) instead of failing the render. The BlackHole recorder described below was found to
 lose ~12% of the captured samples; its rate relabel restored duration but lowered every pitch by ~2.3–2.7 semitones,
 so every BlackHole-scored number since Oct 2026 was on pitch-shifted audio. It stays as a cross-check of live
 playback (`MIDIGREP_RENDERER=blackhole`). Scores are computed against `instrumental.wav` (bass+drums+melodic) —
@@ -300,11 +300,13 @@ calibration when puppeteer's Chromium is missing.
 
 **Pack/instrument cutting.** Drum one-shots come from `drum_oneshots.py` (cut from the same `detect_drums_bands` hits
 that drive the pattern, attack at sample 0); pitched note grains (`pitched_grains.py`) end where the stem stops sounding
-the note (`ring_end`) so bass samples keep their sub tail.
+the note (`ring_end`) so bass samples keep their sub tail; a pitch's sample is chosen near the median level of ALL its grains (`select_per_pitch`). Each
+kick hit is tuned to its stem hit's 808 tail pitch (`drum_pitch.py`, a per-hit `.speed()`).
 
 **Generator note shape.** `melodic_shape.py` (lead/chords strike at stem onsets, hold to the next; chroma-confirmed
 pitch changes inside a hold = `leadLegato`/`chordsLegato`), the loudest-note lead pick, `bass_register.harmonic_of`
-(a transcribed non-octave partial is written as the stem f0) and the `bassLegato` loop-start entry are generator-side
+(a transcribed non-octave partial is written as the stem f0) the `bassLegato` loop-start entry, stem attacks the transcription missed (`bass_shape`, `melodic_shape.missed_attacks`)
+and quiet harmony notes the stem's chroma confirms (`stem_sounds_note`) are generator-side
 and render through the same sample instruments.
 
 **Solo measurements in calibration.** `auto-calibrate.sh` renders the BASS channel (`bass_solo.py`, `--bass-solo`,

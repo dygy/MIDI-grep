@@ -76,7 +76,10 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   {sample-instrument,synth}` (default sample-instrument; synth = palette sounds, no `samples()`),
   no vocal voice in either mode. Lead = the loudest transcribed note per step; `melodic_shape.py` strikes lead/chords
   only at the stem's onsets and holds to the next (`--melodic-shape stem|off`), stem pitch changes inside a hold are
-  `leadLegato`/`chordsLegato` notes (no new attack); sample bass notes without a stem attack go to `bassLegato`. Header line `// generation_mode:`; runs
+  `leadLegato`/`chordsLegato` notes (no new attack); sample bass notes without a stem attack go to `bassLegato`; stem attacks the
+  transcription missed are written (bass `bass_shape.py`, lead `melodic_shape.missed_attacks`); quiet transcribed
+  harmony notes the stem's chroma sounds are kept; kicks get a per-hit `.speed()` from the stem hit's 808 pitch
+  (`drum_pitch.py`). Header line `// generation_mode:`; runs
   `strudel_validation.validate_code` on its own output.
 - **`scripts/python/calibrate_dynamic.py`** — data-driven mix calibrator: reads a render's
   `comparison.json` and emits the NEXT `generate_dynamic_strudel.py` knobs (sub-gain, bass-mult,

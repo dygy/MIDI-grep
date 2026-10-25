@@ -373,7 +373,7 @@ emulating Strudel sounds, ~16% similarity vs the real engine) was deleted. Dead 
   (superdough pools nodes at module level, so a second OfflineAudioContext in one page fails); each chunk
   re-triggers the previous tail-length of haps as a discarded PRE-ROLL, so ringing tails, `cut` chokes and
   ducking cross the boundary like real playback, and haps get their ABSOLUTE cycle (LFO phase); the WAV is
-  written atomically only after every check passes (a failed render leaves no file); `samples("url")` rewritten to single quotes (this bundle's transpiler turns "…"
+  written atomically only after every check passes (a failed render leaves no file); a network outage is waited out with backoff up to `MIDIGREP_RENDER_NET_WAIT_S` (default 1800 s); `samples("url")` rewritten to single quotes (this bundle's transpiler turns "…"
   into mini-notation); crashed pages retried ×3; fails loudly on unloaded sounds, silence, frame/onset
   count mismatch, truncated tails.
 - Selected everywhere by `MIDIGREP_RENDERER` (default `offline`; `blackhole` = the recorder below) —
