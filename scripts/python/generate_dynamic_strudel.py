@@ -268,8 +268,8 @@ def otsu_threshold(values) -> float:
     return best_t
 
 
-def harmony_notes(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16, lo: int = 0, hi: int = 127
-                  ) -> tuple[dict[int, list[int]], dict]:
+def harmony_notes(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16, lo: int = 0, hi: int = 127,
+                  stem_sounds=None) -> tuple[dict[int, list[int]], dict]:
     """The REAL harmony under the lead's top line, per quantised step: {step: [pitches below the top note]}.
 
     The lead keeps ONE note per step (the highest, after folding into [lo,hi]); the transcription holds
@@ -281,11 +281,17 @@ def harmony_notes(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16
          not a second voice.
     The kept notes are octave-folded into [lo,hi] (the lead's own window) and deduplicated against each other and
     the top note. Returns (steps, info) - info carries the derived salience floor and counts for the summary.
+
+    ``stem_sounds(note) -> bool`` (the melodic stem's own chroma, see ``stem_sounds_note``) overrules rule 1 only: the
+    velocity floor measures the TRANSCRIBER's confidence, not whether the stem plays the pitch - on VAGABUNDO it
+    discards 1504 of 2332 notes, 774 of the 1182 it discards at a lead step the stem sounds (measured: the stem's
+    strong chroma that no written voice sounds was 24 % this class). A quiet note is kept when the stem demonstrably
+    sounds its pitch class while it lasts; rule 2 (an overtone of a louder note) still applies to it.
     """
     pm = pretty_midi.PrettyMIDI(str(midi_path))
     notes = [n for inst in pm.instruments for n in inst.notes]
     info = {"salience_floor": None, "notes": len(notes), "kept": 0, "rejected_quiet": 0, "rejected_partial": 0,
-            "gain_ratio": 1.0}
+            "kept_quiet_stem_sounds": 0, "gain_ratio": 1.0}
     kept_vel: list[int] = []
     top_vel: list[int] = []
     if not notes:
@@ -309,7 +315,8 @@ def harmony_notes(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16
         keep: list[int] = []
         top_vel.append(max(n.velocity for n in g if BR.fold_into(n.pitch, lo, hi) == top))
         for n in g:
-            if n.velocity < floor:
+            quiet = n.velocity < floor
+            if quiet and (stem_sounds is None or not stem_sounds(n)):
                 info["rejected_quiet"] += 1
                 continue
             if any(m is not n and m.velocity > n.velocity and (n.pitch - m.pitch) in ivals for m in g):
@@ -319,6 +326,7 @@ def harmony_notes(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16
             if p != top and p not in keep:
                 keep.append(p)
                 kept_vel.append(n.velocity)
+                info["kept_quiet_stem_sounds"] += int(quiet)
         if keep:
             out[s] = sorted(keep)
             info["kept"] += len(keep)
@@ -327,6 +335,24 @@ def harmony_notes(midi_path: Path, bpm: float, nbars: int, *, quantize: int = 16
         # ratio of the transcriber's amplitudes (median kept harmony velocity / median top-note velocity).
         info["gain_ratio"] = float(np.median(kept_vel) / np.median(top_vel))
     return out, info
+
+
+def stem_sounds_note(ev, note) -> bool:
+    """Does the melodic stem sound ``note``'s pitch class while the note lasts? ``ev`` is a ``StemEvidence`` with
+    chroma (``melodic_shape.load_evidence``). The stem's mean chroma over the note's span (at most one second: a long
+    transcribed note is judged on its start) is split into its sounding and silent classes by Otsu over the 12
+    values - no typed level - and the note's class must be in the sounding one."""
+    chroma = getattr(ev, "chroma", None)
+    if chroma is None:
+        return False
+    f0 = int(note.start / ev.chroma_hop_s)
+    f1 = max(f0 + 1, int(min(note.end, note.start + 1.0) / ev.chroma_hop_s))
+    seg = chroma[:, f0:f1]
+    if seg.size == 0:
+        return False
+    v = seg.mean(axis=1)
+    thr = otsu_threshold(v)
+    return bool(v[note.pitch % 12] >= thr and v[note.pitch % 12] > v.min())
 
 
 def harmony_bars(steps: dict[int, list[int]], nbars: int, *, quantize: int = 16) -> list[str] | None:
@@ -872,9 +898,18 @@ def main() -> int:
         return 1
     # HARMONY: the notes under the lead's top line (editable chord bars), derived from the same transcription.
     chord_bars, harmony_info = None, None
+    mev = None
+    if args.melodic_shape == "stem" and lead_bars:
+        try:
+            mev = MS.load_evidence(args.stems_dir / "melodic.wav")
+        except Exception as exc:  # noqa: BLE001 - reported below; the old rules then apply
+            print(f"WARNING melodic-shape: cannot measure melodic.wav ({exc}); lead stays a 1-step stream",
+                  file=sys.stderr)
     if lead_bars and not args.no_harmony and args.lead_midi.exists():
         try:
-            hsteps, harmony_info = harmony_notes(args.lead_midi, args.bpm, nbars, lo=llo, hi=lhi)
+            hsteps, harmony_info = harmony_notes(
+                args.lead_midi, args.bpm, nbars, lo=llo, hi=lhi,
+                stem_sounds=(lambda n: stem_sounds_note(mev, n)) if mev is not None else None)
             chord_bars = harmony_bars(hsteps, nbars)
         except Exception as exc:  # noqa: BLE001 - unreadable midi must not lose the rest of the piece
             print(f"WARNING harmony: could not derive ({exc}); no harmony voice", file=sys.stderr)
@@ -882,9 +917,8 @@ def main() -> int:
     # MELODIC NOTE SHAPE (melodic_shape.py): the written lead retriggers every 16th; the stem plays a note and lets it ring.
     lead_loop_table, melodic_info, lead_loop_stats = {}, None, None
     lead_legato, chord_legato = None, None
-    if args.melodic_shape == "stem" and lead_bars:
+    if mev is not None:
         try:
-            mev = MS.load_evidence(args.stems_dir / "melodic.wav")
             lead_bars, chord_bars, melodic_info = MS.shape_melodic(lead_bars, chord_bars, args.bpm, mev)
             lead_legato = ((melodic_info or {}).get("lead") or {}).pop("legato_bars", None)
             chord_legato = ((melodic_info or {}).get("chords") or {}).pop("legato_bars", None)
