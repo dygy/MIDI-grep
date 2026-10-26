@@ -122,7 +122,7 @@ import { isNetworkFailure, netWaitBudgetS, nextNetWaitS, DEFAULT_NET_WAIT_S } fr
 test('isNetworkFailure: network vs real', () => {
   for (const t of ['Failed to load resource: net::ERR_INTERNET_DISCONNECTED', 'net::ERR_TIMED_OUT', 'net::ERR_NAME_NOT_RESOLVED',
     'net::ERR_NETWORK_CHANGED', 'net::ERR_CONNECTION_RESET', 'net::ERR_CONNECTION_REFUSED', 'net::ERR_QUIC_PROTOCOL_ERROR.QUIC_PACKET_WRITE_ERROR',
-    'TypeError: Failed to fetch', 'getaddrinfo ENOTFOUND strudel.dygy.app']) assert.ok(isNetworkFailure(t), t);
+    'TypeError: Failed to fetch', 'getaddrinfo ENOTFOUND strudel.dygy.app', 'Navigation timeout of 30000 ms exceeded']) assert.ok(isNetworkFailure(t), t);
   for (const t of ['Target closed', 'Protocol error: Session closed', 'triggered 5 onsets but expected 6', 'error loading "x.json"', 'net::ERR_BLOCKED_BY_CLIENT', '', undefined])
     assert.ok(!isNetworkFailure(t), String(t));
 });

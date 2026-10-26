@@ -167,8 +167,9 @@ export function commitOutput(target: string, wav: Uint8Array, ok: () => boolean)
 
 // ---- transient network outage handling -------------------------------------------------------------------------
 /** Chromium net errors / fetch messages that mean "the network is down or flapping", not "the render is wrong". */
-const NETWORK_RE = /net::ERR_(INTERNET_DISCONNECTED|TIMED_OUT|NAME_NOT_RESOLVED|NETWORK_CHANGED|NETWORK_ACCESS_DENIED|ADDRESS_UNREACHABLE|CONNECTION_\w+|QUIC_\w+|SOCKET_NOT_CONNECTED|TUNNEL_CONNECTION_FAILED|PROXY_CONNECTION_FAILED|NETWORK_IO_SUSPENDED)|ERR_(INTERNET_DISCONNECTED|NAME_NOT_RESOLVED)|\b(ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENETUNREACH)\b|failed to fetch|networkerror|load failed/i;
-/** True when `text` (an error message or a browser console line) is a network failure. */
+const NETWORK_RE = /net::ERR_(INTERNET_DISCONNECTED|TIMED_OUT|NAME_NOT_RESOLVED|NETWORK_CHANGED|NETWORK_ACCESS_DENIED|ADDRESS_UNREACHABLE|CONNECTION_\w+|QUIC_\w+|SOCKET_NOT_CONNECTED|TUNNEL_CONNECTION_FAILED|PROXY_CONNECTION_FAILED|NETWORK_IO_SUSPENDED)|ERR_(INTERNET_DISCONNECTED|NAME_NOT_RESOLVED)|\b(ENOTFOUND|EAI_AGAIN|ECONNRESET|ECONNREFUSED|ETIMEDOUT|ENETUNREACH)\b|failed to fetch|networkerror|load failed|navigation timeout of \d+ ms exceeded/i;
+/** True when `text` (an error message or a browser console line) is a network failure. A page navigation timeout counts: the page waits
+ * for 'load', i.e. for every remote script and sample map, so it times out when those stall (Regime 2026-10-26). */
 export function isNetworkFailure(text: string): boolean { return NETWORK_RE.test(text || ''); }
 
 /** Default total seconds a render waits out a network outage before failing; override with MIDIGREP_RENDER_NET_WAIT_S (0 = never wait). */
