@@ -212,7 +212,7 @@ def test_old_lead_behaviour_is_one_flag_away(tmp_path):
 @have
 def test_generated_piece_writes_pitch_changes_as_an_editable_legato_voice(tmp_path):
     code, summary = _generate(tmp_path)
-    assert "let leadLegato = [" in code and "noLoopAttack(note(cat(...leadLegato)))" in code
+    assert "let leadLegato = [" in code and "noLoopAttack(note(cat(...leadLegato))" in code
     assert "const legatoAttack = " in code
     assert "melodic_shape" in summary and "legato_bars" not in summary["melodic_shape"]["lead"]   # arrays live in code
     assert summary["editability"] == "pass"

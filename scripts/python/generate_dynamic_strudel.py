@@ -54,6 +54,7 @@ import bass_register as BR  # noqa: E402  (stem-measured register + octave snap)
 import bass_shape as BS  # noqa: E402  (bass note shape from the stem: hold, glide, sample loop, kick duck)
 import melodic_shape as MS  # noqa: E402  (lead/chords: retrigger only on stem attacks, hold between)
 import drum_pitch as DP  # noqa: E402  (the pitch each stem kick sounds, written per hit)
+import note_dynamics as ND  # noqa: E402  (per-note lead/chord level measured from the melodic stem, written as .velocity())
 from editability_check import check_editability  # noqa: E402  (spec 003 detector)
 from sound_selector import pick_palette_sound  # noqa: E402  (genre palette — no hardcoded names)
 from strudel_validation import VALID_SOUNDS  # noqa: E402  (library sound catalog)
@@ -701,6 +702,9 @@ def main() -> int:
     ap.add_argument("--drum-velocity", choices=["off", "bar", "global"], default="bar",
                     help="per-hit drum velocity measured from the drums stem (detect_drums_bands 'strength'): "
                          "bar=hit strength / its class median in the same bar, global=/ the piece median, off=none")
+    ap.add_argument("--lead-dynamics", choices=["off", "stem"], default="stem",
+                    help="sample-instrument lead/chords: stem = each written note carries a parallel .velocity() measured from the melodic "
+                         "stem's level over that note relative to what its grain plays (note_dynamics.py); off = every note at the voice gain")
     ap.add_argument("--drum-stem-gain", type=float, default=1.0,
                     help="gain for the realstem drum channel (balances the real drums in the mix)")
     ap.add_argument("--drum-lpf", type=int, default=0,
@@ -1231,6 +1235,50 @@ def main() -> int:
                   "return l ? { ...v, begin: l[0], attack: legatoAttack } : { ...v, attack: legatoAttack } })"]
         L += [""]
         lead_row, chord_row = f"withLeadLoop({lead_row})", f"withLeadLoop({chord_row})"
+    # PER-NOTE DYNAMICS (note_dynamics.py): the stem's level over each written note vs what its grain plays, as a
+    # parallel .velocity() (multiplies the voice's single .gain(); the envelope and calibrators compose with it).
+    dyn, dyn_info = None, {"mode": args.lead_dynamics, "applied": False}
+    if args.lead_dynamics == "stem" and not synth and lead_bars:
+        try:
+            import librosa
+            dsr = 22050
+            dy, _ = librosa.load(str(args.stems_dir / "melodic.wav"), sr=dsr, mono=True)
+            glev = ND.GrainLevels(args.pack_dir / "instruments" / "samples.json", lead_sound)
+            env_steps = max(1, int(args.env_steps))
+            bar_s = 60.0 / args.bpm * 4
+
+            def _env_mean(t0: float, t1: float) -> float:
+                if not lead_env:
+                    return 1.0
+                vals = [lead_env[min(len(lead_env) - 1, int(t / bar_s))][min(env_steps - 1, int((t / bar_s % 1.0) * env_steps))]
+                        for t in np.linspace(t0, max(t1, t0 + 1e-3), 8, endpoint=False)]
+                return float(np.mean(vals))
+
+            chord_gv = round(lead_g * harmony_info["gain_ratio"] * args.cal_chord, 4) if harmony_info else lead_g
+            voices_g = {"lead": (lead_bars, lead_g), "leadLegato": (lead_legato or [], lead_g),
+                        "chords": (chord_bars or [], chord_gv), "chordsLegato": (chord_legato or [], chord_gv)}
+            dyn = ND.note_velocities(dy, dsr, args.bpm, voices_g, glev.rms, glev.length_s, _env_mean)
+            dyn_info["applied"] = dyn is not None
+        except Exception as exc:  # noqa: BLE001 - an unmeasurable stem/pack leaves every note at the voice gain
+            print(f"WARNING lead-dynamics: not applied ({exc})", file=sys.stderr)
+    if dyn:
+        def _vel(row: str, name: str, arr: str) -> str:
+            return f"{row}.velocity(cat(...{arr}))" if name in dyn else row
+        lead_row = f"note(cat(...lead))"
+        lead_row = _vel(lead_row, "lead", "leadVel")
+        chord_row = _vel("note(cat(...chords))", "chords", "chordsVel")
+        if lead_legato:
+            lead_row = f"stack({lead_row}, noLoopAttack({_vel('note(cat(...leadLegato))', 'leadLegato', 'leadLegatoVel')}))"
+        if chord_legato:
+            chord_row = f"stack({chord_row}, noLoopAttack({_vel('note(cat(...chordsLegato))', 'chordsLegato', 'chordsLegatoVel')}))"
+        if lead_bars and (lead_loop_table or lead_legato or chord_legato):
+            lead_row, chord_row = f"withLeadLoop({lead_row})", f"withLeadLoop({chord_row})"
+        L += ["// per-note level measured from the melodic stem (note_dynamics.py): one value per written note, a parallel",
+              "// .velocity() (multiplies the voice gain). Set a value to 1 - or delete the .velocity() - to play that note flat.", ""]
+        for nm, arr in (("lead", "leadVel"), ("leadLegato", "leadLegatoVel"), ("chords", "chordsVel"),
+                        ("chordsLegato", "chordsLegatoVel")):
+            if nm in dyn:
+                L += [js_array(arr, dyn[nm]), ""]
     if lead_bars:
         L += [js_array("lead", lead_bars), ""]
         if lead_legato:
@@ -1379,7 +1427,7 @@ def main() -> int:
                       "bass_lpf": int(bass_fx.get("lpf") or 0), "bass_lpf_analysis": bass_lpf_analysis,
                       "bass_note_max_hz": bars_max_hz(bass_bars),
                       "sub_up": int(sub_up),
-                      "harmony": harmony_info, "chord_bars": len(chord_bars or []),
+                      "harmony": harmony_info, "lead_dynamics": dyn_info, "chord_bars": len(chord_bars or []),
                       "lead_octave": lead_oct, "lead_octave_decision": lead_dec,
                       "lead_partial_log2": lead_partial,
                       "lead_hpf": int(args.lead_hpf), "lead_note_min_hz": bars_min_hz(lead_bars),
