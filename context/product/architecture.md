@@ -306,7 +306,8 @@ kick hit is tuned to its stem hit's 808 tail pitch (`drum_pitch.py`, a per-hit `
 **Generator note shape.** `melodic_shape.py` (lead/chords strike at stem onsets, hold to the next; chroma-confirmed
 pitch changes inside a hold = `leadLegato`/`chordsLegato`), the loudest-note lead pick, `bass_register.harmonic_of`
 (a transcribed non-octave partial is written as the stem f0) the `bassLegato` loop-start entry, stem attacks the transcription missed (`bass_shape`, `melodic_shape.missed_attacks`)
-and quiet harmony notes the stem's chroma confirms (`stem_sounds_note`) are generator-side
+quiet harmony notes the stem's chroma confirms (`stem_sounds_note`) and the per-note lead/chord level from the stem
+(`note_dynamics.py`, a parallel `.velocity()`) are generator-side
 and render through the same sample instruments.
 
 **Solo measurements in calibration.** `auto-calibrate.sh` renders the BASS channel (`bass_solo.py`, `--bass-solo`,
