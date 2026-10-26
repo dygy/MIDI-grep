@@ -137,3 +137,17 @@ test('nextNetWaitS: doubling, capped, trimmed to budget, 0 when spent', () => {
   assert.deepEqual(seq, [5, 10, 20, 40, 60, 60, 5]); assert.equal(w, 200);
   assert.equal(nextNetWaitS(0, 0, 0), 0);
 });
+import { isNetworkOutageFailure, isSampleLoadFailure } from '../dist/offline-helpers.js';
+test('isNetworkOutageFailure: only the attempt\'s own failure is an outage; stray network noise does not reclassify real failures', () => {
+  // network noise was logged (netEvents=3) but the failure is a real one -> NOT an outage
+  for (const m of ['triggered 5 onsets but expected 6', 'sound "foo" not found', 'evaluate returned no pattern (eval error): x is not defined', 'renderPatternAudio produced no blob', 'Target closed'])
+    assert.equal(isNetworkOutageFailure(m, 3), false, m);
+  // the error itself is a network failure, with or without console events
+  assert.equal(isNetworkOutageFailure('net::ERR_INTERNET_DISCONNECTED', 0), true);
+  // a sample-map load failure while network errors were logged -> still an outage (744c429 / 204020f behaviour)
+  assert.equal(isNetworkOutageFailure('evaluate returned no pattern (eval error): error loading "https://h/samples.json"', 2), true);
+  assert.equal(isNetworkOutageFailure('sample load failed during network outage: error loading x.json', 1), true);
+  // the same load failure with NO network evidence is a real failure
+  assert.equal(isNetworkOutageFailure('error loading "https://h/samples.json"', 0), false);
+  assert.ok(!isSampleLoadFailure('sound "x" not found'));
+});

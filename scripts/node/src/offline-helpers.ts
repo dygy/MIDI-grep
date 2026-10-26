@@ -172,6 +172,20 @@ const NETWORK_RE = /net::ERR_(INTERNET_DISCONNECTED|TIMED_OUT|NAME_NOT_RESOLVED|
  * for 'load', i.e. for every remote script and sample map, so it times out when those stall (Regime 2026-10-26). */
 export function isNetworkFailure(text: string): boolean { return NETWORK_RE.test(text || ''); }
 
+/** A log/error line saying a sample map or sample file FAILED TO LOAD (as opposed to a sound that is simply unknown, or a render-check failure). */
+const SAMPLE_LOAD_RE = /error loading|failed to load|could not load|unable to load|sample load failed|\bload(?:ing)?\b.{0,40}\b(?:fail\w*|error)\b/i;
+export function isSampleLoadFailure(text: string): boolean { return SAMPLE_LOAD_RE.test(text || ''); }
+
+/**
+ * Is an attempt's OWN failure a network outage (wait + retry) rather than a crash/real failure (MAX_ATTEMPTS, then fail)?
+ * Yes when the error itself is a network failure, or when it is a sample-load failure AND network errors were logged during the
+ * attempt (the host was down, so the load failed for that reason). Unrelated network console noise never reclassifies other errors
+ * (eval error, onset mismatch, unloaded sound, closed page).
+ */
+export function isNetworkOutageFailure(message: string, netEventsDuringAttempt: number): boolean {
+  return isNetworkFailure(message) || (netEventsDuringAttempt > 0 && isSampleLoadFailure(message));
+}
+
 /** Default total seconds a render waits out a network outage before failing; override with MIDIGREP_RENDER_NET_WAIT_S (0 = never wait). */
 export const DEFAULT_NET_WAIT_S = 1800;
 /** Backoff schedule (s): first wait, doubling up to the cap. */
