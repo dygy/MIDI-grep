@@ -197,7 +197,7 @@ def write_rows(rows: list[dict]) -> int:
     have: set[str] = set()
     for tk in {r["track_key"] for r in rows}:
         have |= existing_keys(tk)
-    new = [r for r in rows if r["step_key"] not in have]
+    new = [{**r, "seq": i} for i, r in enumerate(r for r in rows if r["step_key"] not in have)]   # write order (see history)
     # one statement needs identical columns: created_at is either on every row or on none
     for grp in ([r for r in new if "created_at" in r], [r for r in new if "created_at" not in r]):
         CS.clickhouse_insert_many(TABLE, grp)
@@ -212,7 +212,7 @@ def history(track_key: str | None = None, mode: str | None = None, genre: str | 
         cond.append(f"mode = '{CS.sanitize_sql_value(mode)}'")
     if genre:
         cond.append(f"genre = '{CS.sanitize_sql_value(genre)}'")
-    q = f"SELECT *, toString(created_at) AS created FROM {TABLE}" + (" WHERE " + " AND ".join(cond) if cond else "") + " ORDER BY created_at"
+    q = f"SELECT *, toString(created_at) AS created FROM {TABLE}" + (" WHERE " + " AND ".join(cond) if cond else "") + " ORDER BY created_at, seq"
     return CS.clickhouse_query(q)
 
 

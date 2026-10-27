@@ -78,6 +78,19 @@ def improving(n=12):
     return [(0.60 + 0.02 * i, 0.60 + 0.02 * i) for i in range(n)]
 
 
+def test_rows_of_one_write_come_back_in_write_order_although_they_tie_on_created_at(db):
+    # created_at has one-second resolution: the steps of one run, recorded together, tie on it and ClickHouse returns ties
+    # in no defined order (CI, ClickHouse 26.11: ['cal2', 'cal1', 'cal3']). The write order (`seq`) breaks the tie, so a
+    # physically shuffled insert of one write still reads back cal1, cal2, cal3.
+    import clickhouse_store as CS
+    assert db.write_rows([row(db, tag="seed")]) == 1             # creates the table (migrations)
+    t = "2026-10-27 05:00:00"
+    rs = [{**row(db, tag=tg, run="r2"), "created_at": t, "seq": s} for tg, s in (("cal3", 2), ("cal1", 0), ("cal2", 1))]
+    CS.clickhouse_insert_many(db.TABLE, rs)
+    assert [x["tag"] for x in db.history("other", "synth") if x["run_id"] == "r2"] == ["cal1", "cal2", "cal3"]
+    assert [x["seq"] for x in db.history("other", "synth") if x["run_id"] == "r1"] == [0]   # write_rows numbers its rows
+
+
 def test_every_step_and_the_run_best_are_recorded(db, tmp_path):
     r, _ = run_driver(tmp_path, improving(), "--iters", "3")
     assert r.returncode == 0, r.stdout + r.stderr

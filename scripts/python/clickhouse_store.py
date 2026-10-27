@@ -165,6 +165,12 @@ MIGRATIONS = [
     (4, "Calibration memory lead fit column", [
         "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS lead_fit String DEFAULT ''",
     ]),
+    # created_at has one-second resolution, so the rows of one write (a run's steps, recorded together) tie on it and
+    # ClickHouse returns ties in no defined order. `seq` = the row's position in its write: history sorts by
+    # (created_at, seq). Old rows read back as 0.
+    (5, "Calibration memory write order column", [
+        "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS seq UInt32 DEFAULT 0",
+    ]),
 ]
 
 
