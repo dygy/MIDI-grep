@@ -11,7 +11,11 @@ mix: every knob delta is a damped proportional correction of an OBSERVED band ra
 any track/genre because it only ever reacts to that render's own measured gap.
 
 Levers (all multiply the *current* value, sqrt-damped + clamped to avoid oscillation):
-  sub-gain   <- sub_bass band   (raise to fill 20-60 Hz, lower if booming)
+  sub-gain   <- sub_bass band   (raise to fill 20-60 Hz, lower if booming; no absolute cap - each step is the
+                                 damped correction that closes the observed band ratio)
+  sub-up     <- sub_bass band   (0/1: the sine layer an octave above the bass note. Tried ONCE as its own step
+                                 when the render's sub_bass share exceeds the original's;
+                                 the loop's tie/revert rule keeps whichever scores better)
   bass-mult  <- bass band       (60-250 Hz body of the pitched bass sample)
   cal-lead   <- low_mid+mid     (lead/melodic body; the usual deficit)
   lead-lpf   <- high+high_mid   (excess brightness -> lower the cutoff)
@@ -20,7 +24,7 @@ Levers (all multiply the *current* value, sqrt-damped + clamped to avoid oscilla
                                  low_mid-per-bass too high -> lower the bass cutoff, too low ->
                                  raise it. Bounded by the material: floor = 2x the highest bass
                                  fundamental, ceiling = the analysis-derived cutoff)
-  master-gain<- overall RMS      (gentle; the recorder limiter caps absolute loudness)
+  master-gain<- overall RMS      (gentle, capped for the loop; the FINAL level is set by mix_dynamics.py after BEST)
 
 Usage:
   python calibrate_dynamic.py --comparison <comparison.json> \
@@ -57,8 +61,29 @@ def damp(ratio: float, *, strength: float = 0.5, lo: float = 0.7, hi: float = 1.
     return max(lo, min(hi, corr))
 
 
+# One step of a bass layer measured ALONE (no kick in the number): the amplitude correction is the exact sqrt of the
+# power ratio; the bounds only guard against a bad estimate (a 20 dB gap closes in two steps, not one).
+VOICE_STEP_LO, VOICE_STEP_HI = 0.5, 2.0
+
+
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
+
+
+def measured_exponent(r_now: float, r_parent: float | None, f: float, sign: float) -> float:
+    """Elasticity of a share ratio to a cutoff move, MEASURED from the step that produced this render.
+
+    ``r_*`` = orig/rend share ratio now / at the render this one was derived from, ``f`` = cutoff_now /
+    cutoff_parent, ``sign`` = +1 when raising the cutoff raises the ratio (lead high-pass), -1 when lowering
+    it does (bass low-pass). The step rule below assumes exponent 1 (a cutoff move ``f`` moves the ratio by
+    ``f**1``); VAGABUNDO synth cal1->cal2 measured 2.7 (hpf 300->428 Hz moved low_mid-per-mid 0.49 -> 1.27 of the
+    original's), so the next step was 2.7x too long and overshot. The result is floored at 1 so a measured
+    exponent can only SHORTEN a step relative to the unmeasured rule, never lengthen it.
+    """
+    if r_parent is None or r_parent <= 0 or r_now <= 0 or f <= 0 or abs(math.log(f)) < 0.05:
+        return 1.0
+    e = sign * math.log(r_now / r_parent) / math.log(f)
+    return e if math.isfinite(e) and e > 1.0 else 1.0
 
 
 HIGH_MID_TOP_HZ = FREQ_BANDS["high_mid"][1]   # lead cutoff above this adds nothing to high_mid
@@ -159,6 +184,11 @@ def main() -> int:
     # generator's own defaults so the calibrator is usable from a cold start.
     ap.add_argument("--bass-mult", type=float, default=0.40)
     ap.add_argument("--sub-gain", type=float, default=0.7)
+    ap.add_argument("--sub-up", type=int, choices=[0, 1], default=0,
+                    help="EFFECTIVE sub-sine octave of the last render (generator summary 'sub_up'): 1 = an octave above "
+                         "the written bass note")
+    ap.add_argument("--sub-up-locked", type=int, choices=[0, 1], default=0,
+                    help="1 = the octave-up step was already tried in this run and lost: do not propose it again")
     ap.add_argument("--cal-lead", type=float, default=1.0)
     ap.add_argument("--lead-lpf", type=int, default=5000)
     ap.add_argument("--hat-gain", type=float, default=0.0)
@@ -179,6 +209,11 @@ def main() -> int:
     ap.add_argument("--lead-note-min-hz", type=float, default=0.0,
                     help="lowest lead fundamental (summary 'lead_note_min_hz'); floor of the lead-hpf "
                          "lever. 0 = unknown -> lever stays off")
+    ap.add_argument("--parent-comparison", type=Path, default=None,
+                    help="comparison.json of the render these knobs were derived from; with --parent-lead-hpf / "
+                         "--parent-bass-lpf it lets the placement levers measure their own response")
+    ap.add_argument("--parent-lead-hpf", type=int, default=0)
+    ap.add_argument("--parent-bass-lpf", type=int, default=0)
     ap.add_argument("--bass-note-max-hz", type=float, default=0.0,
                     help="highest bass fundamental (summary 'bass_note_max_hz'); sets the lever's "
                          "floor. 0 = unknown -> lever stays off")
@@ -194,6 +229,18 @@ def main() -> int:
                          "section_windows) as JSON here")
     ap.add_argument("--env-correction-in", type=Path, default=None,
                     help="previous env-correction JSON; new curves are multiplied onto it")
+    ap.add_argument("--bass-solo", type=Path, default=None,
+                    help="bass_solo.py measure JSON for the LAST render: the bass voice rendered alone vs the original bass "
+                         "stem, as a share of its mix, per band. When present the bass layers (sub-gain / bass-mult) follow "
+                         "THAT ratio instead of the whole-mix band shares, which the kick also fills")
+    ap.add_argument("--melodic-solo", type=Path, default=None,
+                    help="melodic_solo.py measure JSON for the LAST render: the LEAD+CHORDS voices rendered alone vs the "
+                         "original melodic stem. When present cal-lead follows THAT absolute body level and lead-lpf THAT "
+                         "centroid, instead of the whole-mix low_mid+mid share and centroid the bass/kick/hats also fill")
+    ap.add_argument("--responses", type=Path, default=None,
+                    help="JSON {knob: damping exponent} LEARNED from recorded (knob change -> band share change) pairs "
+                         "(calibration_memory.py responses): replaces the fixed 0.5 (sqrt) exponent of sub_gain / "
+                         "bass_mult / cal_lead where present. Absent file or knob = the sqrt damping, unchanged")
     ap.add_argument("--bpm", type=float, default=None,
                     help="generator BPM for bar mapping (default: measured original tempo)")
     ap.add_argument("--bars", type=int, default=None,
@@ -203,6 +250,7 @@ def main() -> int:
     cur = {
         "bass_mult": args.bass_mult,
         "sub_gain": args.sub_gain,
+        "sub_up": int(args.sub_up),
         "cal_lead": args.cal_lead,
         "lead_lpf": float(args.lead_lpf),
         "hat_gain": args.hat_gain,
@@ -223,6 +271,16 @@ def main() -> int:
 
     eps = 1e-4
 
+    learned: dict[str, float] = {}
+    if args.responses is not None:
+        try:
+            learned = {k: float(v) for k, v in json.loads(args.responses.read_text()).items()}
+        except (OSError, ValueError, AttributeError) as e:
+            print(f"WARNING: --responses {args.responses} unreadable ({e}); using the fixed sqrt damping", file=sys.stderr)
+
+    def strength(knob: str) -> float:
+        return learned.get(knob, 0.5)
+
     def ratio(band_keys: list[str]) -> float:
         o = sum(ob.get(k, 0.0) for k in band_keys)
         r = sum(rb.get(k, 0.0) for k in band_keys)
@@ -230,7 +288,44 @@ def main() -> int:
 
     r_sub = ratio(["sub_bass"])
     r_bass = ratio(["bass"])
+    # The bass voice measured ALONE (bass_solo.py). The kick fills sub_bass/bass too, so the mix shares cannot say
+    # whether the BASS is right: VAGABUNDO's mix sub read 34.7 % vs 34.1 % while the bass voice sat 8.5 dB under its
+    # stem, and the loop lowered it. It sets the SAMPLE layer (bass-mult), the one layer that carries the whole voice,
+    # and being one linear voice (power ratio -> amplitude = sqrt) it takes the full measured step, not the damped one.
+    # The sine layer (sub-gain) stays on the mix shares: both layers feed the 60-250 Hz band, so driving both from the
+    # same band overshoots (measured on VAGABUNDO: bass-band ratio 3.15 -> 0.90 in one step with both raised).
+    voice: dict[str, float] = {}
+    if args.bass_solo is not None:
+        try:
+            solo_ratio = json.loads(args.bass_solo.read_text()).get("ratio") or {}
+            voice = {b: float(v) for b, v in solo_ratio.items() if b in ("sub_bass", "bass") and v}
+        except (OSError, ValueError, AttributeError, TypeError) as e:
+            print(f"WARNING: --bass-solo {args.bass_solo} unreadable ({e}); bass layers follow the mix band shares",
+                  file=sys.stderr)
+
+    def sample_layer_step(band: str, knob: str) -> float:
+        """Multiplicative correction of the sample layer, driven by the voice's own level in `band` when measured."""
+        if band in voice:
+            return damp(voice[band], strength=0.5, lo=VOICE_STEP_LO, hi=VOICE_STEP_HI)
+        return damp(r_sub if band == "sub_bass" else r_bass, strength=strength(knob))
     r_body = ratio(["low_mid", "mid"])       # lead/melodic body
+    # The melodic voices measured ALONE (melodic_solo.py): the same body bands, but as an absolute level of the voices
+    # against the melodic stem, not a share of a mix the bass, kick and hats also fill. One linear voice group, so the
+    # full measured step (power ratio -> amplitude = sqrt) with the bass-solo bounds; brightness is the voices' own
+    # centroid ratio (> 1 = too dark), which replaces the mix centroid for the lead low-pass only.
+    r_body_voice, r_cent_voice = None, None
+    if args.melodic_solo is not None:
+        try:
+            msolo = json.loads(args.melodic_solo.read_text())
+            lo_o, lo_r = (sum(float(msolo[k][b]) for b in ("low_mid", "mid")) for k in ("level_orig", "level_render"))
+            if all(msolo["ratio"].get(b) for b in ("low_mid", "mid")) and lo_r > 0:
+                r_body_voice = lo_o / lo_r
+            c_o, c_r = msolo["centroid"]["orig"], msolo["centroid"]["render"]
+            if c_o and c_r:
+                r_cent_voice = float(c_o) / float(c_r)
+        except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
+            print(f"WARNING: --melodic-solo {args.melodic_solo} unreadable ({e}); lead level/brightness follow the mix",
+                  file=sys.stderr)
     # Brightness lever uses the spectral CENTROID, not the high bands: in bass-heavy genres
     # the high/high_mid bands sit at ~1% magnitude where demucs bleed + noise swamp the
     # signal, so their ratio is unreliable (it kept lead-lpf pinned while the centroid said
@@ -246,7 +341,31 @@ def main() -> int:
 
     nxt = dict(cur)
     # --- sub_bass: fill or tame the 20-60 Hz sine layer -----------------------------------
-    nxt["sub_gain"] = round(clamp(cur["sub_gain"] * damp(r_sub), 0.2, 1.6), 3)
+    # No absolute cap: a fixed 0.2-1.6 range saturated at 1.6 on VAGABUNDO (sub_bass still short) and left the
+    # lever blind. The step is the damped correction that closes the OBSERVED ratio (sqrt = amplitude from an
+    # energy share ratio, further damped by damp() and limited to damp()'s per-step bounds); positive by construction.
+    #
+    # Octave: when the render's sub_bass share is OVER the original's, more gain cannot help; moving the sine an
+    # octave up shifts its energy from sub_bass into bass. That is a different hypothesis, so it is its own step (gain
+    # unchanged) and is scored by the loop like any other (revert / tie rules, then locked for the run). It is NOT
+    # behind the share dead band: that band guards levers that act silently on noise, this one is a trial the loop
+    # scores - and Regime CLT sample (render sub 49.7% vs original 40.4%, ratio 0.81, inside the band) gained
+    # +0.042 overall (0.7510 -> 0.7933) from exactly this step, which the dead band had kept shut.
+    sub_over = r_sub < 1.0
+    nxt["sub_up"] = int(args.sub_up)
+    flipping = sub_over and not args.sub_up and not args.sub_up_locked
+    # WHICH BAND EACH LAYER FEEDS depends on the octave. Octave 0: the sine sits at the bass fundamental, inside
+    # sub_bass (20-60 Hz), and the main layer carries the bass band. Octave up: the sine (note +12, low-pass x2) lands in
+    # the bass band, and the sub_bass share is left to the main layer. So the two gains swap their driving ratios:
+    # sub-gain follows `bass` and bass-mult follows `sub_bass`. Driving sub-gain by sub_bass with the octave up (what
+    # this did) raises a layer that no longer feeds that band: Regime CLT synth cal2->cal3 raised it 0.70 -> 0.95 while
+    # render bass was already 55% vs the original's 41% -> bass 79%, overall 0.7446 -> 0.6566, and the loop's patience
+    # (2 strikes: that step and its shortened retry) ended the run with sub_bass still 18 points off.
+    if flipping:
+        nxt["sub_up"] = 1
+        nxt["sub_gain"] = round(cur["sub_gain"], 3)
+    else:
+        nxt["sub_gain"] = round(cur["sub_gain"] * damp(r_bass if args.sub_up else r_sub, strength=strength("sub_gain")), 3)
     synth = args.mode == "synth"
     r_lm_bass = float("nan")
     cur_blpf, cur_lhpf = int(cur["bass_lpf"]), int(cur["lead_hpf"])
@@ -258,6 +377,21 @@ def main() -> int:
         except (OSError, ValueError):
             sc_stems = {}
     nxt["bass_lpf"], nxt["lead_hpf"] = cur_blpf, cur_lhpf
+
+    parent_bands = None
+    if args.parent_comparison and args.parent_comparison.exists():
+        try:
+            pd = json.loads(args.parent_comparison.read_text())
+            parent_bands = (pd["original"]["bands"], pd["rendered"]["bands"])
+        except (OSError, ValueError, KeyError):
+            parent_bands = None
+
+    def parent_share_ratio(num: str, den: str) -> float | None:
+        if parent_bands is None:
+            return None
+        po, pr = parent_bands
+        return (((po.get(num, 0.0) + eps) / (po.get(den, 0.0) + eps)) /
+                ((pr.get(num, 0.0) + eps) / (pr.get(den, 0.0) + eps)))
 
     # low_mid-per-mid placement ratio, needed by the lead-hpf lever
     r_lm_mid = share_ratio("low_mid", "mid") if synth else float("nan")
@@ -275,7 +409,9 @@ def main() -> int:
         floor_h = int(math.ceil(args.lead_note_min_hz))
         ceil_h = max(cur_lhpf, LOW_MID_TOP_HZ)
         if floor_h <= ceil_h and not (1 / SHARE_DEAD_BAND <= r_lm_mid <= SHARE_DEAD_BAND):
-            nxt["lead_hpf"] = int(clamp(cur_lhpf / damp(r_lm_mid, lo=0.7, hi=1.3), floor_h, ceil_h))
+            e_h = measured_exponent(r_lm_mid, parent_share_ratio("low_mid", "mid"),
+                                    cur_lhpf / args.parent_lead_hpf if args.parent_lead_hpf > 0 else 1.0, +1.0)
+            nxt["lead_hpf"] = int(clamp(cur_lhpf / damp(r_lm_mid, lo=0.7, hi=1.3) ** (1.0 / e_h), floor_h, ceil_h))
             lead_hpf_moved = nxt["lead_hpf"] != cur_lhpf
 
     # --- bass low-pass: tame the saw's upper harmonics (synth only) -------------------------
@@ -291,18 +427,24 @@ def main() -> int:
         ceil_ = max(cur_blpf, args.bass_lpf_max)                   # never open past the analysis value
         if (not lead_hpf_moved and floor <= ceil_
                 and not (1 / SHARE_DEAD_BAND <= r_lm_bass <= SHARE_DEAD_BAND)):
-            nxt["bass_lpf"] = int(clamp(cur_blpf * damp(r_lm_bass, lo=0.7, hi=1.3), floor, ceil_))
+            e_b = measured_exponent(r_lm_bass, parent_share_ratio("low_mid", "bass"),
+                                    cur_blpf / args.parent_bass_lpf if args.parent_bass_lpf > 0 else 1.0, -1.0)
+            nxt["bass_lpf"] = int(clamp(cur_blpf * damp(r_lm_bass, lo=0.7, hi=1.3) ** (1.0 / e_b), floor, ceil_))
             bass_lpf_moved = nxt["bass_lpf"] != cur_blpf
 
     # --- bass (60-250 Hz): body of the pitched bass sample --------------------------------
     # One lever per step: while the cutoff moves, bass-mult may fall but not rise (a rise would
     # re-inflate the very harmonics the cutoff is removing; cal2->cal3 did exactly that: +3%).
-    bass_corr = damp(r_bass)
+    bass_corr = sample_layer_step("sub_bass" if args.sub_up else "bass", "bass_mult")     # see the layer/band assignment at the sub-gain step
+    if flipping:
+        bass_corr = 1.0       # the octave flip IS this step's bass/sub rebalance (it moved ~30 points of share in one go)
     if bass_lpf_moved:
         bass_corr = min(bass_corr, 1.0)
     nxt["bass_mult"] = round(clamp(cur["bass_mult"] * bass_corr, 0.2, 1.3), 3)
     # --- lead/melodic body: raise gain when low_mid+mid is deficient -----------------------
-    nxt["cal_lead"] = round(clamp(cur["cal_lead"] * damp(r_body, hi=1.6), 0.4, 3.0), 3)
+    lead_corr = (damp(r_body_voice, strength=0.5, lo=VOICE_STEP_LO, hi=VOICE_STEP_HI) if r_body_voice is not None
+                 else damp(r_body, strength=strength("cal_lead"), hi=1.6))
+    nxt["cal_lead"] = round(clamp(cur["cal_lead"] * lead_corr, 0.4, 3.0), 3)
     # --- brightness: move the lead low-pass toward centroid parity ------------------------
     # GENTLE + dead-banded: the lead is only ONE source of the highs (hats/drums live there
     # too), and over-darkening tanks the brightness metric hard (a 28% lpf cut dropped it
@@ -330,13 +472,14 @@ def main() -> int:
     over_raw = r_dhigh < 1 / HAT_HI_DEAD_BAND
     hat_via_drums = (r_cent > 1.15 and cur["lead_lpf"] >= HIGH_MID_TOP_HZ and r_hi > HAT_HI_DEAD_BAND
                      and r_high >= 1 / SHARE_DEAD_BAND and not over_raw)
+    r_lead_cent = r_cent if r_cent_voice is None else r_cent_voice   # the lead cutoff follows the lead's own brightness
     if hat_via_drums:
         nxt["lead_lpf"] = int(cur["lead_lpf"])
-    elif r_cent > 1.08:        # rendered too DARK -> open the cutoff a little
-        lpf_corr = clamp(r_cent ** 0.4, 1.0, 1.25)
+    elif r_lead_cent > 1.08:        # rendered too DARK -> open the cutoff a little
+        lpf_corr = clamp(r_lead_cent ** 0.4, 1.0, 1.25)
         nxt["lead_lpf"] = int(clamp(cur["lead_lpf"] * lpf_corr, 3500, 9000))
-    elif r_cent < 0.92:      # rendered too BRIGHT -> shrink the cutoff a little
-        lpf_corr = clamp(r_cent ** 0.4, 0.8, 1.0)
+    elif r_lead_cent < 0.92:      # rendered too BRIGHT -> shrink the cutoff a little
+        lpf_corr = clamp(r_lead_cent ** 0.4, 0.8, 1.0)
         nxt["lead_lpf"] = int(clamp(cur["lead_lpf"] * lpf_corr, 3500, 9000))
     else:
         nxt["lead_lpf"] = int(cur["lead_lpf"])
@@ -390,13 +533,13 @@ def main() -> int:
     print("== knob deltas ==", file=sys.stderr)
     print(f"   low_mid/bass share ratio {r_lm_bass:.2f}, low_mid/mid {r_lm_mid:.2f} "
           f"(orig/rend; nan = lever off)", file=sys.stderr)
-    for k in ["sub_gain", "bass_mult", "cal_lead", "lead_lpf", "hat_gain", "master_gain",
+    for k in ["sub_gain", "sub_up", "bass_mult", "cal_lead", "lead_lpf", "hat_gain", "master_gain",
               "bass_lpf", "lead_hpf"]:
         a, b = cur[k], nxt[k]
         arrow = "->" if a != b else "=="
         print(f"   {k:12s} {a} {arrow} {b}", file=sys.stderr)
 
-    cli = (f"--bass-mult {nxt['bass_mult']} --sub-gain {nxt['sub_gain']} "
+    cli = (f"--bass-mult {nxt['bass_mult']} --sub-gain {nxt['sub_gain']} --sub-up {nxt['sub_up']} "
            f"--cal-lead {nxt['cal_lead']} --lead-lpf {nxt['lead_lpf']} "
            f"--hat-gain {nxt['hat_gain']} --master-gain {nxt['master_gain']}")
     if cur_blpf > 0 and nxt["bass_lpf"] != cur_blpf:

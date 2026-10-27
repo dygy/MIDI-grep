@@ -6,6 +6,10 @@ OfflineAudioContext, exact timing and pitch, no audio device. ``blackhole``: the
 ``record-strudel-blackhole.js`` - it needs the BlackHole device and renders one at a time; its raw capture
 loses samples, so its pitch/timing are off (see CLAUDE.md). Select with ``MIDIGREP_RENDERER=blackhole``.
 
+``MIDIGREP_STRUDEL_BUNDLE=<@strudel/web dist/index.js>`` swaps the engine build the offline renderer loads (default: the
+pinned npm ``@strudel/web``; the choice is logged in the render output). ``supports_master_bus`` says whether that engine
+defines ``setMasterCompressor`` / ``setMasterLimiter`` (the user's fork does; npm 1.3.0 and the live site do not).
+
 This module is the ONLY place that reads ``MIDIGREP_RENDERER`` (case and whitespace are normalised here). The
 shell drivers ask it through the CLI (``renderer.py name|script|busy-pattern|needs-device``; exit 2 and a message
 on stderr for a bad value) and the loop MCP server imports it.
@@ -14,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import os
+import subprocess
 import sys
 from pathlib import Path
 
@@ -35,16 +40,53 @@ def renderer_script(env: dict[str, str] | None = None) -> Path:
     return NODE_DIST / SCRIPTS[renderer_name(env)]
 
 
+NPM_BUNDLE = NODE_DIST.parent / "node_modules" / "@strudel" / "web" / "dist" / "index.js"
+MASTER_BUS_API = ("setMasterLimiter", "setMasterCompressor")
+
+
+def engine_bundle(env: dict[str, str] | None = None) -> Path:
+    """The @strudel/web bundle the offline renderer loads: ``MIDIGREP_STRUDEL_BUNDLE`` or the pinned npm one."""
+    raw = ((os.environ if env is None else env).get("MIDIGREP_STRUDEL_BUNDLE") or "").strip()
+    return Path(raw).expanduser().resolve() if raw else NPM_BUNDLE
+
+
+def supports_master_bus(env: dict[str, str] | None = None) -> bool:
+    """True when the engine that will render defines the master-bus functions (offline renderer only: the BlackHole
+    recorder plays whatever the hosted site runs, which is not knowable here)."""
+    if renderer_name(env) != "offline":
+        return False
+    try:
+        text = engine_bundle(env).read_text(errors="ignore")
+    except OSError:
+        return False
+    return all(fn in text for fn in MASTER_BUS_API)
+
+
 def needs_device_guard(env: dict[str, str] | None = None) -> bool:
     """True when renders need the BlackHole device (serialise them, probe the device)."""
     return renderer_name(env) == "blackhole"
 
 
+def browser_path() -> Path | None:
+    """The Chromium the renderer will launch (puppeteer's resolved executable), or None if it is not installed.
+    Both renderers launch it; a missing one (e.g. a cleared ~/.cache/puppeteer) otherwise fails only at the first
+    render, after the earlier stages have run."""
+    js = "import('puppeteer').then(m => console.log(m.default.executablePath()))"
+    try:
+        r = subprocess.run(["node", "-e", js], cwd=NODE_DIST.parent, capture_output=True, text=True, timeout=60)
+    except (OSError, subprocess.SubprocessError):
+        return None
+    exe = Path(r.stdout.strip()) if r.returncode == 0 and r.stdout.strip() else None
+    return exe if exe and exe.exists() else None
+
+
 def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description="Which Strudel renderer is selected (MIDIGREP_RENDERER)")
-    ap.add_argument("what", choices=("name", "script", "busy-pattern", "needs-device"),
+    ap.add_argument("what", choices=("name", "script", "busy-pattern", "needs-device", "bundle", "master-bus", "browser"),
                     help="name: offline|blackhole; script: absolute path of the renderer .js; busy-pattern: pgrep -f "
-                         "regex of live capture processes; needs-device: exit 0 when renders need BlackHole, else 1")
+                         "regex of live capture processes; needs-device: exit 0 when renders need BlackHole, else 1; "
+                         "bundle: the engine bundle path; master-bus: exit 0 when that engine has setMasterLimiter/Compressor; "
+                         "browser: the Chromium path, exit 1 when it is not installed")
     what = ap.parse_args(argv).what
     try:
         if what == "name":
@@ -53,6 +95,17 @@ def main(argv: list[str] | None = None) -> int:
             print(renderer_script())
         elif what == "busy-pattern":
             print(BLACKHOLE_BUSY)
+        elif what == "bundle":
+            print(engine_bundle())
+        elif what == "browser":
+            exe = browser_path()
+            if exe is None:
+                print("Chromium for the renderer is not installed: (cd scripts/node && npx puppeteer browsers install chrome)",
+                      file=sys.stderr)
+                return 1
+            print(exe)
+        elif what == "master-bus":
+            return 0 if supports_master_bus() else 1
         else:
             return 0 if needs_device_guard() else 1
     except ValueError as exc:

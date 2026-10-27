@@ -9,6 +9,8 @@ Takes one feature — from prompt text, a local file, or a GitHub issue on `dygy
 
 This command is self-contained and derived from `context/product/delivery-flow.md`, the decision record. **Do not read that file during a run.** There is no `/awos:flow` to regenerate this command: to change a decision, edit the record and then this file directly, and log the change in the record's Generation Log.
 
+
+> **Sound-quality work uses the Improvement Loop** (`context/product/delivery-flow.md` §11): one `improve/<theme>` branch, a local commit per measured improvement, no per-change review / PR / CI / merge steps — run Steps up to the render verification, commit, and continue with the next gap; land a batch with one PR when the owner asks.
 ## Arguments
 
 `$ARGUMENTS` — a GitHub issue number (`42`, `#42`) or URL on `dygy/MIDI-grep`, a path to a local file describing the feature, or the feature text itself. A pre-written spec dir under `context/spec/` is also accepted. If empty, take the first unchecked `- [ ]` item in `context/product/roadmap.md`; if the roadmap is missing or fully checked, ask the user.

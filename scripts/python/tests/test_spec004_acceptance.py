@@ -7,7 +7,7 @@ The per-slice suites (test_build_instruments, test_pipeline_helpers, test_simila
 internal/audio/youtube_test.go, cmd/midi-grep/main_test.go) prove each component. This file proves the
 feature's contract on whole deliverables: the CURRENT cached runs (2026-10-19 re-baseline: refined tempo,
 note-aligned pitch-verified instruments, offline renderer, no vocal voice, scored against instrumental.wav) -
-"VAGABUNDO NAO NAMORA" v013 (sample-instrument) / v014 (synth) and Regime CLT v031 / v032 - the reference dataset,
+"VAGABUNDO NAO NAMORA" and Regime CLT at the versions eval/datasets/reference_tracks.yaml pins (resolved at import) - the reference dataset,
 the floors, the docs and the general (not per-track) shape of the defect fixes. Older runs (v002/v004/v007 and the
 BlackHole-era Regime v026/v027) are history; only the fix #10 history check still reads v002/v004 when cached.
 
@@ -107,10 +107,20 @@ STAMP_KEYS = {"editability", "generation_mode", "editability_violations", "edita
 NOTE_RE = re.compile(r"^[a-g][#s]?\d$")   # Strudel accepts both c#3 and cs3 spellings
 
 # the current runs under test (dataset + thresholds point at them; see eval/datasets/reference_tracks.yaml)
-SAMPLE_RUN, SYNTH_RUN = "v013", "v014"
-REGIME_RUNS = ("v031", "v032")
+def _dataset_run(cache_key: str, mode: str) -> str:
+    """The version eval/datasets/reference_tracks.yaml pins for (track, mode) - the single source of the current runs."""
+    for e in yaml.safe_load(DATASET.read_text(encoding="utf-8"))["tracks"]:
+        if e.get("cache_key") == cache_key and e.get("mode") == mode:
+            return e["version"]
+    raise LookupError(f"{DATASET.name} has no {mode} entry for {cache_key!r}")
 
-needs_track = pytest.mark.skipif(not (TRACK / SAMPLE_RUN).is_dir(), reason=f"cached track {TRACK_KEY!r} absent")
+
+SAMPLE_RUN, SYNTH_RUN = _dataset_run(TRACK_KEY, "sample-instrument"), _dataset_run(TRACK_KEY, "synth")
+REGIME_RUNS = (_dataset_run(REGIME_KEY, "sample-instrument"), _dataset_run(REGIME_KEY, "synth"))
+
+needs_track = pytest.mark.skipif(
+    not ((TRACK / SAMPLE_RUN).is_dir() and (TRACK / SYNTH_RUN).is_dir()),
+    reason=f"cached track {TRACK_KEY!r} runs {SAMPLE_RUN}/{SYNTH_RUN} absent")
 
 
 def _read(path: Path) -> str:
@@ -423,10 +433,10 @@ def test_23_dataset_entry_missing_a_mode_or_run_is_detected():
 
 # Mode floors after the 2026-10-19 re-baseline (overall = 0.5 static + 0.5 temporal, vs instrumental.wav; each =
 # round(min over the mode's reference tracks - 0.02, 2)); "never lowered" == these exact values hold. History:
-# synth 0.65/0.63 (2026-10-19, Regime v032 scored one bar mis-aligned), 0.64/0.60 and 0.54/0.53 (2026-10-18, BlackHole, full-mix reference), 0.88/0.90 and 0.77/0.81 (static-only scale).
+# sample 0.70/0.69 and synth 0.70/0.68 (2026-10-19 runs, deleted from the cache), 0.65/0.63 (Regime v032 scored one bar mis-aligned), 0.64/0.60 and 0.54/0.53 (2026-10-18, BlackHole, full-mix reference), 0.88/0.90 and 0.77/0.81 (static-only scale).
 REGIME_FLOORS = {
-    "sample_instrument": {"genres": 0.70, "section_aware": 0.69},
-    "synth": {"genres": 0.70, "section_aware": 0.68},
+    "sample_instrument": {"genres": 0.80, "section_aware": 0.77},
+    "synth": {"genres": 0.79, "section_aware": 0.74},
 }
 OLD_STATIC_SA_FLOOR = 0.90      # pre-rescale sample-instrument section-aware floor (static scale), for fix #10's history
 
@@ -519,13 +529,15 @@ def test_23_a_tampered_record_or_lowered_floor_is_detected():
     notmin["modes"]["synth"]["measured"]["brazilian_funk"]["overall"] = 0.99   # a floor source that is not the lowest track
     assert any("not the lowest-scoring" in p for p in _floor_problems(notmin))
 
-    # an overall-ok / section-aware-below-floor run on the current floors (0.70 overall, 0.69 section-aware)
-    comp = {"comparison": {"overall_similarity": 0.75, "section_aware_similarity": 0.55, "worst_band_diff": 5.0}}  # percent
-    ok = {"mode": "sample-instrument", "expected": "shortfall", "measured": {"overall": 0.75, "section_aware": 0.55}}
+    # an overall-ok / section-aware-below-floor run, built from the current sample-instrument floors
+    cur = th["modes"]["sample_instrument"]
+    ov_ok, sa_low = round(cur["genres"]["brazilian_funk"] + 0.05, 4), round(cur["section_aware"]["brazilian_funk"] - 0.14, 4)
+    comp = {"comparison": {"overall_similarity": ov_ok, "section_aware_similarity": sa_low, "worst_band_diff": 5.0}}  # percent
+    ok = {"mode": "sample-instrument", "expected": "shortfall", "measured": {"overall": ov_ok, "section_aware": sa_low}}
     assert _shortfall_problems(ok, comp, th) == []
     assert "recorded overall != run" in _shortfall_problems({**ok, "measured": {"overall": 0.95}}, comp, th)
     assert "recorded as shortfall but clears every floor" in _shortfall_problems(
-        ok, {"comparison": {**comp["comparison"], "section_aware_similarity": 0.95}}, th)
+        {**ok, "measured": {"overall": ov_ok}}, {"comparison": {**comp["comparison"], "section_aware_similarity": 0.95}}, th)
     assert "below a floor but not recorded as a shortfall" in _shortfall_problems({**ok, "expected": "pass"}, comp, th)
     floor = th["modes"]["sample_instrument"]["genres"]["brazilian_funk"]
     sa_floor = th["modes"]["sample_instrument"]["section_aware"]["brazilian_funk"]
@@ -886,7 +898,7 @@ def test_25_cached_track_metadata_carries_provenance():
         assert _setcps_error(_read(TRACK / version / "output.strudel"), meta["bpm"]) is None
 
 
-# The Regime CLT references (2026-10-19 re-baseline): v031 sample-instrument, v032 synth - both pass the mode floors AND
+# The Regime CLT references (dataset-pinned: sample-instrument, then synth) - both pass the mode floors AND
 # the chance margin. (v027, the BlackHole-era synth run that failed the margin, is history only.)
 @pytest.mark.parametrize("version", REGIME_RUNS)
 def test_25_regime_clt_references_still_clear_their_floors(version):
@@ -943,9 +955,9 @@ def test_synth_stage_runs_its_own_calibration_loop():
 
 
 def test_synth_start_knobs_pass_through_unsplit_for_7_8_or_9_fields():
-    """Static: best.params (7, 8 or 9 fields) goes to --start intact; the driver never splits it."""
+    """Static: best.params (7, 8 or 9 fields) goes to --seed (the fallback of --start) intact; the driver never splits it."""
     body = _run_synth_body()
-    assert '--start "$knobs"' in body
+    assert '--seed "$knobs"' in body
     assert not re.search(r"set -- \$knobs|--bass-mult|--bass-lpf|--lead-hpf|read -r", body)
 
 

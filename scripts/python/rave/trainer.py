@@ -294,7 +294,8 @@ class GranularTrainer:
             target = pg.typical_note_length(notes)
             print(f"note-aligned grains from {len(notes)} transcribed notes; search {fmin:.1f}-{fmax:.1f} Hz; "
                   f"target length P75 = {target:.3f}s")
-            grains = pg.extract_note_grains(y, sr, notes, fmin, fmax)
+            grains = pg.extract_note_grains(y, sr, notes, fmin, fmax, ring=pg.StemRing(y, sr))
+            target = pg.ring_target_length(grains, target)
             chosen = pg.select_per_pitch(grains, target, pg.stub_note_length(notes))
             for i, g in enumerate(grains):
                 grains_info.append({

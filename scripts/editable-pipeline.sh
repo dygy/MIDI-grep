@@ -15,27 +15,33 @@
 #   6 host             upload_r2.py (--r2) | local CORS server on :5555 (--local)
 #   7 generate+calib.  auto-calibrate.sh (sample-instrument), then auto-calibrate.sh --mode synth
 #                      (start = the sample-instrument BEST knobs when present; own env correction)
-#   8 score + gate     compare_audio.py -d 135 --strudel ; eval/gate.py ; editability_check.py
+#   8 score + gate     compare_audio.py -d <whole-bar seconds> --strudel ; eval/gate.py ; editability_check.py
 #   9 promote          pipeline_helpers.py promote -> vNNN/{output.strudel,render.wav,comparison.json,metadata.json}
 #  10 report           pipeline_helpers.py report -> vNNN/{report.html,comparison.png,chart_*.png,render_*.wav,
-#                      stem_comparison.json,iterations.json,iterations/}; Demucs on the render + each calibration
-#                      iteration render (~2 min each). A missing/failed report is an ERROR, never a skip.
+#                      stem_comparison.json,iterations.json,iterations/}; render stems = the renderer with one voice
+#                      group sounding (default; --render-stems demucs = Demucs on the render) + Demucs on each
+#                      calibration iteration render (~2 min each). A missing/failed report is an ERROR, never a skip.
 #
 # Usage:
 #   scripts/editable-pipeline.sh --url <youtube> [--title "<cache folder title>"] [--prefix <slug>]
-#       [--genre <g>] [--mode sample-instrument|synth|both] [--iters 3] [--synth-iters N] [--dur 170]
-#       [--r2 | --local] [--no-iteration-stems] [--force]
+#       [--genre <g>] [--mode sample-instrument|synth|both] [--iters N] [--synth-iters N] [--dur <seconds>]
+#       [--r2 | --local] [--no-iteration-stems] [--render-stems solo|demucs] [--force]
 #
 #   --url      YouTube link (required unless --title names an already-extracted track dir)
 #   --title    locate an already-extracted track dir .cache/stems/<title> (skips stage 1 when complete)
 #   --prefix   slug for hosting/model names (default: kebab-case of the track title)
 #   --genre    override the genre in metadata.json (the override is logged)
 #   --mode     which pieces to build (default both)
-#   --iters    sample-instrument calibration iterations (default 3; best of N is kept)
+#   --iters    cap on sample-instrument calibration iterations (default: calibrate_loop.py MAX_ITERS; the loop
+#              stops earlier after PATIENCE steps without a beyond-noise improvement; best iteration is kept)
 #   --synth-iters  synth calibration iterations (default = --iters)
-#   --dur      BlackHole capture seconds per render (default 170)
+#   --dur      render seconds per render (default: the whole bars of the track, bars*240/bpm - never past the
+#              song end, so the pattern cannot loop back to bar 0)
 #   --r2       host on the project's public R2 bucket (default); --local serves on localhost:5555
 #   --no-iteration-stems  stage 10: skip Demucs on each calibration iteration (report keeps the mixes only)
+#   --render-stems  stage 10: how vNNN/render_{melodic,drums,bass,vocals} are made. solo (default) = the renderer,
+#              one voice group sounding per render (vocals = silence); demucs = Demucs on render.wav (only
+#              when working on the separation stage itself)
 #   --force    redo every stage even if its output exists
 #
 # Requires (checked per stage, not up front): BlackHole + Multi-Output selected, node recorder built
@@ -57,14 +63,14 @@ R2_BUCKET_NAME="4cast"
 R2_PUBLIC="https://pub-56831423fee34641805da07cfdaf6812.r2.dev"
 R2_ACCOUNT="503e92d7d95838d80c33802d3274f284"
 LOCAL_PORT="5555"
-COMPARE_SECONDS="135"
+COMPARE_SECONDS=""   # derived below from the track: the seconds its generated bars cover (pipeline_helpers.py render-seconds)
 if [ "$RENDERER" = offline ]; then
   RENDER_NOTE="render-strudel-offline.js (@strudel/web 1.3.0 OfflineAudioContext, chunked, polyphony 4096)"
 else
   RENDER_NOTE="record-strudel-blackhole.js RAW capture + uniform speed correction (ffmpeg wallclock restamp)"
 fi
 
-URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="3" SYNTH_ITERS="" DUR="170" HOSTING="r2" FORCE="" ITER_STEMS_ARG=()
+URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="" SYNTH_ITERS="" DUR="" HOSTING="r2" FORCE="" ITER_STEMS_ARG=() RENDER_STEMS_ARG=()
 
 usage() { sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
 log() { echo "[editable-pipeline] $*" >&2; }
@@ -82,6 +88,7 @@ while [ $# -gt 0 ]; do case "$1" in
   --r2) HOSTING="r2"; shift;;
   --local) HOSTING="local"; shift;;
   --no-iteration-stems) ITER_STEMS_ARG=(--no-iteration-stems); shift;;
+  --render-stems) RENDER_STEMS_ARG=(--render-stems "${2:?--render-stems needs solo|demucs}"); shift 2;;
   --force) FORCE="1"; shift;;
   -h|--help) usage; exit 0;;
   *) echo "unknown arg: $1 (see --help)" >&2; exit 64;;
@@ -105,6 +112,17 @@ fresh() { [ "$("${PH[@]}" newer "$@" 2>/dev/null)" = fresh ]; }
 # CV field) and makes `auto-calibrate.sh --start` exit 64; it is STALE, not migrated: the best.wav/comparison beside it
 # came from the old recorder and the old score, so dropping the CV field would only keep a result nobody can trust.
 params_ok() { [ "$("${PH[@]}" params-valid "$1" 2>/dev/null)" = ok ]; }
+# code_ok <workdir>: the best render there was calibrated by the CURRENT generator/calibrator/metric code (best.code,
+# calibration_memory.py code-version). A best from older code is rerun - otherwise a code change never reaches the output.
+CODE_VER=""
+code_ok() {
+  [ -n "$CODE_VER" ] || CODE_VER="$("$PY" "$SP/calibration_memory.py" code-version 2>/dev/null)"
+  [ -n "$CODE_VER" ] && [ "$(cat "$1/best.code" 2>/dev/null)" = "$CODE_VER" ]
+}
+stale_reason() {
+  if [ -s "$1/best.params" ] && ! params_ok "$1/best.params"; then echo "best.params is in the old (CV) format"
+  elif [ -s "$1/best.params" ]; then echo "best render is from other code (stamp '$(cat "$1/best.code" 2>/dev/null)', now '$CODE_VER')"; fi
+}
 # base_ok <samples.json> <expected-base>: the baked _base matches the hosting we are about to use
 base_ok() { [ -s "$1" ] && [ "$("$PY" -c "import json,sys;print(json.load(open(sys.argv[1])).get('_base',''))" "$1")" = "$2" ]; }
 
@@ -174,7 +192,10 @@ fi
 SLUG="${PREFIX:-$("${PH[@]}" slug "${TRACK_TITLE:-$(basename "$TRACK")}")}" || die "cannot derive a slug"
 SND="${SLUG//-/_}"      # model / Strudel sound names avoid '-' (mini-notation); hosting prefix keeps kebab
 BARS="$("${PH[@]}" num-bars "$DURATION" "$BPM")" || die "cannot derive num-bars"
-log "track='$TRACK' slug=$SLUG bpm=$BPM key='$KEY' genre=$GENRE duration=${DURATION}s bars=$BARS mode=$MODE host=$HOSTING"
+SONG_SECONDS="$("${PH[@]}" render-seconds "$DURATION" "$BPM")" || die "cannot derive render seconds"
+[ -n "$DUR" ] || DUR="$SONG_SECONDS"
+COMPARE_SECONDS="$SONG_SECONDS"
+log "track='$TRACK' slug=$SLUG bpm=$BPM key='$KEY' genre=$GENRE duration=${DURATION}s bars=$BARS render=${DUR}s compare=${COMPARE_SECONDS}s mode=$MODE host=$HOSTING"
 
 PACK="$TRACK/sample_pack"; PW="$TRACK/.pipeline"; mkdir -p "$PACK" "$PW"
 if [ "$HOSTING" = r2 ]; then HOST_BASE="$R2_PUBLIC/midi-grep"; else HOST_BASE="http://localhost:$LOCAL_PORT"; fi
@@ -198,31 +219,45 @@ if stage_done "$PACK/drums_bands.json" && built_at "$PW/drums_bands.bpm"; then l
   echo "$BPM" > "$PW/drums_bands.bpm"
 fi
 
+# ---------------------------------------------------------------- stage 3b: bass register (f0 of the bass stem)
+# bass_register.py measure is a no-op when $PW/bass_f0.json already matches the stem's content hash; the generator
+# reads it for the bass window + per-note octave and falls back LOUDLY to the legacy typed window without it.
+log "stage 3b: bass f0 / register"
+"$PY" "$SP/bass_register.py" measure --stem "$TRACK/bass.wav" --out "$PW/bass_f0.json" >&2 \
+  || die "stage 3b bass_register measure failed"
+
 # ---------------------------------------------------------------- stage 4: sample pack
+# the pack is stamped with the code that cut it (pack.code): a builder change must reach the one-shots
+PACK_VER="$("$PY" "$SP/calibration_memory.py" code-version --stage pack 2>/dev/null)"
 if stage_done "$PACK/pack.json" "$PACK/samples.json" "$PACK/strudel.json" && base_ok "$PACK/samples.json" "$BASE/" \
-   && built_at "$PW/pack.bpm"; then
+   && built_at "$PW/pack.bpm" && [ -n "$PACK_VER" ] && [ "$(cat "$PW/pack.code" 2>/dev/null)" = "$PACK_VER" ]; then
   log "stage 4 skip: sample pack exists for $BASE/ (built at bpm $BPM)"
 else
-  log "stage 4: build sample pack (bpm $BPM)"
-  rm -f "$PW/pack.bpm"
+  log "stage 4: build sample pack (bpm $BPM, code ${PACK_VER:-?}, was $(cat "$PW/pack.code" 2>/dev/null || echo none))"
+  rm -f "$PW/pack.bpm" "$PW/pack.code"
   key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
   "$PY" "$SP/build_sample_pack.py" --stems-dir "$TRACK" --out "$PACK" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} \
     --prefix "$SND" --base-url "$BASE/" >&2 || die "stage 4 build_sample_pack failed"   # SND: sound names never carry '-' 
   echo "$BPM" > "$PW/pack.bpm"
+  [ -z "$PACK_VER" ] || echo "$PACK_VER" > "$PW/pack.code"
 fi
 [ -s "$PACK/drums/bd.wav" ] || die "stage 4 pack has no drums/ one-shots in $PACK/drums"
 
 # ---------------------------------------------------------------- stage 5: instruments
+# each model is stamped with the code that cut its grains (.code): a trainer/grain fix must reach the instruments
+INST_VER="$("$PY" "$SP/calibration_memory.py" code-version --stage instruments 2>/dev/null)"
 for pair in "bass:bass.wav" "lead:melodic.wav"; do
-  role="${pair%%:*}"; src="${pair##*:}"
-  # a model trained before note-aligned grains (no grain_mode) is retrained
-  if stage_done "$ROOT/models/${SND}_$role/metadata.json" && [ "$(jget "$ROOT/models/${SND}_$role/metadata.json" grain_mode)" = notes ]; then
+  role="${pair%%:*}"; src="${pair##*:}"; mdir="$ROOT/models/${SND}_$role"
+  # a model trained before note-aligned grains (no grain_mode) or by other grain code is retrained
+  if stage_done "$mdir/metadata.json" && [ "$(jget "$mdir/metadata.json" grain_mode)" = notes ] \
+     && [ -n "$INST_VER" ] && [ "$(cat "$mdir/.code" 2>/dev/null)" = "$INST_VER" ]; then
     log "stage 5 skip: models/${SND}_$role trained"; continue; fi
   midi="$PACK/${src%.wav}.mid"   # the stem's transcribed notes (stage 2): one grain per note, length from the music
   log "stage 5: train granular ${SND}_$role from $src (note-aligned, $midi)"
   (cd "$ROOT" && ./bin/midi-grep generative train "$TRACK/$src" --name "${SND}_$role" --mode granular \
       --midi "$midi" --output "$ROOT/models") >&2 \
     || die "stage 5 train ${SND}_$role failed"
+  [ -z "$INST_VER" ] || echo "$INST_VER" > "$mdir/.code"
 done
 # the manifest is rebuilt when its inputs (the drum kit from stage 4, the models trained above) are newer than it
 if stage_done "$PACK/instruments/samples.json" "$PACK/instruments/verification.json" && base_ok "$PACK/instruments/samples.json" "$INST_BASE" \
@@ -240,15 +275,17 @@ SRV_PID=""
 cleanup() { [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; [ -n "${SERVE_ROOT:-}" ] && rm -rf "$SERVE_ROOT"; }
 trap cleanup EXIT
 if [ "$HOSTING" = r2 ]; then
-  # skip only when the hosted copy is current: .uploaded names this base AND nothing in the pack (e.g. instruments
-  # stage 5 just rebuilt) is newer than the upload - otherwise R2 would keep serving the stale files
-  if stage_done "$PACK/.uploaded" && [ "$(cat "$PACK/.uploaded")" = "$BASE" ] && fresh "$PACK/.uploaded" "$PACK" \
+  # upload_r2.py is incremental: it hashes only what Strudel fetches (the manifests + the files they reference; analysis
+  # files such as drums_bands.json are never served) and uploads only files whose hash differs from .uploaded.json.
+  # No .uploaded.json (e.g. a legacy .uploaded base string), another base, or --force -> one full upload.
+  R2_ARGS=(--pack-dir "$PACK" --prefix "midi-grep/$SLUG" --bucket "$R2_BUCKET_NAME" --public-base "$R2_PUBLIC" --backend wrangler)
+  [ -n "$FORCE" ] && R2_ARGS+=(--full)
+  if [ -z "$FORCE" ] && "$PY" "$SP/upload_r2.py" ${R2_ARGS[@]+"${R2_ARGS[@]}"} --check >/dev/null 2>&1 \
      && curl -fsI -o /dev/null "$INST_BASE""samples.json"; then
-    log "stage 6 skip: already hosted at $BASE"
+    log "stage 6 skip: served files unchanged since the last upload to $BASE"
   else
-    log "stage 6: upload pack to R2 ($R2_BUCKET_NAME/midi-grep/$SLUG)"
-    CLOUDFLARE_ACCOUNT_ID="$R2_ACCOUNT" "$PY" "$SP/upload_r2.py" --pack-dir "$PACK" --prefix "midi-grep/$SLUG" \
-      --bucket "$R2_BUCKET_NAME" --public-base "$R2_PUBLIC" --backend wrangler >&2 || die "stage 6 upload_r2 failed"
+    log "stage 6: upload changed pack files to R2 ($R2_BUCKET_NAME/midi-grep/$SLUG)"
+    CLOUDFLARE_ACCOUNT_ID="$R2_ACCOUNT" "$PY" "$SP/upload_r2.py" ${R2_ARGS[@]+"${R2_ARGS[@]}"} >&2 || die "stage 6 upload_r2 failed"
     curl -fsI -o /dev/null "$INST_BASE""samples.json" || die "stage 6: $INST_BASE""samples.json not publicly reachable after upload"
     echo "$BASE" > "$PACK/.uploaded"
   fi
@@ -292,6 +329,7 @@ guard_no_recorder() {
 }
 preflight_render() {
   [ -f "$REC" ] || die "node renderer not built: (cd scripts/node && npm run build)"
+  "$PY" "$RENDERER_PY" browser >/dev/null || die "renderer browser missing (see above)"
   [ "$RENDERER" = blackhole ] || return 0   # offline: no device to guard or probe
   guard_no_recorder; probe_blackhole
 }
@@ -299,31 +337,33 @@ preflight_render() {
 # ---------------------------------------------------------------- stage 7: generate + calibrate
 run_sample_instrument() {
   local W="$PW/sample-instrument"; mkdir -p "$W"
-  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params"; then
+  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params" && code_ok "$W"; then
     log "stage 7 skip (sample-instrument): best render exists in $W"; return 0; fi
-  [ ! -s "$W/best.params" ] || params_ok "$W/best.params" || log "stage 7: $W/best.params is in the old (CV) format - stale, rerunning"
+  local why; why="$(stale_reason "$W")"; [ -z "$why" ] || log "stage 7 (sample-instrument): $why - stale, rerunning"
   rm -f "$W/result.json"   # a rerun invalidates what stages 8-9 derived from the old best render
   preflight_render
-  log "stage 7: auto-calibrate sample-instrument (iters=$ITERS)"
+  log "stage 7: auto-calibrate sample-instrument (iters cap=${ITERS:-default})"
   key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
   "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --base "$BASE" --inst "$INST_BASE""samples.json" \
-    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" --iters "$ITERS" --dur "$DUR" \
+    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" ${ITERS:+--iters "$ITERS"} --dur "$DUR" \
     --bass-sound "${SND}_bass" --lead-sound "${SND}_lead" \
     --mode sample-instrument --workdir "$W" 2>&1 | tee "$W/calibrate.log" >&2
   local cal_rc="${PIPESTATUS[0]}"
   [ "$cal_rc" -eq 0 ] || die "sample-instrument auto-calibrate exited $cal_rc (see $W/calibrate.log)"
   local best; best="$(grep '^BEST:' "$W/calibrate.log" | tail -1)"
   [ -n "$best" ] && [ -s "$W/best.wav" ] || die "auto-calibrate produced no BEST render (see $W/calibrate.log)"
-  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG BL LH" (8 values; BL = bass-lpf, LH = lead high-pass Hz; 0 = generator default)
+  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG BL LH SU stem|off" (BL = bass-lpf, LH = lead high-pass Hz; 0 = generator default;
+  # SU = sub octave up; the last token = the calibrator-chosen --bass-shape, carried into the stage-9 generator note below)
   echo "${best##*params: }" > "$W/best.params"
+  code_ok "$W" || echo "$CODE_VER" > "$W/best.code"
   sleep 3
 }
 
 run_synth() {
   local W="$PW/synth"; mkdir -p "$W"
-  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params"; then
+  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params" && code_ok "$W"; then
     log "stage 7 skip (synth): best render exists in $W"; return 0; fi
-  [ ! -s "$W/best.params" ] || params_ok "$W/best.params" || log "stage 7: $W/best.params is in the old (CV) format - stale, rerunning"
+  local why; why="$(stale_reason "$W")"; [ -z "$why" ] || log "stage 7 (synth): $why - stale, rerunning"
   rm -f "$W/result.json"
   preflight_render
   # Start from the sample-instrument BEST knobs when present (6, 7 or 8 fields, passed to --start UNSPLIT);
@@ -331,23 +371,27 @@ run_synth() {
   # (knobs + per-bar env correction measured on SYNTH renders), writing $W/best.env.json for stage 9.
   local start_arg=() knobs=""
   if [ -s "$PW/sample-instrument/best.params" ] && params_ok "$PW/sample-instrument/best.params"; then
-    knobs="$(cat "$PW/sample-instrument/best.params")"
-    start_arg=(--start "$knobs")
-    log "stage 7: synth calibration starts from the sample-instrument knobs: $knobs"
+    # Seed the magnitudes (fields 1-8) but NOT the sub-sine octave (9th): whether the sine layer sounds better an
+    # octave up depends on the main layer (a recorded sample vs a sawtooth) - Regime CLT synth seeded with the sample's
+    # su=1 scored 0.682 and FAILED the gate, while its own octave trial from su=0 reached 0.763. Synth re-trials it.
+    knobs="$(cut -d' ' -f1-8 "$PW/sample-instrument/best.params")"
+    start_arg=(--seed "$knobs")   # a FALLBACK: ClickHouse (this track's synth best, else the nearest track's) wins when it has one
+    log "stage 7: synth calibration seed (used only when ClickHouse has no synth history for it): sample-instrument knobs $knobs"
   else
     log "stage 7: no sample-instrument calibration found; synth calibration starts from cold-start defaults"
   fi
   local key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
-  log "stage 7: auto-calibrate synth (iters=$SYNTH_ITERS)"
+  log "stage 7: auto-calibrate synth (iters cap=${SYNTH_ITERS:-default})"
   "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --base "$BASE" \
-    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" --iters "$SYNTH_ITERS" --dur "$DUR" \
+    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" ${SYNTH_ITERS:+--iters "$SYNTH_ITERS"} --dur "$DUR" \
     --mode synth --workdir "$W" ${start_arg[@]+"${start_arg[@]}"} 2>&1 | tee "$W/calibrate.log" >&2
   local cal_rc="${PIPESTATUS[0]}"
   [ "$cal_rc" -eq 0 ] || die "synth auto-calibrate exited $cal_rc (see $W/calibrate.log)"
   local best; best="$(grep '^BEST:' "$W/calibrate.log" | tail -1)"
   [ -n "$best" ] && [ -s "$W/best.wav" ] || die "synth auto-calibrate produced no BEST render (see $W/calibrate.log)"
-  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG [BL [LH]]" (6, 7 or 8 values)
+  # "BEST: calN overall=X  params: BM SG CL LLPF HG MG BL LH SU stem|off" (the chosen bass shape is the last token)
   echo "${best##*params: }" > "$W/best.params"
+  code_ok "$W" || echo "$CODE_VER" > "$W/best.code"
   sleep 3
 }
 
@@ -356,12 +400,13 @@ run_synth() {
 # report.html (idempotent per artifact). The mode's calibration workdir supplies the iteration history.
 report_stage() {
   local mode="$1" vdir="$2" W="$PW/$1" gate_arg=()
+  [ -z "$vdir" ] || vdir="$TRACK/$(basename "$vdir")"   # result.json may hold another checkout's absolute path
   [ -n "$vdir" ] && [ -d "$vdir" ] || die "stage 10 ($mode): promoted version dir missing: '$vdir'"
   [ -s "$W/gate.txt" ] && gate_arg=(--gate-verdict "$(jget "$W/result.json" gate_verdict)" \
     --gate-message "$(tr '\n' ' ' < "$W/gate.txt")")
   log "stage 10: report $mode -> $vdir"
   "${PH[@]}" report --track-dir "$TRACK" --version "$(basename "$vdir")" --seconds "$COMPARE_SECONDS" \
-    --calib-workdir "$W" ${ITER_STEMS_ARG[@]+"${ITER_STEMS_ARG[@]}"} ${FORCE:+--force} ${gate_arg[@]+"${gate_arg[@]}"} >&2 \
+    --calib-workdir "$W" ${ITER_STEMS_ARG[@]+"${ITER_STEMS_ARG[@]}"} ${RENDER_STEMS_ARG[@]+"${RENDER_STEMS_ARG[@]}"} ${FORCE:+--force} ${gate_arg[@]+"${gate_arg[@]}"} >&2 \
     || die "stage 10 report failed for $mode ($vdir)"
   [ -s "$vdir/report.html" ] || die "stage 10 produced no $vdir/report.html"
 }
@@ -402,10 +447,13 @@ score_and_promote() {
   local vdir env_arg=()
   [ -s "$W/best.env.json" ] && env_arg=(--env-correction "$W/best.env.json")
   vdir="$("${PH[@]}" promote --track-dir "$TRACK" --mode "$mode" --strudel "$STR" --wav "$WAV" --comparison "$CJ" \
-    --generator "generate_dynamic_strudel.py --mode $mode (knobs from calibrate_dynamic.py: $(cat "$W/best.params"); genre $GENRE; bars $BARS)" \
+    --generator "generate_dynamic_strudel.py --mode $mode (knobs from calibrate_dynamic.py: $(cat "$W/best.params"); final --master-gain $([ -s "$W/best.master" ] && cat "$W/best.master" || echo "= the 6th knob"); genre $GENRE; bars $BARS)" \
     --render "$RENDER_NOTE; -d $DUR; pack served from $BASE/" \
     --compare "compare_audio.py -d $COMPARE_SECONDS --strudel vs instrumental.wav (detector-stamped)" ${env_arg[@]+"${env_arg[@]}"})" \
     || die "stage 9 promote failed for $mode"
+  # calibration memory: the promoted version (knobs + scores + env) becomes a recorded row; a failure here never stops the run
+  "$PY" "$SP/calibration_memory.py" record-promoted --track-dir "$TRACK" --version "$(basename "$vdir")" 2>&1 | grep -v '^  \[ClickHouse\]' >&2 \
+    || log "stage 9: WARNING - could not record $(basename "$vdir") in ClickHouse"
   "$PY" - "$W/result.json" "$mode" "$vdir" "$STR" "$WAV" "$CJ" "$edit_rc" "$gate_rc" "$W/gate.txt" <<'PYR'
 import json, sys
 out, mode, vdir, strudel, wav, cj, edit_rc, gate_rc, gate_txt = sys.argv[1:10]

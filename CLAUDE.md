@@ -30,6 +30,12 @@ Reference install at the same level: the Citation orchestrator repo
 
 These rules govern *how* to work, independent of the audio domain.
 
+### Improvement Loop (owner preference, 2026-10-19)
+Sound-quality work runs as a continuous self-testing loop on ONE `improve/<theme>` branch — measure → fix +
+regression test → static gate → render + score both reference tracks vs the previous best → commit if it improved,
+revert if not → next gap. No PR / `/code-review` / keep-drop question per change; one PR per batch (the owner merges).
+Details: `context/product/delivery-flow.md` §11.
+
 ### Clarifying Questions Budget
 Ask at most ONE round of clarifying questions before taking action. If the request is ambiguous, pick the most likely interpretation, state your assumption, and proceed. Do not use `AskUserQuestion` for routine git operations, stash decisions, or small implementation choices.
 
@@ -170,6 +176,28 @@ those bands are swamped by demucs bleed/noise and pinned lead-lpf while the mix 
 raise a steady TR808 hat layer (`--hat-gain`), which lifted brightness 70%→91% and overall
 89.8%→92.6% in one step (the extracted lead sample is inherently darker than the original).
 Synth mode adds spectral-placement fixes (bug #11): at generation `partial_register.py` measures where the original stem's strongest partial sits relative to the transcribed fundamentals and transposes a fundamental-dominant palette voice (reference = a track-independent chromatic sweep of the sound, `probe_sound_register.py`; the shift is bounded by floor(original) so the shifted fundamental never exceeds the original's dominant partial) so its energy leaves low_mid; the calibrator adds synth-only `lead-hpf`/`bass-lpf` levers (one per step, bounded by the note material and `compare_audio.FREQ_BANDS`), a vocal-gain hold, a hat overshoot back-off, and `auto-calibrate.sh` selects BEST by margin to the gate floors.
+
+**Loudness stage (2026-10-20, `scripts/python/mix_dynamics.py`, run by `auto-calibrate.sh` after BEST):** the score is
+level-invariant (`compare_audio.rms_normalize`), so renders sat 6-13 dB under the mastered instrumental with crest
+17-18 dB vs ~10 and nobody saw it. One measured lever moves it: `--master-gain` onto the instrumental's RMS (up to 3
+render rounds; kept only if RMS ±1 dB, crest ±1.5 dB and neither score drops more than `calibration_noise`; the unmixed
+BEST stays otherwise; `--no-mix-dynamics` skips it; final gain in `best.master`). superdough has NO master bus - the sum
+is limited by full-scale clipping (0.5-1.5 % of samples clip, printed vs the original's share within 3 dB of its peak).
+Per-hap `.compressor` and per-layer tanh saturators were measured and do not bound the sum (see `mix_dynamics.py`);
+per-stem share gains from the Demucs stems scored worse/inconsistent (bleed), so `mix_dynamics.py shares` only reports them.
+
+**Bass voice level (2026-10-23, `scripts/python/bass_solo.py`, run by `auto-calibrate.sh` every iteration):** the
+bass layers used to follow whole-mix band shares that the kick also fills (VAGABUNDO: mix sub share matched while the bass
+voice alone was 8.5 dB under its stem, 20-45 Hz -14 dB, and the loop lowered bass-mult). Now the BASS channel is rendered
+alone (one extra full-length offline render per iteration, same `-d` as the mix render; the melodic solo adds a second on sample-instrument) and its absolute band power vs the bass stem (x master-gain^2) sets bass-mult (`--bass-solo`; full sqrt step,
+bounded 0.5-2x); sub-gain stays on the mix shares (both layers feed 60-250 Hz). `AC_BSOLO=off` skips it.
+
+**Melodic voice level + brightness (2026-10-23, `scripts/python/melodic_solo.py`, run by `auto-calibrate.sh` every
+sample-instrument iteration):** the LEAD+CHORDS channels are rendered alone and compared to `melodic.wav` (absolute low_mid+mid
+power x master-gain^2, and spectral centroid). cal-lead takes the full sqrt step (bounded 0.5-2x) from that body level and
+lead-lpf follows the voices' own centroid, instead of whole-mix shares the bass/kick/hats also fill (VAGABUNDO: voices 7-9 dB
+under the stem at 200 Hz-1.3 kHz). The sampled lead/chord high-pass is now derived (the lowest fundamental played, `sample_lead_hpf`),
+not a fixed 300 Hz. `AC_MSOLO=off` skips it.
 
 **CRITICAL: Similarity Calculation Fix (Feb 2026)**
 The old cosine-based frequency balance was HIDING massive errors (25% sub_bass, 20% mid differences showed as 95%!).
@@ -345,7 +373,7 @@ emulating Strudel sounds, ~16% similarity vs the real engine) was deleted. Dead 
   (superdough pools nodes at module level, so a second OfflineAudioContext in one page fails); each chunk
   re-triggers the previous tail-length of haps as a discarded PRE-ROLL, so ringing tails, `cut` chokes and
   ducking cross the boundary like real playback, and haps get their ABSOLUTE cycle (LFO phase); the WAV is
-  written atomically only after every check passes (a failed render leaves no file); `samples("url")` rewritten to single quotes (this bundle's transpiler turns "…"
+  written atomically only after every check passes (a failed render leaves no file); a network outage is waited out with backoff up to `MIDIGREP_RENDER_NET_WAIT_S` (default 1800 s); `samples("url")` rewritten to single quotes (this bundle's transpiler turns "…"
   into mini-notation); crashed pages retried ×3; fails loudly on unloaded sounds, silence, frame/onset
   count mismatch, truncated tails.
 - Selected everywhere by `MIDIGREP_RENDERER` (default `offline`; `blackhole` = the recorder below) —

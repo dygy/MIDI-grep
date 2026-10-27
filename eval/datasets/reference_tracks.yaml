@@ -21,19 +21,17 @@ tracks:
     genre: brazilian_funk
     mode: sample-instrument
     cache_key: "Regime CLT (Dj Brunin XM, Aurora Shukita)"
-    version: v031
+    version: v069
     expected: pass
-    # 2026-10-19: offline renderer, note-aligned verified instruments, no vocal voice, scored vs instrumental.wav.
-    # Previous: v026 (BlackHole, vocal voice, full-mix reference) 0.6967 / 0.6736.
-    measured: { overall: 0.7794, section_aware: 0.7744, static: 0.8747, temporal: 0.6841, margin_over_chance: 0.2043 }
+    # offline renderer, no vocal voice, scored vs instrumental.wav. previous: v057 0.8181 / 0.8043, v031 0.7794 / 0.7744
+    measured: { overall: 0.9051, section_aware: 0.9019, static: 0.9623, temporal: 0.8480, margin_over_chance: 0.3289 }
   - name: "Regime CLT (Dj Brunin XM, Aurora Shukita) — synth mode"
     genre: brazilian_funk
     mode: synth
     cache_key: "Regime CLT (Dj Brunin XM, Aurora Shukita)"
-    version: v032
-    expected: pass               # 2026-10-19: v027 (margin -0.0182, a different song scored higher) was a recorded shortfall on the BlackHole
-                                 # renderer (~2.5 semitones flat) with the full-mix reference; v032 = offline renderer, refined tempo, no vocals.
-    measured: { overall: 0.7479, section_aware: 0.7361, static: 0.8815, temporal: 0.6142, margin_over_chance: 0.1728 }   # re-scored 2026-10-19 after the alignment fix (was 0.6709 / 0.6523, one bar off)
+    version: v070
+    expected: pass               # previous: v058 0.8823 / 0.8698; v032 0.7479 / 0.7361 (v027, BlackHole, failed the chance margin: history only). v056 (0.8803 / 0.8741) scored lower.
+    measured: { overall: 0.9125, section_aware: 0.8970, static: 0.9764, temporal: 0.8487, margin_over_chance: 0.3364 }
   # - name: "Caravan Palace - Lone Digger"
   #   genre: electro_swing
   #   cache_key: "Caravan Palace - Lone Digger (Official MV)"
@@ -46,14 +44,13 @@ tracks:
     genre: brazilian_funk
     mode: sample-instrument
     cache_key: "VAGABUNDO NÃO NAMORA"
-    version: v013
-    expected: pass               # 2026-10-19: offline renderer, note-aligned verified instruments, no vocal voice, scored vs instrumental.wav.
-                                 # Previous: v004 (BlackHole, full-mix reference) 0.6626 / 0.6223.
-    measured: { overall: 0.7170, section_aware: 0.7073, static: 0.8408, temporal: 0.5932, margin_over_chance: 0.1421 }
+    version: v051
+    expected: pass               # offline renderer, no vocal voice, scored vs instrumental.wav. previous: v036 0.8195 / 0.7886, v013 0.7170 / 0.7073
+    measured: { overall: 0.8759, section_aware: 0.8537, static: 0.9610, temporal: 0.7908, margin_over_chance: 0.3009 }
   - name: "VAGABUNDO NÃO NAMORA (Christopher Luz) — synth mode"
     genre: brazilian_funk
     mode: synth
     cache_key: "VAGABUNDO NÃO NAMORA"
-    version: v014
-    expected: pass               # 2026-10-19: offline renderer, refined tempo, no vocal voice; previous v007 (BlackHole) 0.6627 / 0.5860.
-    measured: { overall: 0.7240, section_aware: 0.7007, static: 0.8352, temporal: 0.6129, margin_over_chance: 0.1491 }
+    version: v052
+    expected: pass               # previous: v035 0.8069 / 0.7645, v014 0.7240 / 0.7007.
+    measured: { overall: 0.8351, section_aware: 0.7989, static: 0.9653, temporal: 0.7049, margin_over_chance: 0.2601 }

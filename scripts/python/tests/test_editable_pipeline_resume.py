@@ -36,9 +36,18 @@ STUBS = {
     "build_instruments.py": 'import sys, json\nfrom pathlib import Path\n'
         'a = sys.argv[1:]\nout = Path(a[a.index("--out") + 1])\nbase = a[a.index("--base-url") + 1]\n'
         'open(Path(__file__).parent / "calls.log", "a").write("instruments\\n")\n'
-        'out.mkdir(parents=True, exist_ok=True)\n(out / "samples.json").write_text(json.dumps({"_base": base}))\n'
-        '(out / "verification.json").write_text("{}")\n(out / "bass.wav").write_bytes(b"x")\n',
-    "upload_r2.py": 'from pathlib import Path\nopen(Path(__file__).parent / "calls.log", "a").write("upload\\n")\n',
+        'out.mkdir(parents=True, exist_ok=True)\n(out / "samples.json").write_text(json.dumps({"_base": base, "bass": ["bass.wav"]}))\n'
+        '(out / "verification.json").write_text("{}")\n'
+        'model = Path(a[a.index("--models") + 1])\n(out / "bass.wav").write_bytes((model / "a.wav").read_bytes())\n',
+    "bass_register.py": 'import sys\na = sys.argv[1:]\nopen(a[a.index("--out") + 1], "w").write("{}")\n',   # stage 3b (real one needs a real stem)
+    # the real planner (pack_sync, symlinked in) decides; only the network step is stubbed
+    "upload_r2.py": 'import sys\nfrom pathlib import Path\nimport pack_sync\n'
+        'a = sys.argv[1:]\npack = Path(a[a.index("--pack-dir") + 1])\n'
+        'base = a[a.index("--public-base") + 1].rstrip("/") + "/" + a[a.index("--prefix") + 1].strip("/")\n'
+        'h = pack_sync.hash_served(pack)\nplan = pack_sync.plan_sync(pack, base, a[a.index("--bucket") + 1], force="--full" in a, hashes=h)\n'
+        'if "--check" in a:\n    sys.exit(0 if plan.is_noop else 3)\n'
+        'open(Path(__file__).parent / "calls.log", "a").write("upload\\n")\n'
+        'pack_sync.write_state(pack, base, a[a.index("--bucket") + 1], h)\n',
     "compare_audio.py": 'import sys\nsys.exit(9)\n',        # stops the pipeline right after stage 7 (stage 8 dies)
     "transcribe.py": 'import sys\nopen(sys.argv[2], "w").write("mid")\n',
 }
@@ -63,6 +72,10 @@ def repo(tmp_path: Path):
     for name, body in STUBS.items():
         (sp / name).write_text(body)
     _exe(sp / ".venv" / "bin" / "python", f'#!/bin/bash\nexec {sys.executable} "$@"\n')
+    _exe(root / "bin" / "midi-grep",                              # stage 5 trainer: logs, writes a note-grain model
+         '#!/bin/bash\nwhile [ $# -gt 0 ]; do case "$1" in --name) n="$2"; shift 2;; --output) o="$2"; shift 2;; '
+         '*) shift;; esac; done\necho "train $n" >> "$(dirname "$0")/../scripts/python/calls.log"\nmkdir -p "$o/$n"\n'
+         'echo \'{"grain_mode": "notes"}\' > "$o/$n/metadata.json"\necho x > "$o/$n/a.wav"\n')
     _exe(root / "scripts" / "auto-calibrate.sh",
          '#!/bin/bash\necho "auto-calibrate $*" >> "$(dirname "$0")/python/calls.log"\nexit 7\n')
     (root / "scripts" / "node" / "dist").mkdir(parents=True)
@@ -72,6 +85,7 @@ def repo(tmp_path: Path):
     (root / "eval" / "gate.py").write_text("")
     bindir = tmp_path / "bin"
     _exe(bindir / "curl", "#!/bin/bash\nexit 0\n")
+    _exe(bindir / "node", "#!/bin/bash\necho /bin/sh\n")   # renderer.py browser: puppeteer's Chromium "is installed"
     track = root / ".cache" / "stems" / TITLE
     track.mkdir(parents=True)
     for n in ("original", "bass", "drums", "melodic", "vocals"):
@@ -123,17 +137,14 @@ def test_stages_3_and_4_are_rebuilt_when_the_stamped_bpm_changes(repo):
 def test_upload_is_repeated_when_the_pack_changed_after_the_last_upload(repo):
     run(repo, "--r2", "--mode", "synth")
     assert calls(repo).count("upload") == 1
-    past = 1_000_000_000
-    for f in repo.pack.rglob("*"):
-        if f.is_file() and f.name != ".uploaded":
-            os.utime(f, (past, past))
-    for f in (repo.root / "models").rglob("*"):
-        os.utime(f, (past, past))
     n = len(calls(repo))
     run(repo, "--r2", "--mode", "synth")
     assert calls(repo)[n:].count("upload") == 0, "nothing changed: the upload must be skipped"
+    (repo.pack / "drums_bands.json").write_text('{"stage": 3}')    # an analysis file: never served, never re-uploaded
+    r = run(repo, "--r2", "--mode", "synth")
+    assert calls(repo)[n:].count("upload") == 0, "drums_bands.json is not served: the upload must be skipped"
     model_file = repo.root / "models" / f"{SLUG}_bass" / "a.wav"   # stage 5 retrained the bass model
-    os.utime(model_file, None)
+    model_file.write_bytes(b"retrained")
     n = len(calls(repo))
     r = run(repo, "--r2", "--mode", "synth")
     again = calls(repo)[n:]
@@ -146,11 +157,17 @@ OLD = "0.4 0.7 1.0 5000 0.1 0.6 1.0 422 300"
 NEW = "0.4 0.7 1.0 5000 0.1 0.6 422 300"
 
 
-def _seed_best(repo, mode: str, params: str) -> Path:
+def _code_version(repo, stage: str = "calibrate") -> str:
+    # hashed in the hermetic copy: its stubbed pack builder is part of what a calibrated render depends on
+    return subprocess.run([sys.executable, str(repo.root / "scripts" / "python" / "calibration_memory.py"),
+                           "code-version", "--stage", stage], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _seed_best(repo, mode: str, params: str, code: str | None = None) -> Path:
     w = repo.pw / mode
     w.mkdir(parents=True, exist_ok=True)
     for n, body in (("best.strudel", "//"), ("best.wav", "w"), ("best.cmp.json", "{}"), ("best.params", params + "\n"),
-                    ("result.json", "{}")):
+                    ("result.json", "{}"), ("best.code", (code if code is not None else _code_version(repo)) + "\n")):
         (w / n).write_text(body)
     return w
 
@@ -173,8 +190,69 @@ def test_synth_does_not_start_from_an_old_format_sample_instrument_params(repo):
     _seed_best(repo, "sample-instrument", OLD)
     run(repo, "--local", "--mode", "synth")
     ac = [c for c in calls(repo) if c.startswith("auto-calibrate")]
-    assert ac and "--start" not in ac[0], ac            # auto-calibrate --start would exit 64 on the 9-field line
+    assert ac and "--seed" not in ac[0], ac            # auto-calibrate --seed would exit 64 on the 9-field line
     _seed_best(repo, "sample-instrument", NEW)
     (repo.calls).write_text("")
     run(repo, "--local", "--mode", "synth")
-    assert f"--start {NEW}" in [c for c in calls(repo) if c.startswith("auto-calibrate")][0]
+    assert f"--seed {NEW}" in [c for c in calls(repo) if c.startswith("auto-calibrate")][0]
+
+
+def test_synth_is_seeded_with_the_sample_magnitudes_but_not_its_sub_octave(repo):
+    """The 9th knob (sub-sine octave up) is a per-instrument decision: synth must re-trial it, not inherit su=1."""
+    _seed_best(repo, "sample-instrument", NEW + " 1")                 # BM..MG BL LH SU=1 (9 fields)
+    (repo.calls).write_text("")
+    run(repo, "--local", "--mode", "synth")
+    ac = [c for c in calls(repo) if c.startswith("auto-calibrate")][0]
+    assert f"--seed {NEW}" in ac and f"--seed {NEW} 1" not in ac, ac
+
+
+# --- a best render calibrated by other code is rerun (a code change must reach the output) ----------------
+@pytest.mark.parametrize("stamp", ["0000000000", ""])
+def test_best_from_other_code_reruns_the_stage_and_invalidates_its_result(repo, stamp):
+    w = _seed_best(repo, "synth", NEW, code=stamp)
+    if not stamp:
+        (w / "best.code").unlink()                    # a best written before renders were stamped
+    r = run(repo, "--local", "--mode", "synth")
+    assert any(c.startswith("auto-calibrate") for c in calls(repo)), r.stderr
+    assert "from other code" in r.stderr and not (w / "result.json").exists()
+
+
+# --- a sample pack cut by other builder code is rebuilt (a one-shot fix must reach the pack) ---------------
+def test_pack_from_other_builder_code_is_rebuilt_and_its_calibration_rerun(repo):
+    run(repo, "--local", "--mode", "synth")
+    assert (repo.pw / "pack.code").read_text().strip() == _code_version(repo, "pack")
+    _seed_best(repo, "synth", NEW)
+    (repo.calls).write_text("")
+    r = run(repo, "--local", "--mode", "synth")
+    assert not [c for c in calls(repo) if c.startswith(("sample_pack", "auto-calibrate"))], r.stderr   # same code: reuse
+    builder = repo.root / "scripts" / "python" / "build_sample_pack.py"
+    builder.write_text(builder.read_text() + "# one-shot cut changed\n")
+    (repo.calls).write_text("")
+    r = run(repo, "--local", "--mode", "synth")
+    assert any(c.startswith("sample_pack") for c in calls(repo)), r.stderr
+    assert any(c.startswith("auto-calibrate") for c in calls(repo)), "a best render on the old pack was kept"
+
+
+# --- a missing renderer browser stops the run before calibration, with the install command ---------------
+def test_missing_renderer_browser_stops_before_calibration(repo):
+    _exe(repo.bin / "node", "#!/bin/bash\necho /nonexistent/chrome\n")   # a cleared ~/.cache/puppeteer
+    r = run(repo, "--local", "--mode", "synth")
+    assert r.returncode != 0 and "puppeteer browsers install" in r.stderr, r.stderr
+    assert not any(c.startswith("auto-calibrate") for c in calls(repo))
+
+
+# --- an instrument model cut by other grain code is retrained (a grain fix must reach the instruments) -----
+def test_instrument_model_from_other_grain_code_is_retrained(repo):
+    run(repo, "--local", "--mode", "synth")
+    stamp = repo.root / "models" / f"{SLUG}_bass" / ".code"
+    assert stamp.read_text().strip() == _code_version(repo, "instruments")
+    (repo.calls).write_text("")
+    r = run(repo, "--local", "--mode", "synth")
+    assert not [c for c in calls(repo) if c.startswith("train")], r.stderr          # same code: reuse
+    grains = repo.root / "scripts" / "python" / "pitched_grains.py"
+    grains.unlink()                                               # the symlinked real module -> a changed copy
+    grains.write_text("# grain cut changed\n")
+    (repo.calls).write_text("")
+    r = run(repo, "--local", "--mode", "synth")
+    assert f"train {SLUG}_bass" in calls(repo) and f"train {SLUG}_lead" in calls(repo), r.stderr
+    assert any(c.startswith("auto-calibrate") for c in calls(repo)), "a best render on the old instruments was kept"

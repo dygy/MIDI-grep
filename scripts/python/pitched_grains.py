@@ -262,18 +262,122 @@ class Grain:
     quality: float
     onset_s: float
     duration_s: float
+    ringed: bool = False     # cut where the stem stops sounding the note, not at the transcribed end
+    rms: float = 0.0         # level of the grain as the stem plays it (whole grain)
+    raw: np.ndarray | None = None   # the grain as the stem plays it, before fades: its level over a common window
+    sr: int = 0                     # sample rate of ``raw``
 
 
-def extract_note_grains(y: np.ndarray, sr: int, notes: list[Note], fmin: float, fmax: float) -> list[Grain]:
-    """One verified grain per transcribed note (onset -> end/next onset); unverifiable segments are skipped."""
+RING_PITCH_TOLERANCE_ST = 1.0   # a ring that leaves the label by more than a semitone is the next note / a glide
+RING_DEVIANT_FRAMES = 2         # ... for at least this many pyin frames (one frame is a pyin glitch)
+
+
+def ring_end(onset: float, note_end: float, attacks: np.ndarray, own_tol: float, sounding_end: float) -> float:
+    """Where the stem's note struck at ``onset`` really stops: the earlier of the stem going quiet
+    (``sounding_end``) and its next audible re-attack, never earlier than the transcribed end.
+
+    The transcriber cuts an 808 at ~one 16th step (median 0.07-0.09 s on both reference stems) while the stem
+    rings 0.2-0.3 s (and seconds when held), so a grain cut at the transcribed end loses the sub tail.
+    ``own_tol`` (seconds) = the attack detector's resolution: an attack within it of ``onset`` is this
+    note's own. A note with no attack of its own is a transcription echo: it keeps its transcribed span."""
+    own = attacks[np.abs(attacks - onset) <= own_tol]
+    if own.size == 0:
+        return note_end
+    after = attacks[attacks > float(own.max()) + own_tol]
+    nxt = float(after[0]) if after.size else sounding_end
+    return max(note_end, min(nxt, sounding_end))
+
+
+def pitch_stable_end(y: np.ndarray, sr: int, label: int, fmin: float, fmax: float, start_s: float = 0.0) -> float:
+    """Seconds into ``y`` after which the pyin track leaves ``label`` (a legato note / slide begins).
+
+    Frames before the track first reaches the label are the note's own pitch drop and are kept; from there
+    the grain ends at the first run of RING_DEVIANT_FRAMES voiced frames further than RING_PITCH_TOLERANCE_ST
+    from the label, or at its end. ``start_s`` frames earlier than it are never trimmed (the transcribed span)."""
+    import librosa
+    fmax = min(fmax, sr / 2 - 1)
+    if len(y) < 16 or fmin >= fmax:
+        return len(y) / sr
+    frame, hop = pyin_geometry(sr, fmin)
+    f0, _v, _p = librosa.pyin(y, fmin=fmin, fmax=fmax, sr=sr, frame_length=frame, hop_length=hop)
+    dev = np.full(len(f0), np.nan)
+    ok = ~np.isnan(f0)
+    dev[ok] = np.abs(12.0 * np.log2(f0[ok] / midi_to_hz(label)))
+    reached = np.nonzero(dev <= STABLE_TOLERANCE_ST)[0]
+    first = int(reached[0]) if reached.size else 0
+    run = 0
+    for i in range(first, len(dev)):
+        if not np.isnan(dev[i]) and dev[i] > RING_PITCH_TOLERANCE_ST:
+            run += 1
+            if run >= RING_DEVIANT_FRAMES:
+                cut = (i - run + 1) * hop / sr
+                return max(cut, start_s)
+        elif not np.isnan(dev[i]):
+            run = 0
+    return len(y) / sr
+
+
+class StemRing:
+    """The stem's own attacks and decay (bass_shape.StemEvidence), as ``ring_end`` inputs."""
+
+    def __init__(self, y: np.ndarray, sr: int):
+        import librosa
+        import bass_shape as BS
+        y22 = librosa.resample(y.astype(np.float32), orig_sr=sr, target_sr=BS.StemEvidence.SR)
+        self.ev = BS.StemEvidence(y22)
+        self.own_tol = 4 * self.ev.hop_s            # backtracked onsets sit a few hops before the audible attack
+        gaps = np.diff(self.ev.attacks)
+        # longest hold the stem itself shows: P95 of its inter-attack intervals
+        self.horizon = float(np.percentile(gaps, 95.0)) if gaps.size else 0.0
+
+    def end(self, note: Note, seg_end: float) -> float:
+        if self.horizon <= 0.0:
+            return seg_end
+        sounding = self.ev.end_after(note.start, self.horizon)
+        return ring_end(note.start, seg_end, self.ev.attacks, self.own_tol, sounding)
+
+
+def extract_note_grains(y: np.ndarray, sr: int, notes: list[Note], fmin: float, fmax: float,
+                        ring: "StemRing | None" = None) -> list[Grain]:
+    """One verified grain per transcribed note (onset -> end/next onset); unverifiable segments are skipped.
+
+    With ``ring`` a note that has an audible attack of its own is cut where the STEM stops sounding it
+    (:func:`ring_end`), trimmed where its pitch moves away (:func:`pitch_stable_end`); the shorter
+    transcribed span is kept when the longer cut cannot be verified."""
     grains: list[Grain] = []
-    for n, s, e in note_segments(notes, len(y) / sr):
+    total = len(y) / sr
+    for n, s, e in note_segments(notes, total):
+        if ring is not None:
+            e_ring = min(ring.end(n, e), total)
+            if e_ring > e + 1e-3:
+                long_seg = y[int(s * sr):int(e_ring * sr)]
+                cut = pitch_stable_end(long_seg, sr, n.pitch, fmin, fmax, start_s=e - s)
+                long_seg = long_seg[:int(cut * sr)]
+                a = assess(long_seg, sr, n.pitch, fmin, fmax)
+                if a.note is not None and len(long_seg) > int((e - s) * sr):
+                    grains.append(Grain(shape_grain(attack_aligned(long_seg, sr), sr, midi_to_hz(a.note)), a.note, n.pitch, a.method,
+                                        a.quality, s, len(long_seg) / sr, True, _rms(long_seg),
+                                        attack_aligned(long_seg, sr), sr))
+                    continue
         seg = y[int(s * sr):int(e * sr)]
         a = assess(seg, sr, n.pitch, fmin, fmax)
         if a.note is None:
             continue
-        grains.append(Grain(shape_grain(seg, sr, midi_to_hz(a.note)), a.note, n.pitch, a.method, a.quality, s, len(seg) / sr))
+        grains.append(Grain(shape_grain(attack_aligned(seg, sr), sr, midi_to_hz(a.note)), a.note, n.pitch, a.method, a.quality, s,
+                            len(seg) / sr, False, _rms(seg), attack_aligned(seg, sr), sr))
     return grains
+
+
+def _rms(x: np.ndarray) -> float:
+    return float(np.sqrt(np.mean(np.square(x, dtype=np.float64)))) if len(x) else 0.0
+
+
+def level_over(g: Grain, window_s: float) -> float:
+    """RMS of the grain's first ``window_s`` as the stem plays it. A ringed grain includes its decay, so its
+    whole-grain RMS reads lower than a short grain struck at the same level: grains are compared over one window."""
+    if g.raw is None or g.sr <= 0:
+        return g.rms
+    return _rms(g.raw[:max(1, int(window_s * g.sr))])
 
 
 def select_per_pitch(grains: list[Grain], target_len_s: float, min_len_s: float = 0.0) -> dict[int, Grain]:
@@ -286,8 +390,20 @@ def select_per_pitch(grains: list[Grain], target_len_s: float, min_len_s: float 
     best: dict[int, Grain] = {}
     for note, gs in by.items():
         long_enough = [g for g in gs if g.duration_s >= target_len_s]
-        best[note] = (max(long_enough, key=lambda g: g.quality) if long_enough
-                      else max(gs, key=lambda g: (g.duration_s, g.quality)))
+        pool = long_enough or gs
+        # A sample stands for every time the stem plays this pitch: take the loudness the stem usually plays it
+        # at (at or above the pitch's median grain level), not the quietest passage that happened to be cleanest.
+        # The reference is the median over ALL of the pitch's grains: the long pool alone can be mostly quiet passages
+        # (a transcribed note held over a faded/ducked stem), whose own median then licenses a quiet grain (Regime d#1:
+        # chosen rms 0.18 vs the pitch's median 0.41 -> every d#1 note rendered 8 dB under the stem). When no pool
+        # member reaches the pitch's level, the loudest one stands for it.
+        # Levels are taken over the shortest grain's duration: a long ringed grain's decay must not count against it.
+        win = min(g.duration_s for g in gs)
+        med = float(np.median([level_over(g, win) for g in gs]))
+        loud = [g for g in pool if level_over(g, win) >= med]
+        pool = loud or [max(pool, key=lambda g: level_over(g, win))]
+        best[note] = (max(pool, key=lambda g: g.quality) if long_enough
+                      else max(pool, key=lambda g: (g.duration_s, g.quality)))
     return best
 
 
@@ -351,3 +467,25 @@ def _note_midi(note: str) -> int:
     idx = len(note.rstrip("0123456789-"))
     pc = note[:idx].replace("s", "#")
     return NOTE_NAMES.index(pc) + (int(note[idx:]) + 1) * 12
+
+
+def ring_target_length(grains: list["Grain"], fallback: float) -> float:
+    """P75 of the ringing grains' lengths (the same convention as :func:`typical_note_length`, but measured on
+    what the stem sustains); ``fallback`` when no note rang past its transcribed end."""
+    ringed = [g.duration_s for g in grains if g.ringed]
+    return float(np.percentile(ringed, 75.0)) if ringed else fallback
+
+
+ATTACK_FRACTION = 0.1   # the audible attack = first sample at 10 % of the grain's peak (-20 dB)
+
+
+def attack_aligned(grain: np.ndarray, sr: int) -> np.ndarray:
+    """Drop the silence before the audible attack so the attack sits at sample 0 (the transcribed onset can
+    lead the stem's hit by tens of ms: VAGABUNDO c#1 started 79 ms late, every hit of that note landed late).
+    One sample's worth of look-back is kept so the onset is not clipped."""
+    pk = float(np.max(np.abs(grain))) if len(grain) else 0.0
+    if pk <= 0.0:
+        return grain
+    first = int(np.argmax(np.abs(grain) >= ATTACK_FRACTION * pk))
+    return grain[max(0, first - 1):] if first > 1 else grain
+

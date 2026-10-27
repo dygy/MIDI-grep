@@ -112,3 +112,47 @@ test('commitOutput: failed checks leave NO file, passing checks rename atomicall
   assert.deepEqual([...fs.readFileSync(t)], [1, 2, 3]);
   fs.rmSync(d, { recursive: true });
 });
+
+test('sampleFailures: a load that merely took 404 ms is not a failure, an HTTP 404 is', () => {
+  assert.deepEqual(sampleFailures(['[sampler] load sound "x_bass:0:0"... done! loaded 54.9 KiB in 404ms']), []);
+  assert.equal(sampleFailures(['GET https://host/x.wav 404 (Not Found)']).length, 1);
+});
+
+import { isNetworkFailure, netWaitBudgetS, nextNetWaitS, DEFAULT_NET_WAIT_S } from '../dist/offline-helpers.js';
+test('isNetworkFailure: network vs real', () => {
+  for (const t of ['Failed to load resource: net::ERR_INTERNET_DISCONNECTED', 'net::ERR_TIMED_OUT', 'net::ERR_NAME_NOT_RESOLVED',
+    'net::ERR_NETWORK_CHANGED', 'net::ERR_CONNECTION_RESET', 'net::ERR_CONNECTION_REFUSED', 'net::ERR_QUIC_PROTOCOL_ERROR.QUIC_PACKET_WRITE_ERROR',
+    'TypeError: Failed to fetch', 'getaddrinfo ENOTFOUND strudel.dygy.app', 'Navigation timeout of 30000 ms exceeded']) assert.ok(isNetworkFailure(t), t);
+  for (const t of ['Target closed', 'Protocol error: Session closed', 'triggered 5 onsets but expected 6', 'error loading "x.json"', 'net::ERR_BLOCKED_BY_CLIENT', '', undefined])
+    assert.ok(!isNetworkFailure(t), String(t));
+});
+test('netWaitBudgetS: env override, default, invalid falls back', () => {
+  assert.equal(netWaitBudgetS(undefined), DEFAULT_NET_WAIT_S); assert.equal(netWaitBudgetS(''), DEFAULT_NET_WAIT_S);
+  assert.equal(netWaitBudgetS('90'), 90); assert.equal(netWaitBudgetS('0'), 0);
+  assert.equal(netWaitBudgetS('-5'), DEFAULT_NET_WAIT_S); assert.equal(netWaitBudgetS('abc'), DEFAULT_NET_WAIT_S);
+});
+test('nextNetWaitS: doubling, capped, trimmed to budget, 0 when spent', () => {
+  const seq = []; let w = 0;
+  for (let n = 0; ; n++) { const x = nextNetWaitS(n, w, 200); if (!x) break; seq.push(x); w += x; }
+  assert.deepEqual(seq, [5, 10, 20, 40, 60, 60, 5]); assert.equal(w, 200);
+  assert.equal(nextNetWaitS(0, 0, 0), 0);
+});
+import { isNetworkOutageFailure, isSampleLoadFailure, isOutageSampleFailure } from '../dist/offline-helpers.js';
+test('isOutageSampleFailure: a sample whose fetch died is explained by the outage, an unknown sound is not', () => {
+  assert.equal(isOutageSampleFailure('error: Failed to fetch hap={"s":"RolandTR808_sd","bank":"RolandTR808"}'), true);
+  assert.equal(isOutageSampleFailure('error loading "http://localhost:8795/x/samples.json"'), true);
+  assert.equal(isOutageSampleFailure('sound RolandTR808_xx not found! Is it loaded?'), false);
+});
+test('isNetworkOutageFailure: only the attempt\'s own failure is an outage; stray network noise does not reclassify real failures', () => {
+  // network noise was logged (netEvents=3) but the failure is a real one -> NOT an outage
+  for (const m of ['triggered 5 onsets but expected 6', 'sound "foo" not found', 'evaluate returned no pattern (eval error): x is not defined', 'renderPatternAudio produced no blob', 'Target closed'])
+    assert.equal(isNetworkOutageFailure(m, 3), false, m);
+  // the error itself is a network failure, with or without console events
+  assert.equal(isNetworkOutageFailure('net::ERR_INTERNET_DISCONNECTED', 0), true);
+  // a sample-map load failure while network errors were logged -> still an outage (744c429 / 204020f behaviour)
+  assert.equal(isNetworkOutageFailure('evaluate returned no pattern (eval error): error loading "https://h/samples.json"', 2), true);
+  assert.equal(isNetworkOutageFailure('sample load failed during network outage: error loading x.json', 1), true);
+  // the same load failure with NO network evidence is a real failure
+  assert.equal(isNetworkOutageFailure('error loading "https://h/samples.json"', 0), false);
+  assert.ok(!isSampleLoadFailure('sound "x" not found'));
+});

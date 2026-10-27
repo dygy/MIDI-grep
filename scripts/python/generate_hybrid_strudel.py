@@ -112,12 +112,67 @@ def fx_chain(fx: dict, *, drop_lpf: bool = False) -> str:
     return "".join(parts)
 
 
-def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int = 16) -> list[str] | None:
+VELOCITY_LO_PCT, VELOCITY_HI_PCT = 10, 90   # the band the dynamic span is reported over (p10-p90)
+
+
+def hit_velocities(hits: list[dict], bpm: float, nbars: int, quantize: int = 16,
+                   mode: str = "bar") -> dict[tuple[str, int], float]:
+    """Measured per-hit velocity: {(drum type, step) -> strength / reference strength of that type}.
+
+    ``strength`` comes from detect_drums_bands (linear band peak at the onset). The reference is the MEDIAN
+    strength of the hit's own class — within the same bar (``mode="bar"``: the bar-to-bar level is already carried
+    by the drum envelope, so only the within-bar accent is added) or over the whole piece (``mode="global"``).
+    Ratios are winsorised per class to their own p10..p90, then scaled to unit mean power. A bar holding fewer than 3 hits of a class has no meaningful median of its own and uses the piece median.
+    Hits without a strength (older drums_bands.json) get no entry. Two hits on one step keep the stronger."""
+    step_dur = 60.0 / bpm * 4 / quantize
+    total = nbars * quantize
+    placed: dict[tuple[str, int], float] = {}
+    for h in hits:
+        st = h.get("strength")
+        step = int(round(h["time"] / step_dur))
+        if st is None or not (0 <= step < total) or not st > 0:
+            continue
+        k = (h["type"], step)
+        placed[k] = max(placed.get(k, 0.0), float(st))
+    by_class: dict[str, list[float]] = {}
+    by_bar: dict[tuple[str, int], list[float]] = {}
+    for (t, step), st in placed.items():
+        by_class.setdefault(t, []).append(st)
+        by_bar.setdefault((t, step // quantize), []).append(st)
+    med = {t: float(np.median(v)) for t, v in by_class.items()}
+    out = {}
+    for (t, step), st in placed.items():
+        ref = med[t]
+        if mode == "bar" and len(by_bar[(t, step // quantize)]) >= 3:
+            ref = float(np.median(by_bar[(t, step // quantize)]))
+        out[(t, step)] = st / ref
+    # winsorise each class to the p10..p90 of its own measured ratios: the extremes of a band-peak detector are
+    # bleed (a quiet bar's one real hit reads 26x its neighbours) and a raw 28 dB velocity swing scored -0.11
+    for t in by_class:
+        ks = [k for k in out if k[0] == t]
+        lo, hi = np.percentile([out[k] for k in ks], [VELOCITY_LO_PCT, VELOCITY_HI_PCT])
+        for k in ks:
+            out[k] = float(min(max(out[k], lo), hi))
+        # energy-preserving: the drum gain is calibrated for velocity 1, so the class's mean power must stay 1
+        # (a median reference reads a bimodal class — VAGABUNDO's hats — at mean velocity 3.3 and scored -0.11)
+        rms = float(np.sqrt(np.mean([out[k] ** 2 for k in ks])))
+        for k in ks:
+            out[k] /= rms
+    return out
+
+
+def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int = 16,
+                         velocity: str | None = None,
+                         pitch: dict[str, dict[float, float]] | None = None) -> list[str] | None:
     """Turn detected drum hits into per-bar TR808 mini-notation (library sounds).
 
     Plays the TRACK'S OWN groove with library drum-machine sounds — library-first
     (no upload) but rhythmically matched, unlike the fixed canonical batidao.
     Returns one ``stack(...)`` voice line per drum type, or None if unusable.
+
+    ``pitch`` ({class: {hit time -> playback-rate ratio}}, `drum_pitch.hit_ratios`) is the measured pitch each hit of a
+    tuned class (the 808 kick) sounds in the stem relative to its one-shot: written as a parallel ``.speed()`` pattern
+    (1 on a hit whose pitch could not be read), only for a class where at least one hit differs from the one-shot.
     """
     if not drums_json.exists():
         return None
@@ -136,6 +191,15 @@ def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int
             grid.setdefault(h["type"], set()).add(step)
     if not grid:
         return None
+    vel = hit_velocities(hits, bpm, nbars, quantize, velocity) if velocity else {}
+    # measured pitch ratio per (class, step); the first hit on a step wins
+    rate: dict[tuple[str, int], float] = {}
+    for h in sorted(hits, key=lambda h: h["time"]):
+        r = (pitch or {}).get(h["type"], {}).get(h["time"])
+        step = int(round(h["time"] / step_dur))
+        if r is not None and 0 <= step < total_steps:
+            rate.setdefault((h["type"], step), r)
+    tuned = {t for (t, _), r in rate.items() if abs(r - 1.0) > 1e-9}
     # Emit a voice per type as cat() of per-bar 16-step strings.
     order = ["bd", "sd", "cp", "hh", "oh"]
     voices = []
@@ -144,8 +208,21 @@ def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int
         bars = []
         for b in range(nbars):
             slots = [t if (b * quantize + s) in on else "~" for s in range(quantize)]
-            bars.append(" ".join(slots))
-        cat = ", ".join(f's("{b}")' for b in bars)
+            line = f's("{" ".join(slots)}")'
+            if vel:
+                # parallel velocity pattern, one value per hit (same steps, rests stay rests): velocity MULTIPLIES
+                # the bar's .gain() envelope in superdough, so the accents ride on the level instead of replacing it
+                vs = [f"{vel[(t, b * quantize + s)]:.3g}" if slot != "~" and (t, b * quantize + s) in vel else "~"
+                      for s, slot in enumerate(slots)]
+                if all((v != "~") == (sl != "~") for v, sl in zip(vs, slots)) and any(v != "~" for v in vs):
+                    line += f'.velocity("{" ".join(vs)}")'
+            if t in tuned:
+                rs = [f"{rate.get((t, b * quantize + s), 1.0):.4g}" if slot != "~" else "~"
+                      for s, slot in enumerate(slots)]
+                if any(r not in ("~", "1") for r in rs):
+                    line += f'.speed("{" ".join(rs)}")'
+            bars.append(line)
+        cat = ", ".join(bars)
         voices.append(f"  cat({cat})")
     return voices
 
