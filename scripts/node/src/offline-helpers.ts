@@ -176,6 +176,10 @@ export function isNetworkFailure(text: string): boolean { return NETWORK_RE.test
 const SAMPLE_LOAD_RE = /error loading|failed to load|could not load|unable to load|sample load failed|\bload(?:ing)?\b.{0,40}\b(?:fail\w*|error)\b/i;
 export function isSampleLoadFailure(text: string): boolean { return SAMPLE_LOAD_RE.test(text || ''); }
 
+/** A logged sample failure the outage explains: a failed load, or a failure that is itself a network error (a sample
+ * fetch that died: superdough logs `error: Failed to fetch hap={...}`). A sound that is simply unknown is neither. */
+export function isOutageSampleFailure(text: string): boolean { return isSampleLoadFailure(text) || isNetworkFailure(text); }
+
 /**
  * Is an attempt's OWN failure a network outage (wait + retry) rather than a crash/real failure (MAX_ATTEMPTS, then fail)?
  * Yes when the error itself is a network failure, or when it is a sample-load failure AND network errors were logged during the

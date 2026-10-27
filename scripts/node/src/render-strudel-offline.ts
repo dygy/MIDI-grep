@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { createRequire } from 'module';
-import { analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures, triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput, isNetworkFailure, isSampleLoadFailure, isNetworkOutageFailure, netWaitBudgetS, nextNetWaitS } from './offline-helpers.js';
+import { analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures, triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput, isNetworkFailure, isOutageSampleFailure, isNetworkOutageFailure, netWaitBudgetS, nextNetWaitS } from './offline-helpers.js';
 
 const SHIM = `const S = window.strudel;
 export const { noteToMidi, freqToMidi, getSoundIndex, getAudioContext, registerSound, getParamADSR, getADSRValues, getPitchEnvelope, getVibratoOscillator } = S;`;
@@ -184,7 +184,7 @@ async function main() {
         const v = await fn();
         // a sample that failed to load while the network was down renders silently wrong: treat as network, retry
         const bad = sampleLogs ? sampleFailures(sampleLogs(v)) : [];
-        const loadBad = bad.filter(isSampleLoadFailure); // only a failed LOAD is attributable to the outage, not any logged failure
+        const loadBad = bad.filter(isOutageSampleFailure); // only a failed load/fetch is attributable to the outage, not any logged failure
         if (loadBad.length && netEvents > ev0) throw new Error(`sample load failed during network outage: ${loadBad[0]}`);
         return v;
       } catch (err: any) {

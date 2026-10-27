@@ -137,7 +137,12 @@ test('nextNetWaitS: doubling, capped, trimmed to budget, 0 when spent', () => {
   assert.deepEqual(seq, [5, 10, 20, 40, 60, 60, 5]); assert.equal(w, 200);
   assert.equal(nextNetWaitS(0, 0, 0), 0);
 });
-import { isNetworkOutageFailure, isSampleLoadFailure } from '../dist/offline-helpers.js';
+import { isNetworkOutageFailure, isSampleLoadFailure, isOutageSampleFailure } from '../dist/offline-helpers.js';
+test('isOutageSampleFailure: a sample whose fetch died is explained by the outage, an unknown sound is not', () => {
+  assert.equal(isOutageSampleFailure('error: Failed to fetch hap={"s":"RolandTR808_sd","bank":"RolandTR808"}'), true);
+  assert.equal(isOutageSampleFailure('error loading "http://localhost:8795/x/samples.json"'), true);
+  assert.equal(isOutageSampleFailure('sound RolandTR808_xx not found! Is it loaded?'), false);
+});
 test('isNetworkOutageFailure: only the attempt\'s own failure is an outage; stray network noise does not reclassify real failures', () => {
   // network noise was logged (netEvents=3) but the failure is a real one -> NOT an outage
   for (const m of ['triggered 5 onsets but expected 6', 'sound "foo" not found', 'evaluate returned no pattern (eval error): x is not defined', 'renderPatternAudio produced no blob', 'Target closed'])
