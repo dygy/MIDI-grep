@@ -60,7 +60,17 @@ def test_solo_keeps_header_and_only_the_bass_channel():
     out = bass_solo.solo_strudel(STRUDEL)
     assert out is not None
     assert "const bassLoop" in out and "const cps" in out          # shared definitions stay
-    assert "// BASS —" in out and "LEAD" not in out and "bd*4" not in out
+    assert "// BASS —" in out
+    assert 'note(cat(...lead)).s("l").gain(0)' in out               # silenced, not removed
+
+
+def test_solo_keeps_the_kick_so_the_bass_is_still_ducked():
+    """The kick's `duckorbit` lives on the DRUMS channel; the stem has its dip, so the solo must keep it."""
+    text = STRUDEL.replace('s("bd*4")', 's("bd*4").duckorbit(2).duckdepth(0.5)')
+    out = bass_solo.solo_strudel(text)
+    assert out is not None
+    drums = next(l for l in out.split("\n") if "bd*4" in l)
+    assert ".duckorbit(2)" in drums and drums.index(".duckorbit(2)") < drums.index(".gain(0)")
 
 
 def test_solo_is_none_without_a_separable_bass_channel():

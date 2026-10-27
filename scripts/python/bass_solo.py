@@ -8,7 +8,7 @@ the bass stem (20-45 Hz: -14.4 dB), and the loop LOWERED the bass multiplier (0.
 read "over". The voice cannot be told from the kick inside the mix, but it can be rendered alone (the offline
 render of one channel takes seconds).
 
-``solo``     strudel -> strudel with only the BASS channel (header and shared definitions kept)
+``solo``     strudel -> strudel with only the BASS channel sounding (others silenced, not removed: the kick's duck stays)
 ``measure``  per project band, the power of the original bass stem (scaled by the master gain every voice is played
              at) over the power of the bass voice rendered alone: ratio > 1 = the voice is too quiet.
              An ABSOLUTE level, not a share of the mix: a share saturates where the bass dominates the mix (measured on
@@ -28,22 +28,20 @@ import numpy as np
 SR = 22050
 EPS = 1e-12
 BAND_MIN_FRAC = 1e-4   # a band holding less than this share of the original bass stem has no evidence (ratio = None)
-_BLOCK_RE = re.compile(r"^\$:", re.M)
-_BASS_TAG_RE = re.compile(r"//[^\n]*\bBASS\s+—")
+_BLOCK_RE = re.compile(r"^\$:", re.M)   # melodic_solo's block scan
 
 
 def solo_strudel(text: str) -> str | None:
-    """The generated strudel with only its BASS channel. None when the file has no separable BASS channel
-    (a single ``stack()`` of channels, or no bass voice): the caller then keeps the mix-share levers."""
-    starts = [m.start() for m in _BLOCK_RE.finditer(text)]
-    if not starts:
+    """The generated strudel with only its BASS channel sounding. None when the file has no separable BASS channel
+    (a single ``stack()`` of channels, or no bass voice): the caller then keeps the mix-share levers.
+
+    The other channels stay in the file, silenced (``solo_stems.solo_code``): the DRUMS channel's kick carries the
+    ``duckorbit`` that dips the bass orbit, so dropping it would render the bass without the dip the stem has."""
+    from solo_stems import StemSplitError, solo_code
+    try:
+        return solo_code(text, "bass")
+    except StemSplitError:
         return None
-    ends = starts[1:] + [len(text)]
-    blocks = [text[a:b] for a, b in zip(starts, ends)]
-    keep = [b for b in blocks if _BASS_TAG_RE.search(b)]
-    if len(keep) != 1:
-        return None
-    return text[:starts[0]] + keep[0].rstrip() + "\n"
 
 
 def band_power(y: np.ndarray, sr: int = SR) -> dict[str, float]:
