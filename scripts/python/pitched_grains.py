@@ -263,7 +263,9 @@ class Grain:
     onset_s: float
     duration_s: float
     ringed: bool = False     # cut where the stem stops sounding the note, not at the transcribed end
-    rms: float = 0.0         # level of the grain as the stem plays it
+    rms: float = 0.0         # level of the grain as the stem plays it (whole grain)
+    raw: np.ndarray | None = None   # the grain as the stem plays it, before fades: its level over a common window
+    sr: int = 0                     # sample rate of ``raw``
 
 
 RING_PITCH_TOLERANCE_ST = 1.0   # a ring that leaves the label by more than a semitone is the next note / a glide
@@ -354,19 +356,28 @@ def extract_note_grains(y: np.ndarray, sr: int, notes: list[Note], fmin: float, 
                 a = assess(long_seg, sr, n.pitch, fmin, fmax)
                 if a.note is not None and len(long_seg) > int((e - s) * sr):
                     grains.append(Grain(shape_grain(attack_aligned(long_seg, sr), sr, midi_to_hz(a.note)), a.note, n.pitch, a.method,
-                                        a.quality, s, len(long_seg) / sr, True, _rms(long_seg)))
+                                        a.quality, s, len(long_seg) / sr, True, _rms(long_seg),
+                                        attack_aligned(long_seg, sr), sr))
                     continue
         seg = y[int(s * sr):int(e * sr)]
         a = assess(seg, sr, n.pitch, fmin, fmax)
         if a.note is None:
             continue
         grains.append(Grain(shape_grain(attack_aligned(seg, sr), sr, midi_to_hz(a.note)), a.note, n.pitch, a.method, a.quality, s,
-                            len(seg) / sr, False, _rms(seg)))
+                            len(seg) / sr, False, _rms(seg), attack_aligned(seg, sr), sr))
     return grains
 
 
 def _rms(x: np.ndarray) -> float:
     return float(np.sqrt(np.mean(np.square(x, dtype=np.float64)))) if len(x) else 0.0
+
+
+def level_over(g: Grain, window_s: float) -> float:
+    """RMS of the grain's first ``window_s`` as the stem plays it. A ringed grain includes its decay, so its
+    whole-grain RMS reads lower than a short grain struck at the same level: grains are compared over one window."""
+    if g.raw is None or g.sr <= 0:
+        return g.rms
+    return _rms(g.raw[:max(1, int(window_s * g.sr))])
 
 
 def select_per_pitch(grains: list[Grain], target_len_s: float, min_len_s: float = 0.0) -> dict[int, Grain]:
@@ -386,9 +397,11 @@ def select_per_pitch(grains: list[Grain], target_len_s: float, min_len_s: float 
         # (a transcribed note held over a faded/ducked stem), whose own median then licenses a quiet grain (Regime d#1:
         # chosen rms 0.18 vs the pitch's median 0.41 -> every d#1 note rendered 8 dB under the stem). When no pool
         # member reaches the pitch's level, the loudest one stands for it.
-        med = float(np.median([g.rms for g in gs]))
-        loud = [g for g in pool if g.rms >= med]
-        pool = loud or [max(pool, key=lambda g: g.rms)]
+        # Levels are taken over the shortest grain's duration: a long ringed grain's decay must not count against it.
+        win = min(g.duration_s for g in gs)
+        med = float(np.median([level_over(g, win) for g in gs]))
+        loud = [g for g in pool if level_over(g, win) >= med]
+        pool = loud or [max(pool, key=lambda g: level_over(g, win))]
         best[note] = (max(pool, key=lambda g: g.quality) if long_enough
                       else max(pool, key=lambda g: (g.duration_s, g.quality)))
     return best
