@@ -216,3 +216,13 @@ def test_generated_piece_writes_pitch_changes_as_an_editable_legato_voice(tmp_pa
     assert "const legatoAttack = " in code
     assert "melodic_shape" in summary and "legato_bars" not in summary["melodic_shape"]["lead"]   # arrays live in code
     assert summary["editability"] == "pass"
+
+
+@have
+def test_header_note_count_includes_the_legato_voices(tmp_path):
+    """``// Notes: N`` is what the piece plays; the legato arrays were left out of it."""
+    code, _ = _generate(tmp_path)
+    played = sum(len(_voice(code, n)) for n in ("lead", "leadLegato", "chords", "chordsLegato") if f"let {n} = [" in code)
+    assert "let leadLegato = [" in code
+    played += len(_voice(code, "bass")) + (len(_voice(code, "bassLegato")) if "let bassLegato = [" in code else 0)
+    assert f"// Notes: {played}\n" in code, (played, re.findall(r"// Notes: \d+", code))

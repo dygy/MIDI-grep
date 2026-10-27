@@ -50,7 +50,6 @@ MAX_ITERS = 8
 WARM_ITERS = 3
 WARM_SOURCES = ("track", "neighbour")      # sources that earn the short budget; "seed" / "cold" run the full MAX_ITERS
 FIELDS = ("tag", "overall", "margin", "gate_out", "params", "envused", "sa", "parent", "alpha", "shape")
-LEAD_FIT_SA_TOLERANCE = 0.005   # a fitted lead may cost at most this much section-aware vs the palette lead (coordinator's gate)
 SHAPES = ("stem", "off")        # generate_dynamic_strudel.py --bass-shape; the first is the generator default (wins ties)
 
 
@@ -142,8 +141,11 @@ def choose_shape(best: Row, trial: Row, n: float) -> Row:
 
 def choose_lead_fit(palette: Row, trial: Row, n: float) -> Row:
     """The fitted synth lead is kept only if its full-song overall beats the palette lead's by MORE than calibration
-    noise AND its section-aware is no worse than the palette's minus LEAD_FIT_SA_TOLERANCE; otherwise the palette."""
-    if trial.overall - palette.overall > n and trial.sa >= palette.sa - LEAD_FIT_SA_TOLERANCE:
+    noise AND its section-aware is no worse than the palette's minus that same noise AND it does not turn a palette
+    lead that clears the eval-gate floors into one that misses them; otherwise the palette."""
+    if palette.passed and trial.passed is False:
+        return palette
+    if trial.overall - palette.overall > n and trial.sa >= palette.sa - n:
         return trial
     return palette
 

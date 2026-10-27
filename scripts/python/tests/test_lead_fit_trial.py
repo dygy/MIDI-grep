@@ -108,6 +108,27 @@ def test_gate_keeps_the_fit_only_beyond_noise_and_without_a_section_regression(f
     assert (CL.choose_lead_fit(pal, fit, 0.005) is fit) is kept
 
 
+def gated(overall, sa, margin, verdict, tag="t"):
+    return CL.Row("\t".join([tag, str(overall), str(margin), f"{margin} {verdict}", "", "", str(sa), "", "1", "stem"]))
+
+
+def test_a_fit_cannot_turn_a_passing_palette_lead_into_a_failing_one():
+    pal = gated(0.800, 0.800, 0.004, "PASS", "palette")
+    assert CL.choose_lead_fit(pal, gated(0.810, 0.800, -0.002, "FAIL", "fit"), 0.005) is pal      # beats it beyond noise, but FAILs
+    fit = gated(0.810, 0.800, 0.009, "PASS", "fit")
+    assert CL.choose_lead_fit(pal, fit, 0.005) is fit
+    pal_fail = gated(0.800, 0.800, -0.01, "FAIL", "palette")
+    fit_fail = gated(0.810, 0.800, -0.002, "FAIL", "fit")
+    assert CL.choose_lead_fit(pal_fail, fit_fail, 0.005) is fit_fail                               # nothing to protect
+
+
+def test_the_section_aware_allowance_is_the_calibration_noise_not_a_constant():
+    pal, fit = row(0.800, 0.800, "palette"), row(0.900, 0.790, "fit")
+    assert CL.choose_lead_fit(pal, fit, 0.005) is pal          # -0.010 > noise 0.005
+    assert CL.choose_lead_fit(pal, fit, 0.020) is fit          # -0.010 <= noise 0.020
+    assert not hasattr(CL, "LEAD_FIT_SA_TOLERANCE")
+
+
 # ------------------------------------------------------------------------------ the driver + ClickHouse
 def test_fit_that_wins_is_kept_baked_into_best_and_recorded(db, tmp_path):
     r, gens, wd = drive(tmp_path, 0.78, 0.80, "--iters", "2", "--lead-fit-evals", "6")

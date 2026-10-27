@@ -58,8 +58,8 @@ print(f"--bass-mult {bm + 0.1:.4f} --sub-gain 0.8 --cal-lead 1.1 --lead-lpf 6000
 STUB_REC = '#!/bin/bash\nwhile [ $# -gt 0 ]; do [ "$1" = "-o" ] && echo wav > "$2"; shift; done\n'
 
 
-def drive(tmp_path, scores, *args, extra_env=None):
-    files = {"gen.py": STUB_GEN, "cmp.py": STUB_CMP, "cal.py": STUB_CAL, "gate.py": STUB_GATE}
+def drive(tmp_path, scores, *args, extra_env=None, cal=STUB_CAL):
+    files = {"gen.py": STUB_GEN, "cmp.py": STUB_CMP, "cal.py": cal, "gate.py": STUB_GATE}
     for n, body in files.items():
         (tmp_path / n).write_text(body)
     (tmp_path / "rec.sh").write_text(STUB_REC)
@@ -164,3 +164,28 @@ def test_lead_hpf_step_uses_measured_response(tmp_path):
     plain = hpf()
     measured = hpf("--parent-comparison", str(tmp_path / "parent.json"), "--parent-lead-hpf", "380")
     assert abs(measured - 428) < abs(plain - 428), (plain, measured)
+
+
+# a calibrator that proposes the sub-octave flip whenever it is allowed to (like a render with the sub_bass share over)
+STUB_CAL_FLIP = r'''
+import sys
+a = sys.argv[1:]
+bm = float(a[a.index("--bass-mult") + 1])
+su, locked = a[a.index("--sub-up") + 1], a[a.index("--sub-up-locked") + 1]
+open(__import__("os").environ["AC_LOG"] + ".cal", "a").write(locked + "\n")
+flip = su == "0" and locked == "0"
+print(f"--bass-mult {bm if flip else bm + 0.1:.4f} --sub-gain 0.8 --cal-lead 1.1 --lead-lpf 6000 --hat-gain 0.1 "
+      f"--master-gain 0.65 --sub-up {1 if flip else 0}")
+'''
+
+
+def test_an_octave_flip_the_generator_refuses_is_locked_not_proposed_again(tmp_path):
+    """The stub generator never reports sub_up=1 (it refused the flip). The calibrator must then be told the lever is
+    locked; before, SULOCK was set only when a LOST step changed the octave, so the flip was re-proposed every step
+    and each proposal froze sub-gain/bass-mult."""
+    r, _ = drive(tmp_path, [(0.60 + 0.02 * i, 0.60 + 0.02 * i) for i in range(10)], "--iters", "4", cal=STUB_CAL_FLIP)
+    assert r.returncode == 0, r.stderr
+    locked = (tmp_path / "gen.log.cal").read_text().split()
+    assert locked == ["0", "1", "1", "1"], locked
+    asked = [(tmp_path / "work" / f"cal{i}.strudel.args").read_text().split() for i in range(1, 5)]
+    assert [a[a.index("--sub-up") + 1] for a in asked] == ["0", "1", "0", "0"]

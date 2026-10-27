@@ -114,7 +114,7 @@ def _wav(path: Path, y: np.ndarray) -> None:
     sf.write(str(path), y.astype(np.float32), 44100, subtype="PCM_16")
 
 
-def run_stage(tmp_path: Path, *, score_after: float, extra: list[str] | None = None) -> subprocess.CompletedProcess:
+def run_stage(tmp_path: Path, *, score_after: float, extra: list[str] | None = None, gate: str = "print('0.1 PASS')\n") -> subprocess.CompletedProcess:
     """auto-calibrate.sh with one calibration iteration followed by the loudness stage. The stub generator writes its
     --master-gain into the piece, the stub renderer writes a tone whose amplitude is proportional to it (clipped at full
     scale like the 16-bit writer), the stub scorer returns 0.80 for the loop's gain and ``score_after`` for a louder one."""
@@ -143,7 +143,7 @@ score = 0.80 if mg <= 0.8 else {score_after}
 print(json.dumps({{'comparison': {{'overall_similarity': score, 'section_aware_similarity': score}}}}))
 """,
         "cal.py": "print('--bass-mult 0.4 --sub-gain 0.7 --cal-lead 1.0 --lead-lpf 5000 --hat-gain 0 --master-gain 0.78')\n",
-        "gate.py": "print('0.1 PASS')\n",
+        "gate.py": gate,
     }
     for name, text in stubs.items():
         (tmp_path / name).write_text(text)
@@ -178,3 +178,16 @@ def test_stage_leaves_the_unmixed_best_when_the_louder_piece_scores_worse_than_t
 def test_stage_can_be_switched_off(tmp_path):
     r = run_stage(tmp_path, score_after=0.80, extra=["--no-mix-dynamics"])
     assert "[mix]" not in r.stdout and (tmp_path / "w" / "best.strudel").read_text().strip() == "MG=0.78", r.stdout + r.stderr
+
+
+def test_the_printed_gate_is_the_one_of_the_piece_the_loudness_stage_kept(tmp_path):
+    """The loop's BEST gate said PASS; the kept (louder) round scores 0.7995 and the stub floor is 0.80, so the final
+    gate line must say FAIL (it kept describing the pre-mix piece), and the report hint must not name a fixed window."""
+    gate = ("import sys, json\n"
+            "o = json.load(open(sys.argv[sys.argv.index('--comparison') + 1]))['comparison']['overall_similarity']\n"
+            "print(f\"{o - 0.8:.4f} {'PASS' if o >= 0.8 else 'FAIL'}\")\n")
+    r = run_stage(tmp_path, score_after=0.7995, gate=gate)
+    assert "[mix] kept round" in r.stdout, r.stdout + r.stderr
+    line = [ln for ln in r.stdout.splitlines() if ln.startswith("  gate:")][0]
+    assert line.split()[2] == "FAIL", line                                   # "gate: <margin> <verdict> ..."
+    assert "--seconds 135" not in r.stdout

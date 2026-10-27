@@ -215,7 +215,7 @@ def next_master_bus(spec: dict, reference: dict, render_profile: dict) -> dict:
     if comp is None:
         return new
     comp["makeup"] = round(max(-24.0, min(24.0, comp["makeup"] + rms_err)), 2)
-    comp["ratio"] = round(min(20.0, max(1.0, 1.0 + (comp["ratio"] - 1.0) * 10 ** (crest_err / 20.0 / 2))), 2)
+    comp["ratio"] = round(min(20.0, max(1.0, comp["ratio"] * 10 ** (crest_err / 20.0 / 2))), 2)   # on the ratio itself: (ratio - 1) scaling could never leave unity
     return new
 
 

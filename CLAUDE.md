@@ -189,7 +189,7 @@ per-stem share gains from the Demucs stems scored worse/inconsistent (bleed), so
 **Bass voice level (2026-10-23, `scripts/python/bass_solo.py`, run by `auto-calibrate.sh` every iteration):** the
 bass layers used to follow whole-mix band shares that the kick also fills (VAGABUNDO: mix sub share matched while the bass
 voice alone was 8.5 dB under its stem, 20-45 Hz -14 dB, and the loop lowered bass-mult). Now the BASS channel is rendered
-alone (~8 s) and its absolute band power vs the bass stem (x master-gain^2) sets bass-mult (`--bass-solo`; full sqrt step,
+alone (one extra full-length offline render per iteration, same `-d` as the mix render; the melodic solo adds a second on sample-instrument) and its absolute band power vs the bass stem (x master-gain^2) sets bass-mult (`--bass-solo`; full sqrt step,
 bounded 0.5-2x); sub-gain stays on the mix shares (both layers feed 60-250 Hz). `AC_BSOLO=off` skips it.
 
 **Melodic voice level + brightness (2026-10-23, `scripts/python/melodic_solo.py`, run by `auto-calibrate.sh` every

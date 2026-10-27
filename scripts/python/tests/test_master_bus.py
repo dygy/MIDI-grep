@@ -118,6 +118,14 @@ def test_next_master_bus_closes_the_rms_error_with_makeup():
     assert spec["compressor"]["makeup"] == 1.0                               # input untouched
 
 
+def test_next_master_bus_can_raise_a_unity_ratio_for_a_peaky_render():
+    ref = {"rms_db": -11.0, "crest_db": 10.0}
+    spec = {"ceiling": -0.6, "compressor": {"threshold": -20.0, "ratio": 1.0, "makeup": 0.0}}
+    peaky = M.next_master_bus(spec, ref, {"rms_db": -11.0, "crest_db": 14.0})["compressor"]["ratio"]
+    assert peaky == pytest.approx(10 ** (4.0 / 40), abs=0.01) and peaky > 1.0
+    assert M.next_master_bus(spec, ref, {"rms_db": -11.0, "crest_db": 8.0})["compressor"]["ratio"] == 1.0   # flatter: never below unity
+
+
 def test_a_limited_render_must_stay_under_its_ceiling_and_unclipped():
     ref = {"rms_db": -11.0, "crest_db": 10.0}
     ok = {"rms_db": -11.2, "crest_db": 10.5, "peak_db": -0.64, "clip_frac": 0.0}

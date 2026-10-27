@@ -1346,7 +1346,7 @@ def main() -> int:
         lines = list(L)
         bus_lines = master_bus_lines(json.loads(args.master_bus.read_text()) if args.master_bus else None)
         # counts of what THIS piece plays (bars / detected drum pattern are final by now)
-        lines[2:2] = count_header_lines(args.genre, count_note_events(bass_bars, lead_bars, chord_bars),
+        lines[2:2] = count_header_lines(args.genre, count_note_events(bass_bars, lead_bars, chord_bars, lead_legato, chord_legato),
                                         count_drum_hits(detected if isinstance(detected, list) else None))
         lines += bus_lines
         if args.dj_flow:

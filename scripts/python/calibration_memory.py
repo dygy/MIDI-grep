@@ -473,6 +473,8 @@ def rows_from_workdir(workdir: Path, track_key: str, mode: str, ctx: dict, run_i
 
 
 _GEN_KNOBS = re.compile(r"calibrate_dynamic\.py: ([0-9. ]+?(?: (?:stem|off))?)[;)]")
+# editable-pipeline.sh stage 9 writes "final --master-gain X" when the loudness stage moved the gain after the loop
+_FINAL_MASTER = re.compile(r"final --master-gain ([0-9.]+)")
 
 
 def promoted_row(track_dir: Path, version: str, *, source: str = "live", created_at: str | None = None) -> dict | None:
@@ -488,6 +490,9 @@ def promoted_row(track_dir: Path, version: str, *, source: str = "live", created
         knobs = parse_knobs(numeric)
     except ValueError:
         return None
+    fm = _FINAL_MASTER.search(meta.get("generator", ""))
+    if fm:       # the row's score is of the piece at the loudness stage's gain, so the knobs must say that gain, not the loop's
+        knobs["master_gain"] = float(fm.group(1))
     mode, ctx = meta["generation_mode"], track_ctx(track_dir)
     ctx["bars"] = (_read_json(vdir / "env_correction.json") or {}).get("bars", 0)
     margin = passed = None

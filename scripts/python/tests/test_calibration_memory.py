@@ -215,3 +215,15 @@ def test_backfill_imports_new_scale_workdirs_and_skips_old_ones(db, tmp_path):
     assert db.backfill(tmp_path / "cache")["new"] == 0
     assert db.warm_start("Track A", "synth", GENRE, 130, "", 81)["knobs"].startswith("0.5 ")
     assert db.backfill(tmp_path / "cache", since="2999-01-01 00:00:00")["workdir_rows"] == 0
+
+
+def test_a_promoted_row_carries_the_final_master_gain_its_score_was_measured_at(db, tmp_path):
+    t = tmp_path / "Track A"
+    v = t / "v001"
+    v.mkdir(parents=True)
+    (t / "metadata.json").write_text(json.dumps({"title": "Track A", "genre": GENRE, "bpm": 130, "key": "C# minor"}))
+    gen = "generate_dynamic_strudel.py --mode synth (knobs from calibrate_dynamic.py: 0.4 0.7 1 5000 0 0.6 0 0 0 stem; %s; genre x; bars 81)"
+    (v / "comparison.json").write_text(json.dumps({"comparison": {"overall_similarity": 0.8}}))
+    for note, want in (("final --master-gain 1.1", 1.1), ("final --master-gain = the 6th knob", 0.6)):
+        (v / "metadata.json").write_text(json.dumps({"generation_mode": "synth", "generator": gen % note}))
+        assert db.promoted_row(t, "v001")["master_gain"] == pytest.approx(want), note

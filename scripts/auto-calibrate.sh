@@ -221,6 +221,11 @@ gen_piece() {
     >"$sum" 2>"$log"
 }
 
+# The gate line of the piece in best.cmp.json (the loudness/bus stages replace it after the loop picked BEST).
+regate() {
+  local g; if g=$("$PY" "$GATE" --comparison "$WORK/best.cmp.json" --genre "$GENRE" --mode "$MODE" 2>/dev/null); then best_gate="$g"; else best_gate="n/a"; fi
+}
+
 SULOCK=0   # 1 once an octave-up step lost to its parent: the calibrator must not propose it again in this run
 best=-1; best_params=""; best_tag=""; best_gate="n/a"; : >"$WORK/iters.tsv"
 rm -f "$WORK/best.env.json" "$WORK/best.master" "$WORK/best.leadsynth.json"   # never report a stale env / level from a previous run
@@ -238,6 +243,10 @@ while [ "$i" -lt "$ITERS" ]; do
   if ! read -r EBL EBLMAX EBHZ ELH ELHZ ESU < <("$PY" -c "import json;d=json.load(open('$WORK/$TAG.gen.json'));print(d['bass_lpf'],d['bass_lpf_analysis'],d['bass_note_max_hz'],d['lead_hpf'],d['lead_note_min_hz'],d.get('sub_up',0))" 2>/dev/null); then
     echo "[$TAG] WARNING: cannot parse the generator summary $WORK/$TAG.gen.json - bass-lpf/lead-hpf levers are OFF this step"
     EBL=0 EBLMAX=0 EBHZ=0 ELH=0 ELHZ=0 ESU=0
+  elif [ "$ESU" != "$SU" ]; then
+    # the generator refused the requested octave (a flip it would filter away): that hypothesis is answered too. Without the
+    # lock the calibrator proposes it again every step, and each proposal holds sub-gain/bass-mult.
+    SULOCK=1
   fi
   echo "$ESU" >"$WORK/$TAG.su"   # the octave the generator ACTUALLY used (it refuses an octave-up its low-pass would filter away)
 
@@ -414,7 +423,8 @@ if [ -n "$SEL" ]; then
       lf_warm=(); [ "$LF_WARM" != "-" ] && [ -n "$LF_WARM" ] && [ -s "$LF_WARM" ] && lf_warm=(--warm "$LF_WARM")
       LHIST="$WORK/leadfit.hist.json"; rm -f "$LHIST" "$WORK/leadfit.tsv"; lf_best=-1; lf_tag=""; lf_n=0; lf_ok=1
       read -r PSA < <("$PY" -c "import json;print(round(json.load(open('$WORK/best.cmp.json'))['comparison'].get('section_aware_similarity',0),4))")
-      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' palette "$best" "n/a" "n/a" "$best_params" "-" "$PSA" "-" 1 "$BSHAPE" >"$WORK/leadfit.palette.tsv"
+      read -r PMARG _ <<<"$best_gate"
+      printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' palette "$best" "$PMARG" "$best_gate" "$best_params" "-" "$PSA" "-" 1 "$BSHAPE" >"$WORK/leadfit.palette.tsv"
       while [ "$lf_n" -lt "$LF_CAP" ]; do
         ASK="$("$PY" "$LSYN" ask --history "$LHIST" --melodic "$STEMS/melodic.wav" --bpm "$BPM" --cap "$LF_CAP" ${lf_warm[@]+"${lf_warm[@]}"} --out "$WORK/leadfit.cand.json")" \
           || { echo "[leadfit] ask FAILED - keeping the palette lead"; lf_ok=0; break; }
@@ -457,7 +467,7 @@ PYL
           cp "$WORK/$lf_tag.strudel" "$WORK/best.strudel"; cp "$WORK/$lf_tag.wav" "$WORK/best.wav"; cp "$WORK/$lf_tag.cmp.json" "$WORK/best.cmp.json"
           cp "$WORK/$lf_tag.leadsynth.json" "$WORK/best.leadsynth.json"; LEAD_ARG=(--lead-synth "$WORK/best.leadsynth.json")
           best="$FOVER"; best_gate="$lf_gate"; BEST_TSV="leadfit.tsv"; BEST_REC_TAG="$lf_tag"
-        else echo "[leadfit] fitted lead does not beat the palette lead (overall $FOVER vs $best, section-aware $FSECT vs $PSA; need > noise and >= palette-0.005) -> palette lead kept"; fi
+        else echo "[leadfit] fitted lead does not beat the palette lead (overall $FOVER vs $best, section-aware $FSECT vs $PSA; need > noise, section-aware >= palette - noise, and no PASS -> FAIL) -> palette lead kept"; fi
         LEAD_FIT_JSON="$WORK/leadfit.json"
       else echo "[leadfit] no candidate scored - palette lead kept (not recorded)"; [ "$lf_ok" = 1 ] || RC=70; fi
     fi
@@ -498,6 +508,7 @@ if [ "$MIXDYN" = 1 ] && [ -n "$best_tag" ] && [ -s "$WORK/best.wav" ]; then
         cp "$WORK/mix$PICK.strudel" "$WORK/best.strudel"; cp "$WORK/mix$PICK.wav" "$WORK/best.wav"
         cp "$WORK/mix$PICK.cmp.json" "$WORK/best.cmp.json"
         best="$("$PY" -c "import json;print(round(json.load(open('$WORK/best.cmp.json'))['comparison']['overall_similarity'],4))")"
+        regate
         cp "$WORK/mix$PICK.master" "$WORK/best.master"   # the BEST params keep the loop's knobs (a seed for the next mode); this is the final level
         echo "[mix] kept round $PICK (--master-gain $(cat "$WORK/mix$PICK.master")) -> best.strudel/best.wav/best.cmp.json";;
       *) echo "[mix] no round matched the reference level within the score tolerance - the unmixed BEST stays";;
@@ -540,6 +551,7 @@ if [ "$MIXDYN" = 1 ] && [ -n "$best_tag" ] && [ -s "$WORK/best.wav" ] && "$PY" "
         [0-9]*)
           cp "$WORK/bus$BPICK.strudel" "$WORK/best.strudel"; cp "$WORK/bus$BPICK.wav" "$WORK/best.wav"; cp "$WORK/bus$BPICK.cmp.json" "$WORK/best.cmp.json"
           best="$("$PY" -c "import json;print(round(json.load(open('$WORK/best.cmp.json'))['comparison']['overall_similarity'],4))")"
+          regate
           echo "[bus] kept round $BPICK (master-bus lines in best.strudel; voices keep --master-gain $CLIP_MG)";;
         *) echo "[bus] no bus round matched level+crest+ceiling within the score tolerance - the clip-limited result stays";;
       esac
@@ -555,6 +567,6 @@ echo "  strudel: $WORK/best.strudel"
 [ -s "$WORK/best.master" ] && echo "  master:  $(cat "$WORK/best.master")  (final --master-gain, set by the loudness stage; the params above are the loop's)"
 [ -s "$WORK/best.env.json" ] && echo "  env:     $WORK/best.env.json  (per-bar bass/lead/master correction used by the best render; pass --env-correction)"
 echo "  wav:     $WORK/best.wav"
-echo "  promote + report: scripts/editable-pipeline.sh --title <track> (stages 9-10), or pipeline_helpers.py promote then 'pipeline_helpers.py report --track-dir <track> --version vNNN --seconds 135 --calib-workdir $WORK'."
+echo "  promote + report: scripts/editable-pipeline.sh --title <track> (stages 9-10), or pipeline_helpers.py promote then 'pipeline_helpers.py report --track-dir <track> --version vNNN --seconds $SONG_S --calib-workdir $WORK'."
 [ "$RC" -eq 0 ] || echo "FAILED: at least one iteration did not complete (exit $RC); BEST above covers only the iterations that ran" >&2
 exit "$RC"
