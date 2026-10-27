@@ -189,6 +189,19 @@ def _run_clickhouse_query(query: str) -> subprocess.CompletedProcess:
     return subprocess.run(cmd, capture_output=True, text=True, stdin=subprocess.DEVNULL)
 
 
+def _applied_migrations() -> set[tuple[int, str]]:
+    """(version, description) of every recorded migration; empty if not initialized."""
+    result = _run_clickhouse_query("SELECT version, description FROM midi_grep.schema_version FORMAT TSV")
+    if result.returncode != 0:
+        return set()
+    out = set()
+    for ln in result.stdout.splitlines():
+        v, _, d = ln.partition("\t")
+        if v.strip().isdigit():
+            out.add((int(v), d))
+    return out
+
+
 def _get_schema_version() -> int:
     """Get current schema version from DB, or 0 if not initialized."""
     result = _run_clickhouse_query(
@@ -215,11 +228,14 @@ def init_clickhouse():
     if result.returncode != 0:
         raise RuntimeError(f"Failed to create database: {result.stderr}")
 
-    current_version = _get_schema_version()
+    applied = _applied_migrations()
 
-    # Apply pending migrations
+    # Apply pending migrations. A migration is applied when ITS (version, description) is recorded, not when the version
+    # number is: a database that once ran an experiment's migration under the same number (2026-10-27: version 5
+    # "voice source column" from an unmerged branch) would otherwise skip this one for good. Every query is idempotent
+    # (IF NOT EXISTS), so a re-applied number is safe.
     for version, description, queries in MIGRATIONS:
-        if version <= current_version:
+        if (version, description) in applied:
             continue  # Already applied
 
         print(f"  [ClickHouse] Applying migration {version}: {description}")
