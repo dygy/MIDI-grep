@@ -1221,7 +1221,13 @@ def main() -> int:
         lead_row = f"stack({lead_row}, noLoopAttack(note(cat(...leadLegato))))"
     if chord_legato:
         chord_row = f"stack({chord_row}, noLoopAttack(note(cat(...chordsLegato))))"
-    if lead_bars and (lead_loop_table or lead_legato or chord_legato):
+    if lead_bars and not lead_loop_table and (lead_legato or chord_legato):
+        # no sample loops (synth palette, or no loopable grain): a legato entry is only the faded-in attack, and no
+        # loop table is written (a synth piece carries no sample machinery)
+        L += ["// a pitch change inside a held note (leadLegato / chordsLegato): faded in over one grid step, no new attack.",
+              f"const legatoAttack = {round(60.0 / args.bpm / 4, 4)}  // s: one grid step to fade the entry in",
+              "const noLoopAttack = p => p.withValue(v => ({ ...v, attack: legatoAttack }))", ""]
+    elif lead_bars and (lead_loop_table or lead_legato or chord_legato):
         L += ["// sample loop [begin, end] (fractions of the grain) per written pitch (midi), measured on the grains:",
               "// held lead/chord notes sustain inside it. Delete a pitch to play its grain once.",
               "const leadLoop = {" + ", ".join(f"{p}: [{b}, {e}]" for p, (b, e) in sorted(lead_loop_table.items())) + "}",
@@ -1271,7 +1277,7 @@ def main() -> int:
             lead_row = f"stack({lead_row}, noLoopAttack({_vel('note(cat(...leadLegato))', 'leadLegato', 'leadLegatoVel')}))"
         if chord_legato:
             chord_row = f"stack({chord_row}, noLoopAttack({_vel('note(cat(...chordsLegato))', 'chordsLegato', 'chordsLegatoVel')}))"
-        if lead_bars and (lead_loop_table or lead_legato or chord_legato):
+        if lead_bars and lead_loop_table:
             lead_row, chord_row = f"withLeadLoop({lead_row})", f"withLeadLoop({chord_row})"
         L += ["// per-note level measured from the melodic stem (note_dynamics.py): one value per written note, a parallel",
               "// .velocity() (multiplies the voice gain). Set a value to 1 - or delete the .velocity() - to play that note flat.", ""]
