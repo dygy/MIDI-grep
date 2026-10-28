@@ -19,7 +19,7 @@ const skip = !haveRenderer || !haveChromium ? 'renderer build or Chromium missin
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 async function waitForIdleRenderer() {
   for (let i = 0; i < 360; i++) { // up to 30 min
-    const r = spawnSync('pgrep', ['-f', 'render-strudel-offline']);
+    const r = spawnSync('pgrep', ['-f', '^(nice )?node .*dist/render-strudel-offline\\.js']) // anchored: a shell whose command line merely mentions the name is not a renderer;
     if (r.status !== 0) return;
     await sleep(5000);
   }
@@ -56,6 +56,24 @@ $: stack(
   const r = await render(code, 8, CHUNKED);
   assert.doesNotMatch(r.log, /duck target orbit 2 does not exist/);
   assert.equal(r.status, 0, r.log);
+});
+
+test('a ducking hap at the very start of a render context (pre-roll edge, song start) does not throw', { skip }, async () => {
+  // superdough's duck() schedules its gain ramp with stop(t - 0.01): a ducking hap at context time < 0.01 s threw
+  // "stop time (-0.01) is less than the minimum bound". Pre-roll 0.5 s puts the kick (cycle position 0.75) exactly at frame 0
+  // of every later chunk; the first test below puts one at t = 0 of the song.
+  const code = `setcps(0.5)
+$: stack(
+  note("c1 ~ ~ ~").s("sine").orbit(2).gain(0),
+  note("~ ~ ~ c2").s("sine").duckorbit(2).duckdepth(0.8).gain(0.4)
+)`;
+  const r = await render(code, 8, ['--chunk-seconds', '2', '--preroll-seconds', '0.5', '--tail-seconds', '1']);
+  assert.doesNotMatch(r.log, /minimum bound/);
+  assert.equal(r.status, 0, r.log);
+  const first = await render(`setcps(0.5)
+$: stack(note("c1 ~ ~ ~").s("sine").orbit(2).gain(0), note("c2 ~ ~ ~").s("sine").duckorbit(2).gain(0.4))`, 4, CHUNKED);
+  assert.doesNotMatch(first.log, /minimum bound/);
+  assert.equal(first.status, 0, first.log);
 });
 
 test('a duck target no earlier hap ever used still fails loudly', { skip }, async () => {

@@ -155,6 +155,9 @@ window.__chunk = async (b, e, sampleRate, startFrame, len, poly, preFrames, preC
 };
 </script>`;
 
+/** superdough duck(): webAudioTimeout(..., t - 0.01) - a hap must sit at least this far into the context (+ margin for rounding). */
+const DUCK_GUARD_S = 0.02;
+
 async function main() {
   const args = process.argv.slice(2);
   let input = '', outputPath = 'offline.wav', duration = 30, sampleRate = 44100, allowFailures = false;
@@ -291,7 +294,11 @@ async function main() {
         const [b, e] = wins[ci];
         const startFrame = Math.floor((b / cps) * sampleRate);
         const m = chunkMargins(rings, b / cps, e / cps, tailSeconds, prerollSeconds);
-        const { preCycle, preFrames } = prerollPlan(b, startFrame, cps, sampleRate, m.prerollSeconds);
+        const plan = prerollPlan(b, startFrame, cps, sampleRate, m.prerollSeconds);
+        const { preCycle } = plan;
+        // lead-in: superdough's duck() schedules its gain ramp with stop(t - 0.01), which throws for a ducking hap at context
+        // time < 0.01 s (a pre-roll hap at the window start, or a kick at t = 0). The context starts a few ms earlier so no hap does.
+        const preFrames = plan.preFrames + Math.ceil(DUCK_GUARD_S * sampleRate);
         const nextStart = ci + 1 < wins.length ? Math.floor((wins[ci + 1][0] / cps) * sampleRate) : total;
         const keep = nextStart - startFrame; // this chunk owns [startFrame, nextStart); later chunks re-trigger its ringing voices as pre-roll
         const len = preFrames + Math.max(1, Math.round(((e - b) / cps) * sampleRate + m.tailSeconds * sampleRate));
