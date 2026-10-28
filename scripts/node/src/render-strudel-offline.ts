@@ -16,6 +16,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { createRequire } from 'module';
+import { deterministicInitScript, PAGE_DETERMINISM_JS } from './determinism.js';
 import { chunkMargins, TAIL_CHECK_S, Ring, analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures, triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput, isNetworkFailure, isOutageSampleFailure, isNetworkOutageFailure, netWaitBudgetS, nextNetWaitS } from './offline-helpers.js';
 
 const SHIM = `const S = window.strudel;
@@ -29,6 +30,7 @@ window.__triggerArgs = ${triggerArgs.toString()};
 window.__fontsP = import("/fontloader.mjs").then(m => m.registerSoundfonts);
 
 window.__logs = [];
+${PAGE_DETERMINISM_JS}
 document.addEventListener('strudel.log', e => window.__logs.push(String(e.detail && e.detail.message)));
 for (const k of ['error', 'warn']) { const o = console[k].bind(console); console[k] = (...a) => { window.__logs.push(k + ': ' + a.map(String).join(' ')); o(...a); }; }
 window.addEventListener('unhandledrejection', e => window.__logs.push('error: unhandledrejection ' + (e.reason && e.reason.message || e.reason)));
@@ -98,6 +100,7 @@ window.__init = async (code, site) => {
     S.aliasBank(alias);
   };
   const repl = await S.initStrudel({ prebake });
+  window.__installDeterminism(); // ducking scheduled at trigger time, reverb bookkeeping (determinism.ts)
   window.__logs.length = 0; // only count failures from evaluate/render, not init chatter
   // Compat shim: this bundled transpiler turns EVERY "double-quoted" string into mini(), including the
   // URL in samples("https://..."), which then fails to parse. Single-quoted strings are left alone, so
@@ -156,6 +159,7 @@ window.__chunk = async (b, e, sampleRate, startFrame, len, poly, preFrames, preC
     try { await S.superdough(hap2value(hap), a.t, hap.duration / cps, cps, a.cycle); }
     catch (err) { const m = 'error: ' + (err && err.message || err) + ' hap=' + JSON.stringify(hap.value).slice(0, 160); window.__logs.push(m); if (errs.length < 2) errs.push(m); }
   }
+  await window.__settleChildRenders(); // every reverb impulse response is in its convolver before the render starts
   const buf = await off.startRendering();
   const f = new Float32Array(len * 2); f.set(buf.getChannelData(0), 0); f.set(buf.getChannelData(1), len);
   window.__bytes = new Uint8Array(f.buffer);
@@ -210,6 +214,11 @@ async function main() {
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
   const port = (server.address() as any).port;
 
+  // Run-to-run determinism (determinism.ts): a fixed seed installed before any bundle code runs; MIDIGREP_RENDER_SEED
+  // changes it, MIDIGREP_RENDER_DETERMINISTIC=0 restores the unseeded engine (A/B and the regression test only).
+  const deterministic = (process.env.MIDIGREP_RENDER_DETERMINISTIC ?? '1') !== '0';
+  const renderSeed = Number.parseInt(process.env.MIDIGREP_RENDER_SEED ?? '1', 10) >>> 0;
+  console.log(`Determinism: ${deterministic ? `seeded (MIDIGREP_RENDER_SEED=${renderSeed}), ducking scheduled at trigger time, reverb IR awaited` : 'OFF (MIDIGREP_RENDER_DETERMINISTIC=0)'}`);
   const t0 = Date.now();
   // EVERY browser this run launches (initial + crash relaunches) is tracked and closed at the end.
   const launched: any[] = [];
@@ -260,6 +269,7 @@ async function main() {
   };
   const openPage = async () => {
     const page = await browser.newPage();
+    if (deterministic) await page.evaluateOnNewDocument(deterministicInitScript(renderSeed)); // before ANY page script, in every page
     page.on('error', e => console.log(`[PAGE CRASH] ${e.message}`));
     page.on('pageerror', e => console.log(`[PAGE ERROR] ${e.message}`));
     page.on('console', m => { const t = m.text(); if (isNetworkFailure(t)) netEvents++; if (process.env.OFFLINE_VERBOSE || /error|fail/i.test(t)) console.log(`[BROWSER] ${t.slice(0, 200)}`); });
