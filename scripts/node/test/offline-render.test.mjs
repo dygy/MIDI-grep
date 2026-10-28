@@ -24,12 +24,12 @@ async function waitForIdleRenderer() {
     await sleep(5000);
   }
 }
-async function render(code, seconds, extra = []) {
+async function render(code, seconds, extra = [], env = {}) {
   await waitForIdleRenderer();
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'offline-render-'));
   const src = path.join(dir, 'p.strudel'), out = path.join(dir, 'o.wav');
   fs.writeFileSync(src, code);
-  const p = spawn('nice', ['node', RENDERER, src, '-o', out, '-d', String(seconds), ...extra]);
+  const p = spawn('nice', ['node', RENDERER, src, '-o', out, '-d', String(seconds), ...extra], { env: { ...process.env, ...env } });
   let log = ''; p.stdout.on('data', d => log += d); p.stderr.on('data', d => log += d);
   const status = await new Promise(r => p.on('close', r));
   return { status, log, out: fs.existsSync(out) ? fs.readFileSync(out) : null };
@@ -84,17 +84,27 @@ $: note("c2 ~ ~ ~").s("sine").duckorbit(3).gain(0.4)`;
   assert.match(r.log, /duck target orbit 3 does not exist/);
 });
 
-test('a one-shot longer than the tail margin is reproduced whole, and a missing sound still fails', { skip }, async () => {
-  // 6 s decay-free tone served over http: it rings through three 2 s chunks, far past the 1 s margin
+/** A 6 s decay-free 220 Hz tone (22.05 kHz mono 16-bit WAV) served over http; `failFirst` requests answer 500 first. fn(url, hits). */
+async function withTone(fn, failFirst = 0) {
   const sr = 22050, n = sr * 6, b = Buffer.alloc(44 + n * 2);
   b.write('RIFF', 0); b.writeUInt32LE(b.length - 8, 4); b.write('WAVEfmt ', 8); b.writeUInt32LE(16, 16); b.writeUInt16LE(1, 20);
   b.writeUInt16LE(1, 22); b.writeUInt32LE(sr, 24); b.writeUInt32LE(sr * 2, 28); b.writeUInt16LE(2, 32); b.writeUInt16LE(16, 34);
   b.write('data', 36); b.writeUInt32LE(n * 2, 40);
   for (let i = 0; i < n; i++) b.writeInt16LE(Math.round(Math.sin(i * 2 * Math.PI * 220 / sr) * 0.4 * 32767), 44 + i * 2);
-  const srv = http.createServer((q, s) => { s.writeHead(200, { 'content-type': 'audio/wav', 'access-control-allow-origin': '*' }); s.end(b); });
+  const hits = { n: 0 };
+  const srv = http.createServer((q, s) => {
+    if (q.method === 'OPTIONS') { s.writeHead(204, { 'access-control-allow-origin': '*' }); return s.end(); }
+    if (hits.n++ < failFirst) { s.writeHead(500, { 'access-control-allow-origin': '*' }); return s.end('no'); }
+    s.writeHead(200, { 'content-type': 'audio/wav', 'access-control-allow-origin': '*' }); s.end(b);
+  });
   await new Promise(r => srv.listen(0, '127.0.0.1', r));
-  try {
-    const url = `http://127.0.0.1:${srv.address().port}/long.wav`;
+  try { return await fn(`http://127.0.0.1:${srv.address().port}/long.wav`, hits); } finally { srv.close(); }
+}
+const ctxFrames = log => [...log.matchAll(/chunk (\d+)\/\d+ cycles .*?ctx (\d+) frames/g)].map(m => [Number(m[1]), Number(m[2])]);
+
+test('a one-shot longer than the tail margin is reproduced whole, and a missing sound still fails', { skip }, async () => {
+  // 6 s decay-free tone served over http: it rings through three 2 s chunks, far past the 1 s margin
+  await withTone(async url => {
     const code = `setcps(0.5)
 await samples({ longtone: ['${url}'] })
 $: s("<longtone ~ ~ ~ ~ ~>")`;
@@ -104,10 +114,59 @@ $: s("<longtone ~ ~ ~ ~ ~>")`;
     const wav = r.out;
     assert.ok(rmsBetween(wav, 44100, 4.2, 5.8) > 0.1, `tone missing at 4.2-5.8 s: ${rmsBetween(wav, 44100, 4.2, 5.8)}`);
     assert.ok(rmsBetween(wav, 44100, 6.5, 9.5) < 0.01);
+    // each context ends the fx margin after its window: the long voice's end is rendered by the chunk that holds it, not by every earlier one
+    const first = ctxFrames(r.log).find(([i]) => i === 1);
+    assert.ok(first && first[1] <= Math.ceil((2 + 1 + 0.1) * 44100), `chunk 1 context is ${first && first[1]} frames, it renders the whole 6 s voice`);
     const miss = await render(`setcps(0.5)\n$: s("nosuchsound ~ ~ ~")`, 4, CHUNKED);
     assert.notEqual(miss.status, 0);
     assert.match(miss.log, /not found|failed/i);
-  } finally { srv.close(); }
+  });
+});
+
+test('a cut group chokes the long voice: it is not re-triggered (and heard) in later chunks', { skip }, async () => {
+  // long tone at 0 s, cut(1); a 0.12 s hit of the same cut group at 1 s chokes it. Chunk 2 starts at 2 s with a 0.6 s pre-roll (from 1.4 s):
+  // the choker is OLDER than the pre-roll window, only the long voice's (unchoked) ring made it a pre-roll hap.
+  await withTone(async url => {
+    const code = `setcps(0.5)
+await samples({ longtone: ['${url}'] })
+$: stack(s("<longtone ~ ~ ~ ~ ~>").cut(1), s("<[~ longtone] ~ ~ ~ ~ ~>").end(0.02).cut(1))`;
+    const r = await render(code, 10, CHUNKED);
+    assert.equal(r.status, 0, r.log);
+    assert.ok(rmsBetween(r.out, 44100, 0.3, 0.9) > 0.1, 'the long voice must sound until it is choked at 1 s');
+    assert.ok(rmsBetween(r.out, 44100, 1.5, 9.5) < 0.01, `choked voice is audible after the choke: ${rmsBetween(r.out, 44100, 1.5, 9.5)}`);
+  });
+});
+
+test('a failing ring estimate fails the render loudly instead of truncating long one-shots in silence', { skip }, async () => {
+  // the estimate runs in its own page: its first fetches of the sample fail (HTTP 500), the chunk pages fetch it fine
+  await withTone(async url => {
+    const code = `setcps(0.5)
+await samples({ longtone: ['${url}'] })
+$: s("<longtone ~ ~ ~ ~ ~>")`;
+    const r = await render(code, 10, CHUNKED);
+    assert.notEqual(r.status, 0, r.log);
+    assert.match(r.log, /ring estimate failed/);
+    assert.equal(r.out, null);
+  }, 3);
+});
+
+test('a hiccup of the ring estimate is retried loudly and the long one-shot is not truncated', { skip }, async () => {
+  await withTone(async url => {
+    const r = await render(`setcps(0.5)\nawait samples({ longtone: ['${url}'] })\n$: s("<longtone ~ ~ ~ ~ ~>")`, 10, CHUNKED);
+    assert.match(r.log, /\[CRASH\] ring estimate/);
+    assert.equal(r.status, 0, r.log);
+    assert.ok(rmsBetween(r.out, 44100, 4.2, 5.8) > 0.1, `tone truncated at 4.2-5.8 s: ${rmsBetween(r.out, 44100, 4.2, 5.8)}`);
+  }, 1);
+});
+
+test('pattern values are not re-queried from 0 for every chunk (orbits come from the one whole-pattern pass)', { skip }, async () => {
+  // a value probe counts evaluations; 16 one-hap cycles in 16 chunks. A per-chunk query of [0, b) alone adds 0+1+..+15 = 120.
+  const code = `setcps(0.5)
+$: note("c3 ~ ~ ~").s("sine").gain(0.2).withValue(v => { console.log('probe-eval'); return v })`;
+  const r = await render(code, 32, CHUNKED, { OFFLINE_VERBOSE: '1' });
+  assert.equal(r.status, 0, r.log);
+  const probes = (r.log.match(/probe-eval/g) || []).length;
+  assert.ok(probes <= 16 * 5, `${probes} pattern evaluations for 16 chunks of 1 hap`);
 });
 
 test('an echo tail that outlasts the derived margin still fails loudly', { skip }, async () => {
