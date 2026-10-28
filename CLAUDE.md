@@ -372,7 +372,7 @@ emulating Strudel sounds, ~16% similarity vs the real engine) was deleted. Dead 
   where `currentTime` stays 0); chunked whole-cycle ~20 s / ≤1200-onset windows, each in a FRESH page
   (superdough pools nodes at module level, so a second OfflineAudioContext in one page fails); each chunk
   re-triggers the previous tail-length of haps as a discarded PRE-ROLL, so ringing tails, `cut` chokes and
-  ducking cross the boundary like real playback, and haps get their ABSOLUTE cycle (LFO phase); the WAV is
+  ducking cross the boundary like real playback, and haps get their ABSOLUTE cycle (LFO phase); the look-back is DERIVED per chunk from the piece (a one-shot with no clip/loop/release rings its whole slice - a 14 s snare needs 14 s, and a `.cut(n)` voice ends where the next same-group sample chokes it, `__rings` / `chunkMargins`), while a context ends only the effect tail past its window: a voice still ringing at the window end is carried by the next chunk's pre-roll (`--tail-seconds`/`--preroll-seconds` are the effect-tail / minimum floors; a failed ring estimate fails the render), and every orbit an earlier hap used is re-created at the chunk start so a `.duckorbit(n)` target exists as in continuous playback (a target no earlier hap used still fails loudly); the WAV is
   written atomically only after every check passes (a failed render leaves no file); a network outage is waited out with backoff up to `MIDIGREP_RENDER_NET_WAIT_S` (default 1800 s); `samples("url")` rewritten to single quotes (this bundle's transpiler turns "…"
   into mini-notation); crashed pages retried ×3; fails loudly on unloaded sounds, silence, frame/onset
   count mismatch, truncated tails.

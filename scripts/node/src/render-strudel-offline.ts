@@ -16,7 +16,7 @@ import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { createRequire } from 'module';
-import { analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures, triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput, isNetworkFailure, isOutageSampleFailure, isNetworkOutageFailure, netWaitBudgetS, nextNetWaitS } from './offline-helpers.js';
+import { chunkMargins, TAIL_CHECK_S, Ring, analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures, triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput, isNetworkFailure, isOutageSampleFailure, isNetworkOutageFailure, netWaitBudgetS, nextNetWaitS } from './offline-helpers.js';
 
 const SHIM = `const S = window.strudel;
 export const { noteToMidi, freqToMidi, getSoundIndex, getAudioContext, registerSound, getParamADSR, getADSRValues, getPitchEnvelope, getVibratoOscillator } = S;`;
@@ -40,6 +40,46 @@ window.__getSlice = (i, n) => {
 // 1) init: engine + prebake + evaluate. Returns cps. The pattern stays in this page.
 window.__count = (cycles) => window.__pattern.queryArc(0, cycles, { _cps: window.__cps }).filter(h => h.hasOnset()).length;
 window.__density = (cycles) => { const n = Math.ceil(cycles - 1e-9), d = new Array(n).fill(0); for (const h of window.__pattern.queryArc(0, cycles, { _cps: window.__cps })) if (h.hasOnset()) { const c = Math.floor(h.whole.begin.valueOf() + 1e-9); if (c >= 0 && c < n) d[c]++; } return d; };
+// Ring estimate per onset hap, in SECONDS: [onset, end of the audible voice]. A sample with no clip/loop/release plays its
+// whole (speed-scaled) slice regardless of the hap length (superdough onTriggerSample: duration = sliceDuration), so a
+// one-shot that is 14 s long rings 14 s; a synth or a held/looped sample ends with the hap + its release. A sample with a cut
+// group (.cut(n)) is choked by the next sample of the same group (global across orbits, superdough keeps only the latest
+// handle): its voice ends there (+ the 10 ms ramp), not at its slice end. Effect tails (reverb, delay) are NOT included: the
+// caller adds its margin on top. Also returns [cycle, orbit] of every onset (the orbits an earlier hap created, per chunk) and
+// the estimate's failures: a sample that cannot be fetched/decoded or any other exception leaves that voice at its hap length,
+// which would truncate a long one-shot, so the caller must not ignore them.
+window.__rings = async (cycles) => {
+  const S = strudel, cps = window.__cps, out = [], dur = {}, errors = [];
+  for (const h of window.__pattern.queryArc(0, cycles, { _cps: cps })) {
+    if (!h.hasOnset()) continue;
+    h.ensureObjectValue(); const v = h.value;
+    const onset = h.whole.begin.valueOf() / cps, hapDur = h.duration / cps;
+    let len = hapDur + (v.release ?? 0), cut = null;
+    const name = v.bank && v.s ? v.bank + '_' + v.s : v.s;
+    const snd = typeof name === 'string' ? S.getSound(name) : undefined;
+    const bank = snd && snd.data && snd.data.type === 'sample' ? snd.data.samples : null;
+    if (bank && v.speed !== 0) {
+      if (v.cut !== undefined) cut = v.cut;
+      try {
+        const info = S.getSampleInfo(v, bank);
+        if (dur[info.url] === undefined) dur[info.url] = (await S.getSampleBuffer(v, bank)).buffer.duration;
+        const rate = info.playbackRate * (v.unit === 'c' ? dur[info.url] : 1);
+        const slice = ((v.end ?? 1) - (v.begin ?? 0)) * dur[info.url] / rate;
+        const sustained = v.clip != null || v.loop != null || v.release != null;
+        len = Math.max(hapDur, sustained ? 0 : slice) + (v.release ?? 0);
+      } catch (err) { errors.push(String(name) + ': ' + String(err && err.message || err)); }
+    }
+    out.push({ onset, end: onset + len, cycle: h.whole.begin.valueOf(), orbit: v.orbit ?? 1, cut, nudge: v.nudge ?? 0 });
+  }
+  const last = new Map(); // cut group -> latest sample voice before this one
+  for (const e of out.slice().sort((x, y) => x.onset - y.onset)) {
+    if (e.cut === null) continue;
+    const prev = last.get(e.cut);
+    if (prev) prev.end = Math.max(prev.onset, Math.min(prev.end, e.onset + e.nudge + 0.01));
+    last.set(e.cut, e);
+  }
+  return { rings: out.map(e => [e.onset, e.end]), used: out.map(e => [e.cycle, e.orbit]), errors: [...new Set(errors)] };
+};
 window.__init = async (code, site) => {
   const S = strudel;
   const prebake = async () => {
@@ -85,7 +125,7 @@ window.__single = async (cycles, sampleRate, poly) => {
 // path as renderPatternAudio. The context's frame 0 is song frame startFrame-preFrames: haps with onsets in
 // [preCycle,b) are PRE-ROLL — triggered so cut groups / orbit ducking see the previous chunk's ringing voices —
 // and their audio (the first preFrames) is discarded by the caller. cycle is the hap's absolute cycle.
-window.__chunk = async (b, e, sampleRate, startFrame, len, poly, preFrames, preCycle) => {
+window.__chunk = async (b, e, sampleRate, startFrame, len, poly, preFrames, preCycle, nearCycle, ringingOnsets, usedOrbits) => {
   const S = strudel, cps = window.__cps, pattern = window.__pattern;
   const Ctrl = S.getSuperdoughAudioController().constructor; // class is not exported; reuse the live one's constructor
   const hap2value = h => { h.ensureObjectValue(); return h.value; };
@@ -95,8 +135,18 @@ window.__chunk = async (b, e, sampleRate, startFrame, len, poly, preFrames, preC
   S.setAudioContext(off); S.setSuperdoughAudioController(new Ctrl(off));
   await S.initAudio({ maxPolyphony: poly, multiChannelOrbits: false });
   const byBegin = (x, y) => x.whole.begin.valueOf() - y.whole.begin.valueOf();
-  const pre = preFrames > 0 ? pattern.queryArc(preCycle, b, { _cps: cps }).filter(h => h.hasOnset() && h.whole.begin.valueOf() < b).sort(byBegin) : [];
+  // pre-roll = every onset in [nearCycle, b) (cut groups, ducking) + the OLDER onsets whose voice still sounds at b (ringingOnsets, seconds)
+  const ringing = new Set(ringingOnsets.map(x => Math.round(x * 1e6)));
+  const isPre = h => h.hasOnset() && h.whole.begin.valueOf() < b && (h.whole.begin.valueOf() >= nearCycle || ringing.has(Math.round((h.whole.begin.valueOf() / cps) * 1e6)));
+  const pre = preFrames > 0 ? pattern.queryArc(preCycle, b, { _cps: cps }).filter(isPre).sort(byBegin) : [];
   const haps = pattern.queryArc(b, e, { _cps: cps }).sort(byBegin);
+  // An orbit is created by the first hap that plays on it and then lives on, so a duck target (.duckorbit(n)) exists in
+  // continuous playback from that hap on. A chunk starts mid-song: orbits that earlier haps of the pattern used must exist
+  // here too, or a kick at the start of the window finds no target before the first hap of its own on that orbit.
+  // A silent '-' hap goes through superdough's own orbit creation (it returns right after it). An orbit that NO earlier hap
+  // used is still missing, as in continuous playback, and still fails loudly.
+  // usedOrbits: the orbits of all earlier onsets, from the single whole-pattern pass of __rings (no re-query of [0, b) per chunk)
+  for (const orbit of usedOrbits) await S.superdough({ s: '-', orbit }, 0, 0, cps, 0);
   let onsets = 0; const errs = [];
   for (const hap of pre.concat(haps)) {
     if (!hap.hasOnset()) continue;
@@ -112,6 +162,9 @@ window.__chunk = async (b, e, sampleRate, startFrame, len, poly, preFrames, preC
   return { bytes: window.__bytes.length, onsets, logs: window.__logs.slice(), errs };
 };
 </script>`;
+
+/** superdough duck(): webAudioTimeout(..., t - 0.01) - a hap must sit at least this far into the context (+ margin for rounding). */
+const DUCK_GUARD_S = 0.02;
 
 async function main() {
   const args = process.argv.slice(2);
@@ -230,7 +283,7 @@ async function main() {
     console.log(`cps ${cps} (${(cps * 240).toFixed(2)} BPM @4/4), ${cycles.toFixed(2)} cycles`);
     const expectedOnsets: number = await page.evaluate((cy) => (window as any).__count(cy), cycles);
     const logs: string[] = []; const errs: string[] = [];
-    let onsets = 0, chunks = 0, tailEndPeak = 0, wav: Buffer;
+    let onsets = 0, chunks = 0, tailEndPeak = 0, tailEndChunk = 0, wav: Buffer;
     if (!(chunkSeconds > 0)) {
       console.log(`Rendering ${duration} s offline at ${sampleRate} Hz (single pass) ...`);
       const r: any = await page.evaluate((cy, sr, po) => (window as any).__single(cy, sr, po), cycles, sampleRate, maxPolyphony);
@@ -241,32 +294,51 @@ async function main() {
       // reuses nodes of the first ("cannot connect to an AudioNode belonging to a different audio
       // context"); a new page also frees all decoded buffers/graphs (page memory grew ~1.1 GB for 150 s).
       const density: number[] = await page.evaluate((cy) => (window as any).__density(cy), cycles);
+      // ring estimate + orbit usage in ONE pass over the pattern. A failure of the estimate (a sample that cannot be fetched, any exception)
+      // leaves a voice at its hap length and would truncate a long one-shot: it is retried like any render step (a network outage is waited
+      // out) and then fails the render, unless --allow-failed-samples, which only warns.
+      let ringTry = 0; // a failed sample fetch stays cached in its page, so a retry needs a fresh one
+      const est: { rings: number[][]; used: number[][]; errors: string[] } = await attempt('ring estimate', 'whole pattern', async () => {
+        if (ringTry++ > 0) { await quickClose(page); page = await openPage(); await page.evaluate((c, site) => (window as any).__init(c, site), code, SITE); }
+        const x = await page.evaluate((cy) => (window as any).__rings(cy), cycles);
+        if (x.errors.length && !allowFailures) throw new Error(`ring estimate failed for ${x.errors.length} sound(s), their one-shot would be cut at the hap length: ${x.errors.slice(0, 3).join(' | ')}`);
+        return x;
+      });
+      if (est.errors.length) console.log(`[RING] estimate failed (allowed by --allow-failed-samples), these voices are cut at the hap length: ${est.errors.slice(0, 3).join(' | ')}`);
+      const rings: Ring[] = est.rings.map(([begin, end]) => ({ begin, end }));
       const wins = planChunks(density, cycles, Math.max(1, Math.round(chunkSeconds * cps)), maxChunkOnsets);
-      console.log(`Rendering ${duration} s offline at ${sampleRate} Hz (chunked: ${wins.length} windows, <= ${Math.max(1, Math.round(chunkSeconds * cps))} cycles and <= ${maxChunkOnsets} onsets each, ${tailSeconds} s tail margin, ${prerollSeconds} s pre-roll, fresh page each) ...`);
+      console.log(`Rendering ${duration} s offline at ${sampleRate} Hz (chunked: ${wins.length} windows, <= ${Math.max(1, Math.round(chunkSeconds * cps))} cycles and <= ${maxChunkOnsets} onsets each, ${tailSeconds} s effect-tail margin past each voice's end (longest ring ${Math.max(0, ...rings.map(r => r.end - r.begin)).toFixed(2)} s), ${prerollSeconds} s minimum pre-roll, fresh page each) ...`);
       const L = new Float32Array(total), R = new Float32Array(total);
       for (let ci = 0; ci < wins.length; ci++) {
         const [b, e] = wins[ci];
         const startFrame = Math.floor((b / cps) * sampleRate);
-        const { preCycle, preFrames } = prerollPlan(b, startFrame, cps, sampleRate, prerollSeconds);
+        const m = chunkMargins(rings, b / cps, e / cps, tailSeconds, prerollSeconds);
+        const plan = prerollPlan(b, startFrame, cps, sampleRate, m.prerollSeconds);
+        const { preCycle } = plan;
+        // lead-in: superdough's duck() schedules its gain ramp with stop(t - 0.01), which throws for a ducking hap at context
+        // time < 0.01 s (a pre-roll hap at the window start, or a kick at t = 0). The context starts a few ms earlier so no hap does.
+        const preFrames = plan.preFrames + Math.ceil(DUCK_GUARD_S * sampleRate);
         const nextStart = ci + 1 < wins.length ? Math.floor((wins[ci + 1][0] / cps) * sampleRate) : total;
         const keep = nextStart - startFrame; // this chunk owns [startFrame, nextStart); later chunks re-trigger its ringing voices as pre-roll
-        const len = preFrames + Math.max(1, Math.round(((e - b) / cps) * sampleRate + tailSeconds * sampleRate));
-        const held = `${density.slice(b, Math.ceil(e)).reduce((x, y) => x + y, 0)} haps over cycles [${b.toFixed(2)}, ${e.toFixed(2)}), ctx ${len} frames`;
+        // the context ends fx seconds after the window: voices still sounding there are re-triggered by the next chunk, which renders their end
+        const len = preFrames + Math.max(1, Math.round(((e - b) / cps) * sampleRate + m.tailSeconds * sampleRate));
+        const held = `${density.slice(b, Math.ceil(e)).reduce((x, y) => x + y, 0)} haps over cycles [${b.toFixed(2)}, ${e.toFixed(2)}), ctx ${len} frames (${m.tailSeconds} s past the window)`;
         let heapMb = 0;
         const { r, raw } = await attempt(`chunk ${ci + 1}/${wins.length}`, held, async () => {
           await quickClose(page); page = await openPage();
           await page.evaluate((c, site) => (window as any).__init(c, site), code, SITE);
-          const rr: any = await page.evaluate((b0, e0, sr, sf, ln, po, pf, pc) => (window as any).__chunk(b0, e0, sr, sf, ln, po, pf, pc), b, e, sampleRate, startFrame, len, maxPolyphony, preFrames, preCycle);
+          const rr: any = await page.evaluate((b0, e0, sr, sf, ln, po, pf, pc, nc, rg, uo) => (window as any).__chunk(b0, e0, sr, sf, ln, po, pf, pc, nc, rg, uo), b, e, sampleRate, startFrame, len, maxPolyphony, preFrames, preCycle, Math.max(0, b - prerollSeconds * cps), m.ringingOnsets, [...new Set(est.used.filter(([c]) => c < b).map(([, o]) => o))]);
           const bytes = await fetchBytes(page, rr.bytes);
           try { heapMb = (await page.metrics()).JSHeapUsedSize! / 1048576; } catch { /* page gone */ }
           return { r: rr, raw: bytes };
         }, v => [...(v.r.logs || []), ...(v.r.errs || [])]);
         const f = new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
         // tail-truncation check: peak over the last 0.25 s of this chunk's tail margin (skip the last chunk: file ends there); measured on the context before trimming
-        if (ci < wins.length - 1) for (let i = Math.max(0, len - Math.round(0.25 * sampleRate)); i < len; i++) tailEndPeak = Math.max(tailEndPeak, Math.abs(f[i]), Math.abs(f[len + i]));
+        // (skipped for a chunk where a voice of the context still legitimately sounds in that window: its end is checked by the chunk that holds it)
+        if (ci < wins.length - 1 && m.tailCheck) for (let i = Math.max(0, len - Math.round(TAIL_CHECK_S * sampleRate)); i < len; i++) { const pk = Math.max(Math.abs(f[i]), Math.abs(f[len + i])); if (pk > tailEndPeak) { tailEndPeak = pk; tailEndChunk = ci + 1; } }
         overlapAdd(L, R, trimChunk(f, len, preFrames, keep), startFrame);
         onsets += r.onsets; logs.push(...r.logs); errs.push(...r.errs); chunks++;
-        console.log(`  chunk ${ci + 1}/${wins.length} cycles [${b.toFixed(2)}, ${e.toFixed(2)}) ${r.onsets} onsets, js heap ${heapMb.toFixed(0)} MB (${((Date.now() - t0) / 1000).toFixed(1)} s elapsed)`);
+        console.log(`  chunk ${ci + 1}/${wins.length} cycles [${b.toFixed(2)}, ${e.toFixed(2)}) ${r.onsets} onsets, ctx ${len} frames, js heap ${heapMb.toFixed(0)} MB (${((Date.now() - t0) / 1000).toFixed(1)} s elapsed)`);
       }
       wav = floatToWav16(L, R, sampleRate);
     }
@@ -279,7 +351,7 @@ async function main() {
     console.log(`Sample/trigger failures: ${failures.length}${failures.length ? '\n  ' + failures.join('\n  ') : ''}`);
     console.log('No leading-silence trim: bar 0 is t=0 (offline render has no capture start-up latency).');
     const chk = checkRender(info, { sampleRate, expectedFrames: exp, failures, allowFailures });
-    if (tailEndPeak > 1e-3) { chk.problems.push(`tail margin ${tailSeconds} s truncates ringing audio (peak ${tailEndPeak.toExponential(2)} at its end) — raise --tail-seconds`); chk.ok = false; }
+    if (tailEndPeak > 1e-3) { chk.problems.push(`tail margin ${tailSeconds} s past a voice's end truncates ringing audio (peak ${tailEndPeak.toExponential(2)} at the end of chunk ${tailEndChunk}'s context) — raise --tail-seconds`); chk.ok = false; }
     if (onsets !== expectedOnsets) { chk.problems.push(`triggered ${onsets} onsets but the pattern has ${expectedOnsets} in range (chunk boundary loss?)`); chk.ok = false; }
     if (onsets === 0) { chk.problems.push('pattern has 0 onsets in range'); chk.ok = false; }
     console.log(`Wall time: ${((Date.now() - t0) / 1000).toFixed(1)} s for ${duration} s of audio`);

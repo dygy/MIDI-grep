@@ -1212,7 +1212,10 @@ def main() -> int:
         rows = [f'  {main_row}{fx_no_gain(bass_fx)}{bass_cut}{glide}{orbit}{gain_pattern(bass_env, bass_fx["gain"] * M)}',
                 f'  {sub_notes}{sub_transpose}.s("sine").lpf({sub_lpf}){glide}{orbit}{gain_pattern(bass_env, sub_g * M)}']
         if bass_duck:
-            # the duck target orbit must exist before the first kick of any render window: a silent keeper voice
+            # the duck target orbit must exist before the first kick of the piece (superdough creates an orbit when the
+            # first hap plays on it, and bass gain can be 0 for the opening bars): a silent keeper voice at cycle 0.
+            # A render window that starts mid-song gets the orbit from the offline renderer (it re-creates the orbits
+            # earlier haps used), so the keeper only has to cover the start of the piece.
             rows.append(f'  note("c1").s("sine").orbit({BASS_ORBIT}).gain(0)')
         bass_code = "stack(\n" + ",\n".join(rows) + "\n)"
         channels.append(("BASS", "low end — root/sub. edit notes in `bass`", bass_code))
@@ -1341,8 +1344,10 @@ def main() -> int:
                 bank = pick_palette_sound(args.genre, "drums")
                 bank_suffix = f'.bank("{bank}")'
                 label = f'detected groove on {bank} — edit the patterns'
+            # the detected slots are counted from the hits' grid phase: `.late()` right after the stack puts them back on
+            # the stem's times (the per-bar gain() below is applied after it, so the envelope is not shifted)
             drum_code = ("stack(\n" + ",\n".join("  " + d for d in dlines)
-                         + f'\n){bank_suffix}{drum_lpf}{fx_no_gain(drums_fx, drop_lpf=True)}'
+                         + f'\n){H.late_suffix(detected.late)}{bank_suffix}{drum_lpf}{fx_no_gain(drums_fx, drop_lpf=True)}'
                          + f'{gain_pattern(drum_env, drums_fx["gain"] * M)}')
             channels.append(("DRUMS", label, drum_code))
 

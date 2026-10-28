@@ -133,6 +133,19 @@ def test_stages_3_and_4_are_rebuilt_when_the_stamped_bpm_changes(repo):
     assert "drums_bands bpm=130.0" in again and "sample_pack bpm=130.0" in again, r.stderr
 
 
+def test_a_title_that_names_no_cache_dir_finds_the_track_by_the_urls_video_id(repo):
+    # 2026-10-28: --title "Automotivo XM, Taka Taka Taka Ta" vs the cache dir the extractor named after the YouTube title
+    # ("Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM"): the title lookup exited empty and stage 1 died with
+    # "produced no complete track dir" although the stems were there, findable by video id
+    meta = json.loads((repo.track / "metadata.json").read_text())
+    (repo.track / "metadata.json").write_text(json.dumps({**meta, "video_id": "VID123abc"}))
+    env = {"PATH": f"{repo.bin}:/usr/bin:/bin", "HOME": str(repo.root)}
+    r = subprocess.run(["/bin/bash", str(repo.root / "scripts" / "editable-pipeline.sh"), "--title", "Trk, other spelling",
+                        "--url", "https://youtu.be/VID123abc", "--prefix", SLUG, "--local", "--mode", "synth"],
+                       capture_output=True, text=True, env=env, timeout=120)
+    assert f"stage 1 skip: stems + metadata exist in {repo.track}" in r.stderr, r.stderr[-1500:]
+
+
 # --- #3 stage 6 follows what was rebuilt ---------------------------------------------------------------
 def test_upload_is_repeated_when_the_pack_changed_after_the_last_upload(repo):
     run(repo, "--r2", "--mode", "synth")

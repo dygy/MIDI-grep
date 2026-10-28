@@ -209,3 +209,34 @@ export function nextNetWaitS(n: number, waitedS: number, budgetS: number): numbe
   if (!(left > 0)) return 0;
   return Math.min(NET_BACKOFF_FIRST_S * 2 ** n, NET_BACKOFF_CAP_S, left);
 }
+
+/** One onset's voice, in seconds: when it starts and when it stops sounding (hap + release, or the whole one-shot slice). */
+export interface Ring { begin: number; end: number }
+
+/** Width (s) of the window at the very end of a chunk context in which the renderer demands silence (the tail-truncation check). */
+export const TAIL_CHECK_S = 0.25;
+
+/**
+ * Per-chunk margins derived from what the piece actually plays (window [tb, te) in seconds). `fxSeconds` is the effect
+ * tail (reverb/delay) added on top of a voice's end, `minPreroll` the least look-back kept for cut groups / ducking.
+ *  - tailSeconds: how far past te the context is rendered = fxSeconds. A voice still sounding at te is NOT rendered to its end here:
+ *    the chunk owns [tb, te) only, and the next chunk re-triggers that voice as pre-roll and renders its end (ring + fx > its tb);
+ *  - tailCheck: whether the end of the context may be required to be silent. Not when a voice that starts before te still sounds
+ *    inside the check window (te + fx - TAIL_CHECK_S, te + fx]: its audio there is legitimate and the chunk that holds its end checks it;
+ *  - prerollSeconds: how far back from tb an onset must be re-triggered so a voice still sounding at tb is reproduced
+ *    from its start, never below minPreroll;
+ *  - ringingOnsets: the onsets (seconds) of those older, still-sounding voices, for the page to include in the pre-roll.
+ */
+export function chunkMargins(rings: Ring[], tb: number, te: number, fxSeconds: number, minPreroll: number): { tailSeconds: number; tailCheck: boolean; prerollSeconds: number; ringingOnsets: number[] } {
+  let back = minPreroll, lastEnd = -Infinity;
+  const ringingOnsets: number[] = [];
+  const eps = 1e-9;
+  for (const r of rings) {
+    if (r.begin < te - eps) lastEnd = Math.max(lastEnd, r.end);
+    if (r.begin < tb - eps && r.end + fxSeconds > tb) {
+      back = Math.max(back, tb - r.begin);
+      if (tb - r.begin > minPreroll) ringingOnsets.push(r.begin);
+    }
+  }
+  return { tailSeconds: fxSeconds, tailCheck: lastEnd <= te + fxSeconds - TAIL_CHECK_S + eps, prerollSeconds: back, ringingOnsets };
+}

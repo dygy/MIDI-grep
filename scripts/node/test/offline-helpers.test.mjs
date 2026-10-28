@@ -156,3 +156,26 @@ test('isNetworkOutageFailure: only the attempt\'s own failure is an outage; stra
   assert.equal(isNetworkOutageFailure('error loading "https://h/samples.json"', 0), false);
   assert.ok(!isSampleLoadFailure('sound "x" not found'));
 });
+
+import { chunkMargins } from '../dist/offline-helpers.js';
+test('chunkMargins: a long one-shot extends the look-back only; the context ends fx after the window, its end is rendered by the chunk that holds it', () => {
+  const rings = [{ begin: 0, end: 14 }, { begin: 9.9, end: 10.1 }, { begin: 20, end: 20.2 }];
+  // chunk [10, 30) s, fx tail 4 s, min look-back 4 s: the 14 s voice from t=0 is still sounding at 10 s
+  const m = chunkMargins(rings, 10, 30, 4, 4);
+  assert.equal(m.prerollSeconds, 10);
+  assert.deepEqual(m.ringingOnsets, [0]);
+  assert.equal(m.tailSeconds, 4);                      // the 14 s voice ends inside the window
+  assert.equal(m.tailCheck, true);
+  // a voice that rings 14 s past the window end is NOT rendered to its end here (the next chunk re-triggers it) ...
+  const spill = chunkMargins([{ begin: 28, end: 44 }], 10, 30, 4, 4);
+  assert.equal(spill.tailSeconds, 4);
+  assert.equal(spill.tailCheck, false);                // ... and its audio at the end of this context is not a truncation
+  // an older voice re-triggered here that still rings past the chunk end: same
+  const old = chunkMargins([{ begin: 0, end: 20 }], 10, 12, 4, 4);
+  assert.deepEqual([old.tailSeconds, old.tailCheck], [4, false]);
+  assert.equal(chunkMargins([{ begin: 0, end: 14 }], 10, 12, 4, 4).tailCheck, true); // it ends 2 s past the window, well before the check window at 15.75..16 s
+  // a voice ending just past the window but before the check window of the context end keeps the check
+  assert.equal(chunkMargins([{ begin: 29, end: 30.5 }], 10, 30, 4, 4).tailCheck, true);
+  // no long voices: the floors stay
+  assert.deepEqual(chunkMargins([{ begin: 9, end: 9.5 }], 10, 30, 4, 4), { tailSeconds: 4, tailCheck: true, prerollSeconds: 4, ringingOnsets: [] });
+});

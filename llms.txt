@@ -103,7 +103,7 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
 
 ## Sample-pack → R2 (highest similarity)
 
-- `scripts/python/build_sample_pack.py` — stems → drum one-shots (`drum_oneshots.py`: cut from the pattern's own detected hits, attack at sample 0) + pitched bass/melodic + raw
+- `scripts/python/build_sample_pack.py` — stems → drum one-shots (`drum_oneshots.py`: cut from the pattern's own detected hits, attack at sample 0, picked against the class's own median profile) + pitched bass/melodic + raw
   beat-aligned per-bar **loops** (drums/bass/melodic; never vocals). Loops are written RAW (un-normalized)
   to preserve dynamics + inter-stem balance — normalizing them drops reconstruction 99%→70%.
 - `scripts/python/generate_sample_strudel.py` — writes host-resolved `samples.json` (absolute
