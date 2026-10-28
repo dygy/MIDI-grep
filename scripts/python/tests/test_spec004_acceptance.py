@@ -435,8 +435,8 @@ def test_23_dataset_entry_missing_a_mode_or_run_is_detected():
 # round(min over the mode's reference tracks - 0.02, 2)); "never lowered" == these exact values hold. History:
 # sample 0.80/0.77 and synth 0.79/0.74 (2026-10-23 re-baseline: Regime v057/v058, VAGABUNDO v036/v035), sample 0.70/0.69 and synth 0.70/0.68 (2026-10-19 runs, deleted from the cache), 0.65/0.63 (Regime v032 scored one bar mis-aligned), 0.64/0.60 and 0.54/0.53 (2026-10-18, BlackHole, full-mix reference), 0.88/0.90 and 0.77/0.81 (static-only scale).
 REGIME_FLOORS = {
-    "sample_instrument": {"genres": 0.86, "section_aware": 0.83},   # 2026-10-27 re-baseline: VAGABUNDO v051 / Regime v069
-    "synth": {"genres": 0.81, "section_aware": 0.78},               # VAGABUNDO v055 / Regime v070 (2026-10-28: 0.82 -> 0.81, owner decision)
+    "sample_instrument": {"genres": 0.85, "section_aware": 0.83},   # 2026-10-28: four reference tracks (owner decision)
+    "synth": {"genres": 0.78, "section_aware": 0.76},               # binding: Dumb Blond Bitches v009 / v009
 }
 OLD_STATIC_SA_FLOOR = 0.90      # pre-rescale sample-instrument section-aware floor (static scale), for fix #10's history
 

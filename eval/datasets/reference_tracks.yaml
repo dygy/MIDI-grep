@@ -54,3 +54,31 @@ tracks:
     version: v055
     expected: pass               # the synth piece from the fixed generator (no sample-loop table). previous: v052 0.8351 / 0.7989, v035 0.8069 / 0.7645, v014 0.7240 / 0.7007.
     measured: { overall: 0.8343, section_aware: 0.7958, static: 0.9606, temporal: 0.7081, margin_over_chance: 0.2594 }
+  - name: "Dumb Blond Bitches (Barbit)"
+    genre: brazilian_funk
+    mode: sample-instrument
+    cache_key: "Dumb Blond Bitches"
+    version: v008
+    expected: pass               # added 2026-10-28; before the PR #24 drum fixes v006 0.7514 / 0.7405 FAILED (drums stem 0.386)
+    measured: { overall: 0.8673, section_aware: 0.8650, static: 0.9551, temporal: 0.7796, margin_over_chance: 0.2836 }
+  - name: "Dumb Blond Bitches (Barbit) — synth mode"
+    genre: brazilian_funk
+    mode: synth
+    cache_key: "Dumb Blond Bitches"
+    version: v009
+    expected: pass               # added 2026-10-28; binding synth track
+    measured: { overall: 0.7979, section_aware: 0.7832, static: 0.9409, temporal: 0.6550, margin_over_chance: 0.2141 }
+  - name: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM)"
+    genre: brazilian_funk
+    mode: sample-instrument
+    cache_key: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM"
+    version: v004
+    expected: pass               # added 2026-10-28 (cache key = the extractor's truncated source title)
+    measured: { overall: 0.9006, section_aware: 0.8947, static: 0.9482, temporal: 0.8530, margin_over_chance: 0.2667 }
+  - name: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM) — synth mode"
+    genre: brazilian_funk
+    mode: synth
+    cache_key: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM"
+    version: v005
+    expected: pass               # added 2026-10-28
+    measured: { overall: 0.8534, section_aware: 0.8242, static: 0.9370, temporal: 0.7698, margin_over_chance: 0.2195 }
