@@ -156,3 +156,19 @@ test('isNetworkOutageFailure: only the attempt\'s own failure is an outage; stra
   assert.equal(isNetworkOutageFailure('error loading "https://h/samples.json"', 0), false);
   assert.ok(!isSampleLoadFailure('sound "x" not found'));
 });
+
+import { chunkMargins } from '../dist/offline-helpers.js';
+test('chunkMargins: a one-shot longer than the margins extends the look-back and the tail, a short one does not', () => {
+  const rings = [{ begin: 0, end: 14 }, { begin: 9.9, end: 10.1 }, { begin: 20, end: 20.2 }];
+  // chunk [10, 30) s, fx tail 4 s, min look-back 4 s: the 14 s voice from t=0 is still sounding at 10 s
+  const m = chunkMargins(rings, 10, 30, 4, 4);
+  assert.equal(m.prerollSeconds, 10);
+  assert.deepEqual(m.ringingOnsets, [0]);
+  assert.equal(m.tailSeconds, 4);                      // the 14 s voice ends before 30 s
+  // a chunk whose own voice rings 14 s past its end needs that much tail
+  assert.equal(chunkMargins([{ begin: 28, end: 44 }], 10, 30, 4, 4).tailSeconds, 18);
+  // an older voice that is re-triggered here and still rings past the chunk end needs tail too
+  assert.equal(chunkMargins([{ begin: 0, end: 14 }], 10, 12, 4, 4).tailSeconds, 6);
+  // no long voices: the floors stay
+  assert.deepEqual(chunkMargins([{ begin: 9, end: 9.5 }], 10, 30, 4, 4), { tailSeconds: 4, prerollSeconds: 4, ringingOnsets: [] });
+});
