@@ -136,7 +136,9 @@ if title:
     d = cache / title
     if (d / "metadata.json").is_file():
         print(d)
-    sys.exit(0)
+        sys.exit(0)
+    # no dir named after --title: the extractor names the cache after the source's own title (punctuation,
+    # accents, truncation), so fall through to the URL's video id
 for meta in sorted(cache.glob("*/metadata.json")):
     try:
         vid = json.loads(meta.read_text()).get("video_id") or ""
