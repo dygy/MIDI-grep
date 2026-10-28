@@ -15,8 +15,8 @@ and each cut
   1. starts at the hit's true attack (rising edge of the class's own band, zero-phase),
   2. ends at the first of: its decay to the stem's noise floor, the next retrigger of its own class
      (25th-percentile own-class interval: most retriggers do not land on a predecessor's tail), or the next hit of ANOTHER class (so no foreign hit is baked in),
-  3. is chosen among the cleanest candidates (least energy outside the class's band), then the medoid of
-     their spectral profile — a representative hit, not an outlier.
+  3. is chosen among the candidates that decayed, nearest the median spectral profile of ALL of them — a
+     representative hit, not an outlier and not one mode of a bimodal class.
 
 Every threshold below is read from this stem; nothing is per-track.
 """
@@ -39,6 +39,7 @@ ATTACK_SEARCH_PRE_S = 0.080     # how far before the detector time the rising ed
 ATTACK_SEARCH_POST_S = 0.040
 EDGE_FADE_IN_S = 0.0015
 EDGE_FADE_OUT_S = 0.010
+OUTLIER_SIGMAS = 3.0            # convention for "outside the candidates' own spread" (robust sigmas above their median)
 
 
 @dataclass
@@ -46,9 +47,10 @@ class Cut:
     audio: np.ndarray
     attack: int          # sample index in the stem
     truncated_by_other: bool   # ended by a foreign hit
-    bleed: float         # fraction of the cut's energy outside the class band
+    bleed: float         # fraction of the cut's energy outside the class's own median profile (set once all cuts exist)
     profile: np.ndarray  # log band energies, for the medoid
-    coincident: bool = False   # a foreign hit is detected within the attack itself (baked into the cut)
+    coincident: bool = False   # a foreign hit is detected within the attack AND adds energy outside the class's profile
+    foreign_near: bool = False  # a foreign hit is detected within the attack itself (not yet judged by its energy)
     band_peak: float = 0.0  # where in the cut the class band peaks (0..1)
     decayed: bool = True    # ended by its own decay (not by running into the length cap)
     isolation: float = 0.0  # level under the hit / its peak: how much sustained material (a bass note) it sits on
@@ -98,16 +100,21 @@ def rise_ratio(env: np.ndarray, attack: int, width: int) -> float:
     return post / (pre + 1e-12)
 
 
-def decay_end(env: np.ndarray, start: int, limit: int, floor: float, background: float = 0.0) -> int:
+def decay_end(env: np.ndarray, start: int, limit: int, floor: float, background: float = 0.0,
+              peak_limit: Optional[int] = None) -> int:
     """First sample after the hit's peak where the envelope has fallen halfway in dB from the peak to the level
     it rose from (the same midpoint that defines the attack), never below the stem's noise floor.
 
     The -60 dB (RT60) tail is NOT used: on a drums stem it runs into the next hits and bass bleed, and
-    measured (proxy onset F1 0.87 -> 0.57) smears the following onsets."""
+    measured (proxy onset F1 0.87 -> 0.57) smears the following onsets.
+
+    The hit's peak is looked for before *peak_limit* (the next onset of any class): a LATER, louder hit inside a long
+    window is not this hit's peak, and measured against it the decay threshold sat so high/low that the one-shot ran
+    on through the music that follows (Automotivo: a 14.3 s snare)."""
     seg = env[start:limit]
     if seg.size < 2:
         return limit
-    pk = int(np.argmax(seg))
+    pk = int(np.argmax(seg[: max(2, peak_limit - start)] if peak_limit is not None else seg))
     peak = float(seg[pk])
     bg = max(background, peak * DECAY_RATIO)
     thr = max(floor, float(np.sqrt(bg * peak)))
@@ -123,12 +130,17 @@ def _profile(x: np.ndarray, sr: int, n_bands: int = 10) -> np.ndarray:
     return np.log10(e / e.sum())
 
 
-def _bleed(x: np.ndarray, sr: int, lo: float, hi: float) -> float:
-    """Fraction of the cut's energy BELOW the class band: the ring of a lower class (a kick under a hat). Energy
-    above the band is the class's own (a kick's body and click, a snare's wires), so it is not bleed."""
-    spec = np.abs(np.fft.rfft(x)) ** 2
-    f = np.fft.rfftfreq(len(x), 1.0 / sr)
-    return float(spec[f < lo].sum() / (spec.sum() + 1e-12))
+def profile_bleed(shares: np.ndarray, typical: np.ndarray) -> float:
+    """Fraction of a cut's energy that sits outside the class's own spectral profile: half the L1 distance between
+    its band shares and the class's median shares (0 = the typical hit, 1 = disjoint). Judged against what the class
+    itself carries, not against a fixed band edge: a sub-heavy 808 kick has 3 % of a click's energy below 160 Hz and
+    "energy below the band's lower edge" ranked the click as the cleaner kick."""
+    return float(0.5 * np.abs(shares - typical).sum())
+
+
+def robust_sigma(x: np.ndarray) -> float:
+    """Normal-consistent spread (1.4826 x MAD): ignores the minority mode that a standard deviation would absorb."""
+    return float(1.4826 * np.median(np.abs(x - np.median(x))))
 
 
 def cut_class(
@@ -182,58 +194,68 @@ def cut_class(
         if trunc:
             limit = int((later.min() - lag) * sr)
         background = float(wide[max(0, a - int(ATTACK_SEARCH_PRE_S * sr)): a + 1].min())
-        end = decay_end(wide, a, limit, floor, background)
-        # baked in = a foreign hit inside the attack that is visible in this class's band (a hat over a kick is not:
-        # it only adds out-of-band energy, which the bleed ranking below already penalises)
-        coincident = bool(other_t.size and any(
-            abs(u - t) <= lag and rise_ratio(env, max(1, int((u - lag) * sr)), width) >= visible for u in other_t))
+        # the hit's own peak lies before the next onset of ANY class (a hat or kick later in the window may be louder)
+        nxt_any = [u for u in np.concatenate([other_t, np.array(own)]) if u - lag > a / sr + 1e-3]
+        peak_limit = int((min(nxt_any) - lag) * sr) if nxt_any else None
+        end = decay_end(wide, a, limit, floor, background, peak_limit)
+        # A hit that has not decayed by the time a later hit of ANY class starts ends there: the length cap above comes
+        # from this class's own gaps, which for a rare class (3 snares in 130 s) is tens of seconds of other music.
+        by_onset = False
+        if end >= limit and nxt_any:
+            stop = int((min(nxt_any) - lag) * sr)
+            if a < stop < limit:
+                end, by_onset = stop, True
+        # a foreign hit detected within the attack is only a CANDIDATE for "baked in": on a kick-driven track most
+        # "hh" hits are the kick's own high-frequency attack (91 % of them sit within 40 ms of a kick), so whether it
+        # counts is decided below by the energy it adds outside the class's own profile
+        foreign_near = bool(other_t.size and np.any(np.abs(other_t - t) <= lag))
         x = y[a:end]
         if len(x) < int(0.01 * sr) or float(np.max(np.abs(x))) < 1e-5:
             continue
-        cuts.append(Cut(x.copy(), a, trunc or coincident, _bleed(x, sr, lo, hi), _profile(x, sr), coincident,
+        cuts.append(Cut(x.copy(), a, trunc, 0.0, _profile(x, sr), False,
                         float(np.argmax(env[a:end])) / max(1, end - a),
                         background / (float(wide[a:end].max()) + 1e-12)))
-        cuts[-1].decayed = end < limit
+        cuts[-1].decayed = end < limit and not by_onset
+        cuts[-1].foreign_near = foreign_near
 
+    if not cuts:
+        return None
+    # The class's own profile = the median over ALL its decayed candidates (a cut that ran to the length cap is a
+    # sustained note, not a hit of the class). Bleed is the energy a cut has outside it, and a foreign hit near the
+    # attack makes the cut "coincident" only if it left more than the candidates' own robust spread of it there.
+    # (Dumb Blond Bitches, 808 kicks: 214 of 422 cuts had an "hh" on their attack; "bleed = energy below 20 Hz"
+    # preferred cuts with less body, and the tiers narrowed to 6 click-only cuts - a 63 ms click with 3 % of its
+    # energy below 160 Hz against a median of 88 %.)
+    base = [c for c in cuts if c.decayed] or cuts
+    typical = np.median(np.array([10.0 ** c.profile for c in base]), axis=0)
+    for c in cuts:
+        c.bleed = profile_bleed(10.0 ** c.profile, typical)
+    b = np.array([c.bleed for c in base])
+    gate = float(np.median(b)) + OUTLIER_SIGMAS * robust_sigma(b)
+    for c in cuts:
+        c.coincident = c.foreign_near and c.bleed > gate
+        c.truncated_by_other = c.truncated_by_other or c.coincident
     if info is not None:
         info.update(max_len_ms=max_len / sr * 1000, n_cuts=len(cuts), n_decayed=sum(c.decayed for c in cuts),
                     n_clean=sum(not c.coincident for c in cuts))
-    if not cuts:
-        return None
-    # Tiers, best first. A one-shot has a natural end: a "hit" that is really a sustained note (VAGABUNDO's 453 ms
-    # "kick", overall 0.796 -> 0.687) or a hat that never dips below the kick under it (Regime's 337 ms hat
-    # ran to the length cap and pushed the high band 7 % over) reaches the cap instead, so a cut that decayed
-    # beats one that did not; a foreign hit baked into the attack only matters between cuts that decayed.
-    # (Regime: 211 of 223 hats coincide with a kick and the 12 that do not are stubs cut short by the next hit, so
-    # a decayed-but-coincident hat — ranked by bleed below — is the better one-shot.)
-    clean = ([c for c in cuts if c.decayed and not c.coincident]
-             or [c for c in cuts if c.decayed]
-             or [c for c in cuts if not c.coincident]
-             or cuts)
-    # a cut shorter than the class's typical ring was ended early by a dip in the bleed beneath it; it would also
-    # win the bleed ranking below just for being short
-    # the class's reference spectrum = the median over ALL its candidates of the tier, taken before the filters below
-    # thin the pool (the last filters leave a handful of cuts; their own median is not the class's sound — VAGABUNDO's
-    # pick had sub/bass 0.10 against the stem kicks' 1.29)
-    ref = np.median(np.array([c.profile for c in clean]), axis=0)
-    typical = float(np.median([len(c.audio) for c in clean]))
-    clean = [c for c in clean if len(c.audio) >= typical] or clean
-    # The class's sound: the third of the candidates closest to the class's reference spectrum, where the reference
-    # is the median of the cleaner half (least energy BELOW the band = the ring of a lower class under the hit).
-    # Energy above the band is the class's own (a kick's body, a snare's wires), so it is not bleed. (Ranking by
-    # "energy outside the band" threw away VAGABUNDO's sub kicks - their body sits above 160 Hz - and kept punchy
-    # cuts with sub/bass 0.04 against the stem kicks' 1.29: sub_bass band 13 % off, bass 18 %.)
-    half = [c for c in clean if c.bleed <= float(np.median([x.bleed for x in clean]))] or clean
-    ref = np.median(np.array([c.profile for c in half]), axis=0)
-    dist = np.array([np.linalg.norm(c.profile - ref) for c in clean])
-    pool = [clean[i] for i in np.argsort(dist)[: max(1, len(clean) // 3)]]
-    q = float(np.median([c.bleed for c in pool]))
-    pool = [c for c in pool if c.bleed <= q] or pool
-    # ... then, among those, the one hit cleanest: attack at the file start, loudest point in its own attack
-    # (a bass note swelling under the hit would otherwise make the "kick" a bass sample)
+    # A one-shot has a natural end: a "hit" that is really a sustained note (VAGABUNDO's 453 ms "kick", overall
+    # 0.796 -> 0.687) or a hat that never dips below the kick under it (Regime's 337 ms hat ran to the length cap and
+    # pushed the high band 7 % over) reaches the cap instead, so a cut that decayed beats one that did not.
+    # Rank ALL of those by distance to the median profile; no filter ahead of it may thin the pool to one mode.
+    ref = np.median(np.array([c.profile for c in base]), axis=0)
+    dist = np.array([np.linalg.norm(c.profile - ref) for c in base])
+    pool = [base[i] for i in np.argsort(dist)[: max(1, len(base) // 3)]]
+    # among the nearest third: not baked-in, then the one hit cleanest: attack at the file start, loudest point in its
+    # own attack (a bass note swelling under the hit would otherwise make the "kick" a bass sample)
+    pool = [c for c in pool if not c.coincident] or pool
     pk_med = float(np.median([c.band_peak for c in pool]))
     pool = [c for c in pool if c.band_peak <= pk_med] or pool
     best = min(pool, key=lambda c: onset_in_file(c.audio, sr))
+    # sanity: the pick must be a typical hit - if its band shares sit further from the candidates' median than the
+    # candidates' own spread allows, fall back to the medoid
+    spread = float(np.median(dist)) + OUTLIER_SIGMAS * robust_sigma(dist)
+    if float(np.linalg.norm(best.profile - ref)) > spread:
+        best = base[int(np.argmin(dist))]
     return best.audio
 
 

@@ -115,21 +115,59 @@ def fx_chain(fx: dict, *, drop_lpf: bool = False) -> str:
 VELOCITY_LO_PCT, VELOCITY_HI_PCT = 10, 90   # the band the dynamic span is reported over (p10-p90)
 
 
+def grid_phase(times: list[float], step_dur: float) -> float:
+    """Seconds by which the hits sit LATE of the step grid (negative = early), the circular mean of frac(t / step).
+
+    ``round(t / step)`` assumes the grid starts at t = 0; a stem whose beat grid starts elsewhere (Dumb Blond Bitches:
+    -51 ms = 0.46 step) sent about half its hits to the neighbouring slot (mean error 49 ms, against 17-23 ms on
+    tracks whose grid does start near 0). 0 when the hits give no phase (spread evenly over the step) - the estimate
+    is used only if it lowers the mean quantisation error."""
+    if len(times) < 2 or step_dur <= 0:
+        return 0.0
+    t = np.asarray(times, dtype=float)
+    mean = np.exp(2j * np.pi * (t / step_dur)).mean()
+    phase = float(np.angle(mean) / (2 * np.pi) * step_dur)
+
+    def err(off: float) -> float:
+        r = (t - off) / step_dur
+        return float(np.abs(r - np.round(r)).mean())
+
+    return phase if err(phase) < err(0.0) else 0.0
+
+
+def drums_late(drums_json: Path, bpm: float, quantize: int = 16) -> float:
+    """The grid phase of the detected drums in CYCLES (one bar = one cycle), for ``.late()`` on the drums stack so the
+    slots built by `build_detected_drums` play where the stem's hits are. 0.0 when there is nothing to correct."""
+    if not drums_json.exists():
+        return 0.0
+    hits = json.loads(drums_json.read_text()).get("hits", [])
+    bar_dur = 60.0 / bpm * 4
+    return grid_phase([h["time"] for h in hits], bar_dur / quantize) / bar_dur
+
+
+def late_suffix(late: float) -> str:
+    """``.late(x)`` for a nonzero phase (cycles), else nothing."""
+    return f".late({late:.6f})" if abs(late) >= 1e-6 else ""
+
+
 def hit_velocities(hits: list[dict], bpm: float, nbars: int, quantize: int = 16,
-                   mode: str = "bar") -> dict[tuple[str, int], float]:
+                   mode: str = "bar", phase: float | None = None) -> dict[tuple[str, int], float]:
     """Measured per-hit velocity: {(drum type, step) -> strength / reference strength of that type}.
 
     ``strength`` comes from detect_drums_bands (linear band peak at the onset). The reference is the MEDIAN
     strength of the hit's own class — within the same bar (``mode="bar"``: the bar-to-bar level is already carried
     by the drum envelope, so only the within-bar accent is added) or over the whole piece (``mode="global"``).
     Ratios are winsorised per class to their own p10..p90, then scaled to unit mean power. A bar holding fewer than 3 hits of a class has no meaningful median of its own and uses the piece median.
-    Hits without a strength (older drums_bands.json) get no entry. Two hits on one step keep the stronger."""
+    Hits without a strength (older drums_bands.json) get no entry. Two hits on one step keep the stronger.
+    Steps are counted from the grid phase (``phase`` seconds; measured from the hits when None), as in `build_detected_drums`."""
     step_dur = 60.0 / bpm * 4 / quantize
     total = nbars * quantize
+    if phase is None:
+        phase = grid_phase([h["time"] for h in hits], step_dur)
     placed: dict[tuple[str, int], float] = {}
     for h in hits:
         st = h.get("strength")
-        step = int(round(h["time"] / step_dur))
+        step = int(round((h["time"] - phase) / step_dur))
         if st is None or not (0 <= step < total) or not st > 0:
             continue
         k = (h["type"], step)
@@ -173,6 +211,9 @@ def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int
     ``pitch`` ({class: {hit time -> playback-rate ratio}}, `drum_pitch.hit_ratios`) is the measured pitch each hit of a
     tuned class (the 808 kick) sounds in the stem relative to its one-shot: written as a parallel ``.speed()`` pattern
     (1 on a hit whose pitch could not be read), only for a class where at least one hit differs from the one-shot.
+
+    Hits are slotted relative to the measured grid phase (`grid_phase`); the caller plays the stack ``.late(drums_late(...))``
+    so the slots land on the stem's own times. ``pitch`` is still keyed by the hits' original times.
     """
     if not drums_json.exists():
         return None
@@ -184,19 +225,20 @@ def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int
     step_dur = bar_dur / quantize
     total_steps = nbars * quantize
     # grid[type] -> list of step indices that are ON
+    phase = grid_phase([h["time"] for h in hits], step_dur)
     grid: dict[str, set] = {}
     for h in hits:
-        step = int(round(h["time"] / step_dur))
+        step = int(round((h["time"] - phase) / step_dur))
         if 0 <= step < total_steps:
             grid.setdefault(h["type"], set()).add(step)
     if not grid:
         return None
-    vel = hit_velocities(hits, bpm, nbars, quantize, velocity) if velocity else {}
+    vel = hit_velocities(hits, bpm, nbars, quantize, velocity, phase) if velocity else {}
     # measured pitch ratio per (class, step); the first hit on a step wins
     rate: dict[tuple[str, int], float] = {}
     for h in sorted(hits, key=lambda h: h["time"]):
         r = (pitch or {}).get(h["type"], {}).get(h["time"])
-        step = int(round(h["time"] / step_dur))
+        step = int(round((h["time"] - phase) / step_dur))
         if r is not None and 0 <= step < total_steps:
             rate.setdefault((h["type"], step), r)
     tuned = {t for (t, _), r in rate.items() if abs(r - 1.0) > 1e-9}
@@ -310,7 +352,7 @@ def main() -> int:
             "// --- LIBRARY: the track's DETECTED groove, played with TR808 ---",
             "$: stack(",
             ",\n".join(detected),
-            f').bank("{pat["drum_bank"]}"){drums_fx}',
+            f'){late_suffix(drums_late(args.drums_json, args.bpm))}.bank("{pat["drum_bank"]}"){drums_fx}',
             "",
         ]
     else:
