@@ -299,7 +299,8 @@ one-shot/grain cutter reruns calibration. The render preflight also calls `rende
 calibration when puppeteer's Chromium is missing.
 
 **Pack/instrument cutting.** Drum one-shots come from `drum_oneshots.py` (cut from the same `detect_drums_bands` hits
-that drive the pattern, attack at sample 0); pitched note grains (`pitched_grains.py`) end where the stem stops sounding
+that drive the pattern, attack at sample 0, picked by distance to the class's own median band profile, a hit ending where it
+decays or at the next onset); drum hits quantise on their measured beat phase (`grid_phase`, one `.late()` on the drums); pitched note grains (`pitched_grains.py`) end where the stem stops sounding
 the note (`ring_end`) so bass samples keep their sub tail; a pitch's sample is chosen near the median level of ALL its grains (`select_per_pitch`). Each
 kick hit is tuned to its stem hit's 808 tail pitch (`drum_pitch.py`, a per-hit `.speed()`).
 
