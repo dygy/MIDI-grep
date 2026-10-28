@@ -51,6 +51,6 @@ tracks:
     genre: brazilian_funk
     mode: synth
     cache_key: "VAGABUNDO NÃO NAMORA"
-    version: v052
-    expected: pass               # previous: v035 0.8069 / 0.7645, v014 0.7240 / 0.7007.
-    measured: { overall: 0.8351, section_aware: 0.7989, static: 0.9653, temporal: 0.7049, margin_over_chance: 0.2601 }
+    version: v055
+    expected: pass               # the synth piece from the fixed generator (no sample-loop table). previous: v052 0.8351 / 0.7989, v035 0.8069 / 0.7645, v014 0.7240 / 0.7007.
+    measured: { overall: 0.8343, section_aware: 0.7958, static: 0.9606, temporal: 0.7081, margin_over_chance: 0.2594 }
