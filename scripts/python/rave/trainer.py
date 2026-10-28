@@ -18,42 +18,86 @@ import hashlib
 
 
 class RAVETrainer:
-    """Train RAVE models on audio stems."""
+    """Train RAVE models on audio stems with the real ``rave`` CLI (pip ``acids-rave``).
+
+    The pip package ``acids-rave`` installs a console script ``rave`` (``rave preprocess|train|export ...``) and the
+    python packages ``rave`` and ``scripts`` - there is NO ``acids_rave`` module, and this repo's own ``rave/`` package
+    shadows the installed ``rave`` for a ``python -m rave`` run from ``scripts/python``. So the CLI executable beside the
+    running interpreter is called directly, from the model directory, and every step fails LOUDLY: a missing CLI, a
+    non-zero exit, or a missing output raises ``RuntimeError`` (nothing is copied or faked as a "preprocessed" dataset).
+    Flags are the ones ``rave <command> --help`` lists (acids-rave 2.3.1): ``--batch`` (not ``--batch_size``),
+    ``--config``, ``--sampling_rate``/``--num_signal`` for preprocess, ``--run``/``--name``/``--output`` for export.
+    """
+
+    CLI_NAME = "rave"
 
     def __init__(self,
                  output_dir: str = "models",
-                 device: str = "mps",
+                 device: str = "cpu",
                  batch_size: int = 8,
-                 n_signal: int = 65536):
+                 n_signal: int = 65536,
+                 sample_rate: int = 44100):
         """
-        Initialize RAVE trainer.
-
         Args:
             output_dir: Where to save trained models
-            device: Training device (mps for M1/M2, cuda, cpu)
+            device: ``cuda`` or ``cpu``. ``mps`` is accepted but acids-rave's train script exits on a Mac GPU ("Training
+                on mac is not available yet"), so it trains on the CPU (``--gpu -1``), loudly.
             batch_size: Training batch size
-            n_signal: Signal length for training
+            n_signal: Signal length (samples) for training and for the preprocessed chunks
+            sample_rate: Sampling rate the dataset is preprocessed at
         """
         self.output_dir = Path(output_dir)
         self.output_dir.mkdir(parents=True, exist_ok=True)
         self.device = device
         self.batch_size = batch_size
         self.n_signal = n_signal
+        self.sample_rate = sample_rate
+        self.cli = self._find_cli()
 
-        self._check_rave_installed()
+    @classmethod
+    def _find_cli(cls) -> str:
+        """Path of the installed ``rave`` console script (beside this interpreter, else on PATH); RuntimeError if absent."""
+        beside = Path(sys.executable).parent / cls.CLI_NAME
+        if beside.is_file():
+            return str(beside)
+        found = shutil.which(cls.CLI_NAME)
+        if found:
+            return found
+        raise RuntimeError(
+            f"the '{cls.CLI_NAME}' CLI is not installed (pip package acids-rave); install it into the venv with "
+            f"`pip install acids-rave` - it pins torch, so check `pip list | grep torch` afterwards")
 
-    def _check_rave_installed(self):
-        """Check if RAVE is installed."""
-        try:
-            import acids_rave
-            print(f"RAVE version: {acids_rave.__version__}")
-        except ImportError:
-            print("RAVE not installed. Installing...")
-            subprocess.run([
-                sys.executable, "-m", "pip", "install",
-                "acids-rave", "--upgrade"
-            ], check=True)
-            print("RAVE installed successfully")
+    def preprocess_cmd(self, dataset_dir: Path, output_dir: Path) -> list:
+        return [self.cli, "preprocess",
+                "--input_path", str(dataset_dir), "--output_path", str(output_dir),
+                "--sampling_rate", str(self.sample_rate), "--channels", "1",
+                "--num_signal", str(self.n_signal)]
+
+    def train_cmd(self, data_dir: Path, out_dir: Path, name: str, max_steps: int, val_every: int,
+                  config: str = "v2") -> list:
+        cmd = [self.cli, "train",
+               "--name", name, "--db_path", str(data_dir), "--out_path", str(out_dir),
+               "--config", config, "--n_signal", str(self.n_signal), "--batch", str(self.batch_size),
+               "--max_steps", str(max_steps), "--val_every", str(val_every), "--save_every", str(val_every)]
+        if self.device != "cuda":
+            cmd += ["--gpu", "-1"]   # train.py: -1 = CPU; without it a Mac exits and a box with no GPU probes for one
+        return cmd
+
+    def export_cmd(self, run_dir: Path, name: str, output_dir: Path) -> list:
+        return [self.cli, "export", "--run", str(run_dir), "--name", name, "--output", str(output_dir)]
+
+    def _run(self, cmd: list, cwd: Path, what: str) -> None:
+        """Run one CLI step from ``cwd`` (never scripts/python: its ``rave/`` would shadow the installed package),
+        streaming its output; a non-zero exit raises."""
+        print(f"Running: {' '.join(cmd)}")
+        cwd.mkdir(parents=True, exist_ok=True)
+        proc = subprocess.Popen(cmd, cwd=str(cwd), stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, bufsize=1)
+        tail: list = []
+        for line in proc.stdout:
+            print(line, end="")
+            tail = (tail + [line])[-20:]
+        if proc.wait() != 0:
+            raise RuntimeError(f"rave {what} failed (exit {proc.returncode}); last output:\n{''.join(tail)}")
 
     def prepare_dataset(self, audio_path: str, dataset_dir: str) -> str:
         """Prepare audio for RAVE training."""
@@ -64,7 +108,7 @@ class RAVETrainer:
         dataset_path = Path(dataset_dir)
         dataset_path.mkdir(parents=True, exist_ok=True)
 
-        y, sr = librosa.load(audio_path, sr=44100, mono=True)
+        y, sr = librosa.load(audio_path, sr=self.sample_rate, mono=True)
         y = y / (np.max(np.abs(y)) + 1e-8) * 0.95
 
         min_duration = 60
@@ -78,12 +122,16 @@ class RAVETrainer:
         chunk_duration = 10
         chunk_samples = chunk_duration * sr
 
+        n_chunks = 0
         for i, start in enumerate(range(0, len(y) - chunk_samples, chunk_samples // 2)):
             chunk = y[start:start + chunk_samples]
             chunk_path = dataset_path / f"chunk_{i:04d}.wav"
             sf.write(str(chunk_path), chunk, sr)
+            n_chunks = i + 1
 
-        print(f"Prepared {i + 1} training chunks in {dataset_path}")
+        if n_chunks == 0:
+            raise RuntimeError(f"{audio_path}: too short to cut a single {chunk_duration}s training chunk")
+        print(f"Prepared {n_chunks} training chunks in {dataset_path}")
         return str(dataset_path)
 
     def train(self,
@@ -93,7 +141,7 @@ class RAVETrainer:
               val_every: int = 100,
               config: str = "v2") -> Dict:
         """
-        Train a RAVE model on audio.
+        Train a RAVE model on audio (preprocess -> train -> export, each a real ``rave`` CLI call).
 
         Returns:
             Dict with model info and paths
@@ -104,9 +152,13 @@ class RAVETrainer:
         print(f"Source: {audio_path}")
         print(f"Config: {config}")
         print(f"Epochs: {epochs}")
-        print(f"Device: {self.device}")
+        device = self.device
+        if device == "mps":
+            print("Device: mps requested, but acids-rave cannot train on a Mac GPU -> CPU (--gpu -1)")
+            device = "cpu"
+        print(f"Device: {device}")
 
-        model_dir = self.output_dir / model_name
+        model_dir = (self.output_dir / model_name).resolve()
         model_dir.mkdir(parents=True, exist_ok=True)
 
         dataset_dir = model_dir / "dataset"
@@ -118,21 +170,21 @@ class RAVETrainer:
 
         print(f"\n[2/3] Training ({epochs} epochs)...")
         checkpoint_dir = model_dir / "checkpoints"
-        self._run_training(preprocess_dir, checkpoint_dir, epochs, val_every)
+        run_dir = self._run_training(preprocess_dir, checkpoint_dir, model_name, epochs, val_every, config)
 
         print("\n[3/3] Exporting model...")
         exported_path = model_dir / f"{model_name}.ts"
-        self._export_model(checkpoint_dir, exported_path)
+        self._export_model(run_dir, model_name, exported_path)
 
         metadata = {
             "name": model_name,
             "source_audio": str(audio_path),
             "config": config,
             "epochs": epochs,
-            "device": self.device,
+            "device": device,
             "created": datetime.now().isoformat(),
             "exported_path": str(exported_path),
-            "sample_rate": 44100,
+            "sample_rate": self.sample_rate,
             "latent_dim": 128
         }
 
@@ -148,75 +200,30 @@ class RAVETrainer:
         return metadata
 
     def _run_preprocess(self, dataset_dir: Path, output_dir: Path):
-        """Run RAVE preprocessing on dataset."""
+        """``rave preprocess``: wavs -> the lmdb dataset ``rave train`` reads. Raises if it fails or writes nothing."""
         output_dir.mkdir(parents=True, exist_ok=True)
+        self._run(self.preprocess_cmd(dataset_dir, output_dir), output_dir.parent, "preprocess")
+        if not any(output_dir.iterdir()):
+            raise RuntimeError(f"rave preprocess wrote nothing to {output_dir}")
 
-        cmd = [
-            sys.executable, "-m", "acids_rave", "preprocess",
-            "--input_path", str(dataset_dir),
-            "--output_path", str(output_dir)
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            print("Standard preprocess unavailable, using direct preprocessing...")
-            self._direct_preprocess(dataset_dir, output_dir)
-
-    def _direct_preprocess(self, dataset_dir: Path, output_dir: Path):
-        """Direct preprocessing without CLI."""
-        import soundfile as sf
-
-        for i, audio_file in enumerate(dataset_dir.glob("*.wav")):
-            y, sr = sf.read(str(audio_file))
-            if len(y.shape) > 1:
-                y = y.mean(axis=1)
-            sf.write(str(output_dir / f"audio_{i:04d}.wav"), y, sr)
-
-        print(f"Preprocessed {i + 1} files")
-
-    def _run_training(self, data_dir: Path, checkpoint_dir: Path, epochs: int, val_every: int):
-        """Run RAVE training."""
+    def _run_training(self, data_dir: Path, checkpoint_dir: Path, name: str, epochs: int, val_every: int,
+                      config: str = "v2") -> Path:
+        """``rave train``; returns the run directory it created (``<out_path>/<name>_<config hash>``)."""
         checkpoint_dir.mkdir(parents=True, exist_ok=True)
-
-        cmd = [
-            sys.executable, "-m", "acids_rave", "train",
-            "--name", "model",
-            "--db_path", str(data_dir),
-            "--out_path", str(checkpoint_dir),
-            "--n_signal", str(self.n_signal),
-            "--batch_size", str(self.batch_size),
-            "--max_steps", str(epochs * 100)
-        ]
-
         if self.device == "mps":
             os.environ["PYTORCH_ENABLE_MPS_FALLBACK"] = "1"
+        self._run(self.train_cmd(data_dir, checkpoint_dir, name, epochs * 100, val_every, config),
+                  checkpoint_dir.parent, "train")
+        runs = sorted((p for p in checkpoint_dir.glob(f"{name}_*") if p.is_dir()), key=lambda p: p.stat().st_mtime)
+        if not runs or not any(runs[-1].rglob("*.ckpt")):
+            raise RuntimeError(f"rave train left no checkpoint under {checkpoint_dir}/{name}_*")
+        return runs[-1]
 
-        print(f"Running: {' '.join(cmd)}")
-
-        process = subprocess.Popen(
-            cmd,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-            text=True,
-            bufsize=1
-        )
-
-        for line in process.stdout:
-            print(line, end='')
-
-        process.wait()
-
-    def _export_model(self, checkpoint_dir: Path, output_path: Path):
-        """Export trained model to TorchScript."""
-        cmd = [
-            sys.executable, "-m", "acids_rave", "export",
-            "--run", str(checkpoint_dir),
-            "--output", str(output_path)
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            print(f"Export info: {result.stderr}")
+    def _export_model(self, run_dir: Path, name: str, output_path: Path):
+        """``rave export``: the run's last checkpoint -> TorchScript ``output_path`` (<dir>/<name>.ts)."""
+        self._run(self.export_cmd(run_dir, name, output_path.parent), output_path.parent, "export")
+        if not output_path.is_file():
+            raise RuntimeError(f"rave export did not write {output_path}")
 
 
 class GranularTrainer:
@@ -392,7 +399,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
 
     if args.type == "rave":
-        trainer = RAVETrainer(args.output)
+        trainer = RAVETrainer(args.output)   # raises RuntimeError (no 'rave' CLI / a failed step) - never a fake model
         result = trainer.train(args.audio, args.name, epochs=args.epochs)
     else:
         trainer = GranularTrainer(args.output)

@@ -219,7 +219,9 @@ async function main() {
     return Buffer.concat(parts);
   };
   try {
-    let page = await openPage();
+    // the first page is opened inside an attempt: its navigation can time out like any later one (a stalled
+    // remote script/sample map holds 'load'), and that must be waited out, not fail the render outright
+    let page = await attempt('open', 'first page', openPage);
     let initTry = 0;
     const init: any = await attempt('init', 'first page', async () => { if (initTry++ > 0) { await quickClose(page); page = await openPage(); } return page.evaluate((c, site) => (window as any).__init(c, site), code, SITE); });
     const cps: number = init.cps, cycles = duration * cps;

@@ -226,8 +226,9 @@ def test_21_every_voice_is_its_own_block_of_editable_data(deliverable):
     decls = _array_decls(deliverable.code)
     used = {a for v in res.editable_voices for a in v.arrays}
     assert used, "no pitched voice is driven by a bar array"
-    # a numeric control array (e.g. `.glide(cat(...bassGlide))`: per-step glide amounts) is declared data, not a note array
-    control = set(re.findall(r"\.glide\(\s*cat\(\s*\.\.\.\s*(\w+)", deliverable.code))
+    # a numeric control array (e.g. `.glide(cat(...bassGlide))`: per-step glide amounts, `.velocity(cat(...leadVel))`:
+    # per-note level) is declared data, not a note array
+    control = set(re.findall(r"\.(?:glide|velocity)\(\s*cat\(\s*\.\.\.\s*(\w+)", deliverable.code))
     for name in used:
         assert decls.get(name), f"bar array {name!r} is referenced but not declared with bars"
         if name in control:

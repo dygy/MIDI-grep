@@ -226,3 +226,13 @@ def test_header_note_count_includes_the_legato_voices(tmp_path):
     assert "let leadLegato = [" in code
     played += len(_voice(code, "bass")) + (len(_voice(code, "bassLegato")) if "let bassLegato = [" in code else 0)
     assert f"// Notes: {played}\n" in code, (played, re.findall(r"// Notes: \d+", code))
+
+
+@have
+def test_a_synth_piece_with_legato_notes_carries_no_sample_loop_table(tmp_path):
+    # synth mode has no grains, so no loop points: the legato entry is only the faded-in attack, and the piece must not
+    # carry the sample-loop machinery (leadLoop / withLeadLoop / `loop: 1`) a synth piece has no use for
+    code, _ = _generate(tmp_path, mode="synth")
+    assert "cat(...leadLegato)" in code, "fixture should still write legato notes"
+    assert "const leadLoop" not in code and "withLeadLoop(" not in code and "loop: 1" not in code
+    assert "legatoAttack" in code

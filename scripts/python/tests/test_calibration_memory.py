@@ -78,6 +78,20 @@ def improving(n=12):
     return [(0.60 + 0.02 * i, 0.60 + 0.02 * i) for i in range(n)]
 
 
+def test_a_migration_number_taken_by_another_branch_does_not_skip_this_migration(db):
+    # 2026-10-27: the shared database had recorded version 5 for an unmerged experiment ("voice source column"), so the
+    # write-order migration 5 never ran and every insert failed with "No such column seq". A migration is applied
+    # unless ITS (version, description) is recorded.
+    import clickhouse_store as CS
+    CS.CLICKHOUSE_DB.mkdir(parents=True, exist_ok=True)
+    for q in ("CREATE DATABASE IF NOT EXISTS midi_grep",
+              CS.MIGRATIONS[0][2][1],                          # the schema_version table
+              "INSERT INTO midi_grep.schema_version (version, description) VALUES (5, 'Calibration memory voice source column')"):
+        assert CS._run_clickhouse_query(q).returncode == 0, q
+    assert db.write_rows([row(db, tag="cal1")]) == 1
+    assert [x["seq"] for x in db.history("other", "synth")] == [0]
+
+
 def test_rows_of_one_write_come_back_in_write_order_although_they_tie_on_created_at(db):
     # created_at has one-second resolution: the steps of one run, recorded together, tie on it and ClickHouse returns ties
     # in no defined order (CI, ClickHouse 26.11: ['cal2', 'cal1', 'cal3']). The write order (`seq`) breaks the tie, so a
