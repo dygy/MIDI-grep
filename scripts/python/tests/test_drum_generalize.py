@@ -109,7 +109,8 @@ def test_phase_is_emitted_as_late_in_cycles_and_is_the_hits_offset(tmp_path):
     assert abs(late - 0.45 * STEP / (STEP * 16)) < 1e-6          # seconds / bar duration
     assert H.late_suffix(late) == f".late({late:.6f})"
     j2, _ = _drums_json(tmp_path, -0.30)
-    assert H.drums_late(j2, BPM) < 0
+    # a grid early of the lines is a LATE of the next line (a negative shift would send step 0 before the piece)
+    assert abs(H.drums_late(j2, BPM) - (STEP - 0.30 * STEP) / (STEP * 16)) < 1e-6
 
 
 def test_a_track_on_the_grid_gets_no_late(tmp_path):
@@ -139,7 +140,7 @@ def test_velocity_and_speed_patterns_still_index_the_same_hits(tmp_path):
 
 def test_dynamic_generator_places_late_before_the_gain_envelope():
     src = (Path(__file__).resolve().parent.parent / "generate_dynamic_strudel.py").read_text()
-    i = src.index("H.late_suffix(H.drums_late(")
+    i = src.index("H.late_suffix(detected.late)")
     j = src.index("gain_pattern(drum_env", i)
     assert i < j       # `.late()` closes the stack; the per-bar gain is applied after it, so the envelope is not shifted
 

@@ -135,14 +135,35 @@ def grid_phase(times: list[float], step_dur: float) -> float:
     return phase if err(phase) < err(0.0) else 0.0
 
 
+def playable_phase(times: list[float], step_dur: float) -> float:
+    """`grid_phase` taken modulo a step, in [0, step): the grid point nearest the piece start is at or after 0.
+
+    The slots are shifted by ``.late(phase)`` over a cyclic ``cat``. A negative shift sends step 0 to negative time
+    (never heard) and replays the next repetition's step 0 just before the end of the piece; a shift in [0, step)
+    moves every slot later, and the previous repetition's last slot (at -step + phase) stays before 0."""
+    return grid_phase(times, step_dur) % step_dur if step_dur > 0 else 0.0
+
+
+def slot_of(t: float, phase: float, step_dur: float) -> int:
+    """Step a hit at *t* is written on: the nearest grid point, but never one before the piece start (such a hit
+    takes the first playable step instead of being dropped)."""
+    return max(0, int(round((t - phase) / step_dur)))
+
+
+class DetectedDrums(list):
+    """The drum voice lines of `build_detected_drums`, with the ``.late()`` (cycles) that puts their slots back on the
+    stem's times: the phase they were slotted with, not a second estimate."""
+    late: float = 0.0
+
+
 def drums_late(drums_json: Path, bpm: float, quantize: int = 16) -> float:
-    """The grid phase of the detected drums in CYCLES (one bar = one cycle), for ``.late()`` on the drums stack so the
-    slots built by `build_detected_drums` play where the stem's hits are. 0.0 when there is nothing to correct."""
+    """The grid phase of the detected drums in CYCLES (one bar = one cycle): what `build_detected_drums` returns as
+    ``.late`` for the same hits and *quantize*. 0.0 when there is nothing to correct."""
     if not drums_json.exists():
         return 0.0
     hits = json.loads(drums_json.read_text()).get("hits", [])
     bar_dur = 60.0 / bpm * 4
-    return grid_phase([h["time"] for h in hits], bar_dur / quantize) / bar_dur
+    return playable_phase([h["time"] for h in hits], bar_dur / quantize) / bar_dur
 
 
 def late_suffix(late: float) -> str:
@@ -163,12 +184,12 @@ def hit_velocities(hits: list[dict], bpm: float, nbars: int, quantize: int = 16,
     step_dur = 60.0 / bpm * 4 / quantize
     total = nbars * quantize
     if phase is None:
-        phase = grid_phase([h["time"] for h in hits], step_dur)
+        phase = playable_phase([h["time"] for h in hits], step_dur)
     placed: dict[tuple[str, int], float] = {}
     for h in hits:
         st = h.get("strength")
-        step = int(round((h["time"] - phase) / step_dur))
-        if st is None or not (0 <= step < total) or not st > 0:
+        step = slot_of(h["time"], phase, step_dur)
+        if st is None or not step < total or not st > 0:
             continue
         k = (h["type"], step)
         placed[k] = max(placed.get(k, 0.0), float(st))
@@ -201,7 +222,7 @@ def hit_velocities(hits: list[dict], bpm: float, nbars: int, quantize: int = 16,
 
 def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int = 16,
                          velocity: str | None = None,
-                         pitch: dict[str, dict[float, float]] | None = None) -> list[str] | None:
+                         pitch: dict[str, dict[float, float]] | None = None) -> DetectedDrums | None:
     """Turn detected drum hits into per-bar TR808 mini-notation (library sounds).
 
     Plays the TRACK'S OWN groove with library drum-machine sounds — library-first
@@ -212,7 +233,7 @@ def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int
     tuned class (the 808 kick) sounds in the stem relative to its one-shot: written as a parallel ``.speed()`` pattern
     (1 on a hit whose pitch could not be read), only for a class where at least one hit differs from the one-shot.
 
-    Hits are slotted relative to the measured grid phase (`grid_phase`); the caller plays the stack ``.late(drums_late(...))``
+    Hits are slotted relative to the measured grid phase (`playable_phase`); the caller plays the stack ``.late(result.late)``
     so the slots land on the stem's own times. ``pitch`` is still keyed by the hits' original times.
     """
     if not drums_json.exists():
@@ -225,11 +246,11 @@ def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int
     step_dur = bar_dur / quantize
     total_steps = nbars * quantize
     # grid[type] -> list of step indices that are ON
-    phase = grid_phase([h["time"] for h in hits], step_dur)
+    phase = playable_phase([h["time"] for h in hits], step_dur)
     grid: dict[str, set] = {}
     for h in hits:
-        step = int(round((h["time"] - phase) / step_dur))
-        if 0 <= step < total_steps:
+        step = slot_of(h["time"], phase, step_dur)
+        if step < total_steps:
             grid.setdefault(h["type"], set()).add(step)
     if not grid:
         return None
@@ -238,13 +259,14 @@ def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int
     rate: dict[tuple[str, int], float] = {}
     for h in sorted(hits, key=lambda h: h["time"]):
         r = (pitch or {}).get(h["type"], {}).get(h["time"])
-        step = int(round((h["time"] - phase) / step_dur))
-        if r is not None and 0 <= step < total_steps:
+        step = slot_of(h["time"], phase, step_dur)
+        if r is not None and step < total_steps:
             rate.setdefault((h["type"], step), r)
     tuned = {t for (t, _), r in rate.items() if abs(r - 1.0) > 1e-9}
     # Emit a voice per type as cat() of per-bar 16-step strings.
     order = ["bd", "sd", "cp", "hh", "oh"]
-    voices = []
+    voices = DetectedDrums()
+    voices.late = phase / bar_dur
     for t in [x for x in order if x in grid] + [x for x in grid if x not in order]:
         on = grid[t]
         bars = []
@@ -352,7 +374,7 @@ def main() -> int:
             "// --- LIBRARY: the track's DETECTED groove, played with TR808 ---",
             "$: stack(",
             ",\n".join(detected),
-            f'){late_suffix(drums_late(args.drums_json, args.bpm))}.bank("{pat["drum_bank"]}"){drums_fx}',
+            f'){late_suffix(detected.late)}.bank("{pat["drum_bank"]}"){drums_fx}',
             "",
         ]
     else:

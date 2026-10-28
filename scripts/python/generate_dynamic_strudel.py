@@ -1347,7 +1347,7 @@ def main() -> int:
             # the detected slots are counted from the hits' grid phase: `.late()` right after the stack puts them back on
             # the stem's times (the per-bar gain() below is applied after it, so the envelope is not shifted)
             drum_code = ("stack(\n" + ",\n".join("  " + d for d in dlines)
-                         + f'\n){H.late_suffix(H.drums_late(args.drums_json, args.bpm))}{bank_suffix}{drum_lpf}{fx_no_gain(drums_fx, drop_lpf=True)}'
+                         + f'\n){H.late_suffix(detected.late)}{bank_suffix}{drum_lpf}{fx_no_gain(drums_fx, drop_lpf=True)}'
                          + f'{gain_pattern(drum_env, drums_fx["gain"] * M)}')
             channels.append(("DRUMS", label, drum_code))
 

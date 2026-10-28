@@ -122,6 +122,18 @@ def decay_end(env: np.ndarray, start: int, limit: int, floor: float, background:
     return limit if under.size == 0 else start + pk + int(under[0])
 
 
+def first_peak(env: np.ndarray, start: int, stop: int, width: int) -> int:
+    """Index of the first local maximum of *env* at or after *start* (hill-climb with a *width* look-ahead, so ripples
+    shorter than the detection lag do not stop it). The end of the hit's own rise."""
+    i = start
+    while i < stop - 1:
+        j = i + int(np.argmax(env[i: min(stop, i + width + 1)]))
+        if j == i:
+            return i
+        i = j
+    return i
+
+
 def _profile(x: np.ndarray, sr: int, n_bands: int = 10) -> np.ndarray:
     spec = np.abs(np.fft.rfft(x)) ** 2
     f = np.fft.rfftfreq(len(x), 1.0 / sr)
@@ -197,6 +209,10 @@ def cut_class(
         # the hit's own peak lies before the next onset of ANY class (a hat or kick later in the window may be louder)
         nxt_any = [u for u in np.concatenate([other_t, np.array(own)]) if u - lag > a / sr + 1e-3]
         peak_limit = int((min(nxt_any) - lag) * sr) if nxt_any else None
+        if peak_limit is not None:
+            # a foreign hit detected while this hit is still RISING (an "hh" on a kick's own attack) does not bound
+            # its peak: the search runs at least to the end of the rise, else the "peak" is a point of the rising edge
+            peak_limit = max(peak_limit, first_peak(wide, a, limit, width) + 1)
         end = decay_end(wide, a, limit, floor, background, peak_limit)
         # A hit that has not decayed by the time a later hit of ANY class starts ends there: the length cap above comes
         # from this class's own gaps, which for a rare class (3 snares in 130 s) is tens of seconds of other music.
@@ -250,12 +266,8 @@ def cut_class(
     pool = [c for c in pool if not c.coincident] or pool
     pk_med = float(np.median([c.band_peak for c in pool]))
     pool = [c for c in pool if c.band_peak <= pk_med] or pool
+    # (the pick is typical by construction: it comes from the third of the candidates nearest the median profile)
     best = min(pool, key=lambda c: onset_in_file(c.audio, sr))
-    # sanity: the pick must be a typical hit - if its band shares sit further from the candidates' median than the
-    # candidates' own spread allows, fall back to the medoid
-    spread = float(np.median(dist)) + OUTLIER_SIGMAS * robust_sigma(dist)
-    if float(np.linalg.norm(best.profile - ref)) > spread:
-        best = base[int(np.argmin(dist))]
     return best.audio
 
 
