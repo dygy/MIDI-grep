@@ -92,6 +92,23 @@ def test_a_migration_number_taken_by_another_branch_does_not_skip_this_migration
     assert [x["seq"] for x in db.history("other", "synth")] == [0]
 
 
+def test_steps_recorded_in_separate_writes_keep_their_order_within_one_second(db):
+    # auto-calibrate.sh records each step in its OWN write: seq (the position inside a write) is 0 for every one of them,
+    # so steps written in the same second tied and came back in no defined order (CI: ['cal2', 'cal1', 'cal3']).
+    # The write clock must increase across writes, and history must follow it even when the rows sit physically reversed.
+    import clickhouse_store as CS
+    t = "2026-10-29 05:00:00"
+    for tag in ("cal1", "cal2", "cal3"):
+        assert db.write_rows([{**row(db, tag=tag, run="rw"), "created_at": t}]) == 1
+    rows = [x for x in db.history("other", "synth") if x["run_id"] == "rw"]
+    assert [x["tag"] for x in rows] == ["cal1", "cal2", "cal3"]
+    keys = [int(x["write_ns"]) for x in rows]
+    assert keys == sorted(keys) and len(set(keys)) == 3, keys
+    rev = [{**row(db, tag=tg, run="rv"), "created_at": t, "seq": 0, "write_ns": w} for tg, w in (("cal3", 30), ("cal1", 10), ("cal2", 20))]
+    CS.clickhouse_insert_many(db.TABLE, rev)
+    assert [x["tag"] for x in db.history("other", "synth") if x["run_id"] == "rv"] == ["cal1", "cal2", "cal3"]
+
+
 def test_rows_of_one_write_come_back_in_write_order_although_they_tie_on_created_at(db):
     # created_at has one-second resolution: the steps of one run, recorded together, tie on it and ClickHouse returns ties
     # in no defined order (CI, ClickHouse 26.11: ['cal2', 'cal1', 'cal3']). The write order (`seq`) breaks the tie, so a
