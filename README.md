@@ -49,6 +49,247 @@ These runs are on the seeded offline renderer (2026-10-29). The score scale chan
 [Scoring](#scoring-and-the-gate)), so any number from before that date is not comparable. Older numbers are
 kept as history in the comments of `thresholds.yaml`.
 
+## Architecture
+
+```
+                              MIDI-grep: the editable pipeline
+
+   INPUT          SEPARATE         ANALYZE            BUILD                CALIBRATE             OUTPUT
+     │                │                │                 │                      │                   │
+     ▼                ▼                ▼                 ▼                      ▼                   ▼
+┌─────────┐    ┌────────────┐    ┌────────────┐    ┌──────────────┐    ┌──────────────────┐    ┌──────────┐
+│ YouTube │    │  Demucs    │    │ librosa    │    │ Basic Pitch  │    │ generate_dynamic │    │ vNNN/    │
+│ yt-dlp  │───▶│  stems     │───▶│ BPM / key  │───▶│ MIDI + drums │───▶│ → offline render │───▶│ .strudel │
+│ WAV/MP3 │    │ (in-proc.) │    │ CLAP genre │    │ sample pack  │    │ → compare + gate │    │ + report │
+└─────────┘    └────────────┘    │ tempo fit  │    │ instruments  │    │ → calibrate      │    └──────────┘
+                    │            └────────────┘    └──────────────┘    └──────────────────┘
+                    ▼                                     │                      │
+              ┌──────────────┐                     ┌──────────────┐    ┌──────────────────┐
+              │ melodic      │                     │ R2 (wrangler)│    │ headless Chromium│
+              │ bass, drums  │                     │ or localhost │    │ @strudel/web     │
+              │ vocals (not  │                     │ :5555        │    │ OfflineAudio-    │
+              │ generated)   │                     └──────────────┘    │ Context          │
+              └──────────────┘                                         └──────────────────┘
+       bass + drums + melodic → instrumental.wav (target)              ClickHouse calibration memory
+
+────────────────────────────────────────────────────────────────────────────────────────────────────
+                              Tech Stack
+
+  Go 1.25+                              Python 3.11 (scripts/python/.venv)
+  ├── CLI (Cobra): extract, serve,      ├── separate.py           - Demucs stems
+  │   generative, report                ├── transcribe.py         - Basic Pitch audio → MIDI
+  ├── HTTP (Chi) + HTMX templates       ├── detect_genre_dl.py    - CLAP genre
+  └── internal/pipeline orchestrator    ├── generate_dynamic_strudel.py - editable Strudel
+                                        ├── compare_audio.py      - static + temporal score
+  TypeScript/Node.js (scripts/node)     ├── calibrate_dynamic.py  - knob corrections
+  ├── render-strudel-offline.ts         └── calibration_memory.py - ClickHouse memory
+  │   (default renderer)
+  └── record-strudel-blackhole.ts       Shell drivers
+      (cross-check only)                ├── scripts/editable-pipeline.sh (stages 1-10)
+                                        └── scripts/auto-calibrate.sh    (stage 7 loop)
+```
+
+### Complete Orchestration Flow
+
+`scripts/editable-pipeline.sh` runs stages 1–10. Each stage is skipped when its output exists and is current
+(`--force` redoes all). The sample pack, the instrument models and the calibrated BEST renders are stamped with
+`calibration_memory.py code-version` (`.pipeline/pack.code`, `models/<name>/.code`, `.pipeline/<mode>/best.code`),
+so a code change rebuilds them.
+
+```mermaid
+flowchart TB
+    %% ===== STAGE 1: stems + analysis =====
+    URL["editable-pipeline.sh --url / --title"] --> S1{"stems + metadata.json<br/>in .cache/stems/&lt;track&gt;/?"}
+    S1 -->|No| Extract["1: midi-grep extract --render none --iterate 0<br/>yt-dlp → separate.py (Demucs) → analyze.py (librosa)"]
+    S1 -->|Yes| S1b
+    Extract --> S1b["1b: detect_genre_dl.py (CLAP)<br/>pipeline_helpers.py stamp<br/>tempo_refine.py (phase coherence on drums.wav)"]
+    S1b --> Instr["pipeline_helpers.py instrumental<br/>→ instrumental.wav (bass + drums + melodic)"]
+
+    %% ===== STAGES 2-6: material =====
+    Instr --> S2["2: transcribe.py (Basic Pitch)<br/>bass.wav, melodic.wav → .mid"]
+    S2 --> S3["3: detect_drums_bands.py → drums_bands.json<br/>3b: bass_register.py → bass_f0.json"]
+    S3 --> S4["4: build_sample_pack.py<br/>drum one-shots + pitched multisamples"]
+    S4 --> S5["5: midi-grep generative train --midi<br/>(one grain per note) + build_instruments.py<br/>→ instruments/samples.json + verification.json"]
+    S5 --> S6{"6: host"}
+    S6 -->|"--r2 (default)"| R2["upload_r2.py (wrangler)<br/>changed files only"]
+    S6 -->|"--local"| Local["CORS server :5555"]
+
+    %% ===== STAGE 7: calibration loop =====
+    R2 --> Cal
+    Local --> Cal
+    Cal["7: auto-calibrate.sh<br/>sample-instrument, then --mode synth"] --> Warm["calibration_memory.py warm-start<br/>(this track or nearest same-genre)"]
+    CH[("ClickHouse<br/>.clickhouse/db<br/>midi_grep.calibration_steps")] -.-> Warm
+    Warm --> Gen["generate_dynamic_strudel.py"]
+    Gen --> Render["renderer.py → render-strudel-offline.js<br/>mix + bass solo + melodic solo<br/>in parallel (render_jobs.py)"]
+    Render --> Cmp["compare_audio.py vs instrumental.wav<br/>gate_margin.py"]
+    Cmp --> Solo["bass_solo.py / melodic_solo.py<br/>(voice level vs bass.wav / melodic.wav)"]
+    Solo --> Step["calibrate_dynamic.py → next knobs<br/>calibrate_loop.py: keep / revert / stop"]
+    Step -.->|record step| CH
+    Step -->|next iteration| Gen
+    Step -->|stop| Post["after BEST: bass-shape trial,<br/>synth lead fit (lead_synth.py),<br/>loudness (mix_dynamics.py),<br/>master bus (only if the engine has one)"]
+
+    %% ===== STAGES 8-10 =====
+    Post --> S8["8: compare_audio.py --strudel --control &lt;other track&gt;<br/>eval/gate.py --mode, editability_check.py"]
+    S8 --> S9["9: pipeline_helpers.py promote → vNNN/<br/>calibration_memory.py record-promoted"]
+    S9 --> S10["10: pipeline_helpers.py report<br/>report.html, charts, render stems,<br/>stem_comparison.json, iterations.json"]
+    S9 -.-> CH
+
+    style Extract fill:#2e7d32,color:#fff
+    style S1b fill:#7b1fa2,color:#fff
+    style Cal fill:#e65100,color:#fff
+    style Render fill:#512da8,color:#fff
+    style Cmp fill:#00796b,color:#fff
+    style S8 fill:#00796b,color:#fff
+    style CH fill:#303f9f,color:#fff
+    style S10 fill:#1b5e20,color:#fff
+```
+
+**The `midi-grep extract` path** (the original one-shot CLI; the editable pipeline uses it only for stage 1):
+
+```mermaid
+flowchart LR
+    CLI["midi-grep extract"] --> Go["internal/pipeline/orchestrator.go<br/>yt-dlp, separate.py, analyze.py,<br/>transcribe.py + cleanup.py, detect_drums.py,<br/>heuristic genre detection"]
+    Go --> Codegen{"--codegen"}
+    Codegen -->|"orchestrated (default)"| Orch["codegen_orchestrator.py<br/>(small validated jobs)"]
+    Codegen -->|single| Single["ollama_codegen.py"]
+    Orch --> Code["output.strudel"]
+    Single --> Code
+    Code --> Iter{"--iterate N"}
+    Iter -->|"N > 0"| Improver["ai_improver.py<br/>Ollama (default) or Claude API<br/>render via renderer.py → compare_audio.py<br/>→ eval/gate.py, revert on regression,<br/>runs stored via clickhouse_store.py"]
+    Iter -->|0| Done["vNNN/"]
+    Improver --> Done
+```
+
+`extract --render` without `--iterate` uses older paths in `cmd/midi-grep/main.go`: the BlackHole recorder with
+`--blackhole`, otherwise `render_with_models.py`, `iterative_render.py` or `render_audio.py`.
+
+**Renderer.** `scripts/python/renderer.py` is the one switch (`MIDIGREP_RENDERER`, default `offline`). The offline
+renderer `scripts/node/src/render-strudel-offline.ts` runs Strudel's own `renderPatternAudio` on an
+`OfflineAudioContext` in headless Chromium (puppeteer) with the pinned `@strudel/web` 1.3.0 bundle, in whole-cycle
+chunks, each in a fresh page. Supporting modules in `scripts/node/src/`:
+
+- `determinism.ts`: seeded `Math.random` and worklet PRNGs, so two renders differ by at most 1 LSB.
+- `sample-cache.ts`: the on-disk sample cache in `.cache/render-samples/`.
+- `offline-helpers.ts`: chunk planning, the render checks and the hang-watchdog limit (`stallLimitS`).
+
+`record-strudel-blackhole.ts` (with `capture-rate.ts`, `capture-guard.ts`) records live playback through BlackHole
+and is a cross-check only. It has a known pitch defect, described under [Renderer](#renderer).
+
+### External Dependencies
+
+| Component | Technology | Where it is used |
+|-----------|------------|------------------|
+| **yt-dlp** | Python CLI (in the venv, `requirements.txt`) | `internal/audio/youtube.go`; `MIDIGREP_YTDLP` overrides the binary |
+| **ffmpeg** | C binary | Audio conversion and mp3 copies for the report; BlackHole capture |
+| **Demucs** | PyTorch | `separate.py` (run in-process via `demucs.apply`). Installed by `scripts/install-deps.sh`; not listed in `requirements.txt` |
+| **Basic Pitch** | TensorFlow 2.15 + `keras<3` | `transcribe.py` (audio → MIDI) |
+| **librosa** | Python | BPM/key (`analyze.py`), onsets, features in `compare_audio.py` |
+| **CLAP** | `laion-clap`, falling back to `transformers` `ClapModel` | `detect_genre_dl.py` (stage 1b genre) |
+| **openl3** | Python | Timbre embeddings for `scripts/python/rave/` |
+| **pyyaml, pydantic, fastmcp** | Python | `eval/gate.py` thresholds, `pipeline_helpers.py` models, the `loop` MCP server |
+| **puppeteer + Chromium** | Node.js | Hosts the offline renderer (and the BlackHole recorder) |
+| **`@strudel/web` 1.3.0, `@strudel/soundfonts` 1.2.6** | Node.js (pinned in `package.json`) | The real Strudel/superdough engine inside the renderer |
+| **ClickHouse local** | C++ binary at `bin/clickhouse` | Calibration memory (`calibration_memory.py`) and the `extract --iterate` run store (`clickhouse_store.py`), data in `.clickhouse/db` |
+| **wrangler / Cloudflare R2** | `npx wrangler` (or the `aws` CLI with R2 keys) | `upload_r2.py`, stage 6 hosting of the sample pack |
+| **Ollama / Claude API** | Local LLM / HTTP API | Only for `extract` codegen and `--iterate` |
+| **BlackHole** | macOS audio driver | Optional cross-check renderer only |
+
+`detect_genre_essentia.py` exists, but nothing in the pipeline calls it.
+
+### Module Structure
+
+```
+midi-grep/
+├── cmd/midi-grep/main.go       # Cobra commands: extract, serve, generative (gen, rave), report
+│
+├── internal/                   # Go packages
+│   ├── audio/                  # input validation, yt-dlp download, Demucs wrapper (separate.py)
+│   ├── analysis/               # BPM & key (analyze.py)
+│   ├── midi/                   # transcription (transcribe.py) + cleanup (cleanup.py)
+│   ├── drums/                  # drum detection (detect_drums.py)
+│   ├── pipeline/               # extract orchestrator → codegen_orchestrator.py / ollama_codegen.py
+│   ├── generative/             # wrapper for scripts/python/rave (granular / RAVE training)
+│   ├── report/                 # Go HTML report generator (midi-grep report)
+│   ├── server/                 # Chi + HTMX web UI, SSE, background jobs
+│   ├── cache/                  # stem + vNNN output caching
+│   ├── exec/                   # Python subprocess runner (finds scripts/python/.venv)
+│   ├── progress/, workspace/, errors/
+│
+├── scripts/
+│   ├── editable-pipeline.sh    # stages 1-10, one command from a link to editable Strudel
+│   ├── auto-calibrate.sh       # stage 7: generate → render → compare → calibrate loop
+│   ├── sample-pipeline.sh      # earlier sample-pack driver
+│   ├── midi-grep.sh, extract-*.sh, quick-riff.sh, serve.sh, install-deps.sh
+│   ├── node/
+│   │   ├── src/
+│   │   │   ├── render-strudel-offline.ts   # default renderer
+│   │   │   ├── determinism.ts, sample-cache.ts, offline-helpers.ts
+│   │   │   └── record-strudel-blackhole.ts, capture-rate.ts, capture-guard.ts   # cross-check
+│   │   ├── test/               # node --test suites (render, determinism, sample cache, capture)
+│   │   └── strudel-validate.mjs
+│   └── python/
+│       ├── separate.py, analyze.py, tempo_refine.py, transcribe.py, cleanup.py
+│       ├── detect_genre_dl.py, detect_drums.py, detect_drums_bands.py, bass_register.py
+│       ├── build_sample_pack.py, build_instruments.py, pitched_grains.py, upload_r2.py
+│       ├── generate_dynamic_strudel.py, sound_selector.py, lead_synth.py, bass_shape.py
+│       ├── renderer.py, render_jobs.py, solo_stems.py
+│       ├── compare_audio.py, compare_cache.py, gate_margin.py, editability_check.py
+│       ├── calibrate_dynamic.py, calibrate_loop.py, bass_solo.py, melodic_solo.py, mix_dynamics.py
+│       ├── calibration_memory.py, clickhouse_store.py
+│       ├── pipeline_helpers.py  # stamp, instrumental, control, promote, report, record-floor, …
+│       ├── generate_report.py
+│       ├── codegen_orchestrator.py, ollama_codegen.py, ollama_agent.py, ai_improver.py   # extract path
+│       ├── rave/               # granular + RAVE trainer, model repository, timbre embeddings
+│       └── tests/              # pytest suites
+│
+├── eval/                       # gate.py, thresholds.yaml, datasets/reference_tracks.yaml
+├── mcp_servers/loop/           # FastMCP: render_strudel, compare_render, verify_strudel, eval_gate
+├── clickhouse-init/            # ClickHouse schema SQL (docker-compose.clickhouse.yml)
+├── models/                     # trained instruments, one dir per <slug>_{bass,lead}
+└── context/                    # AWOS docs
+    ├── product/                # product-definition, values, architecture, roadmap, delivery-flow
+    └── spec/                   # 001-core-pipeline … 004-second-reference-track
+```
+
+### Data Flow
+
+```
+1. INPUT
+   YouTube URL ──▶ yt-dlp ──▶ .cache/stems/<track>/original.wav
+   Local file ───────────────▶ .cache/stems/<track>/original.wav
+
+2. STEMS + ANALYSIS (stage 1, cached per track)
+   original.wav ──▶ Demucs ──▶ melodic.wav + bass.wav + drums.wav + vocals.wav
+                ──▶ librosa + CLAP + tempo_refine ──▶ metadata.json { bpm, bpm_method, key, genre, duration }
+   bass + drums + melodic ──▶ instrumental.wav        (the scoring target; vocals are never generated)
+
+3. MATERIAL (stages 2-6)
+   bass.wav, melodic.wav ──▶ Basic Pitch ──▶ sample_pack/bass.mid, melodic.mid
+   drums.wav ──▶ detect_drums_bands ──▶ sample_pack/drums_bands.json
+   stems + MIDI ──▶ build_sample_pack + generative train ──▶ sample_pack/{drums,bass,melodic}/,
+                                                             sample_pack/instruments/samples.json
+   sample_pack/ ──▶ R2 or localhost:5555        (Strudel fetches samples.json from there)
+
+4. CALIBRATE (stage 7, workdir .cache/stems/<track>/.pipeline/<mode>/)
+   knobs ──▶ generate_dynamic_strudel ──▶ calN.strudel ──▶ offline render ──▶ calN.wav
+   calN.wav vs instrumental.wav ──▶ calN.cmp.json ──▶ calibrate_dynamic ──▶ next knobs
+   every step ──▶ ClickHouse (.clickhouse/db)
+   result ──▶ best.strudel, best.wav, best.cmp.json, best.params, best.code, iters.tsv
+
+5. SCORE, PROMOTE, REPORT (stages 8-10)
+   best.strudel ──▶ compare_audio --strudel --control ──▶ comparison.json ──▶ eval/gate.py ──▶ gate.txt
+                ──▶ editability_check ──▶ editability.json
+   promote ──▶ .cache/stems/<track>/vNNN/
+               ├── output.strudel, render.wav, comparison.json, metadata.json, env_correction.json
+               └── report.html, comparison.png, chart_*.png, render_{melodic,drums,bass}.wav,
+                   stem_comparison.json, iterations.json, iterations/
+
+CACHES (shared across tracks)
+   .cache/render-samples/     samples the renderer fetched (sample-cache.ts)
+   .cache/compare-features/   reference-side features + control scores (compare_cache.py)
+   .clickhouse/db             calibration memory + extract --iterate runs
+```
+
 ## Requirements
 
 macOS is the reference machine. CI also builds and tests the Go, Node and Python-analysis layers on Linux.
@@ -219,7 +460,7 @@ renders one job at a time.
 └── vNNN/                   # one promoted piece
     ├── output.strudel      # the editable code
     ├── render.wav, comparison.json, metadata.json, env_correction.json
-    └── report.html, comparison.png, chart_*.png, render_{melodic,drums,bass}.mp3, stem_comparison.json, iterations.json
+    └── report.html, comparison.png, chart_*.png, render_{melodic,drums,bass}.wav (mp3 copies for the report in embed/), stem_comparison.json, iterations.json
 ```
 
 The report stems come from the renderer with one voice group sounding (`solo_stems.py`). Use
