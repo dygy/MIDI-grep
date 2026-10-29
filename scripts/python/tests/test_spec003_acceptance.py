@@ -242,7 +242,7 @@ def test_21_every_voice_is_its_own_block_of_editable_data(deliverable):
 # negative: a pitched voice fed by an UNDECLARED array is baked/opaque, not editable data
 def test_21_undeclared_array_is_not_editable_data(deliverable):
     base = check_editability(deliverable.code)
-    broken = deliverable.code.replace("...lead", "...ghost")
+    broken = re.sub(r"\.\.\.lead(?!\w)", "...ghost", deliverable.code)   # the `lead` array only, not leadLegato / leadVel
     assert broken != deliverable.code, "fixture has no lead array to break"
     res = check_editability(broken)
     assert len(res.editable_voices) == len(base.editable_voices) - 1
