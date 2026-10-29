@@ -24,6 +24,9 @@ LLM codegen via Ollama/Claude) → render to audio → compare to original → i
   R2), and play via `await samples(...)`. Its `loops` mode is replay (forbidden as a deliverable,
   `values.md` A1); its old-scale ~91% is not comparable. The base URL is the only thing that changes localhost↔R2.
 
+- **Hydra visuals** (`scripts/python/visuals/`, spec 005) — a self-hosted model paints a realistic scene for the track;
+  Ollama writes a Hydra chain over it whose controls are read live from the piece's patterns → `vNNN/visuals.strudel`.
+
 ## Key directories
 
 - `cmd/midi-grep/main.go` — CLI entrypoint (extract, serve, generative).

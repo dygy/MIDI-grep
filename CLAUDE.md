@@ -185,6 +185,8 @@ lead-lpf follows the voices' own centroid, instead of whole-mix shares the bass/
 under the stem at 200 Hz-1.3 kHz). The sampled lead/chord high-pass is now derived (the lowest fundamental played, `sample_lead_hpf`),
 not a fixed 300 Hz. `AC_MSOLO=off` skips it.
 
+**Hydra visuals** (`scripts/python/visuals/`, spec 005; `cd scripts/python && .venv/bin/python -m visuals <track dir> [--version vNNN]`): a realistic scene painted by a self-hosted diffusion model (`--image-model`, default `stabilityai/sd-turbo` via diffusers on MPS) from a prompt the self-hosted Ollama model (`--ollama-model`, default `mistral-small`) writes from the measured track vision (metadata, CLAP scene/mood ranking of `instrumental.wav`, centroid, sections), animated by a Hydra chain whose controls (kick/snare/hat, bassHit/bassWave, leadHit/leadHue, chordDepth, energy) are queried live from the piece's own bar arrays at Strudel's clock. Writes `vNNN/visuals.strudel` (the piece + the Hydra block; `output.strudel` is untouched, no score changes), `visual.jpg`, `visuals.json`. The LLM chain must pass a whitelist and the headless check `scripts/node/dist/check-hydra.js` (scene luminance corr >= 0.5, every wired control moves, strongest-pulse quarter of frames moves >= 1.2x the weakest), else the fallback chain is used.
+
 **CRITICAL: Similarity Calculation Fix (Feb 2026)**
 The old cosine-based frequency balance was HIDING massive errors (25% sub_bass, 20% mid differences showed as 95%!).
 Now uses MAE (Mean Absolute Error) with per-band penalty:

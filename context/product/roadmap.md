@@ -234,7 +234,8 @@ _Support for other live coding environments and formats._
   - [ ] **TidalCycles:** Haskell syntax output
   - [ ] **Sonic Pi:** Ruby syntax output
   - [ ] **SuperCollider:** SC patterns output
-  - [ ] **Hydra:** Visual pattern suggestions based on audio
+  - [ ] **Hydra:** Visual pattern suggestions based on audio — in progress (spec 005, `scripts/python/visuals/`): a
+    self-hosted model paints a realistic scene, Ollama writes the Hydra chain, controls read live from the piece's patterns
 
 - [ ] **Standard Music Formats**
   - [ ] **ABC Notation:** For sheet music generation

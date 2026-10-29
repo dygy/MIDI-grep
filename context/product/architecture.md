@@ -214,6 +214,16 @@ approximation stands in for a failed render). `internal/codegen`'s tests fail wh
 not exist (the web UI used to call the deleted `ai_code_generator.py`). **Only a real-Strudel render (offline renderer by default, or the BlackHole recorder) may
 gate accept/reject decisions.**
 
+### Hydra Visuals (spec 005, `scripts/python/visuals/`)
+
+An optional stage after promotion, outside scoring: `python -m visuals <track dir>` measures the track's vision
+(metadata, CLAP scene/mood ranking of `instrumental.wav`, centroid, sections), asks the self-hosted Ollama model for a
+scene prompt + Hydra chain, paints the scene with a self-hosted diffusers model (default `stabilityai/sd-turbo`, MPS),
+and writes `vNNN/visuals.strudel` = `output.strudel` + a Hydra block whose controls are queried from the piece's own
+bar arrays at Strudel's clock. `scripts/node/src/check-hydra.ts` runs the file headless (pinned @strudel/web +
+hydra-synth 1.4.0) and gates the chain (scene recognizable, controls move, motion follows the pulses); a chain that
+fails falls back to the rule-built one. `output.strudel`, renders and scores are untouched.
+
 ### Comparison & Eval Gate
 
 - **`scripts/python/compare_audio.py`** — rendered-vs-original similarity. Uses **MAE** on
