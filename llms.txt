@@ -99,7 +99,9 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   Each iteration also renders the BASS channel alone (`bass_solo.py`, `--bass-solo`, `AC_BSOLO=off` skips) and, in
   sample-instrument mode, LEAD+CHORDS alone (`melodic_solo.py`, `--melodic-solo`, `AC_MSOLO=off` skips): bass-mult,
   cal-lead and lead-lpf follow the voice's own level/centroid vs its stem, not whole-mix shares. `--lead-hpf 0` = derived
-  from the lowest note the lead/chords play.
+  Those renders (mix, bass solo, melodic solo) are independent and run concurrently: `render_jobs.py` derives how many at once from
+  cores + free memory vs one render's measured footprint (`MIDIGREP_RENDER_JOBS` overrides, logged as `render jobs:`; 1 = sequential;
+  the report's three stem renders use the same limit); a failure or SIGINT/SIGTERM terminates every child process tree.
 
 ## Sample-pack → R2 (highest similarity)
 

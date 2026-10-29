@@ -91,6 +91,49 @@ NODE_BIN="${AC_NODE:-node}"; SETTLE="${AC_SETTLE_S:-3}"
 PGREP="${AC_PGREP:-pgrep}"; WAIT_MAX="${AC_RECORDER_WAIT_S:-120}"   # tests: AC_PGREP=false, AC_RECORDER_WAIT_S=0
 RC=0   # exit status: 70 when any iteration failed (GEN/RENDER/CMP FAILED, recorder wait abort); BEST is still printed
 
+# ---- concurrency ------------------------------------------------------------------------------------------------------
+# The renders of one calibration iteration (mix, bass solo, melodic solo) are independent: all three strudels come from the
+# same generated $STRU. They run concurrently, as many at once as scripts/python/render_jobs.py derives from this machine
+# (cores, free memory against one render's measured footprint; MIDIGREP_RENDER_JOBS overrides; 1 = the old sequential order).
+# Every background child is tracked so that a failure, SIGINT or SIGTERM leaves nothing behind (the whole process tree of
+# each child - node driver and its Chromium - is terminated and waited for).
+RJPY="${AC_RENDER_JOBS_PY:-$ROOT/scripts/python/render_jobs.py}"
+CHILD_PIDS=()
+descendants() {   # descendants PID: every pid below PID in the process tree (one per line)
+  ps -A -o pid= -o ppid= 2>/dev/null | awk -v root="$1" '{ n++; id[n]=$1; par[$1]=$2 }
+    END { seen[root]=1; ch=1; while (ch) { ch=0; for (i=1;i<=n;i++) if (!(id[i] in seen) && (par[id[i]] in seen)) { seen[id[i]]=1; print id[i]; ch=1 } } }'
+}
+reap_children() {   # terminate + wait for every tracked background child and its descendants; idempotent
+  local p d all=""
+  for p in ${CHILD_PIDS[@]+"${CHILD_PIDS[@]}"}; do all="$all $p $(descendants "$p" | tr '\n' ' ')"; done
+  [ -z "${all// /}" ] && { CHILD_PIDS=(); return 0; }
+  for p in ${CHILD_PIDS[@]+"${CHILD_PIDS[@]}"}; do kill -TERM "$p" 2>/dev/null; done   # lanes first: they must not start a next job
+  kill -TERM $all 2>/dev/null
+  for p in ${CHILD_PIDS[@]+"${CHILD_PIDS[@]}"}; do wait "$p" 2>/dev/null; done
+  for d in $all; do kill -0 "$d" 2>/dev/null && { sleep 0.3; kill -KILL $all 2>/dev/null; break; }; done   # a straggler that ignored TERM
+  CHILD_PIDS=(); return 0
+}
+trap reap_children EXIT
+trap 'reap_children; exit 130' INT
+trap 'reap_children; exit 143' TERM HUP
+RJ_LAST=""
+render_jobs_for() {   # render_jobs_for N: the concurrency for N independent renders (logged when it changes); sets RJ
+  local n="$1" out rc err
+  if [ "$RENDERER" = blackhole ]; then RJ=1; return 0; fi   # the capture device records one render at a time
+  err="$WORK/render_jobs.err"
+  out="$("$PY" "$RJPY" jobs --independent "$n" 2>"$err")"; rc=$?
+  if [ "$rc" -eq 2 ]; then cat "$err" >&2; exit 64; fi    # an invalid MIDIGREP_RENDER_JOBS is an error, never a silent default
+  case "$out" in ''|*[!0-9]*) echo "render jobs: WARNING cannot derive the concurrency ($(tr '\n' ' ' <"$err")) - sequential" >&2; RJ=1; return 0;; esac
+  RJ="$out"
+  if [ "$RJ_LAST" != "$RJ/$n" ]; then echo "render jobs: $(cat "$err")"; RJ_LAST="$RJ/$n"; fi
+}
+render_one() {   # render_one STRU WAV LOG: the renderer's EXIT STATUS decides; on failure no WAV is left and LOG.rc holds the status
+  local rrc=0; rm -f "$2" "$3.rc"
+  "$NODE_BIN" "$REC" "$1" -o "$2" -d "$DUR" >"$3" 2>&1 || rrc=$?
+  if [ "$rrc" -ne 0 ] || [ ! -f "$2" ]; then rm -f "$2"; echo "$rrc" >"$3.rc"; return 1; fi
+  return 0
+}
+
 STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" BARS="78"
 LEAD_FIT="${AC_LEAD_FIT:-1}"; LEAD_EVALS=10; LEAD_ARG=(); LSYN="${AC_LEAD_SYNTH:-$ROOT/scripts/python/lead_synth.py}"   # synth lead fit; see header
 BSHAPE="stem"; SHAPE_PIN=0; SHAPE_TESTED=0; SHAPE_TRIAL="${AC_SHAPE_TRIAL:-1}"   # generator --bass-shape; see header
@@ -226,6 +269,26 @@ regate() {
   local g; if g=$("$PY" "$GATE" --comparison "$WORK/best.cmp.json" --genre "$GENRE" --mode "$MODE" 2>/dev/null); then best_gate="$g"; else best_gate="n/a"; fi
 }
 
+# solo_job bass|mel TAG: render the voice alone (its strudel is already written) and measure it against the original stem.
+# Leaves $WORK/TAG.<kind>.json (only on success) and one line for the log in $WORK/TAG.<kind>.msg; never exits non-zero.
+solo_job() {
+  local kind="$1" tag="$2"
+  local strudel="$WORK/$tag.$kind.strudel" wav="$WORK/$tag.$kind.wav" rlog="$WORK/$tag.$kind.render.log" mlog="$WORK/$tag.$kind.log"
+  local json="$WORK/$tag.$kind.json" msg="$WORK/$tag.$kind.msg"
+  if [ "$kind" = bass ]; then
+    render_one "$strudel" "$wav" "$rlog" \
+      && "$PY" "$BSOLO" measure --orig-bass "$STEMS/bass.wav" --solo "$wav" --master-gain "$MG" --seconds "$SONG_S" --out "$json" 2>"$mlog" \
+      && { echo "[$tag] $(tail -1 "$mlog")" >"$msg"; return 0; }
+    rm -f "$json"; echo "[$tag] WARNING: bass-alone measurement failed (see $rlog, $mlog) - bass layers follow the mix band shares this step" >"$msg"
+  else
+    render_one "$strudel" "$wav" "$rlog" \
+      && "$PY" "$MSOLO" measure --orig-melodic "$STEMS/melodic.wav" --solo "$wav" --master-gain "$MG" --seconds "$SONG_S" --out "$json" 2>"$mlog" \
+      && { echo "[$tag] $(tail -1 "$mlog")" >"$msg"; return 0; }
+    rm -f "$json"; echo "[$tag] WARNING: melodic-alone measurement failed (see $rlog, $mlog) - cal-lead/lead-lpf follow the mix this step" >"$msg"
+  fi
+  return 0
+}
+
 SULOCK=0   # 1 once an octave-up step lost to its parent: the calibrator must not propose it again in this run
 best=-1; best_params=""; best_tag=""; best_gate="n/a"; : >"$WORK/iters.tsv"
 rm -f "$WORK/best.env.json" "$WORK/best.master" "$WORK/best.leadsynth.json"   # never report a stale env / level from a previous run
@@ -261,45 +324,60 @@ while [ "$i" -lt "$ITERS" ]; do
       sleep 2; waited=$((waited+2))
     done; sleep "$SETTLE"
   fi
-  # The renderer's EXIT STATUS decides, not the file's existence: a non-zero exit means its own checks failed
-  # (silence, missing sounds, truncated tail ...), so whatever is at $WAV must never be scored.
-  rm -f "$WAV"
-  rrc=0; "$NODE_BIN" "$REC" "$STRU" -o "$WAV" -d "$DUR" >"$WORK/$TAG.render.log" 2>&1 || rrc=$?
-  if [ "$rrc" -ne 0 ] || [ ! -f "$WAV" ]; then
-    rm -f "$WAV"; echo "[$TAG] RENDER FAILED (rc=$rrc, see $WORK/$TAG.render.log)"; RC=70; break
-  fi
 
-  "$PY" "$CMP" "$ORIG" "$WAV" -d "$SONG_S" -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$CJ" 2>/dev/null || { echo "[$TAG] CMP FAILED"; RC=70; break; }
+  # The three renders of this iteration are independent (all derive from $STRU): the mix, the bass voice alone (bass_solo.py)
+  # and the melodic voices alone (melodic_solo.py). Their strudels are written first (cheap); the renders then run
+  # concurrently up to $RJ at a time, and the mix comparison overlaps the solos that are still rendering/measuring.
+  # A solo that cannot be set up or measured only keeps the mix-share levers for this step (WARNING); a failed MIX render ends
+  # the run (RENDER FAILED, exit 70) and the solos in flight are terminated.
+  HAVE_BASS=0; HAVE_MEL=0
+  [ "$BSOLO" != off ] && [ -f "$STEMS/bass.wav" ] && "$PY" "$BSOLO" solo "$STRU" "$WORK/$TAG.bass.strudel" 2>/dev/null && HAVE_BASS=1
+  # melodic: measured on sample-instrument only
+  [ "$MSOLO" != off ] && [ "$MODE" = sample-instrument ] && [ -f "$STEMS/melodic.wav" ] && "$PY" "$MSOLO" solo "$STRU" "$WORK/$TAG.mel.strudel" 2>/dev/null && HAVE_MEL=1
+  render_jobs_for $((1 + HAVE_BASS + HAVE_MEL))
+  rm -f "$WORK/$TAG.bass.json" "$WORK/$TAG.mel.json" "$WORK/$TAG.bass.msg" "$WORK/$TAG.mel.msg"
+  CHILD_PIDS=(); MIX_PID=""; CMP_PID=""; LANE_PIDS=()
+  if [ "$RJ" -gt 1 ]; then
+    render_one "$STRU" "$WAV" "$WORK/$TAG.render.log" & MIX_PID=$!; CHILD_PIDS+=("$MIX_PID")
+    if [ "$RJ" -ge $((1 + HAVE_BASS + HAVE_MEL)) ]; then       # a lane per solo
+      [ "$HAVE_BASS" = 1 ] && { solo_job bass "$TAG" & LANE_PIDS+=("$!"); CHILD_PIDS+=("$!"); }
+      [ "$HAVE_MEL" = 1 ]  && { solo_job mel  "$TAG" & LANE_PIDS+=("$!"); CHILD_PIDS+=("$!"); }
+    elif [ "$HAVE_BASS" = 1 ] || [ "$HAVE_MEL" = 1 ]; then    # two lanes for three renders: the mix, and both solos one after the other
+      ( [ "$HAVE_BASS" = 1 ] && solo_job bass "$TAG"; [ "$HAVE_MEL" = 1 ] && solo_job mel "$TAG"; exit 0 ) & LANE_PIDS+=("$!"); CHILD_PIDS+=("$!")
+    fi
+    wait "$MIX_PID"; mixrc=$?
+  else
+    render_one "$STRU" "$WAV" "$WORK/$TAG.render.log"; mixrc=$?
+  fi
+  if [ "$mixrc" -ne 0 ] || [ ! -f "$WAV" ]; then
+    reap_children; rm -f "$WAV"
+    echo "[$TAG] RENDER FAILED (rc=$(cat "$WORK/$TAG.render.log.rc" 2>/dev/null || echo "$mixrc"), see $WORK/$TAG.render.log)"; RC=70; break
+  fi
+  rm -f "$WORK/$TAG.render.log.rc"
+
+  if [ "$RJ" -gt 1 ]; then
+    "$PY" "$CMP" "$ORIG" "$WAV" -d "$SONG_S" -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$CJ" 2>/dev/null & CMP_PID=$!; CHILD_PIDS+=("$CMP_PID")
+    for lp in ${LANE_PIDS[@]+"${LANE_PIDS[@]}"}; do wait "$lp"; done
+    wait "$CMP_PID"; cmprc=$?
+    CHILD_PIDS=()
+  else
+    "$PY" "$CMP" "$ORIG" "$WAV" -d "$SONG_S" -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$CJ" 2>/dev/null; cmprc=$?
+  fi
+  [ "$cmprc" -eq 0 ] || { reap_children; echo "[$TAG] CMP FAILED"; RC=70; break; }
+  if [ "$RJ" -le 1 ]; then
+    [ "$HAVE_BASS" = 1 ] && solo_job bass "$TAG"
+    [ "$HAVE_MEL" = 1 ]  && solo_job mel  "$TAG"
+  fi
   read -r OVER SECT < <("$PY" -c "import json,sys;d=json.load(open('$CJ'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
   echo "[$TAG] mode=$MODE overall=$OVER section_aware=$SECT  (bm=$BM sg=$SG cl=$CL llpf=$LLPF hg=$HG mg=$MG su=$ESU bl=$BL eff_bl=$EBL lh=$LH eff_lh=$ELH)"
 
-  # Bass voice alone vs the original bass stem (see bass_solo.py). Any failure only keeps the mix-share levers for this step.
-  BSOLO_ARG=()
-  if [ "$BSOLO" != off ] && [ -f "$STEMS/bass.wav" ]; then
-    if "$PY" "$BSOLO" solo "$STRU" "$WORK/$TAG.bass.strudel" 2>/dev/null; then
-      if "$NODE_BIN" "$REC" "$WORK/$TAG.bass.strudel" -o "$WORK/$TAG.bass.wav" -d "$DUR" >"$WORK/$TAG.bass.render.log" 2>&1 \
-         && "$PY" "$BSOLO" measure --orig-bass "$STEMS/bass.wav" --solo "$WORK/$TAG.bass.wav" --master-gain "$MG" \
-              --seconds "$SONG_S" --out "$WORK/$TAG.bass.json" 2>"$WORK/$TAG.bass.log"; then
-        BSOLO_ARG=(--bass-solo "$WORK/$TAG.bass.json"); echo "[$TAG] $(tail -1 "$WORK/$TAG.bass.log")"
-      else
-        echo "[$TAG] WARNING: bass-alone measurement failed (see $WORK/$TAG.bass.render.log, $WORK/$TAG.bass.log) - bass layers follow the mix band shares this step"
-      fi
-    fi
-  fi
-
-  # Melodic voices (LEAD+CHORDS) alone vs the original melodic stem (see melodic_solo.py). Same fallback as the bass.
-  MSOLO_ARG=()
-  if [ "$MSOLO" != off ] && [ "$MODE" = sample-instrument ] && [ -f "$STEMS/melodic.wav" ]; then   # measured on sample-instrument only
-    if "$PY" "$MSOLO" solo "$STRU" "$WORK/$TAG.mel.strudel" 2>/dev/null; then
-      if "$NODE_BIN" "$REC" "$WORK/$TAG.mel.strudel" -o "$WORK/$TAG.mel.wav" -d "$DUR" >"$WORK/$TAG.mel.render.log" 2>&1 \
-         && "$PY" "$MSOLO" measure --orig-melodic "$STEMS/melodic.wav" --solo "$WORK/$TAG.mel.wav" --master-gain "$MG" \
-              --seconds "$SONG_S" --out "$WORK/$TAG.mel.json" 2>"$WORK/$TAG.mel.log"; then
-        MSOLO_ARG=(--melodic-solo "$WORK/$TAG.mel.json"); echo "[$TAG] $(tail -1 "$WORK/$TAG.mel.log")"
-      else
-        echo "[$TAG] WARNING: melodic-alone measurement failed (see $WORK/$TAG.mel.render.log, $WORK/$TAG.mel.log) - cal-lead/lead-lpf follow the mix this step"
-      fi
-    fi
-  fi
+  # Bass / melodic voices alone vs the original stems (see bass_solo.py, melodic_solo.py): the job left its one-line message and
+  # the measurement JSON; any failure only keeps the mix-share levers for this step.
+  BSOLO_ARG=(); MSOLO_ARG=()
+  [ -s "$WORK/$TAG.bass.msg" ] && cat "$WORK/$TAG.bass.msg"
+  [ -s "$WORK/$TAG.bass.json" ] && BSOLO_ARG=(--bass-solo "$WORK/$TAG.bass.json")
+  [ -s "$WORK/$TAG.mel.msg" ] && cat "$WORK/$TAG.mel.msg"
+  [ -s "$WORK/$TAG.mel.json" ] && MSOLO_ARG=(--melodic-solo "$WORK/$TAG.mel.json")
 
   # Record this iteration; BEST is chosen AFTER the loop (see below) so the ordering is one consistent rule.
   # Gate margin = smallest margin to the eval-gate floors (eval/thresholds.yaml via eval/gate.py, per
