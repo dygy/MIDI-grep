@@ -990,11 +990,12 @@ def main() -> int:
     # effects aligned to the original stems
     ref_rms = max((H.stem_features(args.stems_dir / f"{s}.wav", dur) or {"rms": 1e-6})["rms"]
                   for s in ("drums", "bass", "melodic"))
-    bass_fx = H.effects_for(H.stem_features(args.stems_dir / "bass.wav", dur), ref_rms,
+    # synth mode: every voice is a raw oscillator -> the original cutoff derivation (stem_features oscillator=True)
+    bass_fx = H.effects_for(H.stem_features(args.stems_dir / "bass.wav", dur, oscillator=synth), ref_rms,
                             kind="bass", library=(bass_sound != "trackbass"))
-    lead_fx = H.effects_for(H.stem_features(args.stems_dir / "melodic.wav", dur), ref_rms,
+    lead_fx = H.effects_for(H.stem_features(args.stems_dir / "melodic.wav", dur, oscillator=synth), ref_rms,
                             kind="melodic", library=(lead_sound != "tracklead"))
-    drums_fx = H.effects_for(H.stem_features(args.stems_dir / "drums.wav", dur), ref_rms,
+    drums_fx = H.effects_for(H.stem_features(args.stems_dir / "drums.wav", dur, oscillator=synth), ref_rms,
                              kind="drums", library=True)
 
     # realstem drums: play the track's OWN drum stem as a Strudel sample so the rendered drums

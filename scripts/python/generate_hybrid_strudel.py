@@ -73,8 +73,12 @@ ROLLOFF_ENERGY = 0.99
 ANALYSIS_SR = 22050          # the rate the pipeline analyses stems at (bass_shape.StemEvidence); no content above it is musical
 
 
-def stem_features(path: Path, dur: float) -> dict | None:
+def stem_features(path: Path, dur: float, *, oscillator: bool = False) -> dict | None:
     """Spectral/energy features used to ALIGN generated voices via effects.
+
+    ``oscillator=True`` (synth mode, library voices): the voice is a raw oscillator whose harmonics have nothing to
+    do with the stem's own spectrum, so the cutoff keeps its original derivation (median 85 % rolloff over all
+    frames); the sounding-energy rolloff below is valid only for a sample cut from the stem.
 
     ``rolloff`` = median, over the stem's SOUNDING frames (Otsu over its own log frame RMS, as bass_shape), of each
     frame's :data:`ROLLOFF_ENERGY` rolloff at the analysis rate. Rests / noise-floor frames are excluded: their rolloff
@@ -85,8 +89,11 @@ def stem_features(path: Path, dur: float) -> dict | None:
     y, _ = librosa.load(str(path), sr=SR, mono=True, duration=dur)
     if y.size == 0 or np.max(np.abs(y)) < 1e-4:
         return None
-    import bass_shape as BS
     rms = float(np.sqrt(np.mean(y**2)))
+    if oscillator:
+        return {"rms": rms, "rolloff": float(np.median(librosa.feature.spectral_rolloff(y=y, sr=SR, roll_percent=0.85))),
+                "centroid": float(np.median(librosa.feature.spectral_centroid(y=y, sr=SR)))}
+    import bass_shape as BS
     ya = librosa.resample(y, orig_sr=SR, target_sr=ANALYSIS_SR)
     S = np.abs(librosa.stft(ya, n_fft=2048, hop_length=512))
     frame_rms = librosa.feature.rms(S=S, frame_length=2048)[0]
@@ -370,7 +377,7 @@ def main() -> int:
     ref_rms = max((stem_features(args.stems_dir / f"{s}.wav", dur) or {"rms": 1e-6})["rms"]
                   for s in ("drums", "bass", "melodic", "vocals"))
     library_set = {"drums", "bass"}
-    fx = {s: effects_for(stem_features(args.stems_dir / f"{s}.wav", dur), ref_rms,
+    fx = {s: effects_for(stem_features(args.stems_dir / f"{s}.wav", dur, oscillator=(s in library_set)), ref_rms,
                          kind=s, library=(s in library_set))
           for s in ("drums", "bass", "melodic", "vocals")}
 
