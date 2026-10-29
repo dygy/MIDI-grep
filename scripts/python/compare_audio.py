@@ -15,6 +15,8 @@ import sys
 from scipy import signal
 from scipy.spatial.distance import cosine
 
+import compare_cache   # on-disk cache of the reference side (original / --control); MIDIGREP_COMPARE_CACHE=0 bypasses
+
 # Global flag for quiet mode (suppress status messages to stdout)
 _QUIET_MODE = False
 
@@ -410,7 +412,7 @@ def _curve_peaks(curve, inside, distance):
 
 
 def _align_by_onset_envelope(orig, rend, sr, max_lag_s, hop=TEMPORAL_HOP, return_info=False,
-                             beat_s=None, chroma=None, beats_per_bar=None):
+                             beat_s=None, chroma=None, beats_per_bar=None, onset_env_orig=None):
     """Align `rend` to `orig`, searching +/- max_lag_s (one bar). Returns (orig_a, rend_a, lag_seconds):
     equal-length views. lag_seconds > 0 means the render's events come EARLIER than the
     original's (the original's head was trimmed); < 0 means the render's head was trimmed.
@@ -426,9 +428,10 @@ def _align_by_onset_envelope(orig, rend, sr, max_lag_s, hop=TEMPORAL_HOP, return
       3. Among b and its tied candidates the harmony-trajectory score (`_harmony_terms`, not bar-periodic, a
          different feature from the scored components) may overrule b, but only if it separates the winner
          from b by more than ALIGN_TIE_Z standard errors of its own; otherwise b stays.
+    onset_env_orig: the precomputed onset envelope of `orig` (same call, same hop).
     beat_s: beat length (default max_lag_s/4); chroma: optional precomputed (chroma_orig, chroma_rend)
     on the same hop. return_info=True appends the candidate dicts (chosen first) for comparison.json."""
-    ea = librosa.onset.onset_strength(y=orig, sr=sr, hop_length=hop)
+    ea = onset_env_orig if onset_env_orig is not None else librosa.onset.onset_strength(y=orig, sr=sr, hop_length=hop)
     eb = librosa.onset.onset_strength(y=rend, sr=sr, hop_length=hop)
     n = min(len(ea), len(eb))
     ea = ea[:n] - ea[:n].mean()
@@ -614,6 +617,27 @@ def temporal_components(fr, t0=None, t1=None):
     return comps
 
 
+def _control_result(original_path, control_path, duration, synth_config_path, orig_sha):
+    """compare_audio(original, control): a pure function of the two files, the duration, the synth config and the
+    feature code, and the same for every render of a track - cached whole on disk."""
+    def compute():
+        return compare_audio(original_path, control_path, duration, synth_config_path=synth_config_path)
+    if not orig_sha or not compare_cache.enabled():
+        return compute()
+    try:
+        ctrl_sha = compare_cache.file_digest(control_path)
+        cfg = None
+        if synth_config_path:
+            with open(synth_config_path, 'r') as f:
+                cfg = json.load(f)
+            cfg = {'tolerance': cfg.get('tempo', {}).get('tempo_tolerance'), 'bpm': cfg.get('tempo', {}).get('tempo_bpm')}
+    except Exception:
+        return compute()   # unreadable control / config: compute() reports it exactly as before
+    return compare_cache.get_or_compute(
+        {'kind': 'control-pair', 'orig': orig_sha, 'control': ctrl_sha, 'sr': 22050, 'duration': duration,
+         'synth_tempo': cfg, 'target_rms': 0.1, 'n_mfcc': 13, 'hop': TEMPORAL_HOP, 'bands': FREQ_BANDS}, compute)
+
+
 def compare_audio(original_path, rendered_path, duration=60, synth_config_path=None, control_path=None):
     """Compare original and rendered audio files.
 
@@ -643,7 +667,18 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
             log(f"Warning: Could not load synth config: {e}")
 
     log(f"Loading original: {original_path}")
-    original = load_audio(original_path, duration=duration)
+    orig_sha = None
+    if compare_cache.enabled():
+        try:
+            orig_sha = compare_cache.file_digest(original_path)
+        except OSError:
+            orig_sha = None   # unreadable: load_audio reports it below
+    if orig_sha:
+        original = compare_cache.get_or_compute(
+            {'kind': 'orig-audio', 'sha': orig_sha, 'sr': 22050, 'duration': duration},
+            lambda: load_audio(original_path, duration=duration))
+    else:
+        original = load_audio(original_path, duration=duration)
 
     log(f"Loading rendered: {rendered_path}")
     rendered = load_audio(rendered_path, duration=duration)
@@ -696,21 +731,41 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
         'comparison': {}
     }
 
+    # Reference-side features: a function of the original's content, the analysed span and the feature code only,
+    # so they are cached on disk (compare_cache) and the ~45 compares of a track pay for them once.
+    def _orig_cached(what, fn):
+        if not orig_sha:
+            return fn()
+        return compare_cache.get_or_compute(
+            {'kind': 'orig-' + what, 'sha': orig_sha, 'sr': 22050, 'duration': duration, 'n': int(min_len),
+             'target_rms': 0.1, 'n_mfcc': 13, 'hop': TEMPORAL_HOP, 'bands': FREQ_BANDS}, fn)
+
+    def _orig_static():
+        return {'spectral': compute_spectral_features(original),
+                'mfcc': compute_mfcc_features(original),
+                'chroma': compute_chroma_features(original),
+                'rhythm': compute_rhythm_features(original),
+                'bands': compute_frequency_bands(original),
+                'env': librosa.feature.rms(y=original)[0]}
+
+    log("Computing original features (cached on disk)...")
+    orig_static = _orig_cached('static', _orig_static)
+
     # Compute features for both
     log("Computing spectral features...")
-    results['original']['spectral'] = compute_spectral_features(original)
+    results['original']['spectral'] = orig_static['spectral']
     results['rendered']['spectral'] = compute_spectral_features(rendered)
 
     log("Computing MFCC features...")
-    orig_mfcc = compute_mfcc_features(original)
+    orig_mfcc = orig_static['mfcc']
     rend_mfcc = compute_mfcc_features(rendered)
 
     log("Computing chroma features...")
-    orig_chroma = compute_chroma_features(original)
+    orig_chroma = orig_static['chroma']
     rend_chroma = compute_chroma_features(rendered)
 
     log("Computing rhythm features...")
-    results['original']['rhythm'] = compute_rhythm_features(original)
+    results['original']['rhythm'] = orig_static['rhythm']
     # Rendered: the original's tempo is only a weak start_bpm prior (never an override).
     results['rendered']['rhythm'] = compute_rhythm_features(
         rendered, prior_bpm=results['original']['rhythm']['tempo'])
@@ -728,7 +783,7 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
         results['rendered']['rhythm']['tempo_detected'] = detected_rend_tempo  # Keep for debugging
 
     log("Computing frequency band energy...")
-    results['original']['bands'] = compute_frequency_bands(original)
+    results['original']['bands'] = orig_static['bands']
     results['rendered']['bands'] = compute_frequency_bands(rendered)
 
     # Compute similarity scores
@@ -833,7 +888,7 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     # Energy = dynamic-envelope match on the loudness-normalized signals.
     # (Both signals are RMS-matched, so this measures HOW energy moves over time —
     # density, gaps, swells — not absolute loudness, which is a mastering artifact.)
-    orig_env = librosa.feature.rms(y=original)[0]
+    orig_env = orig_static['env']
     rend_env = librosa.feature.rms(y=rendered)[0]
     n = min(len(orig_env), len(rend_env))
     orig_env, rend_env = orig_env[:n], rend_env[:n]
@@ -888,20 +943,20 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     try:
         bpm_o = float(results['original']['rhythm']['tempo'])
         hop = TEMPORAL_HOP
+        orig_onset_env = _orig_cached('onset-env', lambda: librosa.onset.onset_strength(y=original, sr=22050, hop_length=hop))
         beat_s, bpb = None, None
         if not np.isfinite(bpm_o) or bpm_o <= 0:
             log("  WARNING: no valid original tempo, aligning with lag 0 only")
             max_lag_s = 0.0
         else:
             beat_s = 60.0 / bpm_o
-            bpb = _beats_per_bar(librosa.onset.onset_strength(y=original, sr=22050, hop_length=hop),
-                                 beat_s * 22050 / hop)
+            bpb = _beats_per_bar(orig_onset_env, beat_s * 22050 / hop)
             max_lag_s = bpb * beat_s   # one bar, beats per bar measured from the onset periodicity
-        chroma_full = (librosa.feature.chroma_cqt(y=original, sr=22050, hop_length=hop),
+        chroma_full = (_orig_cached('chroma-full', lambda: librosa.feature.chroma_cqt(y=original, sr=22050, hop_length=hop)),
                        librosa.feature.chroma_cqt(y=rendered, sr=22050, hop_length=hop))
         orig_a, rend_a, lag_s, lag_cands = _align_by_onset_envelope(
             original, rendered, 22050, max_lag_s, return_info=True, beat_s=beat_s, chroma=chroma_full,
-            beats_per_bar=bpb)
+            beats_per_bar=bpb, onset_env_orig=orig_onset_env)
         chroma_a = _slice_chroma(chroma_full, int(round(lag_s * 22050 / hop)), min(len(orig_a), len(rend_a)), hop)
         temporal_frames = compute_temporal_frames(orig_a, rend_a, chroma=chroma_a)
         temporal = {'lag_seconds': lag_s, 'lag_candidates': lag_cands, **temporal_components(temporal_frames)}
@@ -1015,7 +1070,7 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
         log(f"Scoring chance control: {control_path}")
         # same function, same synth_config as the render (same tempo handling), no further control
         try:
-            ctrl = compare_audio(original_path, control_path, duration, synth_config_path=synth_config_path)
+            ctrl = _control_result(original_path, control_path, duration, synth_config_path, orig_sha)
             cc = (ctrl or {}).get('comparison') or {}
             if not cc or cc.get('render_empty'):
                 raise ValueError("control audio could not be scored (empty / unreadable / too short)")
