@@ -56,23 +56,14 @@ def code_version() -> str:
     return h.hexdigest()[:20]
 
 
-_DIGESTS: dict = {}
-
-
 def file_digest(path) -> str:
-    """SHA-256 of the file's bytes, memoised per process on (path, size, mtime_ns)."""
-    p = str(path)
-    st = os.stat(p)
-    sig = (p, st.st_size, st.st_mtime_ns)
-    hit = _DIGESTS.get(sig)
-    if hit:
-        return hit
+    """SHA-256 of the file's bytes. Not memoised: a (path, size, mtime) memo can serve a stale digest for a file
+    rewritten with the same size inside one mtime tick, and each compare is its own process anyway."""
     h = hashlib.sha256()
-    with open(p, "rb") as f:
+    with open(str(path), "rb") as f:
         for chunk in iter(lambda: f.read(1 << 20), b""):
             h.update(chunk)
-    _DIGESTS[sig] = h.hexdigest()
-    return _DIGESTS[sig]
+    return h.hexdigest()
 
 
 def _entry_path(parts: dict) -> Path:

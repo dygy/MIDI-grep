@@ -149,3 +149,22 @@ def test_corrupt_entry_is_a_miss_not_a_failure(env, monkeypatch):
     res = C.compare_audio(env["orig"], env["rend"], 6)
     assert res["comparison"]["overall_similarity"] >= 0
     assert cnt.n["compute_spectral_features"] == 2
+
+
+def test_tests_run_against_an_isolated_cache_not_the_repo_cache():
+    # a warm repo cache made test_temporal_similarity's call-counting test fail (it passed only on a cold one)
+    repo_cache = Path(__file__).resolve().parents[3] / ".cache" / "compare-features"
+    assert compare_cache.cache_dir() != repo_cache
+    assert "compare-cache" in str(compare_cache.cache_dir())
+
+
+def test_same_size_rewrite_with_the_same_mtime_is_still_a_new_file(env, monkeypatch):
+    import os
+    cnt = Counter(monkeypatch)
+    C.compare_audio(env["orig"], env["rend"], 6)
+    st = os.stat(env["orig"])
+    _song(Path(env["orig"]), 99, f0=220.0)                 # same path, same size, different samples
+    os.utime(env["orig"], ns=(st.st_atime_ns, st.st_mtime_ns))   # ... and the same mtime
+    cnt.reset()
+    C.compare_audio(env["orig"], env["rend"], 6)
+    assert cnt.n["compute_spectral_features"] == 2
