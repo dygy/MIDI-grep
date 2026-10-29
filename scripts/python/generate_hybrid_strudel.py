@@ -65,15 +65,34 @@ def key_root_token(key: str | None) -> str:
     return key.strip().split()[0].lower().replace("#", "s")
 
 
+# The lowpass is a CEILING for a sample layer, not a typical value: it must not remove what the stem itself sounds.
+# Energy fraction kept below a frame's rolloff: the conventional "bandwidth" (all but the top 1 %). Measured on the five
+# reference bass stems, the median per-frame 85 % rolloff leaves 0.8-3.0 % of the sounding energy above the cutoff
+# (VAGABUNDO 3.0 %), the 99 % one < 0.005 % on all five. Enter: lpf 215 Hz -> ~2.8 kHz (a bass-stem A/B at 2918 Hz: +0.022).
+ROLLOFF_ENERGY = 0.99
+ANALYSIS_SR = 22050          # the rate the pipeline analyses stems at (bass_shape.StemEvidence); no content above it is musical
+
+
 def stem_features(path: Path, dur: float) -> dict | None:
-    """Spectral/energy features used to ALIGN generated voices via effects."""
+    """Spectral/energy features used to ALIGN generated voices via effects.
+
+    ``rolloff`` = median, over the stem's SOUNDING frames (Otsu over its own log frame RMS, as bass_shape), of each
+    frame's :data:`ROLLOFF_ENERGY` rolloff at the analysis rate. Rests / noise-floor frames are excluded: their rolloff
+    is the noise's (Enter, quiet third of the frames: 5.8 kHz, sounding 0.2-2.8 kHz), so the all-frame median depended on
+    how much of the stem is rest rather than on how it sounds."""
     if not path.exists():
         return None
     y, _ = librosa.load(str(path), sr=SR, mono=True, duration=dur)
     if y.size == 0 or np.max(np.abs(y)) < 1e-4:
         return None
+    import bass_shape as BS
     rms = float(np.sqrt(np.mean(y**2)))
-    rolloff = float(np.median(librosa.feature.spectral_rolloff(y=y, sr=SR, roll_percent=0.85)))
+    ya = librosa.resample(y, orig_sr=SR, target_sr=ANALYSIS_SR)
+    S = np.abs(librosa.stft(ya, n_fft=2048, hop_length=512))
+    frame_rms = librosa.feature.rms(S=S, frame_length=2048)[0]
+    ro = librosa.feature.spectral_rolloff(S=S, sr=ANALYSIS_SR, roll_percent=ROLLOFF_ENERGY)[0]
+    sounding = frame_rms >= BS.sounding_level(frame_rms)
+    rolloff = float(np.median(ro[sounding] if sounding.any() else ro))
     centroid = float(np.median(librosa.feature.spectral_centroid(y=y, sr=SR)))
     return {"rms": rms, "rolloff": rolloff, "centroid": centroid}
 

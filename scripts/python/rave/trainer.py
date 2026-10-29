@@ -301,9 +301,12 @@ class GranularTrainer:
             target = pg.typical_note_length(notes)
             print(f"note-aligned grains from {len(notes)} transcribed notes; search {fmin:.1f}-{fmax:.1f} Hz; "
                   f"target length P75 = {target:.3f}s")
-            grains = pg.extract_note_grains(y, sr, notes, fmin, fmax, ring=pg.StemRing(y, sr))
+            ring = pg.StemRing(y, sr)
+            grains = pg.extract_note_grains(y, sr, notes, fmin, fmax, ring=ring)
             target = pg.ring_target_length(grains, target)
-            chosen = pg.select_per_pitch(grains, target, pg.stub_note_length(notes))
+            # the stem's own sounding level: a grain cut where the stem does not sound (a transcription ghost) is silent
+            floor_rms = ring.ev.level
+            chosen = pg.select_per_pitch(grains, target, pg.stub_note_length(notes), floor_rms=floor_rms)
             for i, g in enumerate(grains):
                 grains_info.append({
                     "index": i, "pitch_hz": pg.midi_to_hz(g.note), "midi_note": g.note,
@@ -315,7 +318,7 @@ class GranularTrainer:
                 sf.write(str(pitched_dir / fn), g.audio, sr)
                 pitched_map[key] = f"pitched/{fn}"
             grain_mode = "notes"
-            extra = {"pitch_range_hz": [fmin, fmax], "target_length_sec": target,
+            extra = {"pitch_range_hz": [fmin, fmax], "target_length_sec": target, "sounding_rms": floor_rms,
                      "pitched_durations_sec": {key_and_file(m)[0]: round(g.duration_s, 4) for m, g in sorted(chosen.items())}}
         else:
             import pitched_grains as pg

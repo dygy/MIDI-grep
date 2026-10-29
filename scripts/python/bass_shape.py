@@ -30,9 +30,14 @@ import numpy as np
 NOTE_RE = re.compile(r"^([a-g]s?)(-?\d+)(?:@(\d+))?$")
 _NAMES = ["c", "cs", "d", "ds", "e", "f", "fs", "g", "gs", "a", "as", "b"]
 GLIDE_END_TOL_ST = 0.5      # a frame is "on" a note when its f0 is within half a semitone of it
+SUSTAIN_DB = 6.02          # half amplitude: the usual 'sustain' convention, the widest a loop window may sit under the peak
 DUCK_MIN_T = 0.01          # superdough schedules the duck at t - 0.01 s: a kick earlier than that fails the render
 DUCK_MIN_DB = 1.0          # ~ the just-noticeable level difference: a smaller dip is statistically real but inaudible
 DUCK_SIGMA = 1.645         # one-sided 95%: only a dip is hypothesised, so the one-sided normal quantile
+
+
+def own_tol_frames(own_tol_s: float, hop_s: float) -> int:
+    return int(round(own_tol_s / hop_s))
 
 
 def otsu(values: np.ndarray) -> float | None:
@@ -183,7 +188,13 @@ class StemEvidence:
 
     def end_after(self, t: float, horizon_s: float) -> float:
         """When the note struck at ``t`` stops sounding: its envelope decayed to the stem's typical between-note
-        trough (``fall`` x its peak) or the stem is below its sounding level. Capped at the horizon."""
+        trough (``fall`` x its peak) or the stem is below its sounding level. Capped at the horizon.
+
+        A dip below that floor ends the note only if the level STAYS down until the stem's next audible attack. On a
+        constant-amplitude tone (Enter: sine bass, ``fall`` 0.966 = a 0.3 dB wobble) the floor sits inside the tone's
+        own ripple and the first wobble below it used to end every note (36 holes, 9.5 s of silence where the stem
+        sounds). With persistence a wobble that comes back up before the next attack is not an end, whatever ``fall``
+        is, and nothing is tuned: a decaying note stays below the floor and ends where it first crossed it."""
         f0 = int(t / self.hop_s)
         f1 = min(len(self.rms), f0 + int(horizon_s / self.hop_s) + 1)
         seg = self.rms[f0:f1]
@@ -191,8 +202,23 @@ class StemEvidence:
             return t
         pk = int(np.argmax(seg[:7]))
         floor = max(self.level, float(seg[pk]) * self.fall)
-        below = np.nonzero(seg[pk + 1:] < floor)[0]
-        return (f0 + pk + 1 + int(below[0])) * self.hop_s if below.size else (f1 * self.hop_s)
+        low = seg[pk + 1:] < floor
+        if not low.any():
+            return f1 * self.hop_s
+        base = f0 + pk + 1                                   # absolute frame of low[0]
+        t_pk = (f0 + pk) * self.hop_s
+        own_tol = 4 * self.hop_s                             # the note's own attack is not "next"; also half a frame window
+        nxt = [float(a[a > t_pk + own_tol][0]) for a in (self.attacks, self.peak_attacks) if (a > t_pk + own_tol).any()]
+        if nxt:
+            t_next = min(nxt)                                # the next re-attack's onset (it precedes its peak)
+            # frames within half a window (4 hops) of that attack already contain it: not evidence about THIS note
+            span = min(len(low), max(int(t_next / self.hop_s) - own_tol_frames(own_tol, self.hop_s) - base, 0))
+            if span > 0 and low[:span].any():
+                up = np.nonzero(~low[:span])[0]
+                if up.size and up[-1] == span - 1:           # still sounding when the next attack arrives
+                    return t_next                            # -> it rang until re-attacked
+                return min((base + (int(up[-1]) + 1 if up.size else 0)) * self.hop_s, t_next)
+        return (base + int(np.argmax(low))) * self.hop_s
 
 
 @dataclass
@@ -407,10 +433,15 @@ def loop_points(y: np.ndarray, sr: int, f0_hz: float) -> tuple[float, float] | N
     """(loopBegin, loopEnd) as FRACTIONS of the grain for a sustaining loop, or None when the grain has no steady
     part long enough (two periods).
 
-    Steady part = from one period after the envelope peak to the last frame still within -6 dB (half amplitude,
-    the usual 'sustain' convention) of that peak. Inside it the loop is ``k`` whole periods (the most that fit),
-    both ends at upward zero crossings, positioned where the seam is smoothest: the cost of a begin position is the
-    normalised squared difference between the period before the loop end and the period before its begin."""
+    Steady part = the grain's BODY: from one period after the attack settles to the last frame still at the body
+    level. The body level is the median of the louder half of the post-attack frames and its spread (3 robust
+    sigmas of those frames, in dB) is the grain's own - a sine bass body is flat within a fraction of a dB, a noisier
+    grain tolerates more (never more than SUSTAIN_DB under the post-attack peak: a grain that only decays has no flat body) - so the fade-out (and any tail) is excluded whatever its depth. A -6 dB rule measured against
+    the peak accepted fade-out windows (Enter: loops at -11 to -13 dB under a -6.9 dB body, held notes 4-6 dB down).
+    A grain with no body of two periods (a pure decay) has no loop. Inside the steady part the loop is ``k`` whole
+    periods (the most that fit), both ends at upward zero crossings, positioned where the seam is smoothest: the cost
+    of a begin position is the normalised squared difference between the period before the loop end and the period
+    before its begin."""
     y = np.asarray(y, dtype=float)
     P = max(int(round(sr / f0_hz)), 2)
     hop = max(P // 4, 1)
@@ -421,15 +452,20 @@ def loop_points(y: np.ndarray, sr: int, f0_hz: float) -> tuple[float, float] | N
     ip = int(np.argmax(env))
     if env[ip] <= 0:
         return None
-    # the attack transient can out-shout the sustain: take the sustain level from the loudest frame after it has
-    # passed (two analysis windows later), so "-6 dB" is measured against the tone, not the click
+    # the attack transient can out-shout the sustain: the body starts two analysis windows after the attack
     settle = int(np.ceil(2 * P / hop))
-    if ip + settle < nfr:
-        ip = ip + settle + int(np.argmax(env[ip + settle:]))
-    last = ip
-    while last + 1 < nfr and env[last + 1] >= 0.5 * env[ip]:
-        last += 1
-    start = ip * hop + P
+    st = ip + settle if ip + settle < nfr else ip
+    db = 20.0 * np.log10(env[st:] + 1e-12)
+    top = db[db >= np.median(db)]                             # the louder half: the body, not the fade-out / tail
+    body = float(np.median(top))
+    sigma = 1.4826 * float(np.median(np.abs(top - body)))
+    tol = 3.0 * sigma + 20.0 * np.log10(1.0 + np.finfo(np.float32).eps)    # + float32 resolution of a perfectly flat body
+    # a grain that only decays has no flat body (its 'spread' is the decay): never accept more than the half-amplitude
+    # 'sustain' convention under its post-attack peak, as before
+    thr = max(body - tol, float(db.max()) - SUSTAIN_DB)
+    ok = np.nonzero(db >= thr)[0]
+    first, last = st + int(ok[0]), st + int(ok[-1])
+    start = first * hop + P
     stop = last * hop + 2 * P
     if (stop - start) // P < 2:
         return None
@@ -578,7 +614,8 @@ def sample_loops(samples_json: Path, instrument: str, pitches) -> tuple[dict[int
     stats = {"samples": len(durs), "looped": len(loops),
              "loop_len_s": [round((e - b) * durs[k], 3) for k, (b, e) in loops.items()],
              "loop_start_s": [round(b * durs[k], 3) for k, (b, e) in loops.items()],
-             "pitches": len(set(pitches)), "pitches_looped": len(table)}
+             "pitches": len(set(pitches)), "pitches_looped": len(table),
+             "pitches_unlooped": sorted(set(pitches) - set(table))}      # these play their (nearest key's) grain once
     return table, stats
 
 
