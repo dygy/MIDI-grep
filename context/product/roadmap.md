@@ -549,6 +549,10 @@ measured runs: `eval/thresholds.yaml` `modes:` and `eval/datasets/reference_trac
   (`improve/bass-sustain`).
 - [ ] **Mix brightness on "Enter - Nigdy Więcej Wojny"** (centroid 974 Hz vs 1706 Hz in the instrumental).
 - [ ] **Web UI codegen is broken:** `internal/server/jobs.go` still calls the deleted `ai_code_generator.py`.
+- [ ] **`--deep-genre` is a no-op on `midi-grep extract`:** `cmd/midi-grep/main.go` sets `useDeepGenre` but nothing reads it,
+  and no Go code calls `detect_genre_dl.py` (CLAP only runs in editable-pipeline stage 1b).
+- [ ] **Python requirements drift:** `demucs` (used by `separate.py`) is missing from `requirements.txt`, while `spleeter` is listed
+  but imported nowhere; `essentia` is installed but `detect_genre_essentia.py` is unused.
 - [ ] **Stale comments in code / config headers** still say "BlackHole render" (`eval/thresholds.yaml`,
   `reference_tracks.yaml`, `auto-calibrate.sh`, `editable-pipeline.sh` "Requires", `mcp_servers/loop/server.py`), and dead
   `render-strudel-node.js` references remain in `cmd/midi-grep/main.go`, `synth_profiles.py`, `ai_learning_optimizer.py`.
