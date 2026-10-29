@@ -13,7 +13,7 @@
  *
  * Environment: MIDIGREP_RENDER_SAMPLE_CACHE=0 bypasses the on-disk sample cache (default on, dir MIDIGREP_RENDER_SAMPLE_CACHE_DIR or
  * <repo>/.cache/render-samples, freshness MIDIGREP_RENDER_SAMPLE_CACHE_TTL_S, see sample-cache.ts); MIDIGREP_RENDER_STALL_S overrides the
- * derived hang-watchdog limit; MIDIGREP_RENDER_TEST_HANG=chunk:N makes the first attempt of chunk N never return (watchdog test seam).
+ * derived hang-watchdog limit; MIDIGREP_RENDER_TEST_HANG=chunk:N makes the first attempt of chunk N never return, chunk:N:freeze stops the whole browser process (watchdog test seams).
  */
 import puppeteer from 'puppeteer';
 import * as fs from 'fs';
@@ -275,14 +275,18 @@ async function main() {
   /** Run one page call under the watchdog; `audioS` = seconds of audio it renders (0 for a call with no audio). Stats feed later limits. */
   const wd = async <T>(label: string, audioS: number, fn: () => Promise<T>): Promise<T> => {
     const t = Date.now(); tick();
-    let lastCpu = -1, lastAt = t, polling = false;
-    const poll = setInterval(async () => {
+    let lastCpu = -1, lastAt = t, polling = false, probing = false, lastAnswer = t;
+    // CPU use alone is not progress: a page spinning in a busy loop burns a core for ever (a render that hung this way was only
+    // noticed by protocolTimeout, 900 s). So the page's main thread must also ANSWER a trivial evaluate; the answer is not progress
+    // by itself (an idle page waiting for ever must still stall), it only stops CPU from being credited. The probe is never
+    // awaited by the watchdog: a probe that hangs (page or browser frozen) just stays pending, and the timer below fires on its own.
+    const poll = setInterval(() => {
+      if (!probing) { probing = true; Promise.resolve().then(async () => { for (const pg of await browser.pages()) await pg.evaluate(() => 1); lastAnswer = Date.now(); probing = false; }).catch(() => { probing = false; }); }
       if (polling) return; polling = true;
-      try { const c = await browserCpuS(browser), n = Date.now(); if (lastCpu >= 0 && (c - lastCpu) > CPU_BUSY * ((n - lastAt) / 1000)) tick(); lastCpu = c; lastAt = n; } catch { /* browser gone: the call fails by itself */ }
-      polling = false;
+      browserCpuS(browser).then(c => { const n = Date.now(); if (lastCpu >= 0 && (c - lastCpu) > CPU_BUSY * ((n - lastAt) / 1000)) tick(); lastCpu = c; lastAt = n; }).catch(() => { /* browser gone: the call fails by itself */ }).finally(() => { polling = false; });
     }, 1000);
     try {
-      const v = await watched(fn, { label, limitS: stallS(audioS), lastProgress: () => lastProgress, onStall: () => { console.log(`[STALL] ${label}: no progress, killing the browser`); browser.process()?.kill('SIGKILL'); } });
+      const v = await watched(fn, { label, limitS: stallS(audioS), lastProgress: () => Math.min(lastProgress, lastAnswer), onStall: () => { console.log(`[STALL] ${label}: no progress, killing the browser`); browser.process()?.kill('SIGKILL'); } });
       const wall = (Date.now() - t) / 1000;
       stats.slowestStepS = Math.max(stats.slowestStepS, wall); if (audioS > 0) stats.slowestRate = Math.max(stats.slowestRate, wall / audioS);
       return v;
@@ -291,7 +295,7 @@ async function main() {
       throw e;
     } finally { clearInterval(poll); }
   };
-  const testHang = /^chunk:(\d+)$/.exec(process.env.MIDIGREP_RENDER_TEST_HANG ?? '');
+  const testHang = /^chunk:(\d+)(:freeze|:spin)?$/.exec(process.env.MIDIGREP_RENDER_TEST_HANG ?? '');
   let hung = false;
   // A render step that dies with the page/browser ("Target closed") is retried on a fresh page (and a fresh
   // browser if it is gone). Every attempt is reported with WHAT it held; after MAX_ATTEMPTS it fails loudly.
@@ -403,7 +407,7 @@ async function main() {
         const { r, raw } = await attempt(`chunk ${ci + 1}/${wins.length}`, held, () => wd(`chunk ${ci + 1}/${wins.length}`, (e - b) / cps, async () => {
           await quickClose(page); page = await openPage();
           await page.evaluate((c, site) => (window as any).__init(c, site), code, SITE);
-          if (testHang && Number(testHang[1]) === ci + 1 && !hung) { hung = true; await new Promise(() => {}); } // test seam: an evaluate that never returns
+          if (testHang && Number(testHang[1]) === ci + 1 && !hung) { hung = true; if (testHang[2] === ':spin') await page.evaluate(() => { for (;;) { /* busy */ } }); else if (testHang[2]) process.kill(browser.process()!.pid!, 'SIGSTOP'); else await new Promise(() => {}); } // test seams: an evaluate that never returns; ':freeze' = the whole browser process stopped (SIGSTOP), so the page AND every CDP call, the CPU probe included, hang
           const rr: any = await page.evaluate((b0, e0, sr, sf, ln, po, pf, pc, nc, rg, uo) => (window as any).__chunk(b0, e0, sr, sf, ln, po, pf, pc, nc, rg, uo), b, e, sampleRate, startFrame, len, maxPolyphony, preFrames, preCycle, Math.max(0, b - prerollSeconds * cps), m.ringingOnsets, [...new Set(est.used.filter(([c]) => c < b).map(([, o]) => o))]);
           const bytes = await fetchBytes(page, rr.bytes);
           try { heapMb = (await page.metrics()).JSHeapUsedSize! / 1048576; } catch { /* page gone */ }
