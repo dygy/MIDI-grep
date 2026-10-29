@@ -490,6 +490,7 @@ in-run drift.)*
   - `--control <other same-genre original.wav>` → `comparison.chance` + `margin_over_chance`; the gate
     fails below `min_margin_over_chance` (0.02). `editable-pipeline.sh` stage 8 picks the control via
     `pipeline_helpers.py control`. Genre-wide floors (old scale) are checked against `static_similarity`.
+- Reference-side features (the original's whole-file features, onset envelope, chroma) and the `--control` score are cached per track in `.cache/compare-features/` (`compare_cache.py`, keyed on content SHA-256 + analysis params + a code version; results field-for-field identical; `MIDIGREP_COMPARE_CACHE=0` bypasses) - a warm compare is ~4-5 s instead of 10-13 s
 - Tracks per-band differences in `band_differences` and `worst_band_diff`
 - Generates 6 individual chart images + combined comparison chart
 - Saves comparison.json for HTML report data
