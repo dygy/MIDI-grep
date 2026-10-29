@@ -280,14 +280,49 @@ def rank_genres(window_embeds, prompt_embeds, definitions=None):
     }
 
 
+def expected_model_type():
+    """The model type load_clap_model() will return, without loading a checkpoint ('fallback' = no CLAP at all).
+    The import is tried for real: a package that is installed but cannot import (a missing torchvision) is no CLAP."""
+    try:
+        import laion_clap  # noqa: F401
+        return 'laion_clap'
+    except Exception:  # noqa: BLE001 - any import failure means load_clap_model() falls through to transformers
+        pass
+    import importlib.util
+    return 'transformers' if importlib.util.find_spec('transformers') is not None else 'fallback'
+
+
+def embedding_model_id(model_type):
+    """Identifies the audio embedding space (model + checkpoint + windowing). Embeddings from different ids are never
+    compared or mixed (genre_knn.py caches them per id)."""
+    src = "default" if model_type == 'laion_clap' else (os.environ.get("MIDIGREP_CLAP_PATH") or "laion/clap-htsat-unfused")
+    return f"{model_type}:{os.path.basename(src.rstrip('/'))}|win{WINDOW_S:g}s-max{MAX_WINDOWS}-sil{SILENCE_DB:g}dB"
+
+
+def mean_embedding(window_embeds):
+    """The track embedding: the unit-norm mean of the unit-norm window embeddings (all windows weigh the same)."""
+    E = np.asarray(window_embeds, dtype=np.float64)
+    m = (E / np.linalg.norm(E, axis=1, keepdims=True)).mean(axis=0)
+    return m / np.linalg.norm(m)
+
+
+def track_embedding(audio_path, model, model_type):
+    """(embedding, embedding_model_id) of one track, windowed exactly as the genre detector windows it."""
+    y, sr = librosa.load(audio_path, sr=48000, mono=True)
+    return mean_embedding(embed_windows(model, model_type, split_windows(y, sr), sr)), embedding_model_id(model_type)
+
+
 def detect_genre_clap(audio_path, model, model_type, bpm=None):
     """CLAP genre detection over every window of the track. ``bpm`` is accepted for the caller's convenience and
-    ignored: it is not evidence about the audio."""
+    ignored: it is not evidence about the audio. The result also carries the track's mean audio embedding
+    (``audio_embedding``) - the input of the kNN against the owner-labelled tracks (genre_knn.py)."""
     y, sr = librosa.load(audio_path, sr=48000, mono=True)
     windows = split_windows(y, sr)
-    result = rank_genres(embed_windows(model, model_type, windows, sr),
-                         text_prompt_embeddings(model, model_type))
+    W = embed_windows(model, model_type, windows, sr)
+    result = rank_genres(W, text_prompt_embeddings(model, model_type))
     result['window_s'] = WINDOW_S
+    result['audio_embedding'] = [float(v) for v in mean_embedding(W)]
+    result['embedding_model'] = embedding_model_id(model_type)
     return result
 
 
@@ -379,7 +414,7 @@ def main():
         print(f"\nSaved to: {args.output}")
 
     print("\n--- JSON OUTPUT ---")
-    print(json.dumps(output, indent=2))
+    print(json.dumps({k: v for k, v in output.items() if k != 'audio_embedding'}, indent=2))
 
 
 if __name__ == '__main__':

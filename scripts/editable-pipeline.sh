@@ -172,10 +172,17 @@ if [ -z "$(jget "$META" bpm)" ] || [ -z "$(jget "$META" bpm_method)" ] || [ -n "
   mkdir -p "$TRACK/.pipeline"
   VBPM="$(for v in "$TRACK"/v[0-9][0-9][0-9]; do jget "$v/metadata.json" bpm; done | tail -1)"
   GJ="$TRACK/.pipeline/genre.json"
-  if [ ! -s "$GJ" ]; then
+  if [ ! -s "$GJ" ] || ! grep -q '"audio_embedding"' "$GJ"; then   # a detector JSON without the embedding predates the kNN
     log "stage 1b: deep genre detection (CLAP)"
     "$PY" "$SP/detect_genre_dl.py" "$TRACK/original.wav" ${VBPM:+--bpm "$VBPM"} -o "$GJ" >/dev/null 2>"$TRACK/.pipeline/genre.err" \
       || log "stage 1b: detector failed (see .pipeline/genre.err) — falling back to the heuristic style"
+  fi
+  # Genre precedence (pipeline_helpers.py stamp): --genre > owner label (eval/datasets/genre_labels.yaml) > kNN of the
+  # CLAP embedding against the labelled tracks > CLAP. The kNN needs the labelled tracks' embeddings (cached under
+  # .cache/genre-embeddings/): embed the missing ones now - only when the label/override will not decide anyway.
+  if [ -z "$GENRE_OVERRIDE" ]; then
+    "$PY" "$SP/genre_knn.py" ensure >"$TRACK/.pipeline/genre_knn_ensure.json" 2>>"$TRACK/.pipeline/genre.err" \
+      || log "stage 1b: could not embed the labelled tracks for the kNN (see .pipeline/genre.err) - CLAP decides"
   fi
   "${PH[@]}" stamp "$TRACK" ${GENRE_OVERRIDE:+--genre "$GENRE_OVERRIDE"} ${GJ:+--detector-json "$GJ"} >&2 \
     || die "stage 1b stamp failed"
@@ -195,6 +202,7 @@ fi
 # (eval floors, calibration neighbours, recorded floors) are consulted for - the label only when it is trusted
 # (override, or a detection that cleared the margin rule), else "unreferenced" (gate: default floor, memory: cold).
 GENRE_REF="$(jget "$META" genre_ref)"
+log "genre: '$GENRE' (basis $(jget "$META" genre_basis), ref '$GENRE_REF')"
 if [ -n "$GENRE_OVERRIDE" ]; then GENRE_REF="$GENRE_OVERRIDE"
 elif [ -z "$GENRE_REF" ]; then
   GENRE_REF="$GENRE"

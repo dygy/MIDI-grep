@@ -194,7 +194,7 @@ and is a cross-check only. It has a known pitch defect, described under [Rendere
 | **Ollama / Claude API** | Local LLM / HTTP API | Only for `extract` codegen and `--iterate` |
 | **BlackHole** | macOS audio driver | Optional cross-check renderer only |
 
-`detect_genre_essentia.py` exists, but nothing in the pipeline calls it.
+`detect_genre_essentia.py` exists, but nothing in the pipeline calls it. The stage-1b genre is the owner's label when the track is in `eval/datasets/genre_labels.yaml`, else a kNN of its CLAP embedding against the labelled tracks (`genre_knn.py`), with CLAP zero-shot only as the flagged-uncertain fallback.
 
 ### Module Structure
 
@@ -338,7 +338,7 @@ summary.
 
 | Stage | What runs |
 |-------|-----------|
-| 1 | `midi-grep extract --render none --iterate 0`: stems, BPM/key. 1b: CLAP genre + metadata stamp, tempo refined by phase coherence on the drums stem (`tempo_refine.py`) |
+| 1 | `midi-grep extract --render none --iterate 0`: stems, BPM/key. 1b: genre (`--genre` > owner labels in `eval/datasets/genre_labels.yaml` > kNN of the CLAP embedding against the labelled tracks > CLAP zero-shot, flagged uncertain when kNN finds no supporting genre) + metadata stamp, tempo refined by phase coherence on the drums stem (`tempo_refine.py`) |
 | 2 | `transcribe.py` on `bass.wav` and `melodic.wav` (Basic Pitch). Vocals are not transcribed |
 | 3 | `detect_drums_bands.py` drum onsets; 3b: bass f0/register |
 | 4 | `build_sample_pack.py`: drum one-shots cut from the detected hits, pitched multisamples |

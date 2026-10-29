@@ -1,0 +1,31 @@
+# Owner-provided genre labels: cache_key (the directory name under .cache/stems) -> genre.
+#
+# These are the SOURCE OF TRUTH for the genre of a track (pipeline stage 1b, scripts/python/genre_knn.py):
+#   precedence = --genre override > this registry > kNN on audio embeddings against these labelled tracks > CLAP.
+# The labelled tracks are also the reference set a NEW track is compared with (leave-one-out within-genre spread),
+# so adding a labelled track makes every later classification better supported. A genre needs >= 2 labelled
+# tracks before a new track can be assigned to it by kNN (one member gives no within-genre spread).
+#
+# This file is only about genre. eval/datasets/reference_tracks.yaml stays the similarity-gate dataset (versions,
+# measured scores); a track can be labelled here without being a gate reference (e.g. retro_wave has no floors).
+labels:
+  - cache_key: "VAGABUNDO NÃO NAMORA"
+    genre: brazilian_funk
+    source: owner
+    note: owner-provided, reference dataset
+  - cache_key: "Regime CLT (Dj Brunin XM, Aurora Shukita)"
+    genre: brazilian_funk
+    source: owner
+    note: owner-provided, reference dataset
+  - cache_key: "Dumb Blond Bitches"
+    genre: brazilian_funk
+    source: owner
+    note: owner-provided, reference dataset
+  - cache_key: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM"
+    genre: brazilian_funk
+    source: owner
+    note: owner-provided, reference dataset
+  - cache_key: "Enter - Nigdy Więcej Wojny (prod. Enter) (2022)"
+    genre: retro_wave
+    source: owner
+    note: "owner 2026-10-29: retro wave / Polish electro"

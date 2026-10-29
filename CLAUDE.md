@@ -1019,11 +1019,24 @@ case "retro_wave", "synthwave":
 }
 ```
 
-**Deep Learning Detection (enabled by default):**
-CLAP (Contrastive Language-Audio Pretraining) model for zero-shot classification:
-- Script: `scripts/python/detect_genre_dl.py`
-- Uses laion-clap or transformers CLAP implementation
-- Compares audio embeddings against text descriptions of genres
+**The genre that drives the pipeline is resolved in stage 1b** (`pipeline_helpers.py stamp`; the Go heuristics above only
+feed the Go run). Precedence, recorded as `genre_basis` in the track's `metadata.json`:
+1. `--genre` override (`override`);
+2. the owner's label registry `eval/datasets/genre_labels.yaml` (`cache_key -> genre`; `label`, certain). It is separate from
+   `reference_tracks.yaml`, the gate dataset;
+3. kNN of the track's CLAP audio embedding against the labelled tracks (`scripts/python/genre_knn.py`; `knn`). A genre G
+   supports the track iff G has >= 2 labelled members and the track's mean cosine to them is >= the lowest leave-one-out
+   score among them (conformal-style, level 1/(k+1); no tuned constant). Embeddings are cached under
+   `.cache/genre-embeddings/<model-space>/`; `genre_knn.py ensure` fills them, `genre_knn.py loo` evaluates;
+4. CLAP zero-shot (`detect_genre_dl.py`: window-mean cosine to prompt ensembles over the whole track + margin rule). If the
+   kNN could run and no genre supports the track, CLAP's answer is kept only as the sound-palette guess and marked
+   `genre_uncertain`, `genre_ref: unreferenced` (gate default floor, no calibration neighbours, no floor recorded).
+
+`genre` = best guess (palette, generator header); `genre_ref` = the genre the reference tables are consulted for.
+A labelled genre without measured floors (`retro_wave`) gets the genre-wide/default floor flagged `reference_floor: false`
+("no measured floor for retro_wave"), no funk borrowing, and palette `synthwave` (`sound_selector.GENRE_ALIASES`).
+Honest limit (leave-one-out over the 5 labelled tracks): CLAP embeddings separate funk from "electro with vocals" only
+weakly, so a funk track can come back `unknown`; add the track to the registry rather than lowering the rule.
 
 ## Dependencies
 
