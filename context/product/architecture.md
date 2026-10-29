@@ -314,7 +314,11 @@ and render through the same sample instruments.
 **Solo measurements in calibration.** `auto-calibrate.sh` renders the BASS channel (`bass_solo.py`, `--bass-solo`,
 `AC_BSOLO=off`) and, sample-instrument only, LEAD+CHORDS (`melodic_solo.py`, `--melodic-solo`, `AC_MSOLO=off`) alone each
 iteration; `calibrate_dynamic.py` sets bass-mult, cal-lead and lead-lpf from those absolute levels/centroids, falling back to
-mix shares on failure. `--lead-hpf 0` = derived from the lowest lead/chord note.
+mix shares on failure. `--lead-hpf 0` = derived from the lowest lead/chord note. The mix, bass-solo and melodic-solo renders of an
+iteration are independent (same generated `$STRU`), so they run concurrently, `scripts/python/render_jobs.py` deriving the number from
+cores and free memory against a measured per-render footprint (`MIDIGREP_RENDER_JOBS` overrides, capped at the independent jobs, 1 =
+the old sequential order; the BlackHole recorder is always 1); the mix compare overlaps the solos; stage 10's solo stem renders share
+the limit. A failed mix render still ends the run (`RENDER FAILED`, exit 70) and all background render trees are terminated.
 
 ### Generative Mode (`generative` / `gen` / `rave`)
 

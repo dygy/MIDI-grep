@@ -33,6 +33,7 @@ import sys
 import tempfile
 import unicodedata
 from collections.abc import Callable, Sequence
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 from pathlib import Path
 
@@ -491,12 +492,14 @@ def solo_render_stems(vdir: Path, render: Path, *, run: Runner) -> None:
     measured sum-vs-render check is printed to stderr and stored in ``metadata.json`` (``render_stems_check``)."""
     import soundfile as sf
 
+    import render_jobs
     import renderer
     import solo_stems
     code = (vdir / "output.strudel").read_text(encoding="utf-8")
     info = sf.info(str(render))
     seconds = info.frames / info.samplerate
     with tempfile.TemporaryDirectory(dir=vdir, prefix=".solo_") as tmp:
+        jobs: list[tuple[Path, Path]] = []                    # (solo strudel, output wav) - the renders are independent
         for g in RENDER_STEMS:
             out = vdir / f"render_{g}.wav"
             solo = solo_stems.solo_code(code, g)
@@ -505,8 +508,28 @@ def solo_render_stems(vdir: Path, render: Path, *, run: Runner) -> None:
                 continue
             src = Path(tmp) / f"{g}.strudel"
             src.write_text(solo, encoding="utf-8")
+            jobs.append((src, out))
+
+        def render_one(job: tuple[Path, Path]) -> None:
+            src, out = job
             run(["node", renderer.renderer_script(), src, "-o", out, "-d", f"{seconds:.3f}"])
             _need(out, out.name)
+
+        if jobs:
+            workers = render_jobs.derive_jobs(len(jobs)).jobs   # cores + free memory vs one render's footprint; MIDIGREP_RENDER_JOBS
+            if workers <= 1:
+                for job in jobs:
+                    render_one(job)
+            else:
+                with ThreadPoolExecutor(max_workers=workers) as pool:
+                    futures = [pool.submit(render_one, job) for job in jobs]
+                    try:
+                        for f in futures:
+                            f.result()                        # the first failure is raised; the pool then waits for the rest
+                    except BaseException:
+                        for f in futures:
+                            f.cancel()
+                        raise
     solo_stems.write_silence(vdir / "render_vocals.wav", info.frames, info.samplerate, info.channels)
     chk = solo_stems.sum_check(render, [vdir / f"render_{g}.wav" for g in RENDER_STEMS])
     print(f"render stems (solo): sum(bass+drums+melodic) vs render.wav: correlation {chk.correlation:.5f}, "
