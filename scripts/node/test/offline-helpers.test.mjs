@@ -179,3 +179,11 @@ test('chunkMargins: a long one-shot extends the look-back only; the context ends
   // no long voices: the floors stay
   assert.deepEqual(chunkMargins([{ begin: 9, end: 9.5 }], 10, 30, 4, 4), { tailSeconds: 4, tailCheck: true, prerollSeconds: 4, ringingOnsets: [] });
 });
+
+import { retried } from '../dist/offline-helpers.js';
+test('retried: a transient failure (a browser launch timing out under load) is retried, a lasting one is rethrown', async () => {
+  let n = 0; const seen = [];
+  const v = await retried(async () => { if (++n < 3) throw new Error('Timed out after waiting 30000ms'); return 'browser'; }, 3, (k) => seen.push(k));
+  assert.equal(v, 'browser'); assert.deepEqual(seen, [1, 2]);
+  await assert.rejects(retried(async () => { throw new Error('no chromium'); }, 3, () => {}), /no chromium/);
+});

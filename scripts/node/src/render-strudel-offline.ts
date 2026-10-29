@@ -17,7 +17,7 @@ import * as http from 'http';
 import * as path from 'path';
 import { createRequire } from 'module';
 import { deterministicInitScript, PAGE_DETERMINISM_JS } from './determinism.js';
-import { chunkMargins, TAIL_CHECK_S, Ring, analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures, triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput, isNetworkFailure, isOutageSampleFailure, isNetworkOutageFailure, netWaitBudgetS, nextNetWaitS } from './offline-helpers.js';
+import { retried, chunkMargins, TAIL_CHECK_S, Ring, analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures, triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput, isNetworkFailure, isOutageSampleFailure, isNetworkOutageFailure, netWaitBudgetS, nextNetWaitS } from './offline-helpers.js';
 
 const SHIM = `const S = window.strudel;
 export const { noteToMidi, freqToMidi, getSoundIndex, getAudioContext, registerSound, getParamADSR, getADSRValues, getPitchEnvelope, getVibratoOscillator } = S;`;
@@ -222,8 +222,10 @@ async function main() {
   const t0 = Date.now();
   // EVERY browser this run launches (initial + crash relaunches) is tracked and closed at the end.
   const launched: any[] = [];
+  const MAX_LAUNCHES = 3;   // same budget as a crashed render step (MAX_ATTEMPTS below)
   const launch = async () => {
-    const b = await puppeteer.launch({ headless: true, protocolTimeout: 900000, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--disable-web-security'] });
+    const b = await retried(() => puppeteer.launch({ headless: true, protocolTimeout: 900000, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--disable-web-security'] }),
+      MAX_LAUNCHES, (k, e) => console.log(`[CRASH] browser launch attempt ${k}/${MAX_LAUNCHES}: ${String(e?.message ?? e).slice(0, 160)}`));
     launched.push(b); return b;
   };
   let browser = await launch();

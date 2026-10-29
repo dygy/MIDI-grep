@@ -214,6 +214,17 @@ export function nextNetWaitS(n: number, waitedS: number, budgetS: number): numbe
 export interface Ring { begin: number; end: number }
 
 /** Width (s) of the window at the very end of a chunk context in which the renderer demands silence (the tail-truncation check). */
+/**
+ * Run `fn` up to `attempts` times, reporting each failure through `onFail(attempt, error)`; the last failure is rethrown.
+ * Used for launching the headless browser, which can time out when the machine is loaded (2026-10-29: a 30 s
+ * puppeteer launch timeout at load average ~20 failed a whole calibration).
+ */
+export async function retried<T>(fn: () => Promise<T>, attempts: number, onFail: (attempt: number, err: any) => void): Promise<T> {
+  for (let k = 1; ; k++) {
+    try { return await fn(); } catch (err) { onFail(k, err); if (k >= attempts) throw err; }
+  }
+}
+
 export const TAIL_CHECK_S = 0.25;
 
 /**
