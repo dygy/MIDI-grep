@@ -236,7 +236,7 @@ midi-grep/
 │       ├── compare_audio.py, compare_cache.py, gate_margin.py, editability_check.py
 │       ├── calibrate_dynamic.py, calibrate_loop.py, bass_solo.py, melodic_solo.py, mix_dynamics.py
 │       ├── calibration_memory.py, clickhouse_store.py
-│       ├── pipeline_helpers.py  # stamp, instrumental, control, promote, report, record-floor, …
+│       ├── pipeline_helpers.py  # stamp, instrumental, control, promote, report, record-floor (a genre floor only once >= 2 owner-labelled tracks of it exist), …
 │       ├── generate_report.py
 │       ├── codegen_orchestrator.py, ollama_codegen.py, ollama_agent.py, ai_improver.py   # extract path
 │       ├── rave/               # granular + RAVE trainer, model repository, timbre embeddings

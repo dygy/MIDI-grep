@@ -458,7 +458,7 @@ score_and_promote() {
   [ -s "$CJ" ] || die "stage 8 compare_audio wrote no comparison.json for $mode (rc=$cmp_rc, see $W/compare.stderr)"
   local edit_rc=0 gate_rc=0
   "$PY" "$SP/editability_check.py" "$STR" --json >"$W/editability.json" 2>&1 || edit_rc=$?
-  # Spec 004 §2.3: a genre with no measured floor yet gets one from THIS run (measured − margin),
+  # Spec 004 §2.3 (amended 2026-10-29): a genre with no measured floor AND >= 2 owner-labelled tracks gets one from THIS run (measured − margin),
   # never typed by hand; brazilian_funk already has floors, so this is a no-op for it.
   local vdir_planned; vdir_planned="$("${PH[@]}" next-version "$TRACK")"   # the dir stage 9 will promote into
   "${PH[@]}" record-floor --thresholds "$ROOT/eval/thresholds.yaml" --mode "$mode" --genre "$GENRE_REF" \

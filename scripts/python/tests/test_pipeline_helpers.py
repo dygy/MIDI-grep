@@ -182,19 +182,54 @@ def test_stamp_records_the_detectors_model_type(tmp_path):
 
 
 # spec 004 §2.3 / review #4 — floors for a NEW genre come from the run; existing floors are untouched
+def _labels(tmp_path, **counts):
+    import yaml
+    rows = [{"cache_key": f"{g}-{i}", "genre": g} for g, n in counts.items() for i in range(n)]
+    p = tmp_path / "labels.yaml"
+    p.write_text(yaml.safe_dump({"labels": rows}))
+    return p
+
+
 def test_record_mode_floor_derives_from_measurement_and_never_touches_existing(tmp_path):
     import yaml
     from pipeline_helpers import record_mode_floor
+    labels = _labels(tmp_path, house=2, techno=2)
     th = tmp_path / "thresholds.yaml"
     th.write_text(yaml.safe_dump({"genres": {"brazilian_funk": 0.62}, "modes": {"sample_instrument": {"genres": {"brazilian_funk": 0.88}, "section_aware": {"brazilian_funk": 0.9}, "measured": {}}}}))
     cmp_ = tmp_path / "comparison.json"
     cmp_.write_text(json.dumps({"editability": "pass", "generation_mode": "sample-instrument",
                                 "comparison": {"overall_similarity": 0.8123, "section_aware_similarity": 0.7777}}))
-    rec = record_mode_floor(th, mode="sample-instrument", genre="house", comparison_path=cmp_, run="Some Track/v004")
+    rec = record_mode_floor(th, mode="sample-instrument", genre="house", comparison_path=cmp_, run="Some Track/v004", labels_path=labels)
     d = yaml.safe_load(th.read_text())["modes"]["sample_instrument"]
     assert rec["overall"] == 0.8123 and d["genres"]["house"] == 0.79 and d["section_aware"]["house"] == 0.76
     assert d["measured"]["house"]["run"] == "Some Track/v004" and d["genres"]["brazilian_funk"] == 0.88  # untouched
     # existing floor → no-op; replay run → no-op
-    assert record_mode_floor(th, mode="sample-instrument", genre="brazilian_funk", comparison_path=cmp_, run="x") is None
+    assert record_mode_floor(th, mode="sample-instrument", genre="brazilian_funk", comparison_path=cmp_, run="x", labels_path=labels) is None
     cmp_.write_text(json.dumps({"editability": "fail", "comparison": None}))
-    assert record_mode_floor(th, mode="sample-instrument", genre="techno", comparison_path=cmp_, run="x") is None
+    assert record_mode_floor(th, mode="sample-instrument", genre="techno", comparison_path=cmp_, run="x", labels_path=labels) is None
+
+
+def test_a_floor_is_recorded_only_once_the_genre_has_two_labelled_tracks(tmp_path, capsys):
+    """Owner decision 2026-10-29 (spec 004 §2.3 amended): one track's floor is passed by construction."""
+    import yaml
+    from pipeline_helpers import record_mode_floor
+    th = tmp_path / "thresholds.yaml"
+    th.write_text(yaml.safe_dump({"modes": {"sample_instrument": {"genres": {"brazilian_funk": 0.88}}}}))
+    before = th.read_text()
+    cmp_ = tmp_path / "comparison.json"
+    cmp_.write_text(json.dumps({"editability": "pass", "comparison": {"overall_similarity": 0.8, "section_aware_similarity": 0.79}}))
+    kw = dict(mode="sample-instrument", comparison_path=cmp_, run="Enter/v001")
+    one = _labels(tmp_path, retro_wave=1, brazilian_funk=4)
+    assert record_mode_floor(th, genre="retro_wave", labels_path=one, **kw) is None
+    assert th.read_text() == before                                  # nothing written
+    assert "retro_wave has 1 labelled track; a floor needs >= 2" in capsys.readouterr().err
+    assert record_mode_floor(th, genre="not_labelled_at_all", labels_path=one, **kw) is None
+    two = _labels(tmp_path, retro_wave=2)
+    rec = record_mode_floor(th, genre="retro_wave", labels_path=two, **kw)
+    d = yaml.safe_load(th.read_text())["modes"]["sample_instrument"]
+    assert rec["overall"] == 0.8 and d["genres"]["retro_wave"] == 0.78 and d["genres"]["brazilian_funk"] == 0.88
+    # and the gate keeps saying "no measured floor" for the one-track genre
+    from eval.gate import evaluate_comparison_data
+    res = evaluate_comparison_data({"comparison": {"overall_similarity": 0.9, "static_similarity": 0.9, "worst_band_diff": 5.0}},
+                                   "lofi", yaml.safe_load(th.read_text()), "sample-instrument")
+    assert res.reference_floor is False and "no measured floor for lofi" in res.message

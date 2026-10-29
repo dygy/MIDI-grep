@@ -79,7 +79,7 @@ conformal-style test at level 1/(k+1); best head-room wins) > CLAP (`detector`; 
 ran and no genre supports the track, or the margin rule fails). `genre_ref` = the genre the reference tables (eval
 floors, calibration neighbours, chance control) are consulted for: the genre when basis is override/label/knn/detector,
 else `unreferenced`. A labelled genre with no measured floor (e.g. `retro_wave`) gets the genre-wide/default floor,
-flagged `reference_floor: false` ("no measured floor for ..."); its palette is `synthwave` via `sound_selector.GENRE_ALIASES`.
+flagged `reference_floor: false` ("no measured floor for ..."); `record-floor` records a genre's mode floor only once `genre_labels.yaml` has >= 2 tracks of it (spec 004 §2.3, amended 2026-10-29); its palette is `synthwave` via `sound_selector.GENRE_ALIASES`.
 | `codegen_orchestrator.py` | **DEFAULT codegen** (`--codegen orchestrated`): job-based — structure/bass/lead/drums jobs, each JSON validated + retried, deterministic assembler guarantees 3-voice arrange()+setcps; per-section gains for build/drop dynamics; writes job_run.json |
 | `job_runner.py` | Generic job DAG runner: JobSpec/JobResult, topo order, per-job validate→retry≤2 (error fed back)→logged fallback |
 | `strudel_validation.py` | **Single source of truth** for valid sounds/banks/methods + corrections (tr808→RolandTR808) + `validate_code()`; used by all codegen paths |

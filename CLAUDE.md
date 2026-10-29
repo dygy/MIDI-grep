@@ -1034,7 +1034,7 @@ feed the Go run). Precedence, recorded as `genre_basis` in the track's `metadata
 
 `genre` = best guess (palette, generator header); `genre_ref` = the genre the reference tables are consulted for.
 A labelled genre without measured floors (`retro_wave`) gets the genre-wide/default floor flagged `reference_floor: false`
-("no measured floor for retro_wave"), no funk borrowing, and palette `synthwave` (`sound_selector.GENRE_ALIASES`).
+("no measured floor for retro_wave"), no funk borrowing; `record-floor` writes a genre's mode floor only once >= 2 owner-labelled tracks of it exist (spec 004 §2.3 amended 2026-10-29), and palette `synthwave` (`sound_selector.GENRE_ALIASES`).
 Honest limit (leave-one-out over the 5 labelled tracks): CLAP embeddings separate funk from "electro with vocals" only
 weakly, so a funk track can come back `unknown`; add the track to the registry rather than lowering the rule.
 

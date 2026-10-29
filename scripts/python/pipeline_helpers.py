@@ -328,16 +328,30 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
 
 
 def record_mode_floor(thresholds_path: Path, *, mode: str, genre: str, comparison_path: Path, run: str,
-                      margin: float = 0.02) -> dict | None:
-    """Spec 004 §2.3: when ``modes.<mode>.genres`` has no floor for ``genre`` yet, derive one from THIS
-    run — floor = round(measured − margin, 2) for overall and section-aware — and record the measured
-    block (overall, section_aware, run, margin, editability). Returns the block written, or None when
-    a floor already exists (floors are never changed here) or the run is not detector-passing."""
+                      margin: float = 0.02, labels_path: Path | None = None) -> dict | None:
+    """Spec 004 §2.3 (amended 2026-10-29): when ``modes.<mode>.genres`` has no floor for ``genre`` yet AND
+    ``eval/datasets/genre_labels.yaml`` labels at least ``genre_knn.MIN_MEMBERS`` (2) tracks with that genre, derive
+    one from THIS run — floor = round(measured − margin, 2) for overall and section-aware — and record the measured
+    block (overall, section_aware, run, margin, editability). Returns the block written, or None (reason on stderr)
+    when the genre is unverified, has too few labelled tracks, already has a floor (never changed here) or the run
+    is not detector-passing.
+
+    Why 2: a floor from a single track is passed by that track by construction (measured − margin), so it says
+    nothing about generalisation (fix #10 lesson); at least two tracks are needed for any statement about the
+    genre, and for a leave-one-out. It is the same ``MIN_MEMBERS`` notion the genre kNN uses for a within-genre spread."""
     import yaml
+    import genre_knn as GK
     if not genre or genre == UNREFERENCED:   # an unverified genre must not grow a floor of its own
         return None
     thresholds_path = Path(thresholds_path)
     th = yaml.safe_load(thresholds_path.read_text()) or {}
+    if genre in ((th.get("modes", {}).get(mode.replace("-", "_"), {}) or {}).get("genres") or {}):
+        return None                           # an existing floor is never touched (and needs no label count)
+    n = sum(1 for v in GK.load_labels(labels_path).values() if v["genre"] == genre)
+    if n < GK.MIN_MEMBERS:
+        print(f"pipeline_helpers: no floor recorded: {genre} has {n} labelled track{'s' if n != 1 else ''}; a floor needs "
+              f">= {GK.MIN_MEMBERS} (spec 004 §2.3, amended 2026-10-29)", file=sys.stderr)
+        return None
     mode_key = mode.replace("-", "_")
     block = th.setdefault("modes", {}).setdefault(mode_key, {})
     if genre in ((block.get("genres") or {})):
@@ -901,6 +915,7 @@ def main(argv: list[str] | None = None) -> int:
     rf.add_argument("--comparison", required=True, type=Path)
     rf.add_argument("--run", required=True)
     rf.add_argument("--margin", type=float, default=0.02)
+    rf.add_argument("--labels", type=Path, default=None, help="genre label registry (default eval/datasets/genre_labels.yaml)")
     st = sub.add_parser("stamp")
     st.add_argument("track_dir", type=Path)
     st.add_argument("--genre", default=None, help="explicit genre override (logged in metadata)")
@@ -948,7 +963,7 @@ def main(argv: list[str] | None = None) -> int:
             print(num_bars(args.duration, args.bpm))
         elif args.cmd == "record-floor":
             res = record_mode_floor(args.thresholds, mode=args.mode, genre=args.genre, comparison_path=args.comparison,
-                                    run=args.run, margin=args.margin)
+                                    run=args.run, margin=args.margin, labels_path=args.labels)
             print(json.dumps({"recorded": res is not None, "measured": res}))
         elif args.cmd == "stamp":
             m = stamp_track_metadata(args.track_dir, genre_override=args.genre, detector_json=args.detector_json)
