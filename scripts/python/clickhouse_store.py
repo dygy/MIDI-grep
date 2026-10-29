@@ -171,6 +171,12 @@ MIGRATIONS = [
     (5, "Calibration memory write order column", [
         "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS seq UInt32 DEFAULT 0",
     ]),
+    # `seq` orders the rows of ONE write; auto-calibrate.sh records each step in its own write, so two steps written in the
+    # same second both had seq 0 and still tied (CI: ['cal2', 'cal1', 'cal3']). `write_ns` = the writer's wall clock in ns
+    # (+ the row's position), increasing across writes and processes; history sorts by (created_at, write_ns, seq).
+    (6, "Calibration memory write clock column", [
+        "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS write_ns UInt64 DEFAULT 0",
+    ]),
 ]
 
 
