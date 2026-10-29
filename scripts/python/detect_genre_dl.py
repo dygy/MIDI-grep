@@ -19,7 +19,15 @@ os.environ['TF_CPP_MIN_LOG_LEVEL'] = '3'
 import numpy as np
 import librosa
 
-# Genre definitions with multiple text descriptions for better matching
+# Genre definitions: an ENSEMBLE of text prompts per genre (their normalised embeddings are averaged into one
+# class prototype, the CLIP-style prompt ensemble). There is NO tempo prior and NO penalty term here: a bonus
+# multiplier from a BPM range let the tempo overrule the audio (a 1.8x on 'brazilian_funk' turned a 0.65 cosine
+# into the 1.10 "confidence" of one reference track), and no labelled data supports any particular range
+# (Brazilian funk is played from ~125 to ~150 BPM). `bpm_range` is used ONLY by the no-CLAP fallback, where it is
+# the single piece of evidence there is - and that result is always flagged uncertain.
+# Known limit (measured, see context/spec): these prompts name vocals/Portuguese for funk, so CLAP partly answers
+# "sung/rapped dance music"; a track like that is told apart from funk only if the prompts separate it, and the
+# margin rule below reports when they do not.
 GENRE_DEFINITIONS = {
     'brazilian_funk': {
         'descriptions': [
@@ -29,12 +37,7 @@ GENRE_DEFINITIONS = {
             "Tamborzão beat Brazilian funk female MC vocals dance",
             "Brazilian funk proibidão bass vocal samples Latin rhythm",
         ],
-        'bpm_range': (130, 145),
-        'bpm_weight': 1.8,  # Strong bonus for matching BPM
-        'negative_descriptions': [
-            "synthesizer arpeggios 80s retro",
-            "Russian electronic hardbass",
-        ],
+        'bpm_range': (125, 150),
     },
     'brazilian_phonk': {
         'descriptions': [
@@ -45,11 +48,6 @@ GENRE_DEFINITIONS = {
             "Kordhell aggressive phonk electronic bass distortion",
         ],
         'bpm_range': (75, 180),
-        'bpm_weight': 1.0,
-        'negative_descriptions': [
-            "synthesizer arpeggios 80s",
-            "clean melodic synth pads",
-        ],
     },
     'retro_wave': {
         'descriptions': [
@@ -62,11 +60,6 @@ GENRE_DEFINITIONS = {
             "Italo disco inspired synthwave arpeggios 80s",
         ],
         'bpm_range': (100, 170),
-        'bpm_weight': 1.3,
-        'negative_descriptions': [
-            "Brazilian vocals chopped",
-            "tamborzão drums MC",
-        ],
     },
     'trance': {
         'descriptions': [
@@ -76,7 +69,6 @@ GENRE_DEFINITIONS = {
             "Uplifting trance emotional electronic melody",
         ],
         'bpm_range': (130, 150),
-        'bpm_weight': 1.0,
     },
     'house': {
         'descriptions': [
@@ -86,7 +78,6 @@ GENRE_DEFINITIONS = {
             "Progressive house melodic electronic dance",
         ],
         'bpm_range': (120, 130),
-        'bpm_weight': 1.0,
     },
     'lofi': {
         'descriptions': [
@@ -95,7 +86,6 @@ GENRE_DEFINITIONS = {
             "Lo-fi beats study music calm",
         ],
         'bpm_range': (70, 95),
-        'bpm_weight': 1.2,
     },
     'jazz': {
         'descriptions': [
@@ -104,9 +94,16 @@ GENRE_DEFINITIONS = {
             "Jazz fusion electronic elements",
         ],
         'bpm_range': (60, 140),
-        'bpm_weight': 0.8,
     },
 }
+
+# --- evidence handling (nothing below is tuned to a track) ---------------------------------------------------
+WINDOW_S = 10.0          # CLAP's own input length (the processor truncates/pads to 10 s)
+MAX_WINDOWS = 24         # evenly spaced non-overlapping windows over the WHOLE track (cost cap: ~0.3 s each on CPU)
+SILENCE_DB = -40.0       # a window this far under the track's RMS carries no genre evidence
+Z_MIN = 2.0              # top-2 margin must exceed this many standard errors of its own per-window noise (~95 %)
+MIN_VOTE = 0.5           # ... and the winner must be the best genre in at least this share of the windows
+LOGIT_SCALE = 100.0      # CLAP's trained logit scale (exp(4.6052)); only used for the reported probabilities
 
 
 def load_clap_model():
@@ -125,11 +122,12 @@ def load_clap_model():
         # safetensors avoids torch.load entirely: transformers >= 4.5x refuses torch.load on
         # torch < 2.6 (CVE-2025-32434) and this venv pins torch 2.5 for acids-rave. Without this
         # the detector silently failed and the pipeline fell back to BPM heuristics (2026-10-10).
+        src = os.environ.get("MIDIGREP_CLAP_PATH") or "laion/clap-htsat-unfused"   # local dir = offline use
         try:
-            model = ClapModel.from_pretrained("laion/clap-htsat-unfused", use_safetensors=True)
+            model = ClapModel.from_pretrained(src, use_safetensors=True)
         except (OSError, ValueError):
-            model = ClapModel.from_pretrained("laion/clap-htsat-unfused")
-        processor = ClapProcessor.from_pretrained("laion/clap-htsat-unfused")
+            model = ClapModel.from_pretrained(src)
+        processor = ClapProcessor.from_pretrained(src)
         return (model, processor), 'transformers'
     except (ImportError, OSError, ValueError, RuntimeError) as exc:
         # Review #6: the plain-load fallback raises the torch.load ValueError on torch < 2.6; any
@@ -139,74 +137,66 @@ def load_clap_model():
     return None, None
 
 
-def get_audio_embedding_laion(model, audio_path):
-    """Get audio embedding using laion_clap."""
-    # Load audio at 48kHz (CLAP requirement)
-    y, sr = librosa.load(audio_path, sr=48000, mono=True)
+def split_windows(y, sr, window_s=WINDOW_S, max_windows=MAX_WINDOWS, silence_db=SILENCE_DB):
+    """Non-overlapping ``window_s`` windows spread evenly over the WHOLE track (not one excerpt), silent ones
+    dropped. A track shorter than one window gives that one (padded by the CLAP processor)."""
+    seg = int(window_s * sr)
+    if len(y) <= seg:
+        return [y]
+    n = len(y) // seg
+    starts = [i * seg for i in range(n)]
+    if n > max_windows:
+        starts = [starts[int(round(k))] for k in np.linspace(0, n - 1, max_windows)]
+    rms_all = float(np.sqrt(np.mean(y.astype(np.float64) ** 2))) or 1.0
+    floor = rms_all * 10 ** (silence_db / 20.0)
+    wins = [y[a:a + seg] for a in starts]
+    kept = [w for w in wins if float(np.sqrt(np.mean(w.astype(np.float64) ** 2))) >= floor]
+    return kept or wins
 
-    # CLAP expects audio in specific format
-    # Limit to 10 seconds for efficiency
-    max_samples = 48000 * 10
-    if len(y) > max_samples:
-        # Take middle section
-        start = (len(y) - max_samples) // 2
-        y = y[start:start + max_samples]
 
-    # Get embedding
-    audio_embed = model.get_audio_embedding_from_data(x=[y], use_tensor=False)
-    return audio_embed[0]
+def _pooled(outputs):
+    if hasattr(outputs, 'pooler_output'):
+        return outputs.pooler_output
+    if hasattr(outputs, 'last_hidden_state'):
+        return outputs.last_hidden_state.mean(dim=1)
+    return outputs
+
+
+def embed_windows(model, model_type, windows, sr=48000):
+    """One CLAP audio embedding per window -> array (n_windows, dim)."""
+    if model_type == 'laion_clap':
+        return np.asarray(model.get_audio_embedding_from_data(x=list(windows), use_tensor=False))
+    import torch
+    m, processor = model
+    out = []
+    for w in windows:
+        inputs = processor(audio=w, sampling_rate=sr, return_tensors="pt")
+        with torch.no_grad():
+            out.append(_pooled(m.get_audio_features(**inputs)).detach().numpy()[0])
+    return np.asarray(out)
 
 
 def get_text_embeddings_laion(model, texts):
     """Get text embeddings using laion_clap."""
-    text_embed = model.get_text_embedding(texts, use_tensor=False)
-    return text_embed
-
-
-def get_audio_embedding_transformers(model_tuple, audio_path):
-    """Get audio embedding using transformers CLAP."""
-    model, processor = model_tuple
-
-    # Load audio
-    y, sr = librosa.load(audio_path, sr=48000, mono=True)
-
-    # Limit length
-    max_samples = 48000 * 10
-    if len(y) > max_samples:
-        start = (len(y) - max_samples) // 2
-        y = y[start:start + max_samples]
-
-    # Process (use 'audio' instead of deprecated 'audios')
-    inputs = processor(audio=y, sampling_rate=48000, return_tensors="pt")
-    outputs = model.get_audio_features(**inputs)
-
-    # Handle different return types
-    if hasattr(outputs, 'pooler_output'):
-        audio_embed = outputs.pooler_output
-    elif hasattr(outputs, 'last_hidden_state'):
-        audio_embed = outputs.last_hidden_state.mean(dim=1)
-    else:
-        # Direct tensor output
-        audio_embed = outputs
-
-    return audio_embed.detach().numpy()[0]
+    return model.get_text_embedding(texts, use_tensor=False)
 
 
 def get_text_embeddings_transformers(model_tuple, texts):
     """Get text embeddings using transformers CLAP."""
     model, processor = model_tuple
     inputs = processor(text=texts, return_tensors="pt", padding=True)
-    outputs = model.get_text_features(**inputs)
+    return _pooled(model.get_text_features(**inputs)).detach().numpy()
 
-    # Handle different return types
-    if hasattr(outputs, 'pooler_output'):
-        text_embed = outputs.pooler_output
-    elif hasattr(outputs, 'last_hidden_state'):
-        text_embed = outputs.last_hidden_state.mean(dim=1)
-    else:
-        text_embed = outputs
 
-    return text_embed.detach().numpy()
+def text_prompt_embeddings(model, model_type, definitions=None):
+    """{genre: (n_prompts, dim) array of unit-norm prompt embeddings}."""
+    definitions = GENRE_DEFINITIONS if definitions is None else definitions
+    fn = get_text_embeddings_laion if model_type == 'laion_clap' else get_text_embeddings_transformers
+    out = {}
+    for genre, info in definitions.items():
+        e = np.asarray(fn(model, info['descriptions']), dtype=np.float64)
+        out[genre] = e / np.linalg.norm(e, axis=1, keepdims=True)
+    return out
 
 
 def cosine_similarity(a, b):
@@ -214,140 +204,133 @@ def cosine_similarity(a, b):
     return np.dot(a, b) / (np.linalg.norm(a) * np.linalg.norm(b))
 
 
+def rank_genres(window_embeds, prompt_embeds, definitions=None):
+    """Score a track from per-window audio embeddings and per-genre prompt embeddings. Pure numpy (no model).
+
+    Each genre is the unit-norm mean of its prompt embeddings (prompt ensemble); a window's evidence for a genre
+    is the cosine to that prototype; the track's evidence is the mean over ALL windows. The decision is then
+    tested against the measured noise of exactly that quantity:
+
+    * ``margin`` = mean over windows of (top1 - top2) cosine, ``margin_se`` = its standard error across windows,
+      ``margin_z`` = margin / margin_se (the windows are the replications of the measurement);
+    * ``vote_share`` = share of windows in which the winner is the best genre;
+    * ``uncertain`` = margin_z < Z_MIN, or vote_share < MIN_VOTE, or fewer than 3 windows (no noise estimate);
+    * ``candidates`` = the winner plus every genre whose paired margin to the winner is under Z_MIN standard errors.
+
+    Returns the dict written to genre.json minus the file-level fields.
+    """
+    definitions = GENRE_DEFINITIONS if definitions is None else definitions
+    E = np.asarray(window_embeds, dtype=np.float64)
+    E = E / np.linalg.norm(E, axis=1, keepdims=True)
+    genres = list(prompt_embeds)
+    protos = []
+    for g in genres:
+        c = prompt_embeds[g].mean(axis=0)
+        protos.append(c / np.linalg.norm(c))
+    S = E @ np.stack(protos).T                       # (windows, genres) cosine
+    n = S.shape[0]
+    logits = LOGIT_SCALE * S
+    prob = np.exp(logits - logits.max(axis=1, keepdims=True))
+    prob /= prob.sum(axis=1, keepdims=True)
+    mean_cos, mean_prob = S.mean(axis=0), prob.mean(axis=0)
+    order = list(np.argsort(-mean_cos))
+    t1, t2 = order[0], order[1]
+
+    def paired(a, b):
+        d = S[:, a] - S[:, b]
+        if n < 3:
+            return float(d.mean()), None, None
+        se = float(d.std(ddof=1) / np.sqrt(n))
+        return float(d.mean()), se, (float(d.mean() / se) if se > 0 else float('inf'))
+
+    margin, se, z = paired(t1, t2)
+    vote = float((S.argmax(axis=1) == t1).mean())
+    reasons = []
+    if z is None:
+        reasons.append(f"only {n} analysis window(s): no estimate of the score noise")
+    elif z < Z_MIN:
+        reasons.append(f"top-2 margin {margin:.3f} is {z:.1f} standard errors (<{Z_MIN:g}) over {n} windows")
+    if vote < MIN_VOTE:
+        reasons.append(f"winner is best in only {vote:.0%} of the windows (<{MIN_VOTE:.0%})")
+    candidates = [genres[t1]]
+    for j in order[1:]:
+        _, _, zj = paired(t1, j)
+        if zj is None or zj < Z_MIN:
+            candidates.append(genres[j])
+    rankings = []
+    for j in order:
+        sims = prompt_embeds[genres[j]] @ E.T        # (prompts, windows)
+        best = int(np.argmax(sims.mean(axis=1)))
+        rankings.append({
+            'genre': genres[j],
+            'score': float(mean_cos[j]),             # mean cosine to the prompt-ensemble prototype
+            'probability': float(mean_prob[j]),      # window-averaged softmax at CLAP's logit scale (reporting only)
+            'similarity': float(sims[best].mean()),  # mean cosine to the single best prompt
+            'description': definitions[genres[j]]['descriptions'][best] if genres[j] in definitions else '',
+        })
+    return {
+        'detected_genre': genres[t1],
+        'confidence': float(mean_prob[t1]),
+        'uncertain': bool(reasons),
+        'uncertain_reasons': reasons,
+        'candidates': candidates,
+        'margin': margin, 'margin_se': se, 'margin_z': z,
+        'vote_share': vote, 'n_windows': int(n),
+        'rankings': rankings,
+    }
+
+
 def detect_genre_clap(audio_path, model, model_type, bpm=None):
-    """Detect genre using CLAP model."""
-    # Get audio embedding
-    if model_type == 'laion_clap':
-        audio_embed = get_audio_embedding_laion(model, audio_path)
-    else:
-        audio_embed = get_audio_embedding_transformers(model, audio_path)
-
-    results = {}
-
-    for genre, info in GENRE_DEFINITIONS.items():
-        # Get text embeddings for all descriptions
-        if model_type == 'laion_clap':
-            text_embeds = get_text_embeddings_laion(model, info['descriptions'])
-        else:
-            text_embeds = get_text_embeddings_transformers(model, info['descriptions'])
-
-        # Calculate similarity with each description
-        similarities = []
-        for text_embed in text_embeds:
-            sim = cosine_similarity(audio_embed, text_embed)
-            similarities.append(sim)
-
-        # Use max similarity (best matching description)
-        max_sim = max(similarities)
-        avg_sim = np.mean(similarities)
-
-        # Combined score (weighted towards max)
-        score = 0.7 * max_sim + 0.3 * avg_sim
-
-        # Apply negative descriptions penalty
-        negative_penalty = 0.0
-        if 'negative_descriptions' in info:
-            if model_type == 'laion_clap':
-                neg_embeds = get_text_embeddings_laion(model, info['negative_descriptions'])
-            else:
-                neg_embeds = get_text_embeddings_transformers(model, info['negative_descriptions'])
-
-            neg_sims = []
-            for neg_embed in neg_embeds:
-                neg_sim = cosine_similarity(audio_embed, neg_embed)
-                neg_sims.append(neg_sim)
-
-            # If audio is similar to negative descriptions, penalize
-            max_neg = max(neg_sims) if neg_sims else 0
-            if max_neg > 0.3:  # Threshold for penalty
-                negative_penalty = (max_neg - 0.3) * 0.5
-
-        score -= negative_penalty
-
-        # BPM bonus if provided
-        if bpm is not None:
-            bpm_low, bpm_high = info['bpm_range']
-            if bpm_low <= bpm <= bpm_high:
-                score *= info['bpm_weight']
-            # Also check half-time
-            elif bpm_low <= bpm * 2 <= bpm_high:
-                score *= (info['bpm_weight'] * 0.8)
-            # Penalty for being outside range
-            elif abs(bpm - (bpm_low + bpm_high) / 2) > 30:
-                score *= 0.8
-
-        results[genre] = {
-            'score': float(score),
-            'max_similarity': float(max_sim),
-            'avg_similarity': float(avg_sim),
-            'negative_penalty': float(negative_penalty),
-            'best_description': info['descriptions'][similarities.index(max_sim)],
-        }
-
-    # Sort by score
-    sorted_results = sorted(results.items(), key=lambda x: x[1]['score'], reverse=True)
-
-    return sorted_results
+    """CLAP genre detection over every window of the track. ``bpm`` is accepted for the caller's convenience and
+    ignored: it is not evidence about the audio."""
+    y, sr = librosa.load(audio_path, sr=48000, mono=True)
+    windows = split_windows(y, sr)
+    result = rank_genres(embed_windows(model, model_type, windows, sr),
+                         text_prompt_embeddings(model, model_type))
+    result['window_s'] = WINDOW_S
+    return result
 
 
 def detect_genre_fallback(audio_path, bpm=None):
-    """Fallback genre detection using audio features (no deep learning)."""
+    """Fallback genre detection using audio features (no deep learning): BPM range + centroid heuristics.
+    It is not audio evidence of the genre, so the result is ALWAYS uncertain."""
     print("Warning: CLAP not available, using fallback feature-based detection", file=sys.stderr)
 
-    # Load audio
     y, sr = librosa.load(audio_path, sr=22050)
-
-    # Extract features
     spectral_centroid = np.mean(librosa.feature.spectral_centroid(y=y, sr=sr))
-    spectral_rolloff = np.mean(librosa.feature.spectral_rolloff(y=y, sr=sr))
-    mfccs = np.mean(librosa.feature.mfcc(y=y, sr=sr, n_mfcc=13), axis=1)
-
-    # Simple heuristic scoring
     results = {}
-
     for genre, info in GENRE_DEFINITIONS.items():
-        score = 0.5  # Base score
-
-        # BPM matching
+        score = 0.5
         if bpm is not None:
-            bpm_low, bpm_high = info['bpm_range']
-            if bpm_low <= bpm <= bpm_high:
-                score += 0.3 * info['bpm_weight']
-
-        # Spectral characteristics (rough heuristics)
-        if genre == 'brazilian_funk':
-            # Mid-heavy, moderate brightness
-            if 1000 < spectral_centroid < 3000:
-                score += 0.2
-        elif genre == 'brazilian_phonk':
-            # Can be darker or brighter
-            if 800 < spectral_centroid < 4000:
-                score += 0.15
-        elif genre == 'retro_wave':
-            # Typically brighter (synths)
-            if spectral_centroid > 2000:
-                score += 0.2
-        elif genre == 'lofi':
-            # Darker, warmer
-            if spectral_centroid < 2000:
-                score += 0.2
-
-        results[genre] = {
-            'score': float(score),
-            'max_similarity': float(score),
-            'avg_similarity': float(score),
-            'best_description': info['descriptions'][0],
-            'fallback': True,
-        }
-
-    sorted_results = sorted(results.items(), key=lambda x: x[1]['score'], reverse=True)
-    return sorted_results
+            lo, hi = info['bpm_range']
+            if lo <= bpm <= hi:
+                score += 0.3
+        if genre == 'brazilian_funk' and 1000 < spectral_centroid < 3000:
+            score += 0.2
+        elif genre == 'brazilian_phonk' and 800 < spectral_centroid < 4000:
+            score += 0.15
+        elif genre == 'retro_wave' and spectral_centroid > 2000:
+            score += 0.2
+        elif genre == 'lofi' and spectral_centroid < 2000:
+            score += 0.2
+        results[genre] = score
+    order = sorted(results, key=results.get, reverse=True)
+    return {
+        'detected_genre': order[0], 'confidence': float(results[order[0]]),
+        'uncertain': True,
+        'uncertain_reasons': ['CLAP unavailable: BPM/centroid heuristic only, no audio-text evidence'],
+        'candidates': order[:3], 'margin': float(results[order[0]] - results[order[1]]),
+        'margin_se': None, 'margin_z': None, 'vote_share': None, 'n_windows': 0,
+        'rankings': [{'genre': g, 'score': float(results[g]), 'similarity': float(results[g]),
+                      'probability': None, 'description': GENRE_DEFINITIONS[g]['descriptions'][0],
+                      'fallback': True} for g in order],
+    }
 
 
 def main():
     parser = argparse.ArgumentParser(description='Deep learning genre detection using CLAP')
     parser.add_argument('audio_path', help='Path to audio file')
-    parser.add_argument('--bpm', type=float, help='BPM for additional scoring')
+    parser.add_argument('--bpm', type=float, help='Recorded in the output only; it does not influence the score')
     parser.add_argument('--output', '-o', help='Output JSON file')
     parser.add_argument('--top', type=int, default=3, help='Number of top results to show')
 
@@ -358,53 +341,43 @@ def main():
         sys.exit(1)
 
     print(f"Analyzing: {args.audio_path}", file=sys.stderr)
-
-    # Try to load CLAP model
     model, model_type = load_clap_model()
-
     if model is not None:
         print(f"Using CLAP model ({model_type})", file=sys.stderr)
-        results = detect_genre_clap(args.audio_path, model, model_type, args.bpm)
+        res = detect_genre_clap(args.audio_path, model, model_type, args.bpm)
     else:
-        results = detect_genre_fallback(args.audio_path, args.bpm)
+        res = detect_genre_fallback(args.audio_path, args.bpm)
 
-    # Prepare output
     output = {
         'audio_path': args.audio_path,
         'bpm': args.bpm,
         'model_type': model_type or 'fallback',   # laion_clap | transformers | fallback (BPM/spectral heuristic)
-        'detected_genre': results[0][0],
-        'confidence': results[0][1]['score'],
-        'rankings': [
-            {
-                'genre': genre,
-                'score': info['score'],
-                'similarity': info['max_similarity'],
-                'description': info['best_description'],
-            }
-            for genre, info in results
-        ],
+        'scoring': 'window-mean-cosine/prompt-ensemble/no-bpm-prior' if model is not None else 'heuristic',
+        **res,
     }
 
-    # Print results
     print("\n" + "=" * 60)
     print("DEEP LEARNING GENRE DETECTION")
     print("=" * 60)
-    print(f"\nDetected Genre: {output['detected_genre'].upper()}")
-    print(f"Confidence: {output['confidence']:.3f}")
+    flag = "  [UNCERTAIN]" if output['uncertain'] else ""
+    print(f"\nDetected Genre: {output['detected_genre'].upper()}{flag}")
+    print(f"Confidence (window-mean probability): {output['confidence']:.3f}")
+    if output['margin_z'] is not None:
+        print(f"Top-2 margin {output['margin']:.3f} = {output['margin_z']:.1f} s.e. over {output['n_windows']} windows, "
+              f"winner best in {output['vote_share']:.0%}")
+    for r in output['uncertain_reasons']:
+        print(f"  uncertain: {r}")
     print(f"\nTop {args.top} matches:")
-    for i, (genre, info) in enumerate(results[:args.top], 1):
-        print(f"  {i}. {genre}: {info['score']:.3f}")
-        print(f"     Best match: \"{info['best_description'][:50]}...\"")
+    for i, r in enumerate(output['rankings'][:args.top], 1):
+        print(f"  {i}. {r['genre']}: {r['score']:.3f}")
+        print(f"     Best match: \"{r['description'][:50]}...\"")
     print("=" * 60)
 
-    # Save JSON if requested
     if args.output:
         with open(args.output, 'w') as f:
             json.dump(output, f, indent=2)
         print(f"\nSaved to: {args.output}")
 
-    # Also print JSON to stdout for parsing
     print("\n--- JSON OUTPUT ---")
     print(json.dumps(output, indent=2))
 

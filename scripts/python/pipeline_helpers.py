@@ -205,6 +205,9 @@ def _refine_track_bpm(track_dir: Path, meta: dict, *, coarse: float) -> None:
     meta["bpm_confidence"] = round(float(r["confidence"]), 4)
 
 
+UNREFERENCED = "unreferenced"   # genre key meaning "no trusted genre": the gate uses its default floor, memory finds no neighbours
+
+
 def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
                          detector_json: Path | None = None) -> dict:
     """Consolidate the per-track facts the pipeline needs into ``<track>/metadata.json``.
@@ -248,16 +251,36 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
         meta["genre_confidence"] = det.get("confidence")
         mt = det.get("model_type") or "unknown"   # review #7: do not assert CLAP when the heuristic ran
         meta["genre_detector"] = f"detect_genre_dl.py ({mt})"
+        # Old detector JSON has no verdict on its own noise: such a result is NOT trusted as certain.
+        meta["genre_uncertain"] = bool(det.get("uncertain", True))
+        meta["genre_candidates"] = list(det.get("candidates") or [det.get("detected_genre")])
+        meta["genre_margin_z"] = det.get("margin_z")
+        meta["genre_uncertain_reasons"] = list(det.get("uncertain_reasons") or
+                                               ([] if "uncertain" in det else ["detector JSON predates the margin rule"]))
     if genre_override:
         meta["genre"] = genre_override
         meta["genre_override"] = True
+        meta["genre_basis"] = "override"
         meta["genre_override_note"] = (
             f"--genre {genre_override} given; detector said {meta.get('genre_detected')!r} "
             f"(confidence {meta.get('genre_confidence')}), heuristic style {meta.get('style_heuristic')!r}")
     elif meta.get("genre_detected"):
         meta["genre"] = meta["genre_detected"]; meta["genre_override"] = False
+        meta["genre_basis"] = "detector-uncertain" if meta.get("genre_uncertain") else "detector"
     elif meta.get("style_heuristic"):
         meta["genre"] = meta["style_heuristic"]; meta["genre_override"] = False
+        meta["genre_basis"] = "heuristic-style"   # BPM/style guess from the Go run: not audio evidence of a genre
+        meta["genre_uncertain"] = True
+    # `genre_ref` is the genre the reference tables are consulted for (eval floors, calibration neighbours): the
+    # label itself only when it is trusted (an explicit override, or a detection that cleared the margin rule),
+    # else UNREFERENCED. `genre` stays the best guess (sound palette, generator header).
+    if meta.get("genre"):
+        meta["genre_ref"] = meta["genre"] if meta.get("genre_basis") in ("override", "detector") else UNREFERENCED
+        if meta["genre_ref"] == UNREFERENCED:
+            print(f"pipeline_helpers: GENRE UNCERTAIN - using {meta['genre']!r} for the sound palette only; no genre "
+                  f"floors / calibration neighbours are applied (basis {meta.get('genre_basis')}, candidates "
+                  f"{meta.get('genre_candidates')}, reasons {meta.get('genre_uncertain_reasons')}). Pass --genre to decide.",
+                  file=sys.stderr)
     meta["stamped_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
     return meta
@@ -270,6 +293,8 @@ def record_mode_floor(thresholds_path: Path, *, mode: str, genre: str, compariso
     block (overall, section_aware, run, margin, editability). Returns the block written, or None when
     a floor already exists (floors are never changed here) or the run is not detector-passing."""
     import yaml
+    if not genre or genre == UNREFERENCED:   # an unverified genre must not grow a floor of its own
+        return None
     thresholds_path = Path(thresholds_path)
     th = yaml.safe_load(thresholds_path.read_text()) or {}
     mode_key = mode.replace("-", "_")
@@ -886,7 +911,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"recorded": res is not None, "measured": res}))
         elif args.cmd == "stamp":
             m = stamp_track_metadata(args.track_dir, genre_override=args.genre, detector_json=args.detector_json)
-            print(json.dumps({k: m.get(k) for k in ("bpm", "key", "genre", "genre_detected", "genre_confidence", "genre_override", "duration", "style_heuristic")}))
+            print(json.dumps({k: m.get(k) for k in ("bpm", "key", "genre", "genre_ref", "genre_basis", "genre_uncertain", "genre_detected", "genre_confidence", "genre_override", "duration", "style_heuristic")}))
         elif args.cmd == "instrumental":
             print(write_instrumental(args.track_dir, force=args.force))
         elif args.cmd == "params-valid":

@@ -458,7 +458,7 @@ def track_ctx(track_dir: Path) -> dict:
             h = CS.get_track_hash(str(orig))
         except OSError:
             h = ""
-    return {"title": meta.get("title", track_dir.name), "genre": meta.get("genre", ""), "bpm": meta.get("bpm", 0),
+    return {"title": meta.get("title", track_dir.name), "genre": meta.get("genre_ref") or meta.get("genre", ""), "bpm": meta.get("bpm", 0),   # genre_ref: an untrusted guess is no neighbour key
             "key": meta.get("key", ""), "track_hash": h}
 
 
@@ -524,7 +524,7 @@ def promoted_row(track_dir: Path, version: str, *, source: str = "live", created
     margin = passed = None
     try:
         import gate_margin
-        gm = gate_margin.margins(vdir / "comparison.json", ctx["genre"] or "brazilian_funk", mode)
+        gm = gate_margin.margins(vdir / "comparison.json", ctx["genre"] or None, mode)   # no genre: the default floor, never funk's
         margin, passed = gm["margin"], gm["passed"]
     except Exception as e:      # noqa: BLE001 - the margin is optional metadata
         warn(f"{track_dir.name}/{version}: gate margin unavailable ({e})")

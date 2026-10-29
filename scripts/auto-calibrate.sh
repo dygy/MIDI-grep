@@ -134,7 +134,7 @@ render_one() {   # render_one STRU WAV LOG: the renderer's EXIT STATUS decides; 
   return 0
 }
 
-STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" BARS="78"
+STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" GENRE_REF="" BARS="78"
 LEAD_FIT="${AC_LEAD_FIT:-1}"; LEAD_EVALS=10; LEAD_ARG=(); LSYN="${AC_LEAD_SYNTH:-$ROOT/scripts/python/lead_synth.py}"   # synth lead fit; see header
 BSHAPE="stem"; SHAPE_PIN=0; SHAPE_TESTED=0; SHAPE_TRIAL="${AC_SHAPE_TRIAL:-1}"   # generator --bass-shape; see header
 MIXDYN=1; ENV_START=""; ITERS=""; START_GIVEN=0; SEED=""; WARM_SOURCE="cold" DUR="" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
@@ -144,7 +144,7 @@ BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" BL="0" LH="0" SU="0"  
 
 while [ $# -gt 0 ]; do case "$1" in
   --stems) STEMS="$2"; shift 2;; --base) BASE="$2"; shift 2;; --inst) INST="$2"; shift 2;;
-  --bpm) BPM="$2"; shift 2;; --key) KEY="$2"; shift 2;; --genre) GENRE="$2"; shift 2;;
+  --bpm) BPM="$2"; shift 2;; --key) KEY="$2"; shift 2;; --genre) GENRE="$2"; shift 2;; --genre-ref) GENRE_REF="$2"; shift 2;;
   --bars) BARS="$2"; shift 2;; --iters) ITERS="$2"; shift 2;; --dur) DUR="$2"; shift 2;;
   --bass-sound) BASS_SOUND="$2"; shift 2;; --lead-sound) LEAD_SOUND="$2"; shift 2;;
   --vocal-mode) echo "--vocal-mode was removed: vocals are never generated" >&2; exit 64;;
@@ -179,6 +179,10 @@ else
   DRUM_MODE="bank"
 fi
 PACK="$STEMS/sample_pack"
+# --genre drives the sound palette + the chance-control lookup; --genre-ref (default: same) is the genre the REFERENCE
+# tables are consulted for (eval floors, gate margins, calibration-memory neighbours). The pipeline passes "unreferenced"
+# when the detector could not decide: the gate then uses its default floor and memory finds no same-genre neighbours.
+[ -n "$GENRE_REF" ] || GENRE_REF="$GENRE"
 # reference = the INSTRUMENTAL (bass+drums+melodic), never the full mix with the singer
 ORIG="${AC_REF:-$("$PY" "$ROOT/scripts/python/pipeline_helpers.py" instrumental "$STEMS")}" || { echo "cannot build $STEMS/instrumental.wav" >&2; exit 65; }   # AC_REF: tests point at a stub
 # Chance control (same lookup as editable-pipeline.sh stage 8): a DIFFERENT same-genre reference track scored against
@@ -209,7 +213,7 @@ memcall() {
   return 0
 }
 TRACK_KEY="$(basename "$STEMS")"; RUN_ID="$(date +%Y%m%dT%H%M%S).$$"
-MEM_ARGS=(--stems "$STEMS" --mode "$MODE" --genre "$GENRE" --bpm "$BPM" --bars "$BARS")
+MEM_ARGS=(--stems "$STEMS" --mode "$MODE" --genre "$GENRE_REF" --bpm "$BPM" --bars "$BARS")
 [ -n "$KEY" ] && MEM_ARGS+=(--key "$KEY")
 RESP_ARG=()
 # Warm start: knobs (+ per-bar env correction) from ClickHouse - this track+mode's best, else the nearest recorded track's,
@@ -266,7 +270,7 @@ gen_piece() {
 
 # The gate line of the piece in best.cmp.json (the loudness/bus stages replace it after the loop picked BEST).
 regate() {
-  local g; if g=$("$PY" "$GATE" --comparison "$WORK/best.cmp.json" --genre "$GENRE" --mode "$MODE" 2>/dev/null); then best_gate="$g"; else best_gate="n/a"; fi
+  local g; if g=$("$PY" "$GATE" --comparison "$WORK/best.cmp.json" --genre "$GENRE_REF" --mode "$MODE" 2>/dev/null); then best_gate="$g"; else best_gate="n/a"; fi
 }
 
 # solo_job bass|mel TAG: render the voice alone (its strudel is already written) and measure it against the original stem.
@@ -382,7 +386,7 @@ while [ "$i" -lt "$ITERS" ]; do
   # Record this iteration; BEST is chosen AFTER the loop (see below) so the ordering is one consistent rule.
   # Gate margin = smallest margin to the eval-gate floors (eval/thresholds.yaml via eval/gate.py, per
   # --mode/--genre); "n/a" when the gate cannot be read for this iteration.
-  if GATE_OUT=$("$PY" "$GATE" --comparison "$CJ" --genre "$GENRE" --mode "$MODE" 2>"$WORK/$TAG.gate.log"); then
+  if GATE_OUT=$("$PY" "$GATE" --comparison "$CJ" --genre "$GENRE_REF" --mode "$MODE" 2>"$WORK/$TAG.gate.log"); then
     read -r MARG _ <<<"$GATE_OUT"
   else
     echo "[$TAG] WARNING: gate margin unavailable ($(tr '\n' ' ' <"$WORK/$TAG.gate.log"))"
@@ -466,7 +470,7 @@ if [ -n "$SEL" ]; then
     BSHAPE="$KEPT_SHAPE"
     if [ "$srcok" = 1 ]; then
       read -r SOVER SSECT < <("$PY" -c "import json,sys;d=json.load(open('$SC'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
-      if SGATE=$("$PY" "$GATE" --comparison "$SC" --genre "$GENRE" --mode "$MODE" 2>"$WORK/$STAG.gate.log"); then read -r SMARG _ <<<"$SGATE"
+      if SGATE=$("$PY" "$GATE" --comparison "$SC" --genre "$GENRE_REF" --mode "$MODE" 2>"$WORK/$STAG.gate.log"); then read -r SMARG _ <<<"$SGATE"
       else SMARG="n/a"; SGATE="n/a"; echo "[$STAG] WARNING: gate margin unavailable"; fi
       echo "[$STAG] overall=$SOVER section_aware=$SSECT gate: $SGATE  (BEST $best_tag: overall=$best gate: $best_gate)"
       senv="-"; [ -s "$WORK/best.env.json" ] && senv="$WORK/best.env.json"
@@ -518,7 +522,7 @@ if [ -n "$SEL" ]; then
         [ "$srcok" = 1 ] && { "$PY" "$CMP" "$ORIG" "$LW_" -d "$SONG_S" -j ${CONTROL_ARG[@]+"${CONTROL_ARG[@]}"} > "$LC_" 2>/dev/null || { echo "[$LTAG] CMP FAILED"; srcok=0; }; }
         if [ "$srcok" != 1 ]; then lf_ok=0; "$PY" "$LSYN" tell --history "$LHIST" --score 0; continue; fi
         read -r LOVER LSECT < <("$PY" -c "import json;d=json.load(open('$LC_'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
-        if LGATE=$("$PY" "$GATE" --comparison "$LC_" --genre "$GENRE" --mode "$MODE" 2>/dev/null); then read -r LMARG _ <<<"$LGATE"; else LMARG="n/a"; LGATE="n/a"; fi
+        if LGATE=$("$PY" "$GATE" --comparison "$LC_" --genre "$GENRE_REF" --mode "$MODE" 2>/dev/null); then read -r LMARG _ <<<"$LGATE"; else LMARG="n/a"; LGATE="n/a"; fi
         LSCORE="$("$PY" -c "print(round(($LOVER+$LSECT)/2,5))")"
         echo "[$LTAG] overall=$LOVER section_aware=$LSECT score=$LSCORE (palette: overall=$best section_aware=$PSA)"
         "$PY" "$LSYN" tell --history "$LHIST" --score "$LSCORE"

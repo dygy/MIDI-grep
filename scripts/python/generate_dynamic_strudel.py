@@ -56,7 +56,7 @@ import melodic_shape as MS  # noqa: E402  (lead/chords: retrigger only on stem a
 import drum_pitch as DP  # noqa: E402  (the pitch each stem kick sounds, written per hit)
 import note_dynamics as ND  # noqa: E402  (per-note lead/chord level measured from the melodic stem, written as .velocity())
 from editability_check import check_editability  # noqa: E402  (spec 003 detector)
-from sound_selector import pick_palette_sound  # noqa: E402  (genre palette — no hardcoded names)
+from sound_selector import pick_palette_sound, palette_key  # noqa: E402  (genre palette — no hardcoded names)
 from strudel_validation import VALID_SOUNDS  # noqa: E402  (library sound catalog)
 
 GENERATION_MODES = ("sample-instrument", "synth")
@@ -793,6 +793,9 @@ def main() -> int:
                          "section-level bass/lead balance follows the measured render-vs-original ratios")
     ap.add_argument("--out", type=Path)
     args = ap.parse_args()
+    if palette_key(args.genre) == "default" and (args.genre or "").strip().lower() != "default":
+        print(f"WARNING: genre {args.genre!r} has no sound palette (sound_selector.GENRE_PALETTES / GENRE_ALIASES) - "
+              f"the generic 'default' palette is used for the synth sounds and the drum bank", file=sys.stderr)
 
     # --- generation mode: which instruments voice the (identical) note material ------------
     # synth: every sound is a library sound DERIVED from the genre palette (sound_selector), never

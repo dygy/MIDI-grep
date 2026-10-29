@@ -191,6 +191,19 @@ if [ -n "$GENRE_OVERRIDE" ]; then
   GENRE="$GENRE_OVERRIDE"
 fi
 [ -n "$GENRE" ] || die "no genre in metadata.json and no --genre given"
+# GENRE = best guess (sound palette, generator header, control lookup); GENRE_REF = the genre the REFERENCE tables
+# (eval floors, calibration neighbours, recorded floors) are consulted for - the label only when it is trusted
+# (override, or a detection that cleared the margin rule), else "unreferenced" (gate: default floor, memory: cold).
+GENRE_REF="$(jget "$META" genre_ref)"
+if [ -n "$GENRE_OVERRIDE" ]; then GENRE_REF="$GENRE_OVERRIDE"
+elif [ -z "$GENRE_REF" ]; then
+  GENRE_REF="$GENRE"
+  log "WARNING: legacy genre stamp (no margin verdict) - trusting '$GENRE' as before; re-run with --force to re-detect it"
+fi
+if [ "$GENRE_REF" = "unreferenced" ]; then
+  log "WARNING: GENRE UNCERTAIN - detector best guess '$GENRE' (candidates: $(jget "$META" genre_candidates)) is used for the SOUND PALETTE ONLY."
+  log "WARNING: no genre floor is applied (default floor), no calibration neighbours, no floor is recorded, the chance control is a best-guess '$GENRE' track. Pass --genre <g> to decide."
+fi
 SLUG="${PREFIX:-$("${PH[@]}" slug "${TRACK_TITLE:-$(basename "$TRACK")}")}" || die "cannot derive a slug"
 SND="${SLUG//-/_}"      # model / Strudel sound names avoid '-' (mini-notation); hosting prefix keeps kebab
 BARS="$("${PH[@]}" num-bars "$DURATION" "$BPM")" || die "cannot derive num-bars"
@@ -347,7 +360,7 @@ run_sample_instrument() {
   log "stage 7: auto-calibrate sample-instrument (iters cap=${ITERS:-default})"
   key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
   "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --base "$BASE" --inst "$INST_BASE""samples.json" \
-    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" ${ITERS:+--iters "$ITERS"} --dur "$DUR" \
+    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --genre-ref "$GENRE_REF" --bars "$BARS" ${ITERS:+--iters "$ITERS"} --dur "$DUR" \
     --bass-sound "${SND}_bass" --lead-sound "${SND}_lead" \
     --mode sample-instrument --workdir "$W" 2>&1 | tee "$W/calibrate.log" >&2
   local cal_rc="${PIPESTATUS[0]}"
@@ -385,7 +398,7 @@ run_synth() {
   local key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
   log "stage 7: auto-calibrate synth (iters cap=${SYNTH_ITERS:-default})"
   "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --base "$BASE" \
-    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --bars "$BARS" ${SYNTH_ITERS:+--iters "$SYNTH_ITERS"} --dur "$DUR" \
+    --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --genre-ref "$GENRE_REF" --bars "$BARS" ${SYNTH_ITERS:+--iters "$SYNTH_ITERS"} --dur "$DUR" \
     --mode synth --workdir "$W" ${start_arg[@]+"${start_arg[@]}"} 2>&1 | tee "$W/calibrate.log" >&2
   local cal_rc="${PIPESTATUS[0]}"
   [ "$cal_rc" -eq 0 ] || die "synth auto-calibrate exited $cal_rc (see $W/calibrate.log)"
@@ -440,9 +453,9 @@ score_and_promote() {
   # Spec 004 §2.3: a genre with no measured floor yet gets one from THIS run (measured − margin),
   # never typed by hand; brazilian_funk already has floors, so this is a no-op for it.
   local vdir_planned; vdir_planned="$("${PH[@]}" next-version "$TRACK")"   # the dir stage 9 will promote into
-  "${PH[@]}" record-floor --thresholds "$ROOT/eval/thresholds.yaml" --mode "$mode" --genre "$GENRE" \
+  "${PH[@]}" record-floor --thresholds "$ROOT/eval/thresholds.yaml" --mode "$mode" --genre "$GENRE_REF" \
     --comparison "$CJ" --run "$(basename "$TRACK")/$(basename "$vdir_planned")" >&2 || log "stage 8: record-floor skipped/failed (see above)"
-  "$PY" "$GATE" "$CJ" --genre "$GENRE" --mode "$mode" >"$W/gate.txt" 2>&1 || gate_rc=$?
+  "$PY" "$GATE" "$CJ" --genre "$GENRE_REF" --mode "$mode" >"$W/gate.txt" 2>&1 || gate_rc=$?
   log "stage 8: $mode editability_rc=$edit_rc gate_rc=$gate_rc :: $(tr '\n' ' ' < "$W/gate.txt")"
 
   log "stage 9: promote $mode"
