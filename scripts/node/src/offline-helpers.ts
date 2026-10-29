@@ -214,6 +214,17 @@ export function nextNetWaitS(n: number, waitedS: number, budgetS: number): numbe
 export interface Ring { begin: number; end: number }
 
 /** Width (s) of the window at the very end of a chunk context in which the renderer demands silence (the tail-truncation check). */
+/**
+ * Run `fn` up to `attempts` times, reporting each failure through `onFail(attempt, error)`; the last failure is rethrown.
+ * Used for launching the headless browser, which can time out when the machine is loaded (2026-10-29: a 30 s
+ * puppeteer launch timeout at load average ~20 failed a whole calibration).
+ */
+export async function retried<T>(fn: () => Promise<T>, attempts: number, onFail: (attempt: number, err: any) => void): Promise<T> {
+  for (let k = 1; ; k++) {
+    try { return await fn(); } catch (err) { onFail(k, err); if (k >= attempts) throw err; }
+  }
+}
+
 export const TAIL_CHECK_S = 0.25;
 
 /**
@@ -239,4 +250,42 @@ export function chunkMargins(rings: Ring[], tb: number, te: number, fxSeconds: n
     }
   }
   return { tailSeconds: fxSeconds, tailCheck: lastEnd <= te + fxSeconds - TAIL_CHECK_S + eps, prerollSeconds: back, ringingOnsets };
+}
+
+// ---- hang watchdog ------------------------------------------------------------------------------------------------
+// A page that stops responding used to be noticed only by puppeteer's protocolTimeout (15 min), 2026-10-29: a chunk hung for
+// ~1100 s. A call is now "stalled" when NOTHING happened for a limit derived from the work it carries: no page log line, no
+// sample bytes, no CPU used by the browser's processes. A slow but progressing render on a loaded machine keeps ticking (CPU
+// and logs) and is never killed; a hung one ticks nothing.
+/** Stall limit = this many times the time the call is expected to take. */
+export const STALL_FACTOR = 3;
+/** Lower bound (s) of the limit, so scheduler jitter on a loaded machine (load average 15-20) can never look like a stall. */
+export const STALL_FLOOR_S = 10;
+/** What this run has observed so far: the slowest completed step (s) and the slowest wall-seconds per audio-second of a completed chunk. */
+export interface StepStats { slowestStepS: number; slowestRate: number }
+/** Seconds of silence after which a call carrying `audioS` seconds of audio counts as stalled. `overrideS` (MIDIGREP_RENDER_STALL_S) replaces the derivation. */
+export function stallLimitS(stats: StepStats, audioS: number, overrideS?: number): number {
+  if (overrideS !== undefined && Number.isFinite(overrideS) && overrideS > 0) return overrideS;
+  return Math.max(STALL_FLOOR_S, STALL_FACTOR * Math.max(stats.slowestStepS, audioS * stats.slowestRate));
+}
+export class StallError extends Error {
+  constructor(label: string, public silentS: number, public limitS: number) { super(`page stalled: ${label} made no progress for ${silentS.toFixed(1)} s (limit ${limitS.toFixed(1)} s, derived from the work and the observed render speed)`); }
+}
+/**
+ * Await `fn()`; reject with StallError (after calling onStall, which should kill the page/browser) when `lastProgress()`
+ * (epoch ms, bumped by whatever signals life) is older than limitS. The pending fn() is abandoned (its rejection is swallowed).
+ */
+export function watched<T>(fn: () => Promise<T>, o: { label: string; limitS: number; pollMs?: number; lastProgress: () => number; onStall?: () => void; now?: () => number }): Promise<T> {
+  const now = o.now ?? Date.now, pollMs = o.pollMs ?? Math.max(50, Math.min(1000, o.limitS * 250));
+  return new Promise<T>((resolve, reject) => {
+    let done = false;
+    const timer = setInterval(() => {
+      const silent = (now() - o.lastProgress()) / 1000;
+      if (silent <= o.limitS || done) return;
+      done = true; clearInterval(timer);
+      try { o.onStall?.(); } catch { /* the watchdog's job is the rejection */ }
+      reject(new StallError(o.label, silent, o.limitS));
+    }, pollMs);
+    fn().then(v => { if (!done) { done = true; clearInterval(timer); resolve(v); } }, e => { if (!done) { done = true; clearInterval(timer); reject(e); } });
+  });
 }

@@ -10,13 +10,20 @@
  * because ffmpeg starts before Strudel loads).
  *
  * Usage: node dist/render-strudel-offline.js input.strudel -o out.wav -d 150 [--sample-rate 44100] [--allow-failed-samples]
+ *
+ * Environment: MIDIGREP_RENDER_SAMPLE_CACHE=0 bypasses the on-disk sample cache (default on, dir MIDIGREP_RENDER_SAMPLE_CACHE_DIR or
+ * <repo>/.cache/render-samples, freshness MIDIGREP_RENDER_SAMPLE_CACHE_TTL_S, see sample-cache.ts); MIDIGREP_RENDER_STALL_S overrides the
+ * derived hang-watchdog limit; MIDIGREP_RENDER_TEST_HANG=chunk:N makes the first attempt of chunk N never return (watchdog test seam).
  */
 import puppeteer from 'puppeteer';
 import * as fs from 'fs';
 import * as http from 'http';
 import * as path from 'path';
 import { createRequire } from 'module';
-import { chunkMargins, TAIL_CHECK_S, Ring, analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures, triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput, isNetworkFailure, isOutageSampleFailure, isNetworkOutageFailure, netWaitBudgetS, nextNetWaitS } from './offline-helpers.js';
+import { fileURLToPath } from 'url';
+import { deterministicInitScript, PAGE_DETERMINISM_JS } from './determinism.js';
+import { retried, chunkMargins, TAIL_CHECK_S, Ring, analyzeWav, checkRender, closeAllWithin, planChunks, expectedFrames, floatToWav16, overlapAdd, sampleFailures, triggerArgs, prerollPlan, trimChunk, removeStaleOutput, commitOutput, isNetworkFailure, isOutageSampleFailure, isNetworkOutageFailure, netWaitBudgetS, nextNetWaitS, stallLimitS, watched, StallError, StepStats } from './offline-helpers.js';
+import { SampleCache } from './sample-cache.js';
 
 const SHIM = `const S = window.strudel;
 export const { noteToMidi, freqToMidi, getSoundIndex, getAudioContext, registerSound, getParamADSR, getADSRValues, getPitchEnvelope, getVibratoOscillator } = S;`;
@@ -29,6 +36,7 @@ window.__triggerArgs = ${triggerArgs.toString()};
 window.__fontsP = import("/fontloader.mjs").then(m => m.registerSoundfonts);
 
 window.__logs = [];
+${PAGE_DETERMINISM_JS}
 document.addEventListener('strudel.log', e => window.__logs.push(String(e.detail && e.detail.message)));
 for (const k of ['error', 'warn']) { const o = console[k].bind(console); console[k] = (...a) => { window.__logs.push(k + ': ' + a.map(String).join(' ')); o(...a); }; }
 window.addEventListener('unhandledrejection', e => window.__logs.push('error: unhandledrejection ' + (e.reason && e.reason.message || e.reason)));
@@ -98,6 +106,7 @@ window.__init = async (code, site) => {
     S.aliasBank(alias);
   };
   const repl = await S.initStrudel({ prebake });
+  window.__installDeterminism(); // ducking scheduled at trigger time, reverb bookkeeping (determinism.ts)
   window.__logs.length = 0; // only count failures from evaluate/render, not init chatter
   // Compat shim: this bundled transpiler turns EVERY "double-quoted" string into mini(), including the
   // URL in samples("https://..."), which then fails to parse. Single-quoted strings are left alone, so
@@ -156,6 +165,7 @@ window.__chunk = async (b, e, sampleRate, startFrame, len, poly, preFrames, preC
     try { await S.superdough(hap2value(hap), a.t, hap.duration / cps, cps, a.cycle); }
     catch (err) { const m = 'error: ' + (err && err.message || err) + ' hap=' + JSON.stringify(hap.value).slice(0, 160); window.__logs.push(m); if (errs.length < 2) errs.push(m); }
   }
+  await window.__settleChildRenders(); // every reverb impulse response is in its convolver before the render starts
   const buf = await off.startRendering();
   const f = new Float32Array(len * 2); f.set(buf.getChannelData(0), 0); f.set(buf.getChannelData(1), len);
   window.__bytes = new Uint8Array(f.buffer);
@@ -165,6 +175,25 @@ window.__chunk = async (b, e, sampleRate, startFrame, len, poly, preFrames, preC
 
 /** superdough duck(): webAudioTimeout(..., t - 0.01) - a hap must sit at least this far into the context (+ margin for rounding). */
 const DUCK_GUARD_S = 0.02;
+
+/** Serve every non-local GET of the page from the SampleCache; a failure with no cached copy aborts the request with a net error the outage logic recognises. */
+async function installSampleCache(page: any, cache: SampleCache, localOrigin: string, tick: () => void) {
+  await page.setRequestInterception(true);
+  page.on('request', async (req: any) => {
+    try {
+      const u: string = req.url();
+      if (!/^https?:/.test(u) || u.startsWith(localOrigin) || req.method() !== 'GET' || req.headers()['range']) { await req.continue(); return; }
+      tick();
+      try {
+        const r = await cache.get(u);
+        await req.respond({ status: r.status, contentType: r.contentType || undefined, headers: { 'access-control-allow-origin': '*' }, body: r.body });
+      } catch (err: any) {
+        console.log(`[SAMPLE-CACHE] ${u.slice(0, 120)}: ${String(err?.message ?? err).slice(0, 120)} (no cached copy)`);
+        await req.abort(['timedout', 'namenotresolved', 'connectionrefused', 'connectionreset', 'internetdisconnected'].includes(err?.code) ? err.code : 'connectionreset');
+      }
+    } catch { /* page closed under the request */ }
+  });
+}
 
 async function main() {
   const args = process.argv.slice(2);
@@ -210,15 +239,60 @@ async function main() {
   await new Promise<void>(r => server.listen(0, '127.0.0.1', r));
   const port = (server.address() as any).port;
 
+  // Run-to-run determinism (determinism.ts): a fixed seed installed before any bundle code runs; MIDIGREP_RENDER_SEED
+  // changes it, MIDIGREP_RENDER_DETERMINISTIC=0 restores the unseeded engine (A/B and the regression test only).
+  const deterministic = (process.env.MIDIGREP_RENDER_DETERMINISTIC ?? '1') !== '0';
+  const renderSeed = Number.parseInt(process.env.MIDIGREP_RENDER_SEED ?? '1', 10) >>> 0;
+  console.log(`Determinism: ${deterministic ? `seeded (MIDIGREP_RENDER_SEED=${renderSeed}), ducking scheduled at trigger time, reverb IR awaited` : 'OFF (MIDIGREP_RENDER_DETERMINISTIC=0)'}`);
   const t0 = Date.now();
   // EVERY browser this run launches (initial + crash relaunches) is tracked and closed at the end.
   const launched: any[] = [];
+  const MAX_LAUNCHES = 3;   // same budget as a crashed render step (MAX_ATTEMPTS below)
   const launch = async () => {
-    const b = await puppeteer.launch({ headless: true, protocolTimeout: 900000, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--disable-web-security'] });
+    const b = await retried(() => puppeteer.launch({ headless: true, protocolTimeout: 900000, args: ['--no-sandbox', '--autoplay-policy=no-user-gesture-required', '--disable-web-security'] }),
+      MAX_LAUNCHES, (k, e) => console.log(`[CRASH] browser launch attempt ${k}/${MAX_LAUNCHES}: ${String(e?.message ?? e).slice(0, 160)}`));
     launched.push(b); return b;
   };
   let browser = await launch();
   let exit = 0;
+  // ---- liveness (hang watchdog, see stallLimitS in offline-helpers.ts) and the on-disk sample cache ------------------------
+  let lastProgress = Date.now();
+  const tick = () => { lastProgress = Date.now(); };
+  const stats: StepStats = { slowestStepS: 0, slowestRate: 0 };
+  const stallOverride = Number.parseFloat(process.env.MIDIGREP_RENDER_STALL_S ?? '');
+  const stallS = (audioS: number) => stallLimitS(stats, audioS, stallOverride);
+  const cacheOn = (process.env.MIDIGREP_RENDER_SAMPLE_CACHE ?? '1') !== '0';
+  const cacheDir = process.env.MIDIGREP_RENDER_SAMPLE_CACHE_DIR || path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', '..', '.cache', 'render-samples');
+  const ttlS = Number.parseFloat(process.env.MIDIGREP_RENDER_SAMPLE_CACHE_TTL_S ?? '600');
+  const sampleCache = cacheOn ? new SampleCache({ dir: cacheDir, ttlS: Number.isFinite(ttlS) && ttlS >= 0 ? ttlS : 600, stallMs: () => stallS(0) * 1000, onActivity: tick, log: m => console.log(m) }) : null;
+  console.log(cacheOn ? `Sample cache: ${cacheDir} (revalidated after ${ttlS} s; MIDIGREP_RENDER_SAMPLE_CACHE=0 bypasses)` : 'Sample cache: OFF (MIDIGREP_RENDER_SAMPLE_CACHE=0)');
+  const cpuSessions = new WeakMap<any, any>();
+  const browserCpuS = async (b: any): Promise<number> => {   // CPU seconds of every process of this browser; answered by the browser process, so a hung page does not block it
+    let s = cpuSessions.get(b); if (!s) { s = await b.target().createCDPSession(); cpuSessions.set(b, s); }
+    return ((await s.send('SystemInfo.getProcessInfo')).processInfo as any[]).reduce((a, p) => a + p.cpuTime, 0);
+  };
+  const CPU_BUSY = 0.02; // a browser using more than 2 % of one core is doing something; an idle/hung one is below (idle measured ~0.3 %)
+  /** Run one page call under the watchdog; `audioS` = seconds of audio it renders (0 for a call with no audio). Stats feed later limits. */
+  const wd = async <T>(label: string, audioS: number, fn: () => Promise<T>): Promise<T> => {
+    const t = Date.now(); tick();
+    let lastCpu = -1, lastAt = t, polling = false;
+    const poll = setInterval(async () => {
+      if (polling) return; polling = true;
+      try { const c = await browserCpuS(browser), n = Date.now(); if (lastCpu >= 0 && (c - lastCpu) > CPU_BUSY * ((n - lastAt) / 1000)) tick(); lastCpu = c; lastAt = n; } catch { /* browser gone: the call fails by itself */ }
+      polling = false;
+    }, 1000);
+    try {
+      const v = await watched(fn, { label, limitS: stallS(audioS), lastProgress: () => lastProgress, onStall: () => { console.log(`[STALL] ${label}: no progress, killing the browser`); browser.process()?.kill('SIGKILL'); } });
+      const wall = (Date.now() - t) / 1000;
+      stats.slowestStepS = Math.max(stats.slowestStepS, wall); if (audioS > 0) stats.slowestRate = Math.max(stats.slowestRate, wall / audioS);
+      return v;
+    } catch (e) {
+      if (e instanceof StallError) await Promise.race([new Promise(r => browser.once('disconnected', r)), new Promise(r => setTimeout(r, 3000))]);
+      throw e;
+    } finally { clearInterval(poll); }
+  };
+  const testHang = /^chunk:(\d+)$/.exec(process.env.MIDIGREP_RENDER_TEST_HANG ?? '');
+  let hung = false;
   // A render step that dies with the page/browser ("Target closed") is retried on a fresh page (and a fresh
   // browser if it is gone). Every attempt is reported with WHAT it held; after MAX_ATTEMPTS it fails loudly.
   const MAX_ATTEMPTS = 3;
@@ -260,9 +334,11 @@ async function main() {
   };
   const openPage = async () => {
     const page = await browser.newPage();
+    if (deterministic) await page.evaluateOnNewDocument(deterministicInitScript(renderSeed)); // before ANY page script, in every page
     page.on('error', e => console.log(`[PAGE CRASH] ${e.message}`));
     page.on('pageerror', e => console.log(`[PAGE ERROR] ${e.message}`));
-    page.on('console', m => { const t = m.text(); if (isNetworkFailure(t)) netEvents++; if (process.env.OFFLINE_VERBOSE || /error|fail/i.test(t)) console.log(`[BROWSER] ${t.slice(0, 200)}`); });
+    page.on('console', m => { tick(); const t = m.text(); if (isNetworkFailure(t)) netEvents++; if (process.env.OFFLINE_VERBOSE || /error|fail/i.test(t)) console.log(`[BROWSER] ${t.slice(0, 200)}`); });
+    if (sampleCache) await installSampleCache(page, sampleCache, `http://localhost:${port}/`, tick);
     await page.goto(`http://localhost:${port}/`, { waitUntil: 'load' });
     return page;
   };
@@ -274,33 +350,33 @@ async function main() {
   try {
     // the first page is opened inside an attempt: its navigation can time out like any later one (a stalled
     // remote script/sample map holds 'load'), and that must be waited out, not fail the render outright
-    let page = await attempt('open', 'first page', openPage);
+    let page = await attempt('open', 'first page', () => wd('open', 0, openPage));
     let initTry = 0;
-    const init: any = await attempt('init', 'first page', async () => { if (initTry++ > 0) { await quickClose(page); page = await openPage(); } return page.evaluate((c, site) => (window as any).__init(c, site), code, SITE); });
+    const init: any = await attempt('init', 'first page', async () => { if (initTry++ > 0) { await quickClose(page); page = await openPage(); } return wd('init', 0, () => page.evaluate((c, site) => (window as any).__init(c, site), code, SITE)); });
     const cps: number = init.cps, cycles = duration * cps;
     const total = Math.floor((cycles / cps) * sampleRate);
     console.log(`samples("url") rewritten to single quotes: ${init.rewrites}`);
     console.log(`cps ${cps} (${(cps * 240).toFixed(2)} BPM @4/4), ${cycles.toFixed(2)} cycles`);
-    const expectedOnsets: number = await page.evaluate((cy) => (window as any).__count(cy), cycles);
+    const expectedOnsets: number = await wd('count', 0, () => page.evaluate((cy) => (window as any).__count(cy), cycles));
     const logs: string[] = []; const errs: string[] = [];
     let onsets = 0, chunks = 0, tailEndPeak = 0, tailEndChunk = 0, wav: Buffer;
     if (!(chunkSeconds > 0)) {
       console.log(`Rendering ${duration} s offline at ${sampleRate} Hz (single pass) ...`);
-      const r: any = await page.evaluate((cy, sr, po) => (window as any).__single(cy, sr, po), cycles, sampleRate, maxPolyphony);
+      const r: any = await wd('single pass', duration, () => page.evaluate((cy, sr, po) => (window as any).__single(cy, sr, po), cycles, sampleRate, maxPolyphony));
       wav = await fetchBytes(page, r.bytes); onsets = r.onsets; logs.push(...r.logs); chunks = 1;
     } else {
       // Chunked: one FRESH PAGE per chunk. superdough pools audio nodes at module level and returns
       // them keyed without regard to context, so a second OfflineAudioContext in the same page
       // reuses nodes of the first ("cannot connect to an AudioNode belonging to a different audio
       // context"); a new page also frees all decoded buffers/graphs (page memory grew ~1.1 GB for 150 s).
-      const density: number[] = await page.evaluate((cy) => (window as any).__density(cy), cycles);
+      const density: number[] = await wd('density', 0, () => page.evaluate((cy) => (window as any).__density(cy), cycles));
       // ring estimate + orbit usage in ONE pass over the pattern. A failure of the estimate (a sample that cannot be fetched, any exception)
       // leaves a voice at its hap length and would truncate a long one-shot: it is retried like any render step (a network outage is waited
       // out) and then fails the render, unless --allow-failed-samples, which only warns.
       let ringTry = 0; // a failed sample fetch stays cached in its page, so a retry needs a fresh one
       const est: { rings: number[][]; used: number[][]; errors: string[] } = await attempt('ring estimate', 'whole pattern', async () => {
-        if (ringTry++ > 0) { await quickClose(page); page = await openPage(); await page.evaluate((c, site) => (window as any).__init(c, site), code, SITE); }
-        const x = await page.evaluate((cy) => (window as any).__rings(cy), cycles);
+        if (ringTry++ > 0) { await quickClose(page); page = await openPage(); await wd('init', 0, () => page.evaluate((c, site) => (window as any).__init(c, site), code, SITE)); }
+        const x = await wd('ring estimate', duration, () => page.evaluate((cy) => (window as any).__rings(cy), cycles));
         if (x.errors.length && !allowFailures) throw new Error(`ring estimate failed for ${x.errors.length} sound(s), their one-shot would be cut at the hap length: ${x.errors.slice(0, 3).join(' | ')}`);
         return x;
       });
@@ -324,14 +400,15 @@ async function main() {
         const len = preFrames + Math.max(1, Math.round(((e - b) / cps) * sampleRate + m.tailSeconds * sampleRate));
         const held = `${density.slice(b, Math.ceil(e)).reduce((x, y) => x + y, 0)} haps over cycles [${b.toFixed(2)}, ${e.toFixed(2)}), ctx ${len} frames (${m.tailSeconds} s past the window)`;
         let heapMb = 0;
-        const { r, raw } = await attempt(`chunk ${ci + 1}/${wins.length}`, held, async () => {
+        const { r, raw } = await attempt(`chunk ${ci + 1}/${wins.length}`, held, () => wd(`chunk ${ci + 1}/${wins.length}`, (e - b) / cps, async () => {
           await quickClose(page); page = await openPage();
           await page.evaluate((c, site) => (window as any).__init(c, site), code, SITE);
+          if (testHang && Number(testHang[1]) === ci + 1 && !hung) { hung = true; await new Promise(() => {}); } // test seam: an evaluate that never returns
           const rr: any = await page.evaluate((b0, e0, sr, sf, ln, po, pf, pc, nc, rg, uo) => (window as any).__chunk(b0, e0, sr, sf, ln, po, pf, pc, nc, rg, uo), b, e, sampleRate, startFrame, len, maxPolyphony, preFrames, preCycle, Math.max(0, b - prerollSeconds * cps), m.ringingOnsets, [...new Set(est.used.filter(([c]) => c < b).map(([, o]) => o))]);
           const bytes = await fetchBytes(page, rr.bytes);
           try { heapMb = (await page.metrics()).JSHeapUsedSize! / 1048576; } catch { /* page gone */ }
           return { r: rr, raw: bytes };
-        }, v => [...(v.r.logs || []), ...(v.r.errs || [])]);
+        }), v => [...(v.r.logs || []), ...(v.r.errs || [])]);
         const f = new Float32Array(raw.buffer.slice(raw.byteOffset, raw.byteOffset + raw.byteLength));
         // tail-truncation check: peak over the last 0.25 s of this chunk's tail margin (skip the last chunk: file ends there); measured on the context before trimming
         // (skipped for a chunk where a voice of the context still legitimately sounds in that window: its end is checked by the chunk that holds it)
@@ -354,6 +431,7 @@ async function main() {
     if (tailEndPeak > 1e-3) { chk.problems.push(`tail margin ${tailSeconds} s past a voice's end truncates ringing audio (peak ${tailEndPeak.toExponential(2)} at the end of chunk ${tailEndChunk}'s context) — raise --tail-seconds`); chk.ok = false; }
     if (onsets !== expectedOnsets) { chk.problems.push(`triggered ${onsets} onsets but the pattern has ${expectedOnsets} in range (chunk boundary loss?)`); chk.ok = false; }
     if (onsets === 0) { chk.problems.push('pattern has 0 onsets in range'); chk.ok = false; }
+    if (sampleCache) console.log(`Sample cache: ${sampleCache.stats.requests} requests: ${sampleCache.stats.cache} from cache, ${sampleCache.stats.revalidated} revalidated (304), ${sampleCache.stats.network} fetched, ${sampleCache.stats.stale} stale-if-error`);
     console.log(`Wall time: ${((Date.now() - t0) / 1000).toFixed(1)} s for ${duration} s of audio`);
     // temp file beside the target, renamed only if every check passed; a failed render leaves NO file
     if (!commitOutput(outputPath, wav, () => chk.ok)) { console.error(`ERROR: offline render failed checks: ${chk.problems.join('; ')}; no output written`); exit = 1; }

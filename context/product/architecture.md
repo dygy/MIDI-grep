@@ -140,7 +140,7 @@ code** — all codegen is Python/LLM.*
 
 **Since 2026-10-19 the default is `render-strudel-offline.ts`:** the same superdough engine rendered into
 OfflineAudioContexts in ~20 s whole-cycle chunks (fresh page each, discarded pre-roll of the previous tail so cut/duck/tails cross boundaries, polyphony 4096) — sample-exact
-timing and pitch, no audio device, ~5x faster than real time. A network outage is waited out with backoff (5→60 s, up to `MIDIGREP_RENDER_NET_WAIT_S`, default 1800 s) instead of failing the render. The BlackHole recorder described below was found to
+timing and pitch, no audio device, ~5x faster than real time. Renders are deterministic (`determinism.ts`: seeded `Math.random` per buffer shape, seeded worklets, awaited reverb IR, duck ramps on the AudioParam timeline): two renders differ by at most 1 LSB. A network outage is waited out with backoff (5→60 s, up to `MIDIGREP_RENDER_NET_WAIT_S`, default 1800 s) instead of failing the render. The BlackHole recorder described below was found to
 lose ~12% of the captured samples; its rate relabel restored duration but lowered every pitch by ~2.3–2.7 semitones,
 so every BlackHole-scored number since Oct 2026 was on pitch-shifted audio. It stays as a cross-check of live
 playback (`MIDIGREP_RENDERER=blackhole`). Scores are computed against `instrumental.wav` (bass+drums+melodic) —

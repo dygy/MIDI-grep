@@ -82,6 +82,28 @@ INSTRUMENT_ROOTS = ("rave/trainer.py", "pitched_grains.py", "build_instruments.p
 STAGE_ROOTS = {"pack": PACK_ROOTS, "instruments": INSTRUMENT_ROOTS}
 CALIBRATE_ROOTS = ("generate_dynamic_strudel.py", "calibrate_dynamic.py", "calibrate_loop.py", "mix_dynamics.py",
                    "compare_audio.py") + PACK_ROOTS + INSTRUMENT_ROOTS
+# the offline renderer every calibrated render is made by (its sources and their local imports), and the engine it runs:
+# a renderer change (2026-10-28: deterministic ducks/reverb moved scores by ~0.003) must not reuse renders it did not make
+RENDER_ROOT = "render-strudel-offline.ts"
+_TS_IMPORT = re.compile(r"""from\s+['"]\./([\w-]+)\.js['"]""")
+
+
+def _renderer_files(node: Path) -> set[Path]:
+    """The offline renderer's TypeScript sources (local imports followed) and the engine it loads: the bundle named by
+    MIDIGREP_STRUDEL_BUNDLE when set, else the npm lock file that pins @strudel/web."""
+    seen: set[Path] = set()
+    todo = [node / "src" / RENDER_ROOT]
+    while todo:
+        p = todo.pop()
+        if p in seen or not p.is_file():
+            continue
+        seen.add(p)
+        todo += [node / "src" / f"{m}.ts" for m in _TS_IMPORT.findall(p.read_text())]
+    bundle = (os.environ.get("MIDIGREP_STRUDEL_BUNDLE") or "").strip()
+    engine = Path(bundle) if bundle else node / "package-lock.json"
+    if engine.is_file():
+        seen.add(engine)
+    return seen
 
 
 def code_version(stage: str = "calibrate") -> tuple[str, str]:
@@ -97,6 +119,8 @@ def code_version(stage: str = "calibrate") -> tuple[str, str]:
     driver = src.parents[1] / "scripts" / "auto-calibrate.sh"
     if stage not in STAGE_ROOTS and driver.is_file():
         seen.add(driver)
+    if stage not in STAGE_ROOTS:
+        seen |= _renderer_files(src.parents[1] / "scripts" / "node")
     h = hashlib.sha1()
     for p in sorted(seen):
         h.update(p.name.encode()); h.update(p.read_bytes())

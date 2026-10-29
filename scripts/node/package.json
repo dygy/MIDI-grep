@@ -4,7 +4,7 @@
   "type": "module",
   "scripts": {
     "build": "tsc",
-    "test": "node --test test/capture-guard.test.mjs test/capture-rate.test.mjs test/offline-helpers.test.mjs test/offline-render.test.mjs"
+    "test": "node --test test/capture-guard.test.mjs test/capture-rate.test.mjs test/offline-helpers.test.mjs test/offline-render.test.mjs test/offline-determinism.test.mjs test/offline-sample-cache.test.mjs"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.39.0",
