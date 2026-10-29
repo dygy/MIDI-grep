@@ -2,7 +2,7 @@
 
 - **Version:** 2.0
 - **Status:** Approved
-- **Last reviewed:** 2026-10-09 (post-AWOS 1.5.0 upgrade; supersedes the Feb 2026 revision)
+- **Last reviewed:** 2026-10-29 (render path, gate data, testing facts brought in line with the code; previous review 2026-10-09)
 
 Governing values: `context/product/values.md` (V1 editability, V2 live-codeable, V3 resemblance
 by re-performance, not reproduction). Audio replay of the original is **not** a deliverable;
@@ -119,8 +119,8 @@ code** — all codegen is Python/LLM.*
                    │
                    ▼
       ┌──────────────────────────┐
-      │ BlackHole Recorder       │ record-strudel-blackhole.ts
-      │ (real Strudel playback)  │ → render_vNNN.wav
+      │ Strudel render           │ renderer.py → render-strudel-offline.ts
+      │ (real Strudel engine)    │ → render_vNNN.wav
       └────────────┬─────────────┘
                    │
                    ▼
@@ -144,14 +144,13 @@ timing and pitch, no audio device, ~5x faster than real time. Renders are determ
 lose ~12% of the captured samples; its rate relabel restored duration but lowered every pitch by ~2.3–2.7 semitones,
 so every BlackHole-scored number since Oct 2026 was on pitch-shifted audio. It stays as a cross-check of live
 playback (`MIDIGREP_RENDERER=blackhole`). Scores are computed against `instrumental.wav` (bass+drums+melodic) —
-vocals are never generated. The rest of this section documents the recorder as it stands.
+vocals are never generated. The offline renderer also serves every network fetch from a local cache
+(`sample-cache.ts`, `.cache/render-samples/`) and runs a hang watchdog that kills and retries a stalled page call.
+The rest of this section documents the BlackHole recorder as it stands.
 
-
-There is exactly **one** render path. The former offline Node.js synthesizer was deleted; the
-only script in `scripts/node/src/` is `record-strudel-blackhole.ts`. It records the **real Strudel
-engine** playing the generated code — it is not an emulation — so what is scored is what a user
-would hear in Strudel. (It is still a recording of a browser, so treat results as a faithful
-capture, not a claim of bit-exact "100% accuracy".)
+There are **two** render paths, both the real Strudel engine (the former Node.js synthesizer, an emulation, was
+deleted): the offline renderer (default) and `record-strudel-blackhole.ts`, which records live playback. The
+recorder is a capture of a browser through a virtual device, with the pitch defect above.
 
 ```
 Strudel Code (.strudel)
@@ -193,6 +192,9 @@ device-clock timestamps that do not track real time, so recordings came out ~25%
 read as ~103). `-use_wallclock_as_timestamps 1` + `-af aresample=async=1` fix this; output `-ar`
 does not, and input `-ar` breaks avfoundation. All similarity numbers measured before Jun 2026 were
 on sped-up audio and are invalid.
+Since Oct 2026 the default capture is RAW, corrected once by the measured samples/wall-clock ratio (rate from
+steady-state file growth, `capture-rate.ts`): the wall-clock + `aresample=async=1` path drawn above jittered beat timing.
+`MIDIGREP_CAPTURE=wallclock` restores it.
 
 **Constraints:**
 - **macOS only** (BlackHole + avfoundation). Setup: `brew install blackhole-2ch` (reboot), create a
@@ -204,12 +206,11 @@ on sped-up audio and are invalid.
 - Build: `cd scripts/node && npm run build`. Usage:
   `node scripts/node/dist/record-strudel-blackhole.js input.strudel -o output.wav -d 30`.
 
-**Call sites:** `cmd/midi-grep/main.go` (`renderStrudelBlackHole`, `--blackhole`),
-`scripts/python/ai_improver.py` (every `--iterate` round), `scripts/auto-calibrate.sh`,
-`scripts/sample-pipeline.sh`, `scripts/python/stem_match.py`, `scripts/python/audition_drum_banks.py`,
-`mcp_servers/loop/server.py`. Residual references to `render-strudel-node.js` remain in
-`cmd/midi-grep/main.go` (`renderStrudelNodeJS`), `mcp_servers/loop/server.py` (`recorder='node'`),
-`scripts/node/package.json` (`npm run render`), `synth_profiles.py` and `ai_learning_optimizer.py`;
+**Call sites:** through `scripts/python/renderer.py` (`MIDIGREP_RENDERER`): `scripts/python/ai_improver.py` (every
+`--iterate` round), `scripts/auto-calibrate.sh`, `scripts/editable-pipeline.sh`, `scripts/sample-pipeline.sh`,
+`scripts/python/stem_match.py`, `scripts/python/audition_drum_banks.py`, `mcp_servers/loop/server.py`. Directly:
+`cmd/midi-grep/main.go` (`renderStrudelBlackHole`, `--blackhole`). Residual references to `render-strudel-node.js`
+remain in `cmd/midi-grep/main.go` (`renderStrudelNodeJS`), `synth_profiles.py` and `ai_learning_optimizer.py`;
 they point at a file that no longer exists and are dead paths. **Only a real-Strudel render (offline renderer by default, or the BlackHole recorder) may
 gate accept/reject decisions.**
 
@@ -232,9 +233,13 @@ gate accept/reject decisions.**
   - `eval/gate.py` — `load_thresholds()`, `floor_for_genre()`, `section_aware_floor_for_genre()`,
     `evaluate_comparison()` → `GateResult(passed, genre, similarity, floor, …)`; CLI
     `python eval/gate.py comparison.json --genre <g>`.
-  - `eval/datasets/reference_tracks.yaml` — pins known tracks to genres and a BlackHole
-    `comparison.json`; currently `tracks: []`. Missing comparisons are skipped, present ones must
-    clear the floor (`scripts/python/tests/test_similarity_gate.py`).
+  - Per-mode floors (`modes:`, checked before the genre-wide tables, on the current 50/50 scale): sample-instrument
+    brazilian_funk 0.85 / 0.83 section-aware, synth 0.78 / 0.78; `min_margin_over_chance: 0.02`,
+    `calibration_noise: 0.005`. The genre-wide tables above are on the old static scale and are compared with
+    `static_similarity`.
+  - `eval/datasets/reference_tracks.yaml` — four brazilian_funk tracks (Regime CLT, VAGABUNDO NÃO NAMORA, Dumb Blond
+    Bitches, Automotivo XM) × two modes, each pinned to a cached `vNNN/comparison.json` from the offline renderer.
+    Missing comparisons are skipped, present ones must clear the floor (`scripts/python/tests/test_similarity_gate.py`).
   - **Wired into the `--iterate` loop** (`ai_improver.py`): the gate floor for the genre is resolved
     up front; once any iteration clears both the overall and section-aware floors, later below-floor
     renders are **auto-rejected** (reverted to best) and the loop **early-success stops**
@@ -245,11 +250,15 @@ gate accept/reject decisions.**
   `comparison.json` to the next knobs of `generate_dynamic_strudel.py` (sub-gain, bass-mult,
   cal-lead, lead-lpf, hat-gain, master-gain), each a damped (sqrt) clamped proportional correction of
   an observed band/centroid ratio. `scripts/auto-calibrate.sh` closes the generate → render
-  (BlackHole) → compare → calibrate loop and keeps the best render. No hardcoded per-track values.
+  (offline renderer) → compare → calibrate loop and keeps the best render. No hardcoded per-track values.
   The score is level-invariant (`compare_audio.rms_normalize`), so a final loudness stage
   (`scripts/python/mix_dynamics.py`, in `auto-calibrate.sh`) moves `--master-gain` onto the reference
-  instrumental's RMS and verifies crest and clipped share; superdough has no master bus, so full-scale
+  instrumental's RMS and verifies crest and clipped share; npm superdough 1.3.0 has no master bus, so full-scale
   clipping of the sum is the limiter (per-hap `.compressor` and per-layer tanh were measured and do not bound the sum).
+  On an engine bundle that defines `setMasterLimiter`/`setMasterCompressor` (`MIDIGREP_STRUDEL_BUNDLE`, `renderer.py
+  master-bus`) a master-bus stage (`mix_dynamics.py derive-bus`/`next-bus`) follows and is kept only if level, crest and
+  ceiling match and the score holds. Calibration memory: `calibration_memory.py` → ClickHouse `midi_grep.calibration_steps`
+  (warm start, learned step sizes, code-version stamps).
 
 ### Loop MCP server (`mcp_servers/loop/server.py`)
 
@@ -258,12 +267,13 @@ mcp_servers.loop.server`, `PYTHONPATH=.`). Tools:
 
 | Tool | Does |
 |------|------|
-| `render_strudel(strudel_path, out, duration, recorder)` | Runs the recorder (`recorder='blackhole'` → `record-strudel-blackhole.js`; `'node'` is a dead option) |
+| `render_strudel(strudel_path, output_wav, duration)` | Renders with the renderer `MIDIGREP_RENDERER` selects (offline by default) |
 | `compare_render(original, rendered, duration)` | Runs `compare_audio.py -j` and returns the comparison dict |
-| `verify_strudel(strudel_path, original, …, recorder, genre)` | render → compare → gate; returns the accept/reject verdict |
+| `verify_strudel(strudel_path, original, genre, duration, mode)` | editability → render → compare → gate; returns the accept/reject verdict |
 | `eval_gate(comparison_json, genre)` | Applies `eval/gate.py` to an existing comparison |
 
-Agents must use `recorder='blackhole'` for any accept/reject decision.
+Only a real-Strudel render (offline by default, or BlackHole) may drive an accept/reject decision; there is no
+`recorder` argument any more.
 
 ### Sample-Pack Mode (hosted sample-instruments)
 
@@ -334,7 +344,7 @@ Strudel Code
      │
      ▼
 ┌─────────────────────────┐
-│ BlackHole Recorder      │ (record-strudel-blackhole.ts)
+│ Strudel render          │ (renderer.py; offline default)
 │ → render_vNNN.wav       │
 └────────────┬────────────┘
              │
@@ -409,7 +419,7 @@ Supporting Python modules: `spectrogram_analyzer.py` (mel-spectrogram gap insigh
 └── v001/                  # Output version
     ├── output.strudel     # Strudel code
     ├── metadata.json      # BPM, key, style, genre, notes, drum hits, timestamp
-    ├── render.wav         # BlackHole render of the final code
+    ├── render.wav         # Render of the final code (offline renderer by default)
     ├── render_v*.wav      # Per-iteration renders
     ├── render_v*_{melodic,drums,bass}.mp3  # Per-iteration Demucs stems
     ├── iterations.json    # Iteration manifest (+ gate block)
@@ -450,22 +460,23 @@ cloud deployment path today.**
   buildability of the Go, Node and Python-analysis layers is proven by CI instead. Only
   `docker-compose.clickhouse.yml` (optional learning store) remains. Revisit only if a non-render
   deployment target (analysis-only API) becomes a goal.
-- **BlackHole rendering is macOS-only** (BlackHole virtual device + ffmpeg avfoundation). Since the
-  recorder is the only render path, similarity scoring, the `--iterate` loop, the eval gate and the
-  `loop` MCP all require macOS.
+- **BlackHole rendering is macOS-only** (BlackHole virtual device + ffmpeg avfoundation). The default offline
+  renderer needs no audio device (headless Chromium via puppeteer), so scoring does not depend on BlackHole; macOS
+  remains the reference workstation.
 - **Local Development Requirements:**
   - Go 1.25.5 (`go build -o bin/midi-grep ./cmd/midi-grep`)
   - Python 3.11 venv at `scripts/python/.venv` (`scripts/install-deps.sh`, `make deps`)
   - Node + `cd scripts/node && npm install && npm run build`
   - `ffmpeg`, `yt-dlp`
-  - BlackHole 2ch + a selected Multi-Output Device
+  - Puppeteer's Chromium (`cd scripts/node && npx puppeteer browsers install chrome` if missing)
+  - Only for `MIDIGREP_RENDERER=blackhole`: BlackHole 2ch + a selected Multi-Output Device
   - Ollama running with `midi-grep-strudel-mistral` created from `Modelfile.mistral`
   - Optional: ClickHouse local binary (`bin/clickhouse`), Cloudflare R2 credentials or
     `wrangler login` for sample-pack hosting
 - **Environment preflight** before long runs (see `CLAUDE.md` → Working Agreement): venv imports
-  (librosa, demucs, basic-pitch), ML models present (~1 GB first download), BlackHole + Multi-Output
-  selected, `ollama serve` up with the model pulled.
-- **CI:** none. No `.github/workflows/`; tests run locally only.
+  (librosa, demucs, basic-pitch), ML models present (~1 GB first download), the Node build + Chromium
+  (BlackHole + Multi-Output only for blackhole renders), `ollama serve` up for Ollama runs.
+- **CI:** `.github/workflows/ci.yml` (see §9). Renders and ML-model tests run locally only.
 
 ### Resource Requirements
 
@@ -512,9 +523,11 @@ midi-grep/
 ├── scripts/
 │   ├── midi-grep.sh, extract-youtube.sh, extract-file.sh, quick-riff.sh, serve.sh, install-deps.sh
 │   ├── sample-pipeline.sh    # URL/stems → sample pack → host (local|R2) → Strudel → render/score
-│   ├── auto-calibrate.sh     # generate → render(BlackHole) → compare → calibrate loop
+│   ├── editable-pipeline.sh  # one command: URL → editable pieces → score + gate → vNNN/ + report (stages 1-10)
+│   ├── auto-calibrate.sh     # generate → render(offline) → compare → calibrate loop
 │   ├── node/
-│   │   ├── src/record-strudel-blackhole.ts  # THE renderer (Puppeteer + BlackHole + ffmpeg)
+│   │   ├── src/render-strudel-offline.ts    # DEFAULT renderer (+ determinism.ts, sample-cache.ts, offline-helpers.ts)
+│   │   ├── src/record-strudel-blackhole.ts  # cross-check recorder (Puppeteer + BlackHole + ffmpeg)
 │   │   ├── dist/             # Compiled JS (npm run build)
 │   │   └── package.json
 │   └── python/
@@ -565,7 +578,8 @@ midi-grep/
 │   └── spec/
 │       ├── 001-core-pipeline/
 │       ├── 002-ml-customization/
-│       └── 003-editable-strudel-generation/
+│       ├── 003-editable-strudel-generation/
+│       └── 004-second-reference-track/
 │
 ├── CLAUDE.md, llms.txt, llms-full.txt   # Canonical build/run + reference docs
 ├── Modelfile, Modelfile.mistral          # Ollama custom model definitions
@@ -643,8 +657,8 @@ midi-grep serve --port 8080
   then falls back to a logged deterministic default — never silently. Invalid Strudel (unknown
   sounds/methods) is rejected by `strudel_validation.py`; the iteration loop skips that round
   rather than crashing
-- **Render Errors:** missing BlackHole / missing `dist/record-strudel-blackhole.js` are reported
-  immediately (preflight), not discovered mid-run
+- **Render Errors:** a missing renderer build, a missing puppeteer Chromium (`renderer.py browser`) or, for
+  blackhole renders, a missing BlackHole device are reported immediately (preflight), not discovered mid-run
 - **Gate Resilience:** a missing `eval/` or `pyyaml` disables the gate and the run continues
 - **No pre-existing issues:** any failure met during a run is fixed, not worked around (CLAUDE.md)
 - **Timeout:** web jobs (`internal/server/jobs.go`) use `context.WithTimeout` per stage — 5 min
@@ -675,12 +689,14 @@ workstation.
 
 ### Unit
 
-- **Go:** standard library `testing`, run with `go test ./...`. There are currently **zero**
-  `*_test.go` files; new Go tests go next to the package under test as `<file>_test.go`.
+- **Go:** standard library `testing`, run with `go test ./...`; tests sit next to the package under test as
+  `<file>_test.go`.
+- **Node:** `node --test` suites in `scripts/node/test/` (`npm test`: capture guard/rate, offline helpers, offline
+  render, determinism, sample cache).
 - **Python:** pytest. Suite lives in `scripts/python/tests/` (plus a few root-level
   `scripts/python/test_*.py`). Run with
   `scripts/python/.venv/bin/python -m pytest -q scripts/python/tests scripts/python/test_*.py`
-  (174 tests collected on 2026-10-09). Every new test file carries the annotation tokens
+  (PR #27's commit message records 924 passed, 5 skipped). Every new test file carries the annotation tokens
   `# @layer: unit | integration | e2e | contract` and `# @spec: <spec-dir>`; `# @regression` marks
   cases that belong to the permanent regression suite (existing tests predate this convention and
   are to be annotated as they are touched).
@@ -696,9 +712,8 @@ workstation.
 
 ### End-to-End
 
-- **Audio E2E:** render via the BlackHole recorder → `scripts/python/compare_audio.py` →
-  `eval/gate.py`, driven through the `loop` MCP (`verify_strudel`). **`recorder='blackhole'` only**;
-  the `node` recorder option is dead and must never gate. macOS only.
+- **Audio E2E:** render via `renderer.py` (offline by default) → `scripts/python/compare_audio.py` →
+  `eval/gate.py`, driven through the `loop` MCP (`verify_strudel`) or `scripts/editable-pipeline.sh` stage 8.
 - **Report E2E:** `midi-grep report <cache-dir>` (Go `internal/report`) or `generate_report.py`
   producing a self-contained `report.html`.
   The editable driver's stage 10 (`pipeline_helpers.py report`, covered by `tests/test_report_stage.py` with

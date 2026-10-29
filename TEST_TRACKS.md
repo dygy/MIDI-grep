@@ -2,6 +2,9 @@
 
 Use these verified YouTube URLs for testing. Do NOT guess or make up URLs.
 
+The percentages in the Notes column are Feb 2026 numbers on the old time-averaged scale and are not comparable with
+current scores. The gated reference tracks and their current scores are in `eval/datasets/reference_tracks.yaml`.
+
 ## Brazilian Funk
 
 | Track | URL | Notes |

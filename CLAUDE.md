@@ -106,63 +106,39 @@ The `docs-freshness` hook reminds you once per session when a pipeline file chan
    - AI analyzes differences and generates new parameters
    - Store learnings in ClickHouse for future tracks
 
-**CRITICAL: the score was rescaled 2026-10-18 — every number below this paragraph is on the OLD
-time-averaged scale (now `static_similarity`).** The old score could not tell the song apart: vs the
-VAGABUNDO original, our v004 render read 0.932, a DIFFERENT song 0.876, the drums stem alone 0.775 —
-mean MFCC/chroma/bands are ≈ equal for anything in the genre. `overall_similarity` is now
-0.5 × static + 0.5 × `temporal_similarity` (render aligned to the original within one bar; frame-wise
-chroma + log-mel correlation, onset F1 ±50 ms, RMS-envelope correlation), and the gate requires beating a
-different same-genre song by 0.02 (`--control`, `margin_over_chance`). **Honest state on the new scale**
-(same renders re-scored): sample-instrument Regime v026 **69.7% / 67.4%**, VAGABUNDO v004 **66.3% / 62.2%**;
-synth VAGABUNDO v007 **66.3% / 58.6%**, Regime v027 **55.9% / 55.3% — FAILS: a different song scores
-higher** (margin −0.018). Different-song control ≈ 57.7%. Which-notes-sound-when (chroma in time) is ≈0
-on three of the four renders — the main gap; the next suspect is the sample instruments (100 ms grains,
-wrong pitch labels). Floors reset: sample-instrument 0.64/0.60, synth 0.54/0.53.
+**Current state (2026-10-29; source of truth `eval/thresholds.yaml` `modes:` + `eval/datasets/reference_tracks.yaml`):**
+four brazilian_funk reference tracks (Regime CLT, VAGABUNDO NÃO NAMORA, Dumb Blond Bitches, Automotivo XM), each built in
+both modes on the seeded offline renderer, scored against `instrumental.wav` with a different-song `--control`. Floors =
+round(min over the tracks − 0.02, 2): sample-instrument **0.85 / 0.83** (binding: Dumb Blond Bitches v010 overall 0.8714,
+VAGABUNDO v060 section-aware 0.8539), synth **0.78 / 0.78** (binding: Dumb Blond Bitches v011, 0.8026 / 0.7954). Quote
+numbers from those files, never from memory.
 
-**2026-10-19 — three defects under the score, and vocals out (fix `instruments-short-grains-wrong-labels`):**
-(1) the tempo was a librosa tempogram BIN (129.199 / 135.999) — now refined by phase coherence on the drums
-stem (`tempo_refine.py`): VAGABUNDO **129.989**, Regime **135.017**; (2) BlackHole renders were ~2.5 semitones
-flat (see the renderer section) — the offline renderer is the default; (3) the stem instruments were 100 ms
-grains with wrong pitch labels — now one grain per transcribed note (`pitched_grains.py`, `--midi`), every
-sample re-measured (pyin, harmonic-salience fallback for polyphonic stems, explicit octave rejection) before it
-enters `samples.json` (`instruments/verification.json`). **Vocals are never generated** (owner decision: people
-singing are not part of the music) — no vocal voice/instrument/knob; every score is against `instrumental.wav`
-(bass + drums + melodic stems; `pipeline_helpers.py instrumental`), incl. the different-song control.
-**Honest state after this fix** (offline renders, instrumental target, `eval/thresholds.yaml` `modes.*.measured`):
-sample-instrument VAGABUNDO v013 **71.7% / 70.7%**, Regime v031 **77.9% / 77.4%**; synth VAGABUNDO v014
-**72.4% / 70.1%**, Regime v032 **74.8% / 73.6%** — all four beat the different-song control (≈57.5%) by +0.142 to
-+0.204. Time-aligned chroma rose from ≈0 to 0.33–0.56. Floors: sample-instrument 0.70/0.69, synth 0.70/0.68.
-(Fix `compare-alignment-one-bar-off`: the onset envelope is bar-periodic, so the ±1-bar search could lock one bar off —
-Regime v032 read 67.1% / 65.2%. The onset-best true local maximum now stays unless it is tied with a bar-aliased
-or statistically indistinguishable candidate AND the whole-excerpt chroma trajectory separates them by > 1 standard
-error; `comparison.temporal.lag_candidates` (and `chance.lag_candidates`) record the runner-up, nulls for unscorable.)
+**History — the lessons that still bind (details: `git log`, `context/fix-log-*.md`, the comments in `thresholds.yaml`):**
+- **Score rescaled 2026-10-18 (PR #19).** The time-averaged score could not tell the song apart (VAGABUNDO: our render
+  0.932, a DIFFERENT song 0.876, the drums stem alone 0.775). `overall_similarity` = 0.5 × static + 0.5 ×
+  `temporal_similarity`, and the gate requires beating a different same-genre song by 0.02 (`margin_over_chance`).
+  Every earlier number is on the old scale (`static_similarity`).
+- **Three defects under the score, fixed 2026-10-19 (PR #20):** the tempo was a librosa tempogram BIN (now
+  phase-coherence-refined on the drums stem, `tempo_refine.py`); BlackHole renders were ~2.5 semitones flat (offline
+  renderer is the default); the stem instruments were 100 ms grains with wrong pitch labels (now one grain per transcribed
+  note, `pitched_grains.py`, every sample re-measured — pyin, harmonic-salience fallback for polyphonic stems, explicit
+  octave rejection — before it enters `samples.json`, `instruments/verification.json`).
+- **Vocals are never generated** (owner decision 2026-10-19): no vocal voice/instrument/knob; every score — incl. the
+  control — is against `instrumental.wav` (bass + drums + melodic, `pipeline_helpers.py instrumental`).
+- **Alignment one bar off (PR #21):** the onset envelope is bar-periodic, so the ±1-bar search could lock one bar off.
+  The onset-best true local maximum stays unless it is tied with a bar-aliased or statistically indistinguishable
+  candidate AND the whole-excerpt chroma trajectory separates them by > 1 standard error;
+  `comparison.temporal.lag_candidates` (and `chance.lag_candidates`) record the runner-up, nulls for unscorable.
+- **Replay is not a result:** v023 (2026-06-30) scored 93.8% / 95.9% because its vocal voice was a full-stem replay
+  (`values.md` A1); `editability_check.py` fails it and `compare_audio.py --strudel` refuses to score it.
+- (old scale, history) **Second reference track (2026-10-10, spec 004):** "VAGABUNDO NÃO NAMORA" (Christopher Luz, 129.2 BPM C# minor, CLAP brazilian_funk 0.50) through the one-command driver `scripts/editable-pipeline.sh` (every promoted `vNNN/` also gets `report.html`, render/iteration stems, `stem_comparison.json`, `iterations.json` from stage 10): sample-instrument **93.2% overall / 92.2% section-aware** (`v004`, PASS), synth **93.9% / 87.2%** (`v007`, PASS; the first synth run `v003` scored 72.1% / 75.2% with worst band 30.07% — a recorded shortfall: one render with the sample-instrument knobs — fix #11 gave synth its own calibration pass, see below), both `editability: pass`, tempo 1.000. The first sample-instrument run (`v002`) scored 92.8% / 87.2% and FAILED the 0.90 section floor; fix #10 found the cause in the per-window data (bass/lead balance flipping across sections under one global knob set) and added a measured per-bar correction (`calibrate_dynamic.py --env-correction-out` → `generate_dynamic_strudel.py --env-correction`) — same knobs, floors unchanged, +5 points section-aware. Lesson: floors set from one track are not generalization evidence; the dataset now has two tracks and per-window diagnostics.
+- **Floors set from one track are not generalization evidence:** the second track (spec 004) first failed the section
+  floor; fix #10 (PR #16) added a measured per-bar correction (`calibrate_dynamic.py --env-correction-out` →
+  `generate_dynamic_strudel.py --env-correction`). Synth mode needs its own calibration pass (fix #11, PR #18) — one
+  render with the sample-instrument knobs scored far lower.
+- **Invalid history:** numbers measured before the Jun-2026 recorder tempo fix were on ~25%-sped-up audio; the Feb-2026
+  90%+ numbers were inflated by a cosine bug.
 
-**Previous achievement (old scale, contract-passing):** editable dynamic-Strudel with ALL voices as
-editable data — transcribed bass/lead/VOCAL notes on stem-derived sample-instruments + extracted drum
-patterns — at **90.1% overall / 92.1% section-aware / 91.6% freq balance,
-tempo_sim 1.000** on Regime CLT (brazilian_funk; `v026/comparison.json`, 2026-10-09, `editability: pass`,
-`generation_mode: sample-instrument`, raw-capture recorder). `--mode synth` (palette sounds, no samples)
-measured **78.8% / 83.2%** (`v027`), also detector-passing; its tempo sub-score (0.46) is a
-beat-tracker reading on the 808-bank synth drums, playback is at 136. These are the measured
-`modes.*` floor sources in `eval/thresholds.yaml` (floor = measured − 0.02). HISTORY: v024/v025 (same
-day, wall-clock capture) read 87.4% / 75.9% with tempo_sim 0.365 — the recorder's async resampling
-jittered beat timing (fixed, see CAPTURE MODE below). v023 (2026-06-30) scored 93.8% / 95.9% but its
-vocal voice was a full-stem replay (`s("vocalsfull")…slow(N)`, `values.md` A1) — `editability_check.py`
-now FAILS it and `compare_audio.py --strudel` refuses to score it.
-**Second reference track (2026-10-10, spec 004):** "VAGABUNDO NÃO NAMORA" (Christopher Luz, 129.2 BPM
-C# minor, CLAP brazilian_funk 0.50) through the one-command driver `scripts/editable-pipeline.sh` (every promoted `vNNN/` also gets
-`report.html`, render/iteration stems, `stem_comparison.json`, `iterations.json` from stage 10):
-sample-instrument **93.2% overall / 92.2% section-aware** (`v004`, PASS), synth **93.9% / 87.2%** (`v007`, PASS;
-the first synth run `v003` scored 72.1% / 75.2% with worst band 30.07% — a recorded shortfall: one render with the
-sample-instrument knobs — fix #11 gave synth its own calibration pass, see below), both `editability: pass`, tempo 1.000. The first
-sample-instrument run (`v002`) scored 92.8% / 87.2% and FAILED the 0.90 section floor; fix #10 found the
-cause in the per-window data (bass/lead balance flipping across sections under one global knob set) and
-added a measured per-bar correction (`calibrate_dynamic.py --env-correction-out` → `generate_dynamic_strudel.py
---env-correction`) — same knobs, floors unchanged, +5 points section-aware. Lesson: floors set from one
-track are not generalization evidence; the dataset now has two tracks and per-window diagnostics.
-NOTE: numbers measured BEFORE the Jun-2026 recorder tempo fix (the 72% / 88.7% / 92.4% / 94.6%
-history) were on ~25%-sped-up audio and are invalid — see the recorder fix below. Earlier honest
-baselines were ~60-70% (the old 90%+ was inflated by a cosine bug).
 **Target:** 80%+ similarity across all genres through AI learning, not hardcoding
 
 **Data-driven mix calibration (Jun 2026):** `scripts/python/calibrate_dynamic.py` +
@@ -181,8 +157,11 @@ Synth mode adds spectral-placement fixes (bug #11): at generation `partial_regis
 level-invariant (`compare_audio.rms_normalize`), so renders sat 6-13 dB under the mastered instrumental with crest
 17-18 dB vs ~10 and nobody saw it. One measured lever moves it: `--master-gain` onto the instrumental's RMS (up to 3
 render rounds; kept only if RMS ±1 dB, crest ±1.5 dB and neither score drops more than `calibration_noise`; the unmixed
-BEST stays otherwise; `--no-mix-dynamics` skips it; final gain in `best.master`). superdough has NO master bus - the sum
+BEST stays otherwise; `--no-mix-dynamics` skips it; final gain in `best.master`). npm superdough 1.3.0 has NO master bus - the sum
 is limited by full-scale clipping (0.5-1.5 % of samples clip, printed vs the original's share within 3 dB of its peak).
+On an engine bundle that defines `setMasterLimiter`/`setMasterCompressor` (`MIDIGREP_STRUDEL_BUNDLE`, `renderer.py master-bus`)
+a following master-bus stage (`mix_dynamics.py derive-bus`/`next-bus`) can replace the clipping with a measured limiter; it is
+kept only if level, crest and ceiling match and the score holds.
 Per-hap `.compressor` and per-layer tanh saturators were measured and do not bound the sum (see `mix_dynamics.py`);
 per-stem share gains from the Demucs stems scored worse/inconsistent (bleed), so `mix_dynamics.py shares` only reports them.
 
@@ -210,7 +189,7 @@ Now uses MAE (Mean Absolute Error) with per-band penalty:
 - Original audio (full mix) is used for AI synthesis analysis (proper frequency balance)
 - `analyze_synth_params.py` extracts transients, spectrum, harmonics, tempo
 - `synth_config.json` stores AI-derived BPM and tempo tolerance for comparison
-- Node.js renderer accepts `--config` flag for dynamic synthesis parameters
+- (the Node.js synthesis renderer that read `--config` was deleted in Jun 2026; renders are real Strudel now)
 - Saw waveforms essential for mid-band content (sine only produces fundamental)
 - Per-voice gain scaling from original frequency band analysis
 
@@ -280,7 +259,9 @@ This mode trains neural synthesizers that learn the "sound" of your track materi
 enabling full note() control - edit any pitch, create new melodies, all sounding
 like the original. Models are stored in a repository and reused across tracks.
 
-**Sample-Pack Mode** (R2/localhost-hosted real-stem samples - HIGHEST similarity):
+**Sample-Pack Mode** (R2/localhost-hosted real-stem samples; `scripts/sample-pipeline.sh`, the predecessor of the editable
+pipeline). Its `loops` mode REPLAYS per-bar audio and is forbidden as a deliverable (`values.md` A1); the percentages
+below are old-scale. The editable pipeline reuses its pack builder (`build_sample_pack.py`) for one-shots and pitched samples only:
 ```
 Input (URL) → Stems (Demucs)
     ↓
@@ -335,6 +316,9 @@ All outputs are cached in `.cache/stems/{key}/` by URL or file hash:
     └── report.html        # Self-contained HTML report
 ```
 
+- **Editable pipeline** adds `original.wav`, `instrumental.wav`, `sample_pack/` (MIDI, drum bands, one-shots, `instruments/`)
+  and `.pipeline/<mode>/` (calibration workdirs) to the track dir; its `vNNN/` holds `output.strudel`, `render.wav`,
+  `comparison.json`, `metadata.json`, `env_correction.json` and the stage-10 report files
 - **Stem cache**: Auto-invalidates when `separate.py` changes
 - **Output versioning**: Each run creates new version (v001, v002, ...)
 - **Metadata stored**: BPM, key, style, genre, notes, drum hits, timestamp
@@ -359,8 +343,8 @@ The `--render` flag synthesizes WAV audio from patterns:
 
 **Node.js Strudel Renderer — REMOVED (Jun 2026):** `render-strudel-node.ts` (offline synthesis
 emulating Strudel sounds, ~16% similarity vs the real engine) was deleted. Dead references to
-`render-strudel-node.js` still exist in `cmd/midi-grep/main.go`, `mcp_servers/loop/server.py`
-(recorder='node'), `synth_profiles.py` and `ai_learning_optimizer.py` — tracked in spec 003 tasks.
+`render-strudel-node.js` still exist in `cmd/midi-grep/main.go` (`renderStrudelNodeJS`), `synth_profiles.py` and
+`ai_learning_optimizer.py` — tracked in spec 003 tasks. (The `loop` MCP server no longer has a `recorder` option.)
 
 **Offline Strudel Renderer (`scripts/node/src/render-strudel-offline.ts`) — DEFAULT since 2026-10-19:**
 - Strudel's OWN export path (`renderPatternAudio` → `OfflineAudioContext`), i.e. the real superdough
@@ -447,23 +431,16 @@ in-run drift.)*
 - Suggests optimal Strudel effect parameters (filters, compression, reverb)
 - Feeds back into renderer for AI-driven mix balance
 
-**AI Code Generator (`scripts/python/ai_code_generator.py`):**
-- Analyzes original audio for ALL characteristics (spectrum, dynamics, timing, timbre)
-- Generates Strudel code with parameters inherently matched to target
-- No hardcoded values - everything derived from analysis
-- Works universally for any track/genre
-- Outputs AudioProfile with spectral bands, dynamics, and timing info
-
 **Pattern Thinner (`scripts/python/thin_patterns.py`):**
 - AI-driven pattern density control
 - Thins drum patterns to match original's onset density
 - Prevents tempo detection errors from too many drum hits
 - Parses and modifies Strudel bar arrays
 
-**Model-based Renderer (`scripts/python/render_with_models.py`):** *(deprecated - Node.js is primary)*
+**Model-based Renderer (`scripts/python/render_with_models.py`):** *(deprecated — a Python approximation, not Strudel;
+used only by `extract --render` before its fallbacks; never gates)*
 - Audio rendering using trained granular models
 - Loads pitched samples from model directories
-- Fallback when Node.js renderer unavailable
 
 **Editability / Replay Detector (`scripts/python/editability_check.py`, spec 003 Slice 1):**
 - Static analysis of a `.strudel` file against `values.md`: R1 `slice(N,run(N)).slow(N)`/`loopAt`
@@ -504,17 +481,6 @@ in-run drift.)*
   - Harmonic content differences
   - Transient/attack differences
 - Generates actionable insights for LLM prompts (dB differences → gain multipliers)
-
-**AI Code Improver (`scripts/python/ai_code_improver.py`):**
-- Gap analysis between original and rendered audio
-- Identifies specific frequency band deficiencies
-- Modifies Strudel code to address gaps
-- Conservative 50% correction per iteration to avoid over-correction
-
-**AI Iterative Codegen (`scripts/python/ai_iterative_codegen.py`):**
-- Iteration loop with automatic revert-on-regression
-- Tracks best similarity across iterations
-- Reverts to best code if similarity drops
 
 **Sound Selector (`scripts/python/sound_selector.py`):**
 - Complete Strudel sound catalog:
@@ -569,7 +535,7 @@ in-run drift.)*
 - **CLI Framework**: Cobra
 - **Web Framework**: Chi + HTMX + Go templates
 - **Audio Processing**: Python scripts (demucs, basic-pitch, librosa)
-- **Audio Rendering**: TypeScript/Node.js (node-web-audio-api for offline synthesis)
+- **Audio Rendering**: TypeScript/Node.js — Puppeteer + headless Chromium running `@strudel/web` 1.3.0 (`render-strudel-offline.ts`)
 - **YouTube Download**: yt-dlp
 
 ## Project Structure
@@ -623,9 +589,6 @@ midi-grep/
 │       ├── audio_to_strudel_params.py # AI-driven effect parameter suggestion
 │       ├── compare_audio.py    # Rendered vs original audio comparison
 │       ├── generate_report.py  # HTML report generation
-│       ├── ai_code_generator.py # AI-driven Strudel code generation
-│       ├── ai_code_improver.py # Gap analysis and Strudel code modification
-│       ├── ai_iterative_codegen.py # Iteration loop with revert-on-regression
 │       ├── ollama_codegen.py   # Ollama LLM code gen with genre sound RAG
 │       ├── ai_learning_optimizer.py # AI learning optimization
 │       ├── spectrogram_analyzer.py # Mel spectrogram deep analysis for AI
@@ -636,7 +599,6 @@ midi-grep/
 │       ├── iterative_render.py # AI-driven iterative audio refinement
 │       ├── learn_artist.py     # Artist-specific learning
 │       ├── seed_knowledge.py   # Knowledge base seeding
-│       ├── iterative_optimizer.py # Iterative optimization loop
 │       ├── requirements.txt
 │       └── rave/               # RAVE generative model system
 │           ├── __init__.py
@@ -701,6 +663,7 @@ defer ws.Cleanup()
 - HTMX for reactivity (no JavaScript frameworks)
 - SSE for real-time progress updates
 - Go templates with PicoCSS styling
+- Known defect: `internal/server/jobs.go` still calls `ai_code_generator.py`, which was deleted
 
 ## Common Tasks
 
@@ -711,30 +674,26 @@ defer ws.Cleanup()
 3. Update pipeline in `internal/pipeline/orchestrator.go`
 4. Update progress stages in `internal/progress/progress.go`
 
-### LLM-First Code Generation Architecture
+### Code Generation: two paths
 
-**IMPORTANT: Go does NOT generate Strudel code.** All Strudel code is generated by Python AI (`ai_code_generator.py`).
+**Go does NOT generate Strudel code.** All Strudel code is generated in Python, on one of two paths:
 
-The architecture is:
-1. **Go Pipeline** (`internal/pipeline/orchestrator.go`): Stem separation, BPM/key analysis
-2. **Python AI Generator** (`scripts/python/ai_code_generator.py`): Generates ALL Strudel code
-3. **Offline Strudel Renderer** (`scripts/node/src/render-strudel-offline.ts`): Renders for verification (BlackHole recorder = cross-check)
+1. **Editable pipeline** (`scripts/editable-pipeline.sh`, the product path): `scripts/python/generate_dynamic_strudel.py`
+   writes the editable bar-array pieces (`--mode sample-instrument|synth`) from the transcribed notes and drum onsets;
+   `scripts/auto-calibrate.sh` tunes its knobs from measured comparisons. No LLM is involved.
+2. **`midi-grep extract`** (LLM-first, the original path): Go (`internal/pipeline/orchestrator.go`) does stems, BPM/key
+   and genre, then calls `codegen_orchestrator.py` (`--codegen orchestrated`, the CLI default) or `ollama_codegen.py`
+   (`--codegen single`); `--iterate` runs `ai_improver.py`.
 
-**Why LLM-First?**
+Both verify on the offline Strudel renderer (`scripts/node/src/render-strudel-offline.ts`; BlackHole recorder = cross-check).
+
+**Why LLM-first (for `extract`)?**
 - Hardcoded Go patterns don't generalize across genres
 - LLM can adapt to any audio characteristics
 - ClickHouse stores learning for incremental improvement
-- BlackHole produces 100% accurate audio (not emulation)
-
-**`scripts/python/ai_code_generator.py`** - Main AI code generator:
-- Analyzes audio for spectral, dynamic, and timing characteristics
-- Generates Strudel code with AI-derived parameters
-- Queries ClickHouse for best previous runs
-- Supports all genres via `sound_selector.py` integration
-- Arguments: `--bpm`, `--key`, `--style`, `--genre`, `--drum-kit`, `--drums-only`
 
 **`scripts/python/ollama_codegen.py`** - Ollama-powered Strudel code generator:
-- Replaces rule-based `ai_code_generator.py` with LLM-based generation
+- Replaced the rule-based `ai_code_generator.py` (deleted); the legacy `--codegen single` path
 - `build_prompt()` includes genre-aware sound RAG context (~40 tokens vs 800)
 - Example sounds in the prompt use genre-appropriate palette (not hardcoded)
 - Enforces 3-voice structure (bass, lead, drums) via `enforce_three_voices()`
@@ -744,8 +703,8 @@ The architecture is:
 - Stem separation via Demucs
 - BPM/key detection via librosa
 - Genre auto-detection (Brazilian funk, phonk, synthwave, etc.)
-- Style detection (passed as hints to AI generator)
-- Calls Python AI generator for all Strudel code
+- Style detection (passed as hints to the Python codegen)
+- Calls the Python codegen for all Strudel code
 - Manages caching and output versioning
 
 ### Detection Candidates
@@ -838,7 +797,10 @@ go build -o bin/midi-grep ./cmd/midi-grep
 ./bin/midi-grep serve --port 8080
 ```
 
-### CLI Flags
+### CLI Flags (`midi-grep extract`)
+
+The editable pipeline calls `extract` only for stage 1 (`--render none --iterate 0`); its own flags are in
+`scripts/editable-pipeline.sh --help`.
 
 | Flag | Description |
 |------|-------------|
@@ -855,12 +817,13 @@ go build -o bin/midi-grep ./cmd/midi-grep
 | `--genre` | Manual genre override (`brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz`) |
 | `--deep-genre` | Use deep learning (CLAP) for genre detection (default: enabled, skipped when `--genre` is specified) |
 | `--iterate N` | AI-driven improvement iterations (default: 20) |
-| `--target-similarity` | Target similarity for --iterate (0.0-1.0, default: 0.85) |
+| `--target-similarity` | Target similarity for --iterate (0.0-1.0, default: 0.99 = always run all iterations) |
 | `--ignore-gate-stop` | Keep iterating toward `--target-similarity` even after the eval-gate floor is cleared (disables the early-success stop; auto-reject + reporting stay on) |
 
-### Default Analysis Features (Always Enabled)
+### Default Analysis Features of `midi-grep extract` (Always Enabled)
 
-The following analysis features are **always enabled by default**:
+These apply to the `extract` path (not to `scripts/editable-pipeline.sh`, whose stage 10 builds the report,
+with render stems from the renderer itself, `solo_stems.py`). On `extract`, the following are **enabled by default**:
 
 1. **Stem Rendering**: Renders 3 separate stems (`render_bass.wav`, `render_drums.wav`, `render_melodic.wav`)
 2. **Per-Stem Comparison**: Generates per-stem comparison charts (`chart_stem_bass.png`, `chart_stem_drums.png`, `chart_stem_melodic.png`)
@@ -871,7 +834,7 @@ The following analysis features are **always enabled by default**:
 
 ### AI-Driven Iterative Improvement
 
-The `--iterate` flag enables AI-driven code improvement using Claude:
+The `--iterate` flag (on `midi-grep extract`) enables LLM-driven code improvement (`ai_improver.py`; Ollama by default, Claude API with `--ollama=false`). Renders go through `renderer.py`, i.e. the offline renderer by default:
 
 ```bash
 # Run 5 iterations, target 70% similarity
@@ -1078,7 +1041,8 @@ CLAP (Contrastive Language-Audio Pretraining) model for zero-shot classification
 - `acids-rave` - (Optional) Full RAVE neural network training
 
 ### Node.js/TypeScript (in scripts/node)
-- `node-web-audio-api` - Web Audio API for Node.js (offline rendering)
+- `puppeteer` + `@strudel/web` 1.3.0 + `@strudel/soundfonts` 1.2.6 - the offline renderer (real Strudel in headless Chromium)
+- `node-web-audio-api` - still a dependency in `package.json`; the deleted Node synthesis renderer used it
 - `typescript` - TypeScript compiler
 - `@types/node` - Node.js type definitions
 
@@ -1092,8 +1056,11 @@ CLAP (Contrastive Language-Audio Pretraining) model for zero-shot classification
 # Run Go tests
 go test ./...
 
-# Test extraction
-./bin/midi-grep extract --input testdata/sample.wav
+# Python tests
+cd scripts/python && .venv/bin/python -m pytest -q tests test_*.py
+
+# Node renderer tests
+cd scripts/node && npm test
 ```
 
 ## Domain Experts

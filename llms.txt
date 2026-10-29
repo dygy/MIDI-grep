@@ -1,15 +1,16 @@
 # MIDI-grep
 
 > Go CLI + web app that extracts musical content from audio files / YouTube videos and generates
-> [Strudel](https://strudel.cc) live-coding code. Go orchestrates the pipeline; Python does audio
-> analysis & ML; Node/TypeScript renders Strudel to audio for verification. The system is
-> LLM-first and **never hardcodes** synthesis values — everything is learned from analysis.
+> [Strudel](https://strudel.dygy.app) live-coding code. Go orchestrates the pipeline; Python does audio
+> analysis & ML; Node/TypeScript renders Strudel to audio for verification. The product path is
+> `scripts/editable-pipeline.sh` (editable Strudel, replay forbidden, vocals never generated); the system
+> **never hardcodes** synthesis values — everything is learned from analysis.
 
 ## Core idea
 
 Input (WAV/MP3/YouTube) → stem separation (Demucs) → analysis (librosa: BPM, key, chords) →
-LLM generates Strudel code (Ollama/Claude) → render to audio → compare to original → iterate to
-improve similarity. All outputs cached in `.cache/stems/{key}/` with output versioning (v001, …).
+Strudel code (editable pipeline: `generate_dynamic_strudel.py` + measured calibration; `midi-grep extract`:
+LLM codegen via Ollama/Claude) → render to audio → compare to original → iterate to improve similarity. All outputs cached in `.cache/stems/{key}/` with output versioning (v001, …).
 
 ## Pipelines (modes)
 
@@ -17,10 +18,11 @@ improve similarity. All outputs cached in `.cache/stems/{key}/` with output vers
 - **Chord** (`--chords`) — chord-progression detection; best for electronic/EDM/funk.
 - **Brazilian Funk** (`--brazilian-funk`, auto-detected) — tamborzão + 808 template.
 - **Generative** (`generative` cmd) — trains RAVE/granular neural synths for full note() control.
-- **Sample-pack** (`scripts/sample-pipeline.sh`) — slice the REAL extracted stems into a Strudel
+- **Editable** (`scripts/editable-pipeline.sh`, the product path) — `sample-instrument` and `synth` pieces; see below.
+- **Sample-pack** (`scripts/sample-pipeline.sh`, predecessor) — slice the REAL extracted stems into a Strudel
   sample pack (per-bar loops + drum one-shots + pitched samples), host it (localhost or Cloudflare
-  R2), and play via `await samples(...)`. Reuses the original audio → ~91% rendered similarity
-  (vs ~72% synthesis ceiling). The base URL is the only thing that changes localhost↔R2.
+  R2), and play via `await samples(...)`. Its `loops` mode is replay (forbidden as a deliverable,
+  `values.md` A1); its old-scale ~91% is not comparable. The base URL is the only thing that changes localhost↔R2.
 
 ## Key directories
 
@@ -36,9 +38,10 @@ improve similarity. All outputs cached in `.cache/stems/{key}/` with output vers
 - `.awos/`, `.claude/` — agent workflow (commands, skills, domain-expert subagents).
 - `.sisyphus/` — durable plan + evidence orchestration for multi-step runs.
 
-## Code generation is LLM-first (important)
+## Code generation (important)
 
-**Go does NOT generate Strudel code.** All Strudel comes from Python LLM codegen:
+**Go does NOT generate Strudel code.** The editable pipeline uses `generate_dynamic_strudel.py` (no LLM).
+The `midi-grep extract` path is LLM-first:
 - `scripts/python/ollama_codegen.py` — Ollama code gen with genre-aware sound RAG + per-genre sidechain instruction.
 - `scripts/python/ollama_agent.py` — agentic LLM with per-track memory + RAG + code validation; feedback gives concrete per-voice gain multipliers from band diffs.
 - `scripts/python/ai_improver.py` — iteration loop + ClickHouse learning storage.
@@ -49,7 +52,8 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
 
 - **Offline renderer** (`scripts/node/src/render-strudel-offline.ts`) — DEFAULT since 2026-10-19; Strudel's own
   `renderPatternAudio` into an OfflineAudioContext (real superdough engine, headless Chromium): sample-exact timing
-  and pitch, no audio device. `MIDIGREP_RENDERER=offline|blackhole` (`scripts/python/renderer.py`).
+  and pitch, no audio device. Deterministic (`determinism.ts`; two renders differ by ≤ 1 LSB), local sample cache
+  (`sample-cache.ts`, `.cache/render-samples/`), hang watchdog. `MIDIGREP_RENDERER=offline|blackhole` (`scripts/python/renderer.py`).
 - **BlackHole recorder** (`scripts/node/src/record-strudel-blackhole.ts`) — cross-check only; KNOWN DEFECT: ~12%
   sample loss + rate relabel → every pitch ~2.3–2.7 semitones flat.
 - **Node.js synth** — REMOVED (Jun 2026). `render-strudel-node.ts` no longer exists.
@@ -58,6 +62,8 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   Brightness 15%, Tempo/Chroma 5%, time-averaged) + 0.5 × temporal (aligned frame-wise chroma/mel corr,
   onset F1 ±50 ms, envelope corr); `--control` = a different same-genre song the render must beat by 0.02.
   The old time-averaged score scored a different song 0.876 vs our 0.932 — pre-2026-10-18 numbers are old-scale.
+  Reference-side features are cached (`compare_cache.py`, `.cache/compare-features/`, `MIDIGREP_COMPARE_CACHE=0` bypasses).
+  Gate: `eval/gate.py --mode`; floors + the four reference tracks: `eval/thresholds.yaml` `modes:`, `eval/datasets/reference_tracks.yaml`.
 - **`scripts/editable-pipeline.sh`** — ONE command from a YouTube link to both editable pieces, scored on
   real playback (spec 004): extract → MIDI per stem (bass/melodic; never vocals) → drum bands → sample pack → granular
   instruments (one grain per transcribed note, bass grains keep the stem's ring/808 tail, every sample pitch-verified; `build_instruments.py` manifest + `verification.json`) → R2/local host → `auto-calibrate.sh` (N iters) then `auto-calibrate.sh --mode synth`
@@ -90,15 +96,18 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   out and the mix is still dark, it raises a TR808 hat layer (`--hat-gain`) — the hats carry the
   brightness the extracted lead can't.
 - **`scripts/auto-calibrate.sh`** — runs the full generate→render(offline)→compare→calibrate
-  loop, keeping the best render. Took Regime CLT 88.7%→92.4% overall (freq 86→95, section-aware
-  82→89) over ~6 iterations from a cold start, fully data-driven. After BEST it runs the loudness
+  loop, keeping the best render (BEST = gate-passing first, then largest minimum margin to the floors;
+  `calibrate_loop.py`, noise = `calibration_noise`). Calibration memory in ClickHouse
+  (`calibration_memory.py`, `midi_grep.calibration_steps`: warm start, learned step sizes; `--no-memory`/`AC_MEM=off`);
+  outputs are stamped with `calibration_memory.py code-version` and rerun when the code changes. After BEST it runs the loudness
   stage (`scripts/python/mix_dynamics.py`): the score is level-invariant, so one measured lever,
   `--master-gain`, is moved onto the instrumental's RMS in up to 3 render→measure rounds (the output
-  clips at full scale - superdough has no master bus); kept only if RMS and crest match the
-  reference and neither score drops more than `calibration_noise`; `--no-mix-dynamics` skips it.
+  clips at full scale - npm superdough 1.3.0 has no master bus); kept only if RMS and crest match the
+  reference and neither score drops more than `calibration_noise`; `--no-mix-dynamics` skips it. On an engine bundle
+  with `setMasterLimiter`/`setMasterCompressor` (`MIDIGREP_STRUDEL_BUNDLE`) a master-bus stage follows.
   Each iteration also renders the BASS channel alone (`bass_solo.py`, `--bass-solo`, `AC_BSOLO=off` skips) and, in
   sample-instrument mode, LEAD+CHORDS alone (`melodic_solo.py`, `--melodic-solo`, `AC_MSOLO=off` skips): bass-mult,
-  cal-lead and lead-lpf follow the voice's own level/centroid vs its stem, not whole-mix shares. `--lead-hpf 0` = derived
+  cal-lead and lead-lpf follow the voice's own level/centroid vs its stem, not whole-mix shares. `--lead-hpf 0` = derived.
   Those renders (mix, bass solo, melodic solo) are independent and run concurrently: `render_jobs.py` derives how many at once from
   cores + free memory vs one render's measured footprint (`MIDIGREP_RENDER_JOBS` overrides, logged as `render jobs:`; 1 = sequential;
   the report's three stem renders use the same limit); a failure or SIGINT/SIGTERM terminates every child process tree.
@@ -120,6 +129,7 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
 
 ```bash
 go build -o bin/midi-grep ./cmd/midi-grep
+scripts/editable-pipeline.sh --url "https://youtu.be/..."     # the product path (both modes, R2 hosting)
 ./bin/midi-grep extract --url "https://youtu.be/..."          # standard
 ./bin/midi-grep extract --url "..." --chords --iterate 5      # chord mode, 5 AI iterations
 ./bin/midi-grep serve --port 8080                             # web UI (Chi + HTMX)

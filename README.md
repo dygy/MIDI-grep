@@ -1,1045 +1,302 @@
 # MIDI-grep
 
-Extract piano riffs from audio files or YouTube videos and generate [Strudel](https://strudel.dygy.app/) code for live coding.
+MIDI-grep turns a song (a YouTube link or an audio file) into **editable [Strudel](https://strudel.dygy.app/)
+code**. The code is a re-performance: transcribed bass and lead/chord notes, an extracted drum pattern and
+per-bar mix data, all written as bar arrays you can change. It is not a recording played back. Each piece is
+rendered with the real Strudel engine, scored against the original, and gated against regression floors.
 
 ```
-Audio/YouTube → Stem Separation → MIDI Transcription → Strudel Code
+YouTube / WAV / MP3
+  → stems (Demucs) → tempo, key, genre → MIDI per stem + drum onsets
+  → instruments cut from the stems (or palette sounds) → generated Strudel
+  → offline render → compare to the original instrumental → calibrate → gate → vNNN/ + report.html
 ```
 
-## Features
+The ground rules are in [`context/product/values.md`](context/product/values.md):
 
-- **YouTube Support**: Paste a URL, get playable code
-- **AI-Powered Separation**: Demucs isolates melodic/bass/drums/vocals stems
-- **Drum Pattern Detection**: Extracts kick, snare, hi-hat patterns automatically
-- **Accurate Transcription**: Spotify's Basic Pitch for audio-to-MIDI
-- **BPM & Key Detection**: Automatic tempo and musical key analysis with confidence scores
-- **Detection Candidates**: Shows top 5 candidates for key, BPM, time signature, and style in output header
-- **Smart Caching**: Stems cached by URL/file hash; auto-invalidates when processing scripts change
-- **Chord Mode**: Alternative chord-based generation for electronic/funk music (`--chords`)
-- **Loop Detection**: Automatically identifies repeating patterns (1, 2, 4, or 8 bar loops) with confidence scoring
-- **Genre Auto-Detection**: Automatically detects genre and uses specialized generators:
-  - **Brazilian Funk**: BPM 130-145 (136 typical), mid-heavy spectrum, vocal chops → uses tamborzão templates
-  - **Brazilian Phonk**: BPM 80-100 or 145-180, darker sound → phonk-style drums
-  - **Retro Wave/Synthwave**: BPM 130-170, longer synth notes → synthwave style
-  - **Style Detection**: Detects style based on BPM, key (minor/major), and note density
-- **Deep Learning Genre Detection**: CLAP (Contrastive Language-Audio Pretraining) model for zero-shot audio classification (enabled by default)
-- **Manual Genre Override**: `--genre` flag to force specific genre when auto-detection fails
-- **Genre-Aware Sound RAG**: LLM prompts include only ~15 genre-relevant sounds (not all 196), reducing hallucinated sound names and saving ~760 tokens per call
-- **AI-Driven Audio Rendering**: Synthesize WAV previews with AI-suggested mix parameters
-  - Spectral/dynamics/timbre analysis of original audio
-  - Automatic effect parameter optimization
-  - Rendered vs original comparison with similarity scoring
-- **Self-Contained HTML Report**: Single-file report with everything embedded
-  - **Audio Studio Player**: Two-section stem mixer (Original + Rendered)
-  - Solo/Mute controls per stem with waveform visualization
-  - A/B comparison mode (toggle between original and rendered)
-  - Per-stem comparison charts (bass, drums, melodic)
-  - Visual comparison charts (spectrograms, chromagrams, frequency bands)
-  - Copyable analysis data tables
-  - Strudel code with copy button
-- **Dynamic Strudel Output**: Rich patterns with per-voice effects
-  - `.velocity()` patterns with dynamic range expansion for expressive dynamics
-  - Style-specific accent patterns (downbeat, backbeat, offbeat)
-  - Compressor effect for dynamics control (electronic)
-  - Per-voice filtering (HPF/LPF by register)
-  - Stereo panning with style-appropriate LFO shapes (sine, perlin, saw)
-  - ADSR envelopes for synth/orchestral styles
-  - Voice-appropriate reverb, delay, phaser, vibrato
-  - Style-specific FX: bitcrush/coarse for lofi, distort for electronic
-  - FM synthesis (.fm, .fmh, .fmdecay) for synth/electronic richness
-  - Tremolo/amplitude modulation for synth/orchestral movement
-  - Filter envelope (.lpenv, .lpattack, .lpdecay) for dynamic sweeps
-  - Sidechain/ducking (.duck, .duckattack, .duckdepth) for electronic pumping
-  - Ring modulation (.ring, .ringfreq) for metallic timbres
-  - Chorus (.chorus, .chorusDepth) for warm width (jazz/soul)
-  - Leslie effect (.leslie, .leslieSpeed) for organ-style modulation
-  - Shape/saturation (.shape) for harmonic warmth
-  - Pitch envelope (.pitchenv, .pitchattack) for synth bass punch
-  - Pattern transforms: swing for jazz, degradeBy for lofi, iter for electronic/lofi variation
-  - `.clip()` for note duration control (staccato/legato/sustained)
-  - `.echo()` for rhythmic repeats
-  - `.superimpose()` for detuned layering (synth richness)
-  - `.off()` for harmonic layering with time offset
-  - `.layer()` for parallel transformations (orchestral octave doubling)
-  - `.echoWith()` for sophisticated pitch-shifted echoes (electronic)
-  - `.scale()` for key-aware quantization
-  - Section detection with time markers
-- **Sound Style Presets**: 20+ styles with auto-detection
-  - **GM Soundfont**: `piano`, `synth`, `orchestral`, `electronic`, `jazz`, `lofi`
-  - **Groove Styles**: `funk`, `soul`, `house`, `trance` (auto-detected by BPM/key)
-  - **Raw Oscillators**: `raw`, `chiptune`, `ambient`, `drone`, plus `supersaw`, ZZFX synths
-  - **Sample-based**: `mallets`, `plucked`, `keys`, `pad`, `percussive`
-  - **Genre-specific**: `synthwave`, `darkwave`, `minimal`, `industrial`, `newage`
-- **Extended Sound Palette**:
-  - **Supersaw**: Fat detuned sawtooth for bass/leads
-  - **ZZFX Synths**: 8-bit style (`z_sawtooth`, `z_square`, `z_triangle`, `z_tan`, `z_noise`)
-  - **Wavetables**: Digital waveforms (`wt_digital`, `wt_vgame`, `wt_piano`)
-  - **Noise**: Textural elements (`white`, `pink`, `brown`, `crackle`)
-- **Web Interface**: HTMX-powered UI, no JavaScript frameworks
-- **CLI Tool**: Full-featured command-line interface
+- **Editability is the product.** Audio replay (`loopAt`, `slice(N, run(N)).slow(N)`, full-stem or per-bar-loop
+  samples) is forbidden. `scripts/python/editability_check.py` rejects it, and `compare_audio.py --strudel`
+  refuses to score it.
+- **Vocals are never generated.** Every score is computed against `instrumental.wav`, which is bass + drums +
+  melodic stems (`pipeline_helpers.py instrumental`).
+- **No per-track constants.** Every gain, filter and effect value comes from analysis of the track or from the
+  calibration loop.
 
-## Architecture
+## Current state
 
-```
-                              MIDI-grep Pipeline
+The reference dataset is four brazilian_funk tracks, each built in both modes
+([`eval/datasets/reference_tracks.yaml`](eval/datasets/reference_tracks.yaml)). The floors come from
+[`eval/thresholds.yaml`](eval/thresholds.yaml) `modes:`. Each floor is the lowest track's score minus 0.02, rounded
+to 2 decimals.
 
-   INPUT            SEPARATE          ANALYZE          AI GENERATE        OUTPUT
-     │                 │                 │                  │                │
-     ▼                 ▼                 ▼                  ▼                ▼
-┌─────────┐     ┌────────────┐     ┌───────────┐     ┌──────────────┐    ┌─────────┐
-│ YouTube │     │  Demucs    │     │  librosa  │     │ Ollama LLM   │    │ Strudel │
-│ yt-dlp  │────▶│   stem     │────▶│  BPM/Key  │────▶│ AI code gen  │───▶│  code   │
-│ WAV/MP3 │     │ separation │     │  + CLAP   │     │ + iteration  │    │  + WAV  │
-└─────────┘     └────────────┘     └───────────┘     └──────────────┘    └─────────┘
-                    │                  │                    │
-                    ▼                  ▼                    ▼
-              ┌──────────┐      ┌───────────┐       ┌──────────────┐
-              │ melodic  │      │  Genre    │       │  BlackHole   │
-              │ bass     │      │ Detection │       │  Recorder    │
-              │ drums    │      │           │       │ (real audio) │
-              │ vocals   │      └───────────┘       └──────────────┘
-              └──────────┘
+| Track | Mode | Run | Overall | Section-aware | Margin over a different song |
+|-------|------|-----|---------|---------------|------------------------------|
+| Regime CLT (Dj Brunin XM, Aurora Shukita) | sample-instrument | v077 | 0.9081 | 0.9042 | 0.3319 |
+| Regime CLT | synth | v078 | 0.9136 | 0.9038 | 0.3374 |
+| VAGABUNDO NÃO NAMORA (Christopher Luz) | sample-instrument | v060 | 0.8738 | 0.8539 | 0.2988 |
+| VAGABUNDO NÃO NAMORA | synth | v061 | 0.8379 | 0.8021 | 0.2629 |
+| Dumb Blond Bitches (Barbit) | sample-instrument | v010 | 0.8714 | 0.8685 | 0.2877 |
+| Dumb Blond Bitches | synth | v011 | 0.8026 | 0.7954 | 0.2189 |
+| Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM) | sample-instrument | v006 | 0.9002 | 0.8944 | 0.2663 |
+| Automotivo XM | synth | v007 | 0.8533 | 0.8296 | 0.2194 |
 
-────────────────────────────────────────────────────────────────────────────────
-                              Tech Stack
+| Mode | Overall floor | Section-aware floor |
+|------|---------------|---------------------|
+| sample-instrument (brazilian_funk) | 0.85 | 0.83 |
+| synth (brazilian_funk) | 0.78 | 0.78 |
 
-  Go 1.25+                              Python 3.11+
-  ├── CLI (Cobra)                       ├── demucs      - stem separation
-  ├── HTTP (Chi)                        ├── basic-pitch - audio to MIDI
-  └── Pipeline orchestration            ├── librosa     - audio analysis
-                                        ├── ollama_agent - agentic LLM
-                                        └── ai_improver - iterative improvement
+These runs are on the seeded offline renderer (2026-10-29). The score scale changed on 2026-10-18 (see
+[Scoring](#scoring-and-the-gate)), so any number from before that date is not comparable. Older numbers are
+kept as history in the comments of `thresholds.yaml`.
 
-  TypeScript/Node.js                    External
-  ├── BlackHole recorder (primary)      ├── yt-dlp     - YouTube download
-  └── Puppeteer + ffmpeg                ├── ffmpeg     - audio conversion
-                                        ├── Ollama     - local LLM
-  Frontend                              └── ClickHouse - learning DB
-  ├── HTMX
-  ├── PicoCSS
-  └── SSE updates
-```
+## Requirements
 
-### Complete Orchestration Flow
+macOS is the reference machine. CI also builds and tests the Go, Node and Python-analysis layers on Linux.
 
-This diagram shows the full pipeline including AI-driven iteration (worst case: all iterations run).
+- Go 1.25+ (`go.mod`)
+- Python **3.11** in `scripts/python/.venv`. `basic-pitch` needs TensorFlow 2.15 + `keras<3`, which do not
+  support Python 3.12+.
+- Node + npm for `scripts/node`. Puppeteer's Chromium is used by the renderer.
+- `ffmpeg`, `yt-dlp` (`MIDIGREP_YTDLP` overrides the binary path)
+- For R2 hosting (the default for the editable pipeline): `npx wrangler login`, or R2 S3 keys (see
+  `scripts/python/upload_r2.py`). Use `--local` to serve the pack on `localhost:5555` instead.
+- Optional: the ClickHouse local binary at `bin/clickhouse` (calibration memory; `.clickhouse/db`).
+- Optional, cross-check only: BlackHole 2ch + a Multi-Output Device (`MIDIGREP_RENDERER=blackhole`).
+- Optional, only for the legacy `extract --iterate` LLM loop: Ollama with `midi-grep-strudel-mistral`
+  (`ollama create midi-grep-strudel-mistral -f Modelfile.mistral`).
 
-```mermaid
-flowchart TB
-    %% ===== INPUT & SEPARATION =====
-    CLI["CLI: extract --url/--file"] --> YT["yt-dlp download"]
-    YT --> CheckCache{"Cached stems?"}
-    CheckCache -->|No| Demucs["Demucs: melodic + drums + bass + vocals"]
-    CheckCache -->|Yes| LoadStems["Load cached stems"]
-    Demucs --> Analysis
-    LoadStems --> Analysis
+The first run downloads about 1 GB of ML models.
 
-    %% ===== ANALYSIS =====
-    Analysis["librosa + CLAP"] --> Profile["AudioProfile extraction:<br/>BPM, key, genre, spectrum"]
-    Profile --> Features["Spectrum, dynamics,<br/>rhythm, timbre, structure"]
-
-    %% ===== TRANSCRIPTION =====
-    Features --> BasicPitch["Basic Pitch → MIDI notes"]
-    Features --> DrumDetect["Drum onset → bd/sd/hh"]
-    BasicPitch --> Cleanup["Quantize + Simplify"]
-    DrumDetect --> Cleanup
-
-    %% ===== INITIAL GENERATION (LLM-first) =====
-    Cleanup --> CheckBest{"Best previous run<br/>in ClickHouse?"}
-    CheckBest --> QueryBest["Query best code + similarity<br/>for this track_hash"]
-    QueryBest --> CH[("ClickHouse<br/>runs + knowledge")]
-
-    CH -->|Found| StartFromBest["Start from best code"]
-    CH -->|Not found| GenreRAG["Genre Sound RAG<br/>retrieve_genre_context()<br/>~15 sounds per genre"]
-    GenreRAG --> FreshGen["Ollama generates fresh<br/>Strudel code<br/>(with genre palette)"]
-
-    StartFromBest --> InitCode["output.strudel"]
-    FreshGen --> InitCode
-
-    %% ===== RENDER via BlackHole =====
-    InitCode --> Render["BlackHole Recorder<br/>(Puppeteer + ffmpeg)<br/>100% real Strudel audio"]
-    Render --> StemSep["Demucs: separate render<br/>into bass/drums/melodic"]
-    StemSep --> Compare["compare_audio.py<br/>(MAE, not cosine)"]
-    Compare --> Metrics["Per-stem diffs:<br/>bass, drums, melodic<br/>+ per-band analysis"]
-
-    %% ===== TWO-PHASE IMPROVEMENT LOOP =====
-    Metrics --> LoopCheck{"iteration < N AND<br/>similarity < target?"}
-
-    LoopCheck -->|Yes| Phase1["Phase 1: Deterministic<br/>optimize_parameters()<br/>gain/lpf/hpf/room math"]
-    Phase1 --> Phase1Check{"Changes made?"}
-    Phase1Check -->|Yes| QuickRender["BlackHole render<br/>(full track)"]
-    Phase1Check -->|No| Phase2["Phase 2: Constrained LLM<br/>+ Genre Sound RAG<br/>(~15 valid sounds per genre)"]
-    Phase2 --> QuickRender
-
-    QuickRender --> Regress{"new > best?"}
-    Regress -->|No| Revert["REVERT to best code"]
-    Regress -->|Yes| Accept["Accept + store to ClickHouse"]
-    Revert --> LoopCheck
-    Accept --> LoopCheck
-
-    %% ===== VALIDATION =====
-    Phase2 --> Validate{"Valid Strudel?<br/>No .peak/.volume/.eq<br/>Valid sound names?"}
-    Validate -->|No| LoopCheck
-    Validate -->|Yes| QuickRender
-
-    %% ===== OUTPUT =====
-    LoopCheck -->|Done| BatchStems["Batch Demucs: separate<br/>each iteration render<br/>into melodic/drums/bass"]
-    BatchStems --> FinalRender["Full-length BlackHole render<br/>+ Demucs stem separation"]
-    FinalRender --> Report["generate_report.py"]
-    Report --> Output["vNNN/<br/>├── output.strudel<br/>├── render.wav + stems<br/>├── render_v*_{melodic,drums,bass}.mp3<br/>├── iterations.json (with stem paths)<br/>├── comparison.json<br/>├── stem_comparison.json<br/>└── report.html"]
-
-    %% ===== PER-TRACK LEARNING =====
-    CH -.->|"Best runs + learned<br/>parameter deltas"| Phase1
-
-    %% ===== STYLING =====
-    style CLI fill:#1565c0,color:#fff
-    style Demucs fill:#2e7d32,color:#fff
-    style Analysis fill:#7b1fa2,color:#fff
-    style Profile fill:#7b1fa2,color:#fff
-    style Render fill:#512da8,color:#fff
-    style StemSep fill:#2e7d32,color:#fff
-    style Compare fill:#00796b,color:#fff
-    style Phase1 fill:#e65100,color:#fff
-    style Phase2 fill:#c62828,color:#fff
-    style CH fill:#303f9f,color:#fff
-    style FinalRender fill:#512da8,color:#fff
-    style Report fill:#6a1b9a,color:#fff
-    style Output fill:#1b5e20,color:#fff
-    style GenreRAG fill:#00897b,color:#fff
-    style FreshGen fill:#f9a825,color:#000
-```
-
-### External Dependencies
-
-| Component | Technology | Purpose |
-|-----------|------------|---------|
-| **yt-dlp** | Python CLI | YouTube audio download |
-| **ffmpeg/ffprobe** | C binary | Audio codec, duration, BlackHole recording |
-| **Demucs** | PyTorch | Stem separation (melodic/drums/bass/vocals) |
-| **Basic Pitch** | TensorFlow | Audio → MIDI transcription |
-| **librosa** | Python | BPM, key, onset detection |
-| **CLAP** | PyTorch | Zero-shot genre classification |
-| **Ollama** | Go binary | Local LLM (default model `midi-grep-strudel-mistral`; see CLAUDE.md "Ollama Setup") for code gen + iteration |
-| **ClickHouse** | C++ binary | Learning database (runs + knowledge) |
-| **Puppeteer** | Node.js | Browser automation for BlackHole recording |
-| **BlackHole** | macOS driver | Virtual audio device for recording |
-| **strudel.dygy.app** | Web | Self-hosted Strudel embed (recording target) |
-
-### Module Structure
-
-```
-midi-grep/
-├── cmd/midi-grep/           # CLI entrypoint (Go)
-│   └── main.go              # Cobra commands: extract, serve, generative
-│
-├── internal/                # Go packages
-│   ├── audio/               # Input validation, YouTube download, stem separation
-│   ├── analysis/            # BPM & key detection (calls Python)
-│   ├── midi/                # Transcription & cleanup (calls Python)
-│   ├── pipeline/            # Orchestrates full flow (calls Python AI for code gen)
-│   ├── server/              # HTTP server, HTMX templates, SSE
-│   ├── exec/                # Python subprocess runner
-│   ├── cache/               # Stem + output caching with versioning
-│   ├── report/              # Go HTML report generation
-│   └── generative/          # RAVE neural synthesizer pipeline
-│
-├── scripts/
-│   ├── midi-grep.sh         # Main CLI wrapper (Bash)
-│   ├── node/                # TypeScript BlackHole recorder + rendering
-│   │   ├── src/
-│   │   │   └── record-strudel-blackhole.ts  # BlackHole recorder (primary)
-│   │   ├── dist/            # Compiled JavaScript output
-│   │   ├── package.json     # puppeteer, typescript
-│   │   └── tsconfig.json    # TypeScript configuration
-│   └── python/              # Python ML + AI scripts
-│       ├── separate.py      # Demucs stem separation
-│       ├── transcribe.py    # Basic Pitch audio → MIDI
-│       ├── analyze.py       # librosa BPM/key detection
-│       ├── cleanup.py       # MIDI quantization & filtering
-│       ├── detect_drums.py  # Drum onset detection & classification
-│       ├── detect_genre_dl.py    # CLAP deep learning genre detection
-│       ├── ai_improver.py   # AI-driven iterative improvement (Ollama/Claude)
-│       ├── ollama_codegen.py # Ollama LLM code gen with genre sound RAG
-│       ├── ollama_agent.py  # Agentic LLM with ClickHouse memory + genre RAG
-│       ├── sound_selector.py     # Sound catalog (67 drums, 128 GM) + genre RAG retrieval
-│       ├── compare_audio.py      # Rendered vs original comparison (MAE)
-│       ├── generate_report.py    # Self-contained HTML report
-│       ├── analyze_synth_params.py  # AI audio analysis for synthesis
-│       ├── render_audio.py       # WAV synthesis (fallback renderer)
-│       ├── render_with_models.py # Render with granular models
-│       └── thin_patterns.py      # Pattern density control
-│
-└── context/                 # AWOS documentation
-    ├── product/             # Product definition, roadmap
-    └── spec/                # Feature specifications
-```
-
-### Data Flow
-
-```
-1. INPUT
-   YouTube URL ──▶ yt-dlp ──▶ audio.wav
-   Local file ─────────────▶ audio.wav
-
-2. CACHE CHECK
-   URL/file hash ──▶ Check .cache/stems/ ──▶ Use cached if valid
-
-3. STEM SEPARATION
-   audio.wav ──▶ Demucs ──▶ melodic.mp3 + drums.mp3 + bass.mp3 + vocals.mp3
-
-4. ANALYSIS
-   melodic.mp3 ──▶ librosa + CLAP ──▶ { bpm: 136, key: "C# minor", genre: "brazilian_funk" }
-
-5. TRANSCRIPTION (parallel)
-   melodic.mp3 ──▶ Basic Pitch ──▶ raw.mid ──▶ cleanup ──▶ notes.json
-   drums.mp3 ──▶ onset detection ──▶ drum_hits.json
-
-6. AI CODE GENERATION (LLM-first)
-   notes + drums + analysis ──▶ Genre Sound RAG (~15 sounds) ──▶ Ollama ──▶ code.strudel
-   ClickHouse best runs ──▶ start from best known code
-
-7. RENDER & ITERATE
-   code.strudel ──▶ BlackHole Recorder ──▶ render.wav
-   render.wav ──▶ compare_audio.py ──▶ similarity score
-   similarity < target? ──▶ AI improver ──▶ iterate
-```
-
-## Quick Start
+## Setup
 
 ```bash
-# Install dependencies
-./scripts/midi-grep.sh install
-
-# Extract from YouTube
-./scripts/midi-grep.sh extract --url "https://youtu.be/Q4801HzWZfg"
-
-# Extract from local file
-./scripts/midi-grep.sh extract --file track.wav --output riff.strudel
-
-# Start web interface
-./scripts/midi-grep.sh serve --port 8080
+python3.11 -m venv scripts/python/.venv
+scripts/python/.venv/bin/pip install -r scripts/python/requirements.txt
+go build -o bin/midi-grep ./cmd/midi-grep
+cd scripts/node && npm install && npm run build && cd -
+(cd scripts/node && npx puppeteer browsers install chrome)   # if the renderer reports Chromium missing
 ```
 
-## Installation
+`make install-python-deps` does the same with whatever `python3` is on `PATH`. `scripts/install-deps.sh` deletes and
+recreates the venv with only a subset of the requirements (numpy, librosa, pretty_midi, soundfile, basic-pitch,
+demucs).
 
-### Prerequisites
-
-- **Go 1.25+**: `brew install go`
-- **Python 3.11+**: `brew install python@3.11`
-- **yt-dlp** (for YouTube): `brew install yt-dlp`
-- **ffmpeg** (for audio processing): `brew install ffmpeg`
-
-### Install
+## Quick start: the editable pipeline
 
 ```bash
-# Clone the repository
-git clone https://github.com/dygy/midi-grep.git
-cd midi-grep
-
-# Install all dependencies (Go + Python)
-./scripts/midi-grep.sh install
+scripts/editable-pipeline.sh --url "https://youtu.be/Q4801HzWZfg"            # both modes, hosted on R2
+scripts/editable-pipeline.sh --url "<url>" --mode sample-instrument --local   # one mode, local hosting
+scripts/editable-pipeline.sh --title "VAGABUNDO NÃO NAMORA" --iters 4        # resume an extracted track
+scripts/editable-pipeline.sh --help
 ```
 
-This installs:
-- Python packages: `demucs`, `basic-pitch`, `librosa`, `pretty_midi`
-- Builds the Go binary
+Each stage is skipped when its output already exists and is current. `--force` redoes every stage. Outputs are
+also rebuilt when the code that produced them changes: the sample pack, the instruments and the calibrated renders
+are stamped with `calibration_memory.py code-version`. Progress goes to stderr. stdout carries only a final JSON
+summary.
 
-## Usage
+| Stage | What runs |
+|-------|-----------|
+| 1 | `midi-grep extract --render none --iterate 0`: stems, BPM/key. 1b: CLAP genre + metadata stamp, tempo refined by phase coherence on the drums stem (`tempo_refine.py`) |
+| 2 | `transcribe.py` on `bass.wav` and `melodic.wav` (Basic Pitch). Vocals are not transcribed |
+| 3 | `detect_drums_bands.py` drum onsets; 3b: bass f0/register |
+| 4 | `build_sample_pack.py`: drum one-shots cut from the detected hits, pitched multisamples |
+| 5 | `midi-grep generative train` (one grain per transcribed note) + `build_instruments.py`. Every sample is re-measured for pitch (`instruments/verification.json`) |
+| 6 | Host the pack: `upload_r2.py` (`--r2`, default) or a local CORS server (`--local`) |
+| 7 | `auto-calibrate.sh` for sample-instrument, then `--mode synth`, which starts from the sample-instrument knobs |
+| 8 | `compare_audio.py --strudel --control <other track>`, `eval/gate.py --mode`, `editability_check.py` |
+| 9 | `pipeline_helpers.py promote` → `.cache/stems/<track>/vNNN/` |
+| 10 | `pipeline_helpers.py report`: `report.html`, charts, render stems, `stem_comparison.json`, `iterations.json`. A missing or failed report is an error |
 
-### Command Line
+### Modes
+
+- **sample-instrument** plays pitched instruments cut from the track's own bass and melodic stems, one grain per
+  transcribed note, together with the extracted drum kit. Notes stay editable (`note(...)` bar arrays). Only the
+  sound source comes from the track.
+- **synth** emits no `samples()` call at all. Bass, lead and drums come from the genre palette in
+  `sound_selector.py`. A synth-only lead fit (`lead_synth.py`) can replace the palette lead with a fitted
+  oscillator. The fit is kept only when it scores better.
+
+The generator for both modes is `scripts/python/generate_dynamic_strudel.py`. It writes a `// generation_mode:`
+header and validates its own output.
+
+## Scoring and the gate
+
+`scripts/python/compare_audio.py` compares a render to the original instrumental:
+
+- `static_similarity` is time-averaged: frequency balance 40% (MAE per band, penalty when any band is more than
+  15% off), MFCC 20%, energy 15%, brightness 15%, tempo 5%, chroma 5%.
+- `temporal_similarity` is time-aligned. The render is aligned within one bar by onset-envelope
+  cross-correlation. Then the mean of frame-wise chroma correlation, log-mel correlation, onset F1 (±50 ms) and
+  RMS-envelope correlation.
+- `overall_similarity = 0.5 × static + 0.5 × temporal`. `section_aware_similarity` applies the same 50/50 split
+  per window.
+- `--control <another same-genre original>` scores a different song against the same original and gives
+  `margin_over_chance`. The time-averaged score alone could not tell the right song from a different one.
+
+`eval/gate.py <comparison.json> --genre <g> --mode <m>` passes when all of these hold:
+
+- overall ≥ the mode floor
+- section-aware ≥ the mode section floor
+- `margin_over_chance` ≥ `min_margin_over_chance` (0.02)
+- no band is off by more than `max_worst_band_diff` (0.30)
+
+Genres without a mode entry fall back to the genre-wide tables, which are on the old static scale.
+`scripts/python/tests/test_similarity_gate.py` asserts the reference tracks against the floors. Comparisons that
+are missing locally are skipped. Floors are only raised.
+
+The reference side of a compare (the original's features and the control's score) is cached in
+`.cache/compare-features/` (`compare_cache.py`, keyed on file content, analysis parameters and code version). A warm
+compare skips that work.
+
+## Calibration (`scripts/auto-calibrate.sh`)
+
+The loop runs generate → render → compare → `calibrate_dynamic.py` → repeat. Each knob step is a damped,
+bounded correction of a measured ratio. `calibrate_loop.py` handles loop control: a step that is worse than the
+best beyond `calibration_noise` (0.005) is reverted. BEST prefers a gate-passing run, then the largest minimum margin to the gate
+floors. The loop stops after a set number of steps without improvement, or at `--iters`.
+
+Each iteration also renders some voice groups on their own:
+
+- **Bass solo** (`bass_solo.py`) sets the bass level from the bass voice alone against `bass.wav`, not from mix
+  shares that the kick also fills.
+- **Melodic solo** (`melodic_solo.py`, sample-instrument only) sets lead level and low-pass from LEAD+CHORDS
+  against `melodic.wav`.
+- The mix and solo renders of one iteration run in parallel. `render_jobs.py` sizes the number of jobs from CPU
+  cores and free memory.
+
+Trials and stages after the loop picks BEST:
+
+- **Bass-shape trial** (`--bass-shape stem|off`) is recorded per track and code version.
+- **Synth lead fit** runs in synth mode only.
+- **Loudness stage** (`mix_dynamics.py`): the score is level-invariant, so `--master-gain` is moved onto the
+  instrumental's RMS. The result is kept only if level and crest match and the score holds.
+- **Master-bus stage** runs only when the engine bundle defines `setMasterLimiter` / `setMasterCompressor`
+  (`renderer.py master-bus`; npm `@strudel/web` 1.3.0 does not).
+
+The calibration memory lives in ClickHouse (`calibration_memory.py`, table `midi_grep.calibration_steps`). It
+supplies warm starts from this track or the nearest same-genre track, learned step sizes, and records of every
+step, BEST and promoted version. `--no-memory` or `AC_MEM=off` turns it off. A memory failure never stops a run.
+
+Switches: `--no-mix-dynamics`, `--no-shape-trial`, `--no-lead-fit`, `AC_BSOLO=off`, `AC_MSOLO=off`.
+
+## Renderer
+
+The default is `scripts/node/src/render-strudel-offline.ts`. It runs Strudel's own `renderPatternAudio` on an
+`OfflineAudioContext` (pinned `@strudel/web` 1.3.0 + `@strudel/soundfonts` 1.2.6, headless Chromium). That is the
+real superdough engine, not an emulation.
 
 ```bash
-# Basic extraction from YouTube
-./scripts/midi-grep.sh extract --url "https://youtu.be/VIDEO_ID"
-
-# With options
-./scripts/midi-grep.sh extract \
-  --url "https://youtu.be/VIDEO_ID" \
-  --quantize 8 \
-  --output riff.strudel \
-  --midi piano.mid
-
-# From local file
-./scripts/midi-grep.sh extract --file track.wav
-
-# Copy to clipboard (macOS)
-./scripts/midi-grep.sh extract --url "..." --copy
+node scripts/node/dist/render-strudel-offline.js piece.strudel -o out.wav -d 150
 ```
 
-### CLI Options
+- **Chunked rendering.** The piece renders in whole-cycle chunks, each in a fresh page. A discarded pre-roll
+  carries ringing tails, `cut` chokes and ducking across chunk boundaries. Polyphony is 4096.
+- **Deterministic** (`determinism.ts`). It seeds `Math.random` and the worklet PRNGs, waits for the reverb IR, and
+  schedules ducking on the AudioParam timeline. Two renders differ by at most 1 LSB.
+- **Local sample cache** (`sample-cache.ts`, `.cache/render-samples/`). It revalidates entries with conditional
+  GETs after a TTL and serves the cached copy when the upstream cannot be reached.
+- **Hang watchdog.** A page call that makes no progress for longer than its audio length predicts is killed and
+  retried.
+- **Fails loudly.** An unloaded sound, silence, a frame or onset count mismatch, or a truncated tail fails the
+  render. The WAV is written only after every check passes.
 
-| Option | Short | Description |
-|--------|-------|-------------|
-| `--url` | `-u` | YouTube URL to extract from |
-| `--file` | `-f` | Local audio file (WAV/MP3) |
-| `--output` | `-o` | Output file for Strudel code |
-| `--quantize` | `-q` | Quantization: 4, 8, or 16 (default: 16) |
-| `--midi` | `-m` | Also save cleaned MIDI file |
-| `--copy` | `-c` | Copy result to clipboard |
-| `--verbose` | `-v` | Show verbose output |
-| `--render` | - | Render audio to WAV (default: `auto` saves to cache, `none` to disable). **Always outputs 3 stems** |
-| `--quality` | - | Stem separation quality: `fast`, `normal` (default), `high`, `best` |
-| `--chords` | - | Use chord-based generation (better for electronic/funk) |
-| `--no-cache` | - | Skip stem cache, force fresh extraction |
-| `--drums` | - | Include drum patterns (default: on) |
-| `--drums-only` | - | Extract only drums (skip melodic processing) |
-| `--drum-kit` | - | Drum kit: tr808, tr909, linn, acoustic, lofi |
-| `--style` | - | Sound style (auto, piano, synth, electronic, house, etc.) |
-| `--brazilian-funk` | - | Force Brazilian funk mode (auto-detected normally) |
-| `--genre` | - | Manual genre override: `brazilian_funk`, `brazilian_phonk`, `retro_wave`, `synthwave`, `trance`, `house`, `lofi`, `jazz` |
-| `--deep-genre` | `true` | Use deep learning (CLAP) for genre detection (skipped when `--genre` is specified) |
-| `--iterate` | `20` | AI-driven improvement iterations (default: 20; the eval gate may stop early once the genre floor is cleared) |
-| `--target-similarity` | `0.99` | Target similarity score to stop iteration (default: 0.99, i.e. run all iterations unless the eval gate stops early) |
-| `--ollama` | `true` | Use Ollama (free local LLM) for AI improvement |
-| `--ollama-model` | `midi-grep-strudel-mistral` | Ollama model to use (see Ollama Setup in CLAUDE.md for building it) |
+`scripts/python/renderer.py` is the one switch (`MIDIGREP_RENDERER=offline|blackhole`). The shell drivers, the
+Python tools and the `loop` MCP server all go through it.
 
-### Generator flags (Python, spec 003)
+The BlackHole recorder (`record-strudel-blackhole.ts`) records live playback from `strudel.dygy.app/embed` and is
+kept as a cross-check only. **Known defect:** its raw capture loses about 12% of the samples, and the rate
+correction lowers every pitch by about 2.3–2.7 semitones. It needs BlackHole + a selected Multi-Output Device and
+renders one job at a time.
 
-The editable generator `scripts/python/generate_dynamic_strudel.py` (driven by `scripts/auto-calibrate.sh`) takes:
+## Outputs
 
-| Flag | Default | Description |
-|------|---------|-------------|
-| `--mode` | `sample-instrument` | `sample-instrument` plays your note arrays on stem-derived multisamples; `synth` uses genre-palette synth sounds and no `samples()` |
-| `--vocal-mode` | `instrument` | `instrument` = transcribed `let vocal` on the `<prefix>_vocal` multisample, `chops` = onset chops `let vox`, `texture` = the old full-stem loop (allowed only under ≥2 editable voices, tagged `// texture`), `none` |
-| `--cal-vocal` | `1.0` | Vocal level knob set by `calibrate_dynamic.py` from the measured render |
+```
+.cache/stems/<track>/
+├── original.wav, instrumental.wav, melodic.wav, bass.wav, drums.wav, vocals.wav, metadata.json
+├── sample_pack/            # MIDI, drum bands, one-shots, pitched samples, instruments/samples.json + verification.json
+├── .pipeline/              # per-mode calibration workdirs (best.strudel, best.wav, best.cmp.json, iters.tsv, gate.txt, result.json)
+└── vNNN/                   # one promoted piece
+    ├── output.strudel      # the editable code
+    ├── render.wav, comparison.json, metadata.json, env_correction.json
+    └── report.html, comparison.png, chart_*.png, render_{melodic,drums,bass}.mp3, stem_comparison.json, iterations.json
+```
 
-Every output carries a `// generation_mode:` header and is checked by `scripts/python/editability_check.py`; replayed audio is rejected before any similarity is computed.
+The report stems come from the renderer with one voice group sounding (`solo_stems.py`). Use
+`--render-stems demucs` to run Demucs on the render instead. `--no-iteration-stems` skips Demucs on each
+calibration iteration. The report embeds mp3 copies of the audio.
 
-### Default Analysis Features
+## Environment variables
 
-All analysis features are **enabled by default**:
+| Variable | Read by | Effect |
+|----------|---------|--------|
+| `MIDIGREP_RENDERER` | `renderer.py` | `offline` (default) or `blackhole` |
+| `MIDIGREP_STRUDEL_BUNDLE` | `renderer.py`, offline renderer | Path to another `@strudel/web` `dist/index.js` |
+| `MIDIGREP_RENDER_JOBS` | `render_jobs.py` | Concurrent renders (overrides the derivation; invalid = error) |
+| `MIDIGREP_RENDER_RSS_MB`, `MIDIGREP_RENDER_CORES` | `render_jobs.py` | Replace the measured per-render memory / CPU footprint |
+| `MIDIGREP_RENDER_SEED` | offline renderer | Seed for deterministic renders (default 1) |
+| `MIDIGREP_RENDER_DETERMINISTIC` | offline renderer | `0` = stock, unseeded engine (A/B only) |
+| `MIDIGREP_RENDER_SAMPLE_CACHE` | offline renderer | `0` bypasses the sample cache |
+| `MIDIGREP_RENDER_SAMPLE_CACHE_DIR` | offline renderer | Cache location (default `.cache/render-samples`) |
+| `MIDIGREP_RENDER_SAMPLE_CACHE_TTL_S` | `sample-cache.ts` | Seconds before revalidation (default 600) |
+| `MIDIGREP_RENDER_STALL_S` | offline renderer | Overrides the derived hang-watchdog limit |
+| `MIDIGREP_RENDER_NET_WAIT_S` | offline renderer | Total seconds to wait out a network outage (default 1800, `0` = never) |
+| `MIDIGREP_RENDER_TEST_HANG` | offline renderer | Test seam: `chunk:N` hangs chunk N's first attempt |
+| `MIDIGREP_CAPTURE` | BlackHole recorder | `wallclock` restores the old capture path |
+| `MIDIGREP_COMPARE_CACHE` | `compare_cache.py` | `0` bypasses the compare reference cache |
+| `MIDIGREP_COMPARE_CACHE_DIR` | `compare_cache.py` | Cache location (default `.cache/compare-features`) |
+| `MIDIGREP_CLICKHOUSE_DB` | `clickhouse_store.py` | ClickHouse data directory (default `.clickhouse/db`) |
+| `MIDIGREP_YTDLP` | `internal/audio/youtube.go` | yt-dlp binary path |
+| `MIDIGREP_TARGETED_ITER` | `ai_improver.py` | `1` = job-based targeted iteration in the legacy LLM loop |
+| `MIDIGREP_TEST_RENDERER` | Node determinism test | Renderer script under test |
 
-- **Stem Rendering**: Outputs 3 separate stems (`render_bass.wav`, `render_drums.wav`, `render_melodic.wav`)
-- **Per-Stem Comparison**: Generates charts comparing each rendered stem vs original
-- **Overall Comparison**: Combined frequency/MFCC/chroma comparison chart
-- **AI Improvement**: 20 iterations by default, gated by the genre-aware eval floor in `eval/thresholds.yaml`
-- **Iteration Stem Separation**: Batch Demucs on each iteration render → per-iteration melodic/drums/bass stems
-- **HTML Report**: Audio studio with Solo/Mute controls, per-iteration stem tracks, A/B comparison, shimmer loading, waveforms
+`auto-calibrate.sh` also reads `AC_*` variables, mostly test stubs. See the top of the script.
 
-### AI-Driven Code Improvement
+## Other entry points
 
-MIDI-grep can iteratively improve Strudel code using AI analysis:
+- **`midi-grep extract`**: the original one-shot path. It runs stem separation and analysis, then LLM Strudel
+  codegen (`--codegen orchestrated`, default, or `single`; Ollama by default, `--ollama=false` = Claude API), then
+  an optional `--iterate N` LLM improvement loop (`ai_improver.py`, default 20 iterations,
+  `--target-similarity 0.99`) gated by `eval/`. The editable pipeline uses it only for stage 1. Run
+  `./bin/midi-grep extract --help` for its flags (`--chords`, `--genre`, `--style`, `--drums-only`, `--quality`,
+  `--render`, `--blackhole`, …).
+- **`midi-grep generative`** (`gen`, `rave`): `train <audio> --mode granular|rave [--midi notes.mid]`, `search`,
+  `list`, `process`, `serve --port 5555`.
+- **`midi-grep report <cache-dir> [--version N]`**: rebuild an HTML report with the Go generator.
+- **`midi-grep serve --port 8080`**: the HTMX web UI. Known defect: its job runner (`internal/server/jobs.go`) still calls
+  `ai_code_generator.py`, which was deleted.
+- **`scripts/sample-pipeline.sh`**: the earlier sample-pack driver (`--mode loops|instrument|hybrid`). Its
+  `loops` output replays per-bar audio and is not a valid deliverable under `values.md`.
+- **`loop` MCP server** (`mcp_servers/loop/server.py`, registered in `.mcp.json`): `render_strudel`,
+  `compare_render`, `verify_strudel` (editability → render → compare → gate), `eval_gate`.
+
+## Testing
 
 ```bash
-# Run 5 iterations of AI improvement (uses Ollama by default - free & local)
-./bin/midi-grep extract --url "..." --iterate 5
-
-# Target 75% similarity, max 10 iterations
-./bin/midi-grep extract --url "..." --iterate 10 --target-similarity 0.75
-
-# Use a different Ollama model
-./bin/midi-grep extract --url "..." --iterate 5 --ollama-model llama3.1:8b   # fast smoke run; default is midi-grep-strudel-mistral
+go test ./...
+cd scripts/python && .venv/bin/python -m pytest -q tests test_*.py
+cd scripts/node && npm test
 ```
 
-**How it works:**
-1. Render initial Strudel code to WAV
-2. Compare against original audio (MFCC, chroma, frequency bands)
-3. **Genre Sound RAG**: Inject ~15 genre-appropriate sounds into LLM prompt (not the full 196-sound catalog)
-4. LLM analyzes gaps and suggests changes using only valid genre sounds
-5. Apply changes and repeat until target reached
-6. Batch stem separation: Demucs splits each iteration render into melodic/drums/bass
-7. Store all runs in ClickHouse for learning
-8. Generate report with per-iteration stem tracks (mute buttons, shimmer loading)
-
-**Ollama Setup (one-time, free):**
-```bash
-brew install ollama
-ollama serve
-ollama pull mistral-small && ollama create midi-grep-strudel-mistral -f Modelfile.mistral   # default model (~13GB)
-ollama pull llama3.1:8b   # optional fast smoke-run model (4.9GB)
-```
-
-**ClickHouse Learning Storage:**
-
-All improvement runs are stored in ClickHouse for incremental learning:
-- `midi_grep.runs` - Every render attempt with similarity scores
-- `midi_grep.knowledge` - Learned parameter improvements that transfer to future tracks
-
-ClickHouse Local is auto-downloaded and requires no setup. Data stored in `.clickhouse/db/`.
-
-```bash
-# Query your improvement history
-./bin/clickhouse local --path .clickhouse/db \
-  --query "SELECT track_hash, version, similarity_overall FROM midi_grep.runs ORDER BY created_at DESC LIMIT 5"
-```
-
-### Web Interface
-
-```bash
-./scripts/midi-grep.sh serve --port 8080
-```
-
-Open http://localhost:8080 in your browser:
-- Drag & drop audio files
-- Paste YouTube URLs
-- Real-time progress updates
-- Copy Strudel code with one click
-
-### Direct Binary Usage
-
-```bash
-# Build
-make build
-
-# CLI
-./bin/midi-grep extract --input track.wav
-./bin/midi-grep extract --url "https://youtu.be/..."
-./bin/midi-grep serve --port 8080
-
-# Help
-./bin/midi-grep --help
-./bin/midi-grep extract --help
-```
-
-## Example Output
-
-### Default Format (Bar Arrays + Effect Functions)
-
-The default output uses bar arrays for easy mixing and matching:
-
-```javascript
-// MIDI-grep output
-// BPM: 136, Key: C# minor
-// Notes: 497 (bass: 17, mid: 371, high: 109)
-// Drums: 287 hits (bd: 72, sd: 78, hh: 5)
-// Kit: tr808
-// Style: house
-
-setcps(136/60/4)
-
-// Bar arrays - mix & match freely
-let bass = [
-  "cs2 ~*7 cs2",
-  "~*6 cs2",
-  "~*7 cs2"
-]
-
-let mid = [
-  "cs4 ~*3 e4 ~*2 cs4",
-  "~*4 cs4 ~*2 ds4",
-  "cs4 ~*3 e4"
-]
-
-let drums = [
-  "bd ~ sd ~ bd sd ~ ~",
-  "bd ~ sd ~ bd ~ sd bd",
-  "~ oh ~ sd ~ oh"
-]
-
-// Effects (applied at playback)
-let bassFx = p => p.sound("supersaw").lpf(800).room(0.12)
-let midFx = p => p.sound("gm_pad_poly").lpf(4000).room(0.21)
-let drumsFx = p => p.bank("RolandTR808").room(0.15)
-
-// Play all
-$: stack(
-  bassFx(cat(...bass.map(b => note(b)))),
-  midFx(cat(...mid.map(b => note(b)))),
-  drumsFx(cat(...drums.map(b => s(b))))
-)
-
-// Mix & match:
-// $: bassFx(note(bass[0]))
-// $: cat(...bass.slice(0,4).map(b => note(b)))
-```
-
-### Brazilian Funk/Phonk (auto-detected)
-
-When the tool detects Brazilian funk characteristics (BPM 125-155, vocal chop transcription patterns, low bass content), it automatically switches to template-based generation:
-
-```javascript
-// MIDI-grep output (Brazilian Funk mode)
-// BPM: 136, Key: C# minor
-// Genre: Brazilian Funk / Phonk
-// Pattern: Tamborzão
-
-setcps(136/60/4)
-
-// Tamborzão drum pattern (2 bars)
-let tamborzao = `
-  bd ~ ~ bd ~ ~ bd ~ | ~ bd ~ ~ bd ~ ~ ~
-`
-
-let snare = `
-  ~ ~ sd ~ ~ ~ sd ~ | ~ ~ sd ~ ~ ~ sd ~
-`
-
-let hats = `
-  hh hh hh hh hh hh hh hh | hh hh oh hh hh hh oh hh
-`
-
-// 808 Bass (follows kick pattern)
-let bassPattern = `
-  c#1 ~ ~ c#1 ~ ~ c#1 ~ | ~ c#1 ~ ~ g#1 ~ ~ ~
-`
-
-// Synth stab (phonk style)
-let stab = `
-  [c#4,e4,g#4] ~ ~ ~ [c#4,e4,g#4] ~ ~ ~ | ~ ~ [c#4,e4,g#4] ~ ~ ~ ~ ~
-`
-
-// Effects
-let drumFx = p => p.bank("RolandTR808").room(0.1).gain(1.0)
-let bassFx = p => p.sound("sawtooth")
-    .lpf(200).gain(1.2).distort(0.3)
-    .attack(0.001).decay(0.3).sustain(0.2).release(0.1)
-let stabFx = p => p.sound("square")
-    .lpf(2000).gain(0.6).distort(0.2)
-    .attack(0.01).decay(0.1).sustain(0.3).release(0.05)
-    .room(0.2)
-
-// Play all
-$: stack(
-  drumFx(s(tamborzao)),
-  drumFx(s(snare)),
-  drumFx(s(hats).gain(0.6)),
-  bassFx(note(bassPattern)),
-  stabFx(note(stab))
-)
-```
-
-### Jazz Style (with swing, perlin LFO, vibrato)
-```javascript
-// MIDI-grep output
-// BPM: 89, Key: E minor
-// Notes: 48 (bass: 12, mid: 28, high: 8)
-// Style: jazz
-// Duration: 32.0 beats
-// Sections: 0:00 intro | 0:08 main
-
-setcps(89/60/4)
-
-$: stack(
-  // bass (12 notes)
-  note("e2 ~ b2 ~ | e2 g2 ~ b2")
-    .sound("gm_acoustic_bass")
-    .velocity("0.75 ~ 0.68 ~ | 0.82 0.60 ~ 0.70")
-    .gain(1.20)
-    .pan(0.5).hpf(50).lpf(800).vib(3.0).vibmod(0.08).room(0.20).size(0.30)
-    .swing(0.10),
-
-  // mid (28 notes)
-  note("[e4,g4] [b3,d4] fs4 [a3,cs4]")
-    .sound("gm_epiano1")
-    .velocity("0.65 0.72 0.80 0.58")
-    .pan(perlin.range(0.44,0.56).slow(4)).hpf(200).lpf(4000).vib(3.0).vibmod(0.08).room(0.35).size(0.50)
-    .swing(0.10),
-
-  // high (8 notes)
-  note("b5 ~ ~ e5 | fs5 ~ gs5 ~")
-    .sound("gm_vibraphone")
-    .velocity("0.55 ~ ~ 0.62 | 0.70 ~ 0.65 ~")
-    .gain(0.80)
-    .pan(perlin.range(0.38,0.62).slow(3)).hpf(400).lpf(10000).vib(3.0).vibmod(0.08).room(0.40).size(0.60).delay(0.15).delaytime(0.375).delayfeedback(0.30)
-    .swing(0.10)
-)
-```
-
-### Lofi Style (with bitcrush, coarse, echo, superimpose, degradeBy)
-```javascript
-// Style: lofi
-$: stack(
-  note("c3 ~ g2 ~ | c3 e3 ~ g2")
-    .sound("gm_electric_bass_finger")
-    .velocity("0.70 ~ 0.65 ~")
-    .pan(0.5).hpf(50).lpf(800).clip(1.10).crush(10).coarse(4).room(0.18).size(0.27).echo(2,0.125,0.40)
-    .superimpose(add(0.03))
-    .swing(0.05).degradeBy(0.05),
-  // ...
-)
-```
-
-### Synth Style (with FM synthesis, phaser, envelope, off, superimpose)
-```javascript
-// Style: synth
-$: stack(
-  note("c3 ~ g3 ~ | c3 e3 ~ g3")
-    .sound("gm_synth_bass_1")
-    .velocity("0.75 ~ 0.70 ~")
-    .gain(1.30)
-    .pan(saw.range(0.43,0.57).slow(4)).hpf(50).lpf(800)
-    .attack(0.003).decay(0.08).sustain(0.90).release(0.05)
-    .phaser(0.50).phaserdepth(0.30).vib(4.0).vibmod(0.10)
-    .fm(1.5).fmh(1.0).fmdecay(0.30).fmsustain(0.50)
-    .room(0.16).size(0.24).echo(2,0.125,0.40)
-    .superimpose(add(0.03))
-    .off(0.125, add(12)),
-  // ...
-)
-```
-
-### Raw Style (pure oscillators with FM and filter envelope)
-```javascript
-// Style: raw - using Strudel's built-in oscillators
-$: stack(
-  note("c2 ~ g2 ~ | c2 e2 ~ g2")
-    .sound("sawtooth")
-    .velocity("0.80 ~ 0.75 ~")
-    .gain(0.80)
-    .pan(0.5)
-    .hpf(50)
-    .lpf(800)
-    .lpattack(0.010)
-    .lpdecay(0.20)
-    .lpsustain(0.50)
-    .lprelease(0.15)
-    .lpenv(3000)
-    .attack(0.003)
-    .decay(0.05)
-    .sustain(0.70)
-    .release(0.10)
-    .phaser(0.60)
-    .phaserdepth(0.40)
-    .fm(2.0)
-    .fmh(1.5)
-    .room(0.10)
-    .size(0.15)
-    .superimpose(add(0.03))
-    .off(0.125, add(12)),
-
-  note("c4 e4 g4 b4")
-    .sound("square")
-    .velocity("0.65 0.70 0.75 0.68")
-    .gain(0.60)
-    .pan(saw.range(0.40,0.60).slow(4))
-    .lpf(4000)
-    .attack(0.005)
-    .decay(0.10)
-    .sustain(0.70)
-    .release(0.20)
-    .room(0.25)
-    .size(0.35),
-
-  note("c5 ~ e5 g5")
-    .sound("triangle")
-    .velocity("0.55 ~ 0.60 0.58")
-    .gain(0.50)
-    .pan(saw.range(0.30,0.70).slow(3))
-    .lpf(8000)
-    .room(0.30)
-    .size(0.40)
-    .delay(0.20)
-    .delaytime(0.375)
-    .delayfeedback(0.35)
-)
-```
-
-### Chiptune Style (8-bit retro with crush and coarse)
-```javascript
-// Style: chiptune - 8-bit video game aesthetic
-$: stack(
-  note("c3 c3 g2 g2 | a2 a2 e2 e2")
-    .sound("square")
-    .velocity("0.70 0.65 0.70 0.65")
-    .gain(0.70)
-    .pan(0.5)
-    .attack(0.001)
-    .decay(0.05)
-    .sustain(0.60)
-    .release(0.10)
-    .clip(0.70)
-    .crush(8)
-    .coarse(8)
-    .room(0.09)
-    .size(0.14)
-    .iter(2),
-
-  note("e4 g4 c5 g4 | a4 c5 e5 c5")
-    .sound("square")
-    .velocity("0.50 0.55 0.60 0.55")
-    .gain(0.50)
-    .crush(8)
-    .coarse(8)
-    .room(0.15)
-    .size(0.21)
-    .echo(3, 0.125, 0.50)
-)
-```
-
-### Ambient Style (sine waves with heavy reverb)
-```javascript
-// Style: ambient - atmospheric pads
-$: stack(
-  note("c2 ~ ~ ~ | e2 ~ ~ ~")
-    .sound("sine")
-    .velocity("0.60 ~ ~ ~")
-    .gain(1.00)
-    .pan(0.5)
-    .attack(0.50)
-    .decay(1.00)
-    .sustain(0.80)
-    .release(2.00)
-    .vib(2.0)
-    .vibmod(0.05)
-    .clip(2.00)
-    .tremolo(16.0)
-    .tremolodepth(0.25)
-    .room(0.60)
-    .size(0.78)
-    .superimpose(add(0.03))
-    .off(0.125, add(12)),
-
-  note("[c4,e4,g4] ~ ~ [d4,f4,a4]")
-    .sound("triangle")
-    .velocity("0.45 ~ ~ 0.50")
-    .gain(0.70)
-    .pan(sine.range(0.30,0.70).slow(8))
-    .attack(0.50)
-    .decay(1.00)
-    .sustain(0.80)
-    .release(2.00)
-    .clip(2.00)
-    .room(0.65)
-    .size(0.84)
-    .delay(0.30)
-    .delaytime(0.500)
-    .delayfeedback(0.45)
-)
-```
-
-Paste this into [Strudel](https://strudel.dygy.app/) and press Ctrl+Enter to play!
-
-## How It Works
-
-1. **Input**: Audio file or YouTube URL (downloaded via yt-dlp)
-2. **Cache Check**: Skip re-processing if stems already cached
-3. **Stem Separation**: Demucs AI model extracts melodic, bass, drums, vocals stems
-4. **Analysis**: librosa detects BPM and musical key
-5. **Genre Detection**: Auto-detect Brazilian funk/phonk based on audio characteristics
-6. **Transcription**: Basic Pitch converts melodic audio to MIDI
-7. **Drum Detection**: Onset detection extracts kick, snare, hi-hat patterns
-8. **Cleanup**: Quantization, velocity filtering, noise removal
-9. **Loop Detection**: Identifies repeating patterns with confidence scoring
-10. **Generation**: Notes + drums converted to Strudel bar arrays with effect functions
-11. **Caching**: Save versioned outputs for iteration
-12. **Audio Rendering**: Optionally synthesize WAV preview
-
-## Audio Rendering & AI Analysis
-
-Generate a WAV preview of the Strudel patterns without opening a browser:
-
-```bash
-# Render to cache directory (recommended)
-./bin/midi-grep extract --url "..." --render auto
-
-# Render to specific file
-./bin/midi-grep extract --url "..." --render output.wav
-```
-
-### BlackHole Recording (RECOMMENDED - 100% Accurate)
-
-For perfect audio reproduction, record REAL Strudel playback using BlackHole virtual audio device:
-
-```bash
-# One-time setup
-brew install blackhole-2ch  # Requires reboot
-
-# Record Strudel playback (runs in background, no UI disturbance)
-node scripts/node/dist/record-strudel-blackhole.js input.strudel -o output.wav -d 30
-```
-
-This approach:
-- Uses the **real Strudel engine** (not emulation)
-- **100% accurate** sound reproduction
-- Works with all Strudel features (samples, effects, etc.)
-- No endless gain/filter tuning needed
-- **Runs invisibly** - browser window hidden offscreen, doesn't steal focus
-- **Automatic audio routing** via Web Audio API `setSinkId()`
-
-**How it works:**
-1. Starts ffmpeg recording from BlackHole device
-2. Opens strudel.dygy.app/embed in Puppeteer (window hidden at -32000,-32000)
-3. Grants audio permissions, finds BlackHole device ID
-4. Inserts code via CodeMirror dispatch API
-5. Clicks Play, routes audio to BlackHole via `getAudioContext().setSinkId()`
-6. Waits for samples to load, records for specified duration
-7. Stops playback, closes browser
-
-**Browser runs invisibly:**
-- Position: `-32000,-32000` (far offscreen)
-- Size: `1x1` pixels
-- AppleScript hides Chromium process
-- Background throttling disabled
-
-### Node.js Synthesis Engine — removed (Jun 2026)
-
-The offline TypeScript synthesizer (`render-strudel-node.ts`) was deleted. It emulated Strudel
-sounds and scored ~16% against the real engine, so it could never be trusted as a gate. The
-BlackHole recorder above is now the only render path. `scripts/node` still needs
-`npm install && npm run build` (puppeteer + tsc) before the recorder can run.
-
-### Python Synthesis Engine (`render_audio.py`)
-
-Fallback renderer for AI-driven iterative improvement:
-- **Kick drums**: Pitch envelope with distortion (808 style)
-- **Snare**: Body tone + high-passed noise
-- **Hi-hats**: Filtered noise with decay envelope
-- **Bass**: Sawtooth + sub-octave, low-pass filtered
-- **Vocal chops**: Square wave with fast attack
-- **Chord stabs**: Filtered sawtooth
-- **Lead**: Triangle wave with vibrato
-
-Output: Stereo 44.1kHz 16-bit WAV.
-
-### AI-Driven Mix Parameters (`audio_to_strudel_params.py`)
-
-Analyzes the original audio to suggest optimal Strudel effect parameters:
-
-- **Spectral analysis**: Determines filter cutoffs, brightness
-- **Dynamics analysis**: Suggests compression, gain staging
-- **Timbre matching**: Recommends distortion, FM synthesis amounts
-- **Spatial analysis**: Determines reverb size, delay times
-- **Envelope detection**: Suggests ADSR values
-
-The analysis feeds back into the renderer for better mix balance.
-
-### Audio Comparison (`compare_audio.py`)
-
-Compares rendered output against original stems:
-
-```
-[7/7] Comparing rendered audio with original...
-```
-
-Metrics computed:
-- **Spectral similarity**: Centroid, bandwidth, rolloff comparison
-- **Rhythmic similarity**: Onset alignment, tempo consistency
-- **Timbral similarity**: MFCC distance, spectral flatness
-- **Overall score**: Weighted combination (0-100%)
-
-This feedback loop helps improve the synthesis quality.
-
-## Output Caching
-
-All outputs are cached for iteration and comparison:
-
-```
-.cache/stems/yt_VIDEO_ID/
-├── piano.wav              # Separated piano/melodic stem
-├── drums.wav              # Separated drums stem
-├── output_v001.strudel    # Version 1 Strudel code
-├── output_v001.json       # Version 1 metadata (BPM, key, style)
-├── output_v002.strudel    # Version 2 (after re-running)
-├── output_v002.json
-├── output_latest.strudel  # Always points to latest
-├── render_v001.wav        # Rendered audio for v1
-└── render_v002.wav        # Rendered audio for v2
-```
-
-Each run creates a new version, allowing you to:
-- Compare different generations
-- Track improvements over time
-- Iterate on the output without losing previous work
-
-**Metadata stored** (`output_vXXX.json`):
-```json
-{
-  "code": "// MIDI-grep output...",
-  "bpm": 136,
-  "key": "C# minor",
-  "style": "brazilian_funk",
-  "genre": "brazilian_funk",
-  "notes": 497,
-  "drum_hits": 287,
-  "version": 1,
-  "created_at": "2025-02-03T01:24:00Z"
-}
-```
-
-## Project Structure
-
-```
-midi-grep/
-├── cmd/midi-grep/          # CLI entrypoint
-├── internal/
-│   ├── audio/              # File validation, stems, YouTube
-│   ├── analysis/           # BPM & key detection
-│   ├── midi/               # Transcription & cleanup
-│   ├── pipeline/           # Orchestration (calls Python AI for code gen)
-│   ├── server/             # Web interface (HTMX)
-│   ├── cache/              # Stem + output caching
-│   └── report/             # Go HTML report generation
-├── scripts/
-│   ├── midi-grep.sh        # Main CLI wrapper
-│   ├── node/               # BlackHole recorder (TypeScript)
-│   └── python/             # AI + ML scripts (code gen, comparison, LLM)
-├── context/                # AWOS product docs
-├── Makefile
-├── docker-compose.clickhouse.yml   # optional ClickHouse store (app Dockerfile retired Oct 2026)
-└── README.md
-```
-
-## Configuration
-
-### Quantization
-
-Controls note timing precision:
-- `4` = Quarter notes (simplified, loose timing)
-- `8` = Eighth notes (moderate detail)
-- `16` = Sixteenth notes (full detail, default)
-
-### Audio Requirements
-
-- **Formats**: WAV, MP3
-- **Max size**: 100MB
-- **Best results**: Clear piano recordings, minimal background noise
-
-## Docker
-
-**Retired (Oct 2026).** The app `Dockerfile` was removed: it had been broken since Feb 2026
-(Go 1.21 base vs Go 1.25 in `go.mod`, no yt-dlp, Node or Demucs in the image) and a container can
-never run the only render path, which needs the macOS BlackHole virtual audio device. Linux
-buildability is proven by CI (`.github/workflows/ci.yml`) instead. `docker-compose.clickhouse.yml`
-(the optional ClickHouse learning store) still works and is unrelated to the app image.
-
-## Development
-
-```bash
-# Build
-make build
-
-# Run tests
-make test
-
-# Install deps
-make deps
-
-# Start dev server
-make serve
-```
-
-## Tech Stack
-
-- **Backend**: Go 1.25+, Chi router
-- **Frontend**: HTMX, PicoCSS (no JavaScript frameworks)
-- **Audio Processing**:
-  - Demucs (stem separation)
-  - Basic Pitch (audio-to-MIDI)
-  - librosa (analysis)
-- **CLI**: Cobra
-
-## Troubleshooting
-
-### "Demucs failed" or "Spleeter not installed"
-```bash
-./scripts/midi-grep.sh install
-```
-
-### "yt-dlp not found"
-```bash
-brew install yt-dlp
-# or
-pip install yt-dlp
-```
-
-### Python version issues
-```bash
-brew install python@3.11
-```
-
-### Slow processing
-- Stem separation takes 1-2 minutes for a 3-minute track
-- First run downloads ML models (~1GB)
+CI (`.github/workflows/ci.yml`) runs Go build/vet/gofmt/test, the Node build, a lightweight pytest subset and
+hook/JSON checks. Renders and anything that needs ML models run locally.
+
+## No longer present
+
+- The Node.js synthesis renderer `render-strudel-node.ts` was deleted in Jun 2026. It was an emulation and read
+  about 16% against the real engine. Dead references remain in `cmd/midi-grep/main.go`, `synth_profiles.py` and
+  `ai_learning_optimizer.py`.
+- The app `Dockerfile` was retired in Oct 2026. Only `docker-compose.clickhouse.yml` remains.
+- The vocal voice, its instrument and its calibration knob were removed on 2026-10-19.
+- Similarity numbers from before 2026-10-18 are on the old time-averaged scale. Numbers from before the Jun 2026
+  recorder tempo fix were measured on sped-up audio.
+
+## Further docs
+
+- [`CLAUDE.md`](CLAUDE.md): working agreement, principles and lessons per component.
+- [`llms.txt`](llms.txt) / [`llms-full.txt`](llms-full.txt): overview / detailed script reference.
+- [`context/product/architecture.md`](context/product/architecture.md), [`roadmap.md`](context/product/roadmap.md),
+  [`values.md`](context/product/values.md); specs under `context/spec/`.
 
 ## License
 
@@ -1047,8 +304,5 @@ MIT
 
 ## Credits
 
-- [Demucs](https://github.com/facebookresearch/demucs) - Meta's audio source separation
-- [Basic Pitch](https://github.com/spotify/basic-pitch) - Spotify's audio-to-MIDI
-- [librosa](https://librosa.org/) - Audio analysis
-- [Strudel](https://strudel.dygy.app/) - Live coding environment
-- [HTMX](https://htmx.org) - HTML-driven interactivity
+[Demucs](https://github.com/facebookresearch/demucs), [Basic Pitch](https://github.com/spotify/basic-pitch),
+[librosa](https://librosa.org/), [Strudel](https://strudel.cc/), [HTMX](https://htmx.org).

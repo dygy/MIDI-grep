@@ -1,5 +1,10 @@
 # Dynamics & AI Learning - Completed
 
+> **Historical (Feb 2026), partly superseded.** The "BlackHole recording = 100%" claim below did not hold: the capture
+> loses ~12% of samples and lowers every pitch by ~2.3–2.7 semitones. Since 2026-10-19 the default renderer is the
+> offline Strudel render (`scripts/node/src/render-strudel-offline.ts`); BlackHole is a cross-check. Current status:
+> `context/product/roadmap.md` Phase 11.
+
 ## Summary
 
 This roadmap tracked the effort to fix flat audio rendering and add AI-driven iteration. **All major goals achieved.**

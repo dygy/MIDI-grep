@@ -2,6 +2,10 @@
 
 _This roadmap outlines our strategic direction based on customer needs and business goals. It focuses on the "what" and "why," not the technical "how."_
 
+> **Status (2026-10-29):** the current work is **Phase 11** (editable pipeline, honest scoring, generalization).
+> Phases 1–10 describe the original `midi-grep extract` path (LLM codegen, `--iterate`); their similarity numbers are
+> on the pre-2026-10-18 time-averaged scale, many measured on BlackHole renders that were later found pitch-shifted.
+
 ---
 
 ## Phase 1: Core Pipeline (Foundation) ✅ COMPLETE
@@ -417,7 +421,11 @@ _Fixing the core audio quality issues blocking high similarity scores._
   - [x] **Configurable Depth:** per-genre `sidechain.depth` in `synth_profiles.py` (0.5-0.75 for funk/house/techno/dnb; 0 for jazz/lofi/swing) drives `.duckdepth()`
   - [x] **Attack/Release Timing:** `.duckattack(0.15)` (medium) emitted; methods confirmed valid and validator-safe
 
-### ✅ SOLVED: BlackHole Recording (Feb 2026)
+### ✅ SOLVED: BlackHole Recording (Feb 2026), SUPERSEDED 2026-10-19
+
+> **Superseded (PR #20):** the BlackHole capture loses ~12% of samples and its rate relabel lowers every pitch by
+> ~2.3–2.7 semitones, so the "100%" below never held. The default renderer is now the offline Strudel render
+> (`render-strudel-offline.ts`); BlackHole is a `MIDIGREP_RENDERER=blackhole` cross-check. See Phase 11.
 
 **Best approach for 100% audio similarity - record real Strudel playback instead of emulating synthesis.**
 
@@ -498,6 +506,53 @@ _Fixing the core audio quality issues blocking high similarity scores._
   - [ ] **Automated Benchmarks:** Compare different configs
   - [ ] **Regression Tests:** Ensure changes improve similarity
 
+
+---
+
+## Phase 11: Editable Strudel, Honest Scoring, Generalization 🟢 ACTIVE
+
+_The product as it is built now: `scripts/editable-pipeline.sh` (stages 1–10) turns a track into two editable pieces
+(sample-instrument and synth), rendered offline, scored against `instrumental.wav`, gated by `eval/gate.py`. Specs:
+`context/spec/003-editable-strudel-generation/`, `context/spec/004-second-reference-track/`. Current floors and
+measured runs: `eval/thresholds.yaml` `modes:` and `eval/datasets/reference_tracks.yaml`._
+
+### Shipped
+
+- [x] **One-command editable pipeline + second reference track** (PR #15, spec 004)
+- [x] **Per-bar env correction from section windows** (PR #16)
+- [x] **Stage 10: a complete HTML report for every promoted version** (PR #17)
+- [x] **Synth mode gets its own calibration pass** (PR #18)
+- [x] **Time-aligned similarity + beat-a-different-song gate** (PR #19): overall = 0.5 static + 0.5 temporal,
+  `--control` / `margin_over_chance` ≥ 0.02
+- [x] **Note-aligned, pitch-verified instruments; offline renderer default; refined tempo; no vocals** (PR #20)
+- [x] **Temporal alignment could lock one bar off — fixed** (PR #21)
+- [x] **Stem-sample instruments fixed voice by voice** (PR #22): bass/melodic solo levels, drum one-shots, note shape
+- [x] **Calibration memory records again; first-page render retry; synth loop table** (PR #23)
+- [x] **Drums follow the track** (PR #24): kick profile, measured beat phase, render windows keep ducks and long one-shots
+- [x] **Four reference tracks** (PR #25): Dumb Blond Bitches and Automotivo XM join Regime CLT and VAGABUNDO; floors
+  re-derived by the same rule
+- [x] **Deterministic, hang-proof offline renders** (PR #26): seeded engine (`determinism.ts`), hang watchdog, local
+  sample cache; reference renders re-made
+- [x] **Parallel renders per calibration iteration; cached reference side in `compare_audio`** (PR #27):
+  `render_jobs.py`, `compare_cache.py`
+
+### Open
+
+- [ ] **Per-voice grid phase for the lead.** The drums already quantise on their measured beat phase; the lead needs the
+  same, which first needs the onset detector's latency calibrated.
+- [ ] **Genre detection mislabels a retro wave / Polish electro track as brazilian_funk.** "Enter - Nigdy Więcej Wojny"
+  was stamped brazilian_funk (CLAP score 0.484 vs lofi 0.431; on raw similarity it ranked third), so it was gated against
+  brazilian_funk floors and a brazilian_funk control - its sample-instrument 0.834 "FAIL" is not a valid verdict. Fix in
+  progress (`fix/genre-detection`): audio evidence first, a margin rule for uncertain picks, no foreign-genre floors.
+- [ ] **Bass on a constant-level stem** (found on that track): notes end on a 0.3 dB wobble, loops sit in the grain's
+  fade-out, the bass lpf comes from the median over rests; silent / loopless bass samples enter the pack. Fix in progress
+  (`improve/bass-sustain`).
+- [ ] **Mix brightness on "Enter - Nigdy Więcej Wojny"** (centroid 974 Hz vs 1706 Hz in the instrumental).
+- [ ] **Web UI codegen is broken:** `internal/server/jobs.go` still calls the deleted `ai_code_generator.py`.
+- [ ] **Stale comments in code / config headers** still say "BlackHole render" (`eval/thresholds.yaml`,
+  `reference_tracks.yaml`, `auto-calibrate.sh`, `editable-pipeline.sh` "Requires", `mcp_servers/loop/server.py`), and dead
+  `render-strudel-node.js` references remain in `cmd/midi-grep/main.go`, `synth_profiles.py`, `ai_learning_optimizer.py`.
+- [ ] **Modulators `.lfo` / `.env` race mid-render** in the offline renderer.
 
 ---
 
@@ -585,3 +640,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.66 | 2026-02-18 | **Iteration Stems + Shimmer Loading:** Batch Demucs on each iteration render → per-iteration melodic/drums/bass stems in report with mute buttons, shimmer skeleton loading animation |
 | 1.67 | 2026-02-24 | **Genre-Aware Sound RAG:** `retrieve_genre_context()` injects ~15 genre-appropriate sounds into LLM prompts (800→40 tokens), reducing hallucinated sound names. Injected into `ollama_codegen.py` and `ollama_agent.py`. |
 | 1.68 | 2026-06-22 | **Phase 10 batch (4 items):** (1) Concrete gain multipliers in LLM feedback (`_build_band_advice` → "multiply bassFx.gain() by X"); (2) Genre-specific synthesis profiles (`synth_profiles.py`, `analyze_synth_params.py --genre`, plumbed from Go) read by the `dist/` renderer; (3) Sub-bass via profile sub_octave_gain + master.hpf 20Hz + octave-1 prompt bias; (4) Sidechain ducking in generated Strudel (bass `.orbit(2)`, kick `.duckorbit(2).duckdepth().duckattack()`), per-genre depth. |
+| 1.69 | 2026-10-29 | **Phase 11 added:** editable pipeline, rescaled score + different-song gate, offline deterministic renderer, four reference tracks (PRs #15–#27); BlackHole "100%" section marked superseded; open items listed |
