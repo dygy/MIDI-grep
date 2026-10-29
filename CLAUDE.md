@@ -376,6 +376,13 @@ emulating Strudel sounds, ~16% similarity vs the real engine) was deleted. Dead 
   written atomically only after every check passes (a failed render leaves no file); a network outage is waited out with backoff up to `MIDIGREP_RENDER_NET_WAIT_S` (default 1800 s); `samples("url")` rewritten to single quotes (this bundle's transpiler turns "…"
   into mini-notation); crashed pages retried ×3; fails loudly on unloaded sounds, silence, frame/onset
   count mismatch, truncated tails.
+- Speed (2026-10-29): every non-local GET (sample packs, site sample maps, GM soundfonts) is served from an on-disk cache
+  `.cache/render-samples/` (`sample-cache.ts`; puppeteer request interception; keyed by URL, body stored by sha256, atomic
+  renames; fresh for `MIDIGREP_RENDER_SAMPLE_CACHE_TTL_S` = 600 s, then a conditional GET (ETag/Last-Modified) renews or replaces
+  it; an unreachable upstream serves the cached copy, a never-fetched URL still waits out the outage; `MIDIGREP_RENDER_SAMPLE_CACHE=0`
+  bypasses). A hang watchdog replaces the 15-minute protocolTimeout as the detector: a page call with no log line, no sample
+  bytes and no browser CPU for 3x the time its audio length / the observed render speed predicts (floor 10 s,
+  `MIDIGREP_RENDER_STALL_S` overrides) is killed and retried through the crash path (`[STALL]` / `[CRASH] ... page stalled`).
 - Selected everywhere by `MIDIGREP_RENDERER` (default `offline`; `blackhole` = the recorder below) —
   `scripts/python/renderer.py`, the shell drivers, the `loop` MCP server.
 
