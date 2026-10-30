@@ -179,7 +179,7 @@ and is a cross-check only. It has a known pitch defect, described under [Rendere
 
 | Component | Technology | Where it is used |
 |-----------|------------|------------------|
-| **yt-dlp** | Python CLI (in the venv, `requirements.txt`) | `internal/audio/youtube.go`; `MIDIGREP_YTDLP` overrides the binary |
+| **yt-dlp** | Python CLI (in the venv, `requirements.txt`) | `internal/audio/youtube.go`; `MIDIGREP_YTDLP` overrides the binary; `MIDIGREP_YTDLP_COOKIES_FROM_BROWSER` / `MIDIGREP_YTDLP_COOKIES` pass a signed-in session past YouTube's bot check |
 | **ffmpeg** | C binary | Audio conversion and mp3 copies for the report; BlackHole capture |
 | **Demucs** | PyTorch | `separate.py` (run in-process via `demucs.apply`). Installed by `scripts/install-deps.sh`; not listed in `requirements.txt` |
 | **Basic Pitch** | TensorFlow 2.15 + `keras<3` | `transcribe.py` (audio → MIDI) |
@@ -298,7 +298,7 @@ macOS is the reference machine. CI also builds and tests the Go, Node and Python
 - Python **3.11** in `scripts/python/.venv`. `basic-pitch` needs TensorFlow 2.15 + `keras<3`, which do not
   support Python 3.12+.
 - Node + npm for `scripts/node`. Puppeteer's Chromium is used by the renderer.
-- `ffmpeg`, `yt-dlp` (`MIDIGREP_YTDLP` overrides the binary path)
+- `ffmpeg`, `yt-dlp` (`MIDIGREP_YTDLP` overrides the binary path; on "Sign in to confirm you're not a bot" set `MIDIGREP_YTDLP_COOKIES_FROM_BROWSER=chrome`)
 - For R2 hosting (the default for the editable pipeline): `npx wrangler login`, or R2 S3 keys (see
   `scripts/python/upload_r2.py`). Use `--local` to serve the pack on `localhost:5555` instead.
 - Optional: the ClickHouse local binary at `bin/clickhouse` (calibration memory; `.clickhouse/db`).
@@ -488,6 +488,8 @@ calibration iteration. The report embeds mp3 copies of the audio.
 | `MIDIGREP_COMPARE_CACHE_DIR` | `compare_cache.py` | Cache location (default `.cache/compare-features`) |
 | `MIDIGREP_CLICKHOUSE_DB` | `clickhouse_store.py` | ClickHouse data directory (default `.clickhouse/db`) |
 | `MIDIGREP_YTDLP` | `internal/audio/youtube.go` | yt-dlp binary path |
+| `MIDIGREP_YTDLP_COOKIES_FROM_BROWSER` | `internal/audio/youtube.go` | browser whose cookies every yt-dlp call carries (`chrome`, `firefox`, ...); needed when YouTube asks to confirm you're not a bot |
+| `MIDIGREP_YTDLP_COOKIES` | `internal/audio/youtube.go` | Netscape cookies.txt for the same purpose |
 | `MIDIGREP_TARGETED_ITER` | `ai_improver.py` | `1` = job-based targeted iteration in the legacy LLM loop |
 | `MIDIGREP_TEST_RENDERER` | Node determinism test | Renderer script under test |
 

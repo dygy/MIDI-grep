@@ -62,6 +62,37 @@ func ytDlpBinary() string {
 	return "yt-dlp"
 }
 
+// ytDlpAuthArgs returns the cookie flags for every yt-dlp call. YouTube answers some videos (and
+// some networks) with "Sign in to confirm you're not a bot" unless the request carries a signed-in
+// browser's cookies — on 2026-10-30 four of five new tracks failed that way while a fifth downloaded.
+// MIDIGREP_YTDLP_COOKIES_FROM_BROWSER names a browser (chrome, firefox, safari, ...; yt-dlp's
+// --cookies-from-browser syntax), MIDIGREP_YTDLP_COOKIES a Netscape cookies.txt; both may be set.
+func ytDlpAuthArgs() []string {
+	var args []string
+	if b := os.Getenv("MIDIGREP_YTDLP_COOKIES_FROM_BROWSER"); b != "" {
+		args = append(args, "--cookies-from-browser", b)
+	}
+	if f := os.Getenv("MIDIGREP_YTDLP_COOKIES"); f != "" {
+		args = append(args, "--cookies", f)
+	}
+	return args
+}
+
+// ytDlpCommand builds a yt-dlp command with the auth flags ahead of the call's own arguments.
+func ytDlpCommand(ctx context.Context, args ...string) *exec.Cmd {
+	return exec.CommandContext(ctx, ytDlpBinary(), append(ytDlpAuthArgs(), args...)...)
+}
+
+// botCheckError turns YouTube's sign-in wall into an error that says how to get past it, or
+// returns nil when stderr is not that wall. Retrying in another format cannot help here.
+func botCheckError(stderr string) error {
+	if !strings.Contains(stderr, "confirm you") || !strings.Contains(stderr, "not a bot") {
+		return nil
+	}
+	return fmt.Errorf("YouTube wants a signed-in session for this video: set MIDIGREP_YTDLP_COOKIES_FROM_BROWSER=chrome "+
+		"(or another browser you are signed in with) or MIDIGREP_YTDLP_COOKIES=<cookies.txt> (yt-dlp: %s)", strings.TrimSpace(stderr))
+}
+
 // Download downloads audio from a YouTube URL using yt-dlp
 func (d *YouTubeDownloader) Download(ctx context.Context, url, outputDir string) (string, error) {
 	// Check if yt-dlp is installed
@@ -72,7 +103,7 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url, outputDir string)
 	outputPath := filepath.Join(outputDir, "input.%(ext)s")
 
 	// Download best audio and convert to wav
-	cmd := exec.CommandContext(ctx, ytDlpBinary(),
+	cmd := ytDlpCommand(ctx,
 		"--no-playlist",         // Only download single video
 		"--extract-audio",       // Extract audio only
 		"--audio-format", "wav", // Convert to WAV
@@ -88,6 +119,9 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url, outputDir string)
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		if botErr := botCheckError(stderr.String()); botErr != nil {
+			return "", botErr
+		}
 		// Try with mp3 if wav fails
 		return d.downloadAsMp3(ctx, url, outputDir)
 	}
@@ -101,7 +135,7 @@ func (d *YouTubeDownloader) Download(ctx context.Context, url, outputDir string)
 func (d *YouTubeDownloader) downloadAsMp3(ctx context.Context, url, outputDir string) (string, error) {
 	outputPath := filepath.Join(outputDir, "input.%(ext)s")
 
-	cmd := exec.CommandContext(ctx, ytDlpBinary(),
+	cmd := ytDlpCommand(ctx,
 		"--no-playlist",
 		"--extract-audio",
 		"--audio-format", "mp3",
@@ -115,6 +149,9 @@ func (d *YouTubeDownloader) downloadAsMp3(ctx context.Context, url, outputDir st
 	cmd.Stderr = &stderr
 
 	if err := cmd.Run(); err != nil {
+		if botErr := botCheckError(stderr.String()); botErr != nil {
+			return "", botErr
+		}
 		return "", fmt.Errorf("yt-dlp failed: %w (stderr: %s)", err, stderr.String())
 	}
 
@@ -133,7 +170,7 @@ func (d *YouTubeDownloader) checkYtDlp() error {
 
 // GetVideoTitle fetches the video title for display
 func (d *YouTubeDownloader) GetVideoTitle(ctx context.Context, url string) (string, error) {
-	cmd := exec.CommandContext(ctx, ytDlpBinary(),
+	cmd := ytDlpCommand(ctx,
 		"--no-playlist", // Only get title for single video, not entire playlist
 		"--get-title",
 		"--no-warnings",
