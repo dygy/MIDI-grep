@@ -59,6 +59,9 @@ class GateResult:
     mode: str | None = None
     editability: str | None = None
     floor_source: str | None = None
+    # False when the floor is NOT a measured reference floor for this genre+mode (it came from the genre-wide table
+    # or the global default): the pass/fail is then weak evidence, and the message says so.
+    reference_floor: bool | None = None
     # Chance control: overall minus the overall of a DIFFERENT same-genre song scored against the
     # same original (comparison.margin_over_chance). None when the comparison has no control or
     # thresholds.yaml has no `min_margin_over_chance` (legacy files skip the check silently).
@@ -66,6 +69,11 @@ class GateResult:
     chance_passed: bool | None = None
     # True when compare_audio.py could not compute the temporal half (comparison.temporal_failed): the gate FAILS.
     temporal_failed: bool | None = None
+
+
+# Genre keys meaning "no trusted genre" (the detector was uncertain / no label): they get the default floor and
+# are never mistaken for a genre that has references.
+UNREFERENCED_GENRES = frozenset({"unreferenced", "unknown", "uncertain", "none", ""})
 
 
 def load_thresholds(path: str | Path = THRESHOLDS_PATH) -> dict[str, Any]:
@@ -98,17 +106,19 @@ def _mode_block(thresholds: dict[str, Any], mode: str | None) -> dict[str, Any]:
 def resolve_floor(
     genre: str | None, thresholds: dict[str, Any], mode: str | None = None
 ) -> tuple[float, str]:
-    """Return (floor, source) — source is "modes.<mode>" when a per-mode floor exists for
-    the genre, else "genres" (the genre-wide lookup, which itself falls back to `default`)."""
+    """Return (floor, source). source is "modes.<mode>" when a measured per-mode floor exists for the genre,
+    "genres" for the genre-wide table, and "default" when the genre has no entry anywhere (or no trusted genre
+    was given): the global `default`. A genre without a per-mode floor never borrows another genre's."""
     default = float(thresholds.get("default", 0.55))
     key = _norm_key(genre)
-    if key:
+    if key and key not in UNREFERENCED_GENRES:
         mode_genres = _mode_block(thresholds, mode).get("genres") or {}
         if mode_genres.get(key) is not None:
             return float(mode_genres[key]), f"modes.{_norm_key(mode)}"
         genres = thresholds.get("genres", {}) or {}
-        return float(genres.get(key, default)), "genres"
-    return default, "genres"
+        if genres.get(key) is not None:
+            return float(genres[key]), "genres"
+    return default, "default"
 
 
 def floor_for_genre(
@@ -161,12 +171,14 @@ def resolve_section_aware_floor(
     """(floor, source) for the section-aware check; source is "modes.<mode>" or "genres" (the
     genre-wide / default tables), None when no floor is configured at all."""
     key = _norm_key(genre)
-    if key:
+    if key and key not in UNREFERENCED_GENRES:
         mode_sa = _mode_block(thresholds, mode).get("section_aware") or {}
         if mode_sa.get(key) is not None:
             return float(mode_sa[key]), f"modes.{_norm_key(mode)}"
-    floor = section_aware_floor_for_genre(genre, thresholds, None)
-    return floor, ("genres" if floor is not None else None)
+        if key in ((thresholds.get("section_aware", {}) or {}).get("genres", {}) or {}):
+            return section_aware_floor_for_genre(genre, thresholds, None), "genres"
+    floor = section_aware_floor_for_genre(None, thresholds, None)
+    return floor, ("default" if floor is not None else None)
 
 
 def select_scores(
@@ -183,9 +195,9 @@ def select_scores(
     of the section windows' `static` values; none -> skip the check) is compared instead.
     Returns (similarity, section_aware, overall_label, section_label)."""
     label, sa_label = "similarity", "section_aware_similarity"
-    if floor_source == "genres" and comp.get("static_similarity") is not None:
+    if floor_source in ("genres", "default") and comp.get("static_similarity") is not None:
         similarity, label = float(comp["static_similarity"]), "static similarity"
-    if sa_source == "genres" and comp.get("static_similarity") is not None:
+    if sa_source in ("genres", "default") and comp.get("static_similarity") is not None:
         statics = [w["static"] for w in comp.get("section_windows") or [] if w.get("static") is not None]
         section_aware = float(sum(statics) / len(statics)) if statics else None
         sa_label = "static section_aware"
@@ -286,6 +298,7 @@ def evaluate_comparison_data(
             mode=mode,
             editability="fail",
             floor_source=floor_source,
+            reference_floor=floor_source.startswith("modes."),
         )
 
     similarity, worst_frac, section_aware = _read_similarity(data)
@@ -349,6 +362,12 @@ def evaluate_comparison_data(
         msg = f"FAIL {tag} " + "; ".join(reasons)
     if editability:
         msg += f"; editability: {editability}"
+    reference_floor = floor_source.startswith("modes.")
+    if not reference_floor:
+        why = ("genre unverified" if _norm_key(genre) in UNREFERENCED_GENRES or genre is None
+               else f"no measured floor for {g}" + (f"/{mode}" if mode else ""))
+        msg += (f"; NOTE {why}: the {floor_source} floor {floor:.2f} was applied, so this is "
+                f"{'weak evidence' if passed else 'a hint, not a verdict on a reference'}")
     return GateResult(
         passed=passed,
         genre=g,
@@ -362,6 +381,7 @@ def evaluate_comparison_data(
         mode=mode,
         editability=editability,
         floor_source=floor_source,
+        reference_floor=reference_floor,
         margin_over_chance=margin,
         chance_passed=chance_passed,
         temporal_failed=temporal_failed,

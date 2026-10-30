@@ -386,8 +386,7 @@ def select_sounds_for_timbre(profile: TimbreProfile) -> Dict[str, List[str]]:
     """Select appropriate sounds based on timbre analysis."""
 
     # Start with genre palette if available
-    genre = profile.genre_hint.lower().replace(" ", "_").replace("-", "_")
-    base_palette = GENRE_PALETTES.get(genre, GENRE_PALETTES["default"])
+    base_palette = GENRE_PALETTES[palette_key(profile.genre_hint)]
 
     sounds = {
         "drums": list(base_palette["drums"]),
@@ -538,10 +537,27 @@ def analyze_and_suggest(
     return result
 
 
+# Detector / threshold-table genre names that are the SAME sound world as a palette key. Before this map the
+# detector's own labels 'retro_wave' and 'brazilian_phonk' matched no palette and silently got the default one.
+# 'electro'/'electropop' are not a separate palette: the electro-pop-with-synth-leads sound is the synthwave one
+# (a dedicated label measured no better separable from funk by CLAP, see detect_genre_dl.py).
+GENRE_ALIASES = {
+    "retro_wave": "synthwave", "retrowave": "synthwave",
+    "brazilian_phonk": "phonk",
+    "electro": "synthwave", "electropop": "synthwave", "electro_pop": "synthwave",
+}
+
+
+def palette_key(genre) -> str:
+    """The GENRE_PALETTES key a genre name resolves to ('default' when it has no palette)."""
+    key = genre.lower().strip().replace(" ", "_").replace("-", "_") if genre else "default"
+    key = GENRE_ALIASES.get(key, key)
+    return key if key in GENRE_PALETTES else "default"
+
+
 def get_genre_sounds(genre: str) -> Dict:
     """Get sound palette for a specific genre."""
-    genre_key = genre.lower().replace(" ", "_").replace("-", "_")
-    palette = GENRE_PALETTES.get(genre_key, GENRE_PALETTES["default"])
+    palette = GENRE_PALETTES[palette_key(genre)]
 
     return {
         "bass_sound": create_sound_alternation(palette["bass"], variety=0.5),
@@ -569,8 +585,7 @@ _VOICE_LIKE = re.compile(r"voice|choir|vox|ooh|aah", re.I)
 
 
 def _palette_for(genre: str) -> Dict:
-    genre_key = genre.lower().replace(" ", "_").replace("-", "_") if genre else "default"
-    return GENRE_PALETTES.get(genre_key, GENRE_PALETTES["default"])
+    return GENRE_PALETTES[palette_key(genre)]
 
 
 def palette_sounds(genre: str, role: str) -> List[str]:

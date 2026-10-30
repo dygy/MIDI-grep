@@ -140,6 +140,7 @@ def _gate_fields(verdict) -> dict:
         "similarity": round(verdict.similarity, 4),
         "floor": verdict.floor,
         "floor_source": verdict.floor_source,
+        "reference_floor": verdict.reference_floor,
         "worst_band_diff": verdict.worst_band_diff,
         "gate_passed": verdict.passed,
         "message": verdict.message,

@@ -205,17 +205,25 @@ def _refine_track_bpm(track_dir: Path, meta: dict, *, coarse: float) -> None:
     meta["bpm_confidence"] = round(float(r["confidence"]), 4)
 
 
+UNREFERENCED = "unreferenced"   # genre key meaning "no trusted genre": the gate uses its default floor, memory finds no neighbours
+
+
 def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
-                         detector_json: Path | None = None) -> dict:
+                         detector_json: Path | None = None, labels_path: Path | None = None,
+                         embeddings_root: Path | None = None, stems_root: Path | None = None) -> dict:
     """Consolidate the per-track facts the pipeline needs into ``<track>/metadata.json``.
 
     The Go cache writes only title/url/video_id there; bpm/key/style live in the latest
     ``vNNN/metadata.json`` (spec 004 defect #6). This copies them up, adds the audio duration
     (``original.wav``), and records genre provenance: the heuristic ``style`` from the Go run,
     the deep detector's verdict (``detect_genre_dl.py -o`` JSON: detected_genre/confidence/rankings)
-    when given, and an explicit override (logged as such). ``genre`` = override if given, else the
-    detector's genre, else the heuristic style. Nothing here is a per-track constant.
+    when given, and an explicit override (logged as such). ``genre`` precedence (``genre_basis``): ``--genre`` override
+    > the owner's label registry (``eval/datasets/genre_labels.yaml``, certain) > kNN of the track's CLAP embedding
+    against the labelled tracks (``genre_knn.py``) > the CLAP zero-shot verdict > the heuristic style. When the kNN
+    ran and no labelled genre supports the track, the CLAP verdict stays as the palette guess but is marked
+    uncertain / unreferenced. Nothing here is a per-track constant.
     """
+    import genre_knn as GK
     track_dir = Path(track_dir)
     meta_path = track_dir / "metadata.json"
     meta = json.loads(meta_path.read_text()) if meta_path.exists() else {}
@@ -242,36 +250,108 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
         import soundfile as sf
         info = sf.info(str(orig))
         meta["duration"] = round(info.frames / info.samplerate, 2)
+    key = track_dir.name
+    labels = GK.load_labels(labels_path)
+    for stale in ("genre_knn", "genre_label_source", "genre_uncertain", "genre_candidates", "genre_margin_z",
+                  "genre_uncertain_reasons"):
+        meta.pop(stale, None)          # a re-stamp must not inherit another run's evidence
+    embedding = model_id = None
     if detector_json is not None and Path(detector_json).exists():
         det = json.loads(Path(detector_json).read_text())
         meta["genre_detected"] = det.get("detected_genre")
         meta["genre_confidence"] = det.get("confidence")
         mt = det.get("model_type") or "unknown"   # review #7: do not assert CLAP when the heuristic ran
         meta["genre_detector"] = f"detect_genre_dl.py ({mt})"
+        # Old detector JSON has no verdict on its own noise: such a result is NOT trusted as certain.
+        meta["genre_uncertain"] = bool(det.get("uncertain", True))
+        meta["genre_candidates"] = list(det.get("candidates") or [det.get("detected_genre")])
+        meta["genre_margin_z"] = det.get("margin_z")
+        meta["genre_uncertain_reasons"] = list(det.get("uncertain_reasons") or
+                                               ([] if "uncertain" in det else ["detector JSON predates the margin rule"]))
+        if det.get("audio_embedding"):
+            embedding, model_id = det["audio_embedding"], det.get("embedding_model")
+    # kNN against the owner-labelled tracks: only for a track that is neither overridden nor itself labelled.
+    knn = None
+    if not genre_override and key not in labels:
+        if embedding is None or not model_id:
+            knn = {"status": "unavailable", "genre": None, "supported": [], "per_genre": {},
+                   "reasons": ["no audio embedding in the detector output"]}
+        else:
+            knn = GK.classify_track(embedding, model_id, labels, exclude_key=key, root=embeddings_root, stems_root=stems_root)
+        meta["genre_knn"] = {"status": knn["status"], "genre": knn["genre"], "supported": knn["supported"],
+                             "scores": {g: round(p["score"], 4) for g, p in knn["per_genre"].items()},
+                             "loo_min": {g: round(p["loo_min"], 4) for g, p in knn["per_genre"].items() if "loo_min" in p},
+                             "n_members": {g: p["n_members"] for g, p in knn["per_genre"].items()},
+                             "reasons": knn["reasons"]}
     if genre_override:
         meta["genre"] = genre_override
         meta["genre_override"] = True
+        meta["genre_basis"] = "override"
         meta["genre_override_note"] = (
             f"--genre {genre_override} given; detector said {meta.get('genre_detected')!r} "
             f"(confidence {meta.get('genre_confidence')}), heuristic style {meta.get('style_heuristic')!r}")
+    elif key in labels:
+        lab = labels[key]
+        meta["genre"] = lab["genre"]; meta["genre_override"] = False
+        meta["genre_basis"] = "label"; meta["genre_uncertain"] = False
+        meta["genre_candidates"] = [lab["genre"]]
+        meta["genre_label_source"] = f"{lab['source']}: {lab['note']}".strip(": ")
+    elif knn is not None and knn["genre"]:
+        meta["genre"] = knn["genre"]; meta["genre_override"] = False
+        meta["genre_basis"] = "knn"; meta["genre_uncertain"] = False
+        meta["genre_candidates"] = list(knn["supported"])
     elif meta.get("genre_detected"):
         meta["genre"] = meta["genre_detected"]; meta["genre_override"] = False
+        if knn is not None and knn["status"] == "ok":
+            # The kNN COULD decide and no labelled genre supports this track: whatever CLAP says is a guess.
+            meta["genre_uncertain"] = True
+            meta["genre_uncertain_reasons"] = (list(meta.get("genre_uncertain_reasons") or [])
+                                               + ["kNN: no labelled genre supports this track (" + "; ".join(knn["reasons"]) + ")"])
+        meta["genre_basis"] = "detector-uncertain" if meta.get("genre_uncertain") else "detector"
     elif meta.get("style_heuristic"):
         meta["genre"] = meta["style_heuristic"]; meta["genre_override"] = False
+        meta["genre_basis"] = "heuristic-style"   # BPM/style guess from the Go run: not audio evidence of a genre
+        meta["genre_uncertain"] = True
+    # `genre_ref` is the genre the reference tables are consulted for (eval floors, calibration neighbours): the
+    # label itself only when it is trusted (override, owner label, kNN, or a detection that cleared the margin
+    # rule), else UNREFERENCED. `genre` stays the best guess (sound palette, generator header).
+    if meta.get("genre"):
+        meta["genre_ref"] = meta["genre"] if meta.get("genre_basis") in ("override", "label", "knn", "detector") else UNREFERENCED
+        if meta["genre_ref"] == UNREFERENCED:
+            print(f"pipeline_helpers: GENRE UNCERTAIN - using {meta['genre']!r} for the sound palette only; no genre "
+                  f"floors / calibration neighbours are applied (basis {meta.get('genre_basis')}, candidates "
+                  f"{meta.get('genre_candidates')}, reasons {meta.get('genre_uncertain_reasons')}). Pass --genre to decide "
+                  f"or add the track to eval/datasets/genre_labels.yaml.", file=sys.stderr)
     meta["stamped_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
     return meta
 
 
 def record_mode_floor(thresholds_path: Path, *, mode: str, genre: str, comparison_path: Path, run: str,
-                      margin: float = 0.02) -> dict | None:
-    """Spec 004 §2.3: when ``modes.<mode>.genres`` has no floor for ``genre`` yet, derive one from THIS
-    run — floor = round(measured − margin, 2) for overall and section-aware — and record the measured
-    block (overall, section_aware, run, margin, editability). Returns the block written, or None when
-    a floor already exists (floors are never changed here) or the run is not detector-passing."""
+                      margin: float = 0.02, labels_path: Path | None = None) -> dict | None:
+    """Spec 004 §2.3 (amended 2026-10-29): when ``modes.<mode>.genres`` has no floor for ``genre`` yet AND
+    ``eval/datasets/genre_labels.yaml`` labels at least ``genre_knn.MIN_MEMBERS`` (2) tracks with that genre, derive
+    one from THIS run — floor = round(measured − margin, 2) for overall and section-aware — and record the measured
+    block (overall, section_aware, run, margin, editability). Returns the block written, or None (reason on stderr)
+    when the genre is unverified, has too few labelled tracks, already has a floor (never changed here) or the run
+    is not detector-passing.
+
+    Why 2: a floor from a single track is passed by that track by construction (measured − margin), so it says
+    nothing about generalisation (fix #10 lesson); at least two tracks are needed for any statement about the
+    genre, and for a leave-one-out. It is the same ``MIN_MEMBERS`` notion the genre kNN uses for a within-genre spread."""
     import yaml
+    import genre_knn as GK
+    if not genre or genre == UNREFERENCED:   # an unverified genre must not grow a floor of its own
+        return None
     thresholds_path = Path(thresholds_path)
     th = yaml.safe_load(thresholds_path.read_text()) or {}
+    if genre in ((th.get("modes", {}).get(mode.replace("-", "_"), {}) or {}).get("genres") or {}):
+        return None                           # an existing floor is never touched (and needs no label count)
+    n = sum(1 for v in GK.load_labels(labels_path).values() if v["genre"] == genre)
+    if n < GK.MIN_MEMBERS:
+        print(f"pipeline_helpers: no floor recorded: {genre} has {n} labelled track{'s' if n != 1 else ''}; a floor needs "
+              f">= {GK.MIN_MEMBERS} (spec 004 §2.3, amended 2026-10-29)", file=sys.stderr)
+        return None
     mode_key = mode.replace("-", "_")
     block = th.setdefault("modes", {}).setdefault(mode_key, {})
     if genre in ((block.get("genres") or {})):
@@ -835,6 +915,7 @@ def main(argv: list[str] | None = None) -> int:
     rf.add_argument("--comparison", required=True, type=Path)
     rf.add_argument("--run", required=True)
     rf.add_argument("--margin", type=float, default=0.02)
+    rf.add_argument("--labels", type=Path, default=None, help="genre label registry (default eval/datasets/genre_labels.yaml)")
     st = sub.add_parser("stamp")
     st.add_argument("track_dir", type=Path)
     st.add_argument("--genre", default=None, help="explicit genre override (logged in metadata)")
@@ -882,11 +963,11 @@ def main(argv: list[str] | None = None) -> int:
             print(num_bars(args.duration, args.bpm))
         elif args.cmd == "record-floor":
             res = record_mode_floor(args.thresholds, mode=args.mode, genre=args.genre, comparison_path=args.comparison,
-                                    run=args.run, margin=args.margin)
+                                    run=args.run, margin=args.margin, labels_path=args.labels)
             print(json.dumps({"recorded": res is not None, "measured": res}))
         elif args.cmd == "stamp":
             m = stamp_track_metadata(args.track_dir, genre_override=args.genre, detector_json=args.detector_json)
-            print(json.dumps({k: m.get(k) for k in ("bpm", "key", "genre", "genre_detected", "genre_confidence", "genre_override", "duration", "style_heuristic")}))
+            print(json.dumps({k: m.get(k) for k in ("bpm", "key", "genre", "genre_ref", "genre_basis", "genre_uncertain", "genre_candidates", "genre_detected", "genre_confidence", "genre_override", "duration", "style_heuristic")}))
         elif args.cmd == "instrumental":
             print(write_instrumental(args.track_dir, force=args.force))
         elif args.cmd == "params-valid":
