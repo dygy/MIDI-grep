@@ -578,7 +578,8 @@ def sample_loops(samples_json: Path, instrument: str, pitches) -> tuple[dict[int
     stats = {"samples": len(durs), "looped": len(loops),
              "loop_len_s": [round((e - b) * durs[k], 3) for k, (b, e) in loops.items()],
              "loop_start_s": [round(b * durs[k], 3) for k, (b, e) in loops.items()],
-             "pitches": len(set(pitches)), "pitches_looped": len(table)}
+             "pitches": len(set(pitches)), "pitches_looped": len(table),
+             "pitches_unlooped": sorted(set(pitches) - set(table))}      # these play their (nearest key's) grain once
     return table, stats
 
 

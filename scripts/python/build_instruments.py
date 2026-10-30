@@ -38,9 +38,10 @@ import statistics
 import sys
 from pathlib import Path
 
+import numpy as np
 from pydantic import BaseModel, Field
 
-from pitched_grains import VERIFY_TOLERANCE_ST, _note_midi as _pg_note_midi, coverage, read_midi_notes, verify_samples
+from pitched_grains import VERIFY_TOLERANCE_ST, _note_midi as _pg_note_midi, coverage, read_midi_notes, stem_sounding_rms, verify_samples
 
 # Chromatic names; the 'c#' spelling is what Strudel and models/regime_instruments/r2/samples.json use.
 NOTE_NAMES: tuple[str, ...] = ("c", "c#", "d", "d#", "e", "f", "f#", "g", "g#", "a", "a#", "b")
@@ -62,7 +63,10 @@ class ModelMetadata(BaseModel):
     name: str | None = None
     pitched_map: dict[str, str] | None = None
     midi_path: str | None = None
+    sample_rate: int | None = None
     pitch_range_hz: list[float] | None = None   # register the trainer searched (note-aligned models)
+    source_audio: str | None = None             # the stem the grains were cut from
+    sounding_rms: float | None = None           # that stem's sounding frame-RMS level (trainer; older models: re-measured)
     grains: list[Grain] = Field(default_factory=list)
 
 
@@ -159,6 +163,19 @@ def resolve_kit(kit_dir: Path) -> dict[str, Path]:
 VERIFICATION_FILE = "verification.json"
 
 
+def sounding_floor(meta: ModelMetadata) -> float | None:
+    """The stem's sounding level a sample must reach to be audible: recorded by the trainer, else re-measured from the
+    model's source stem (normalised to the trainer's 0.95 peak, so it is on the samples' scale); None when neither exists."""
+    if meta.sounding_rms is not None:
+        return meta.sounding_rms
+    if meta.source_audio and Path(meta.source_audio).is_file():
+        import librosa
+        y, sr = librosa.load(meta.source_audio, sr=meta.sample_rate or 44100, mono=True)
+        y = y / (np.max(np.abs(y)) + 1e-8) * 0.95
+        return stem_sounding_rms(y, sr)
+    return None
+
+
 def build_instruments(models: list[Path], kit_dir: Path, out_dir: Path, base_url: str,
                       verify: bool = True) -> InstrumentManifest:
     """Copy wavs into ``out_dir`` and write ``out_dir/samples.json``; returns the manifest.
@@ -179,7 +196,7 @@ def build_instruments(models: list[Path], kit_dir: Path, out_dir: Path, base_url
         plans[name] = resolve_notes(model_dir, meta)
         if verify:
             lo_hi = meta.pitch_range_hz or (None, None)
-            plans[name], rows = verify_samples(plans[name], fmin=lo_hi[0], fmax=lo_hi[1])
+            plans[name], rows = verify_samples(plans[name], fmin=lo_hi[0], fmax=lo_hi[1], floor_rms=sounding_floor(meta))
             report[name] = rows
             if meta.midi_path and Path(meta.midi_path).is_file():
                 cover[name] = coverage([n.pitch for n in read_midi_notes(meta.midi_path)],

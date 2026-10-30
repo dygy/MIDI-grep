@@ -236,6 +236,21 @@ def test_synth_mode_gets_held_notes_without_sample_loops(tmp_path):
     assert "bassLoop" not in code and "samples(" not in code
 
 
+@regime
+def test_synth_bass_lpf_keeps_the_oscillator_derivation(tmp_path):
+    """A raw sawtooth's harmonics are not the stem's: the sounding-energy rolloff (3284 Hz on Regime) is for the
+    sample layer only; synth mode keeps the median 85 % rolloff over all frames (538 Hz)."""
+    code, summary = _generate(tmp_path, mode="synth")
+    assert summary["bass_lpf_analysis"] == 538
+    assert ".lpf(538)" in code and ".lpf(3284)" not in code
+
+
+@regime
+def test_sample_layer_lpf_follows_the_sounding_energy(tmp_path):
+    _, summary = _generate(tmp_path)
+    assert summary["bass_lpf_analysis"] == 3284
+
+
 # ---- attacks follow the stem ---------------------------------------------------------------------------------
 def _register(spans, hop=0.01, dur=2.0):
     """A bass_register.Register whose f0 track holds [(t0, t1, midi)]."""

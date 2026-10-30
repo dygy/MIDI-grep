@@ -380,15 +380,71 @@ def level_over(g: Grain, window_s: float) -> float:
     return _rms(g.raw[:max(1, int(window_s * g.sr))])
 
 
-def select_per_pitch(grains: list[Grain], target_len_s: float, min_len_s: float = 0.0) -> dict[int, Grain]:
+RMS_FRAME_22K = 2048        # the analysis frame of bass_shape.StemEvidence (at 22.05 kHz) - one scale for stem and sample
+
+
+def peak_frame_rms(y: np.ndarray, sr: int) -> float:
+    """RMS of the loudest analysis frame of ``y`` (the frame of :class:`bass_shape.StemEvidence`, scaled to ``sr``):
+    how loud a sample is where it sounds, comparable with the stem's own frame RMS."""
+    y = np.asarray(y, dtype=np.float64)
+    fl = max(int(round(RMS_FRAME_22K * sr / 22050)), 2)
+    if len(y) <= fl:
+        return _rms(y)
+    hop = max(fl // 8, 1)
+    c = np.concatenate(([0.0], np.cumsum(y * y)))
+    starts = np.arange(0, len(y) - fl + 1, hop)
+    return float(np.sqrt(np.max(c[starts + fl] - c[starts]) / fl))
+
+
+def stem_sounding_rms(y: np.ndarray, sr: int) -> float:
+    """The stem's own 'sounding' frame-RMS level (Otsu over its log frame RMS, :func:`bass_shape.sounding_level`).
+    A cut sample whose loudest frame lies below it is a stretch where the stem is not sounding (a transcription
+    ghost): it plays as silence."""
+    import librosa
+    import bass_shape as BS
+    y22 = y if sr == 22050 else librosa.resample(np.asarray(y, dtype=np.float32), orig_sr=sr, target_sr=22050)
+    rms = librosa.feature.rms(y=y22, frame_length=RMS_FRAME_22K, hop_length=256)[0]
+    return BS.sounding_level(rms)
+
+
+def is_silent(y: np.ndarray, sr: int, floor_rms: float) -> bool:
+    """A sample that never reaches the stem's sounding level (or is digitally empty)."""
+    peak = peak_frame_rms(y, sr)
+    return peak <= 0.0 or peak < floor_rms
+
+
+def _grain_silent(g: "Grain", floor_rms: float) -> bool:
+    if floor_rms <= 0.0:
+        return False
+    y, sr = (g.raw, g.sr) if g.raw is not None and g.sr > 0 else (g.audio, g.sr or 22050)
+    return is_silent(y, sr, floor_rms)
+
+
+def _loopable(g: "Grain") -> bool:
+    """The grain has a steady body to loop (bass_shape.loop_points); unknown sample rate -> assume it does."""
+    if g.sr <= 0:
+        return True
+    import bass_shape as BS
+    return BS.loop_points(g.audio, g.sr, midi_to_hz(g.note)) is not None
+
+
+def select_per_pitch(grains: list[Grain], target_len_s: float, min_len_s: float = 0.0,
+                     floor_rms: float = 0.0) -> dict[int, Grain]:
     """Best grain per note: among those at least ``target_len_s`` long the highest quality; if none is long
-    enough, the longest (ties -> quality). Grains shorter than ``min_len_s`` (stub_note_length) are never used."""
+    enough, the longest (ties -> quality). Grains shorter than ``min_len_s`` (stub_note_length) are never used.
+
+    ``floor_rms`` (the stem's sounding level, :func:`stem_sounding_rms`): grains that never reach it are stretches
+    where the stem is not sounding and are never used (a pitch with no sounding grain gets no sample - the nearest
+    pitch's plays it). Among a pitch's grains those with a steady body to loop are preferred: a long grain whose
+    tail is digital silence counts as 'long enough' but cannot sustain a held note (Enter d#1: the chosen grain
+    sounded 0.1 s of its 0.44 s and had no loop, so 5 written pitches had none)."""
     by: dict[int, list[Grain]] = {}
     for g in grains:
-        if g.duration_s >= min_len_s:
+        if g.duration_s >= min_len_s and not _grain_silent(g, floor_rms):
             by.setdefault(g.note, []).append(g)
     best: dict[int, Grain] = {}
-    for note, gs in by.items():
+    for note, all_gs in by.items():
+        gs = [g for g in all_gs if _loopable(g)] or all_gs
         long_enough = [g for g in gs if g.duration_s >= target_len_s]
         pool = long_enough or gs
         # A sample stands for every time the stem plays this pitch: take the loudness the stem usually plays it
@@ -398,8 +454,8 @@ def select_per_pitch(grains: list[Grain], target_len_s: float, min_len_s: float 
         # chosen rms 0.18 vs the pitch's median 0.41 -> every d#1 note rendered 8 dB under the stem). When no pool
         # member reaches the pitch's level, the loudest one stands for it.
         # Levels are taken over the shortest grain's duration: a long ringed grain's decay must not count against it.
-        win = min(g.duration_s for g in gs)
-        med = float(np.median([level_over(g, win) for g in gs]))
+        win = min(g.duration_s for g in all_gs)
+        med = float(np.median([level_over(g, win) for g in all_gs]))
         loud = [g for g in pool if level_over(g, win) >= med]
         pool = loud or [max(pool, key=lambda g: level_over(g, win))]
         best[note] = (max(pool, key=lambda g: g.quality) if long_enough
@@ -422,8 +478,13 @@ def coverage(transcribed: list[int], samples: list[int]) -> dict:
 
 
 def verify_samples(samples: dict[str, Path], *, fmin: float | None = None, fmax: float | None = None,
-                   tolerance_st: float = VERIFY_TOLERANCE_ST) -> tuple[dict[str, Path], list[dict]]:
+                   tolerance_st: float = VERIFY_TOLERANCE_ST, floor_rms: float | None = None
+                   ) -> tuple[dict[str, Path], list[dict]]:
     """Re-measure every ``{note name: wav}`` sample; keep, relabel or drop. Returns ``(final map, report)``.
+
+    A SILENT sample is dropped before its pitch is even measured: digitally empty, or (with ``floor_rms``, the stem's
+    sounding level, :func:`stem_sounding_rms`) never reaching the level at which the stem sounds. ``salience`` is
+    scale-free and labelled -60 dB ghosts as pitched notes (Enter: 11 samples a2-g#4 at peak 0.001, all 'kept').
 
     keep: |measured - label| <= tolerance; relabel: it measures as another note that no verified sample
     already covers; drop: unvoiced, or its measured note is already covered. The search range is
@@ -439,8 +500,13 @@ def verify_samples(samples: dict[str, Path], *, fmin: float | None = None, fmax:
         y, sr = sf.read(str(samples[k]), dtype="float32", always_2d=False)
         if y.ndim > 1:
             y = y.mean(axis=1)
-        a = assess(y, sr, labels[k], fmin, fmax)
         row = {"label": k, "file": samples[k].name, "duration_s": round(len(y) / sr, 4)}
+        if is_silent(y, sr, floor_rms or 0.0):
+            row.update(measured=None, error_st=None, action="dropped",
+                       reason=f"silent: loudest frame rms {peak_frame_rms(y, sr):.2g} < sounding level {floor_rms or 0.0:.2g}")
+            rows[k] = row
+            continue
+        a = assess(y, sr, labels[k], fmin, fmax)
         if a.note is None:
             row.update(measured=None, error_st=None, action="dropped", reason=a.detail)
         else:
