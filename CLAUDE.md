@@ -106,11 +106,11 @@ The `docs-freshness` hook reminds you once per session when a pipeline file chan
    - AI analyzes differences and generates new parameters
    - Store learnings in ClickHouse for future tracks
 
-**Current state (2026-10-29; source of truth `eval/thresholds.yaml` `modes:` + `eval/datasets/reference_tracks.yaml`):**
+**Current state (2026-10-31; source of truth `eval/thresholds.yaml` `modes:` + `eval/datasets/reference_tracks.yaml`):**
 four brazilian_funk reference tracks (Regime CLT, VAGABUNDO NÃO NAMORA, Dumb Blond Bitches, Automotivo XM), each built in
 both modes on the seeded offline renderer, scored against `instrumental.wav` with a different-song `--control`. Floors =
-round(min over the tracks − 0.02, 2): sample-instrument **0.85 / 0.83** (binding: Dumb Blond Bitches v010 overall 0.8714,
-VAGABUNDO v060 section-aware 0.8539), synth **0.78 / 0.78** (binding: Dumb Blond Bitches v011, 0.8026 / 0.7954). Quote
+round(min over the tracks − 0.02, 2): sample-instrument **0.85 / 0.84** (binding: Dumb Blond Bitches v019 overall 0.8700,
+VAGABUNDO v072 section-aware 0.8588), synth **0.79 / 0.77** (binding: Dumb Blond Bitches v020, 0.8094 / 0.7938). Quote
 numbers from those files, never from memory.
 
 **History — the lessons that still bind (details: `git log`, `context/fix-log-*.md`, the comments in `thresholds.yaml`):**

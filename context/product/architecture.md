@@ -234,7 +234,7 @@ gate accept/reject decisions.**
     `evaluate_comparison()` → `GateResult(passed, genre, similarity, floor, …)`; CLI
     `python eval/gate.py comparison.json --genre <g>`.
   - Per-mode floors (`modes:`, checked before the genre-wide tables, on the current 50/50 scale): sample-instrument
-    brazilian_funk 0.85 / 0.83 section-aware, synth 0.78 / 0.78; `min_margin_over_chance: 0.02`,
+    brazilian_funk 0.85 / 0.84 section-aware, synth 0.79 / 0.77; `min_margin_over_chance: 0.02`,
     `calibration_noise: 0.005`. The genre-wide tables above are on the old static scale and are compared with
     `static_similarity`.
   - `eval/datasets/reference_tracks.yaml` — four brazilian_funk tracks (Regime CLT, VAGABUNDO NÃO NAMORA, Dumb Blond

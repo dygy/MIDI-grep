@@ -31,21 +31,21 @@ to 2 decimals.
 
 | Track | Mode | Run | Overall | Section-aware | Margin over a different song |
 |-------|------|-----|---------|---------------|------------------------------|
-| Regime CLT (Dj Brunin XM, Aurora Shukita) | sample-instrument | v077 | 0.9081 | 0.9042 | 0.3319 |
-| Regime CLT | synth | v078 | 0.9136 | 0.9038 | 0.3374 |
-| VAGABUNDO NÃO NAMORA (Christopher Luz) | sample-instrument | v060 | 0.8738 | 0.8539 | 0.2988 |
-| VAGABUNDO NÃO NAMORA | synth | v061 | 0.8379 | 0.8021 | 0.2629 |
-| Dumb Blond Bitches (Barbit) | sample-instrument | v010 | 0.8714 | 0.8685 | 0.2877 |
-| Dumb Blond Bitches | synth | v011 | 0.8026 | 0.7954 | 0.2189 |
-| Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM) | sample-instrument | v006 | 0.9002 | 0.8944 | 0.2663 |
-| Automotivo XM | synth | v007 | 0.8533 | 0.8296 | 0.2194 |
+| Regime CLT (Dj Brunin XM, Aurora Shukita) | sample-instrument | v087 | 0.9093 | 0.9002 | 0.3331 |
+| Regime CLT | synth | v088 | 0.9136 | 0.9038 | 0.3374 |
+| VAGABUNDO NÃO NAMORA (Christopher Luz) | sample-instrument | v072 | 0.8816 | 0.8588 | 0.3066 |
+| VAGABUNDO NÃO NAMORA | synth | v073 | 0.8395 | 0.8058 | 0.2646 |
+| Dumb Blond Bitches (Barbit) | sample-instrument | v019 | 0.8700 | 0.8677 | 0.2862 |
+| Dumb Blond Bitches | synth | v020 | 0.8094 | 0.7938 | 0.2257 |
+| Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM) | sample-instrument | v017 | 0.9000 | 0.8970 | 0.2661 |
+| Automotivo XM | synth | v018 | 0.8624 | 0.8412 | 0.2285 |
 
 | Mode | Overall floor | Section-aware floor |
 |------|---------------|---------------------|
-| sample-instrument (brazilian_funk) | 0.85 | 0.83 |
-| synth (brazilian_funk) | 0.78 | 0.78 |
+| sample-instrument (brazilian_funk) | 0.85 | 0.84 |
+| synth (brazilian_funk) | 0.79 | 0.77 |
 
-These runs are on the seeded offline renderer (2026-10-29). The score scale changed on 2026-10-18 (see
+These runs are on the seeded offline renderer, rebuilt on main 2026-10-31. The score scale changed on 2026-10-18 (see
 [Scoring](#scoring-and-the-gate)), so any number from before that date is not comparable. Older numbers are
 kept as history in the comments of `thresholds.yaml`.
 
