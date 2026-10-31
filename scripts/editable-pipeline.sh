@@ -168,8 +168,16 @@ META="$TRACK/metadata.json"
 # latest vNNN/metadata.json (spec 004 defect #6). Run the deep genre detector (CLAP, with the
 # analysed bpm as prior) and consolidate everything into the track metadata — once.
 # Also re-stamp a track whose bpm predates the phase-coherence refinement (no bpm_method).
-if [ -z "$(jget "$META" bpm)" ] || [ -z "$(jget "$META" bpm_method)" ] || [ -n "$FORCE" ]; then
+# And re-stamp when the owner's genre label registry labels the track but the stamp did not come from it (a label added
+# after the first run); a calibration made under another genre_ref is then stale (other floors, other neighbours).
+KEEP_TEMPO=()
+if [ -n "$(jget "$META" bpm)" ] && [ -n "$(jget "$META" bpm_method)" ] && [ -z "$FORCE" ] && [ -z "$GENRE_OVERRIDE" ] \
+   && [ "$("${PH[@]}" label-stale "$TRACK" 2>/dev/null)" = stale ]; then
+  KEEP_TEMPO=(--keep-tempo); log "stage 1b: the genre label registry labels this track differently than its stamp - re-stamping the genre"
+fi
+if [ -z "$(jget "$META" bpm)" ] || [ -z "$(jget "$META" bpm_method)" ] || [ -n "$FORCE" ] || [ ${#KEEP_TEMPO[@]} -gt 0 ]; then
   mkdir -p "$TRACK/.pipeline"
+  OLD_REF="$(jget "$META" genre_ref)"; [ -n "$OLD_REF" ] || OLD_REF="$(jget "$META" genre)"   # pre-genre_ref stamp: ref = genre (as below)
   VBPM="$(for v in "$TRACK"/v[0-9][0-9][0-9]; do jget "$v/metadata.json" bpm; done | tail -1)"
   GJ="$TRACK/.pipeline/genre.json"
   if [ ! -s "$GJ" ] || ! grep -q '"audio_embedding"' "$GJ"; then   # a detector JSON without the embedding predates the kNN
@@ -184,8 +192,13 @@ if [ -z "$(jget "$META" bpm)" ] || [ -z "$(jget "$META" bpm_method)" ] || [ -n "
     "$PY" "$SP/genre_knn.py" ensure >"$TRACK/.pipeline/genre_knn_ensure.json" 2>>"$TRACK/.pipeline/genre.err" \
       || log "stage 1b: could not embed the labelled tracks for the kNN (see .pipeline/genre.err) - CLAP decides"
   fi
-  "${PH[@]}" stamp "$TRACK" ${GENRE_OVERRIDE:+--genre "$GENRE_OVERRIDE"} ${GJ:+--detector-json "$GJ"} >&2 \
+  "${PH[@]}" stamp "$TRACK" ${GENRE_OVERRIDE:+--genre "$GENRE_OVERRIDE"} ${GJ:+--detector-json "$GJ"} ${KEEP_TEMPO[@]+"${KEEP_TEMPO[@]}"} >&2 \
     || die "stage 1b stamp failed"
+  NEW_REF="$(jget "$META" genre_ref)"; [ -n "$NEW_REF" ] || NEW_REF="$(jget "$META" genre)"
+  if [ -n "$OLD_REF" ] && [ "$OLD_REF" != "$NEW_REF" ]; then
+    log "stage 1b: genre_ref '$OLD_REF' -> '$NEW_REF': calibrations made under the old one are stale"
+    for m in $(modes); do rm -f "$TRACK/.pipeline/$m/best.code"; done
+  fi
 fi
 BPM="$(jget "$META" bpm)"; KEY="$(jget "$META" key)"; GENRE="$(jget "$META" genre)"
 DURATION="$(jget "$META" duration)"; TRACK_TITLE="$(jget "$META" title)"

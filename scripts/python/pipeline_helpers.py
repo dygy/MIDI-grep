@@ -210,7 +210,8 @@ UNREFERENCED = "unreferenced"   # genre key meaning "no trusted genre": the gate
 
 def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
                          detector_json: Path | None = None, labels_path: Path | None = None,
-                         embeddings_root: Path | None = None, stems_root: Path | None = None) -> dict:
+                         embeddings_root: Path | None = None, stems_root: Path | None = None,
+                         keep_tempo: bool = False) -> dict:
     """Consolidate the per-track facts the pipeline needs into ``<track>/metadata.json``.
 
     The Go cache writes only title/url/video_id there; bpm/key/style live in the latest
@@ -222,6 +223,10 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
     against the labelled tracks (``genre_knn.py``) > the CLAP zero-shot verdict > the heuristic style. When the kNN
     ran and no labelled genre supports the track, the CLAP verdict stays as the palette guess but is marked
     uncertain / unreferenced. Nothing here is a per-track constant.
+
+    ``keep_tempo``: a re-stamp for the genre only (a label added later) keeps the refined bpm/key already stamped -
+    re-refining moves the bpm by the last digit (VAGABUNDO 129.989 -> 129.988), and every stage built at the old bpm
+    would then rebuild for a change that is about genre alone.
     """
     import genre_knn as GK
     track_dir = Path(track_dir)
@@ -231,20 +236,24 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
     if not versions:
         raise FileNotFoundError(f"no vNNN/metadata.json under {track_dir} — run stage 1 first")
     # Review #8: promoted vNNN dirs carry no bpm — use the latest version that has one.
-    with_bpm = [v for v in versions if json.loads((v / "metadata.json").read_text()).get("bpm") not in (None, "")]
+    keep_tempo = keep_tempo and meta.get("bpm") not in (None, "") and bool(meta.get("bpm_method"))
+    with_bpm = [] if keep_tempo else [v for v in versions if json.loads((v / "metadata.json").read_text()).get("bpm") not in (None, "")]
     if with_bpm:
         vmeta = json.loads((with_bpm[-1] / "metadata.json").read_text())
         for src, dst in (("bpm", "bpm"), ("key", "key"), ("style", "style_heuristic")):
             if src in vmeta and vmeta[src] not in (None, ""):
                 meta[dst] = vmeta[src]
         coarse = float(vmeta["bpm"])
+    elif keep_tempo:
+        coarse = None
     elif meta.get("bpm") not in (None, ""):
         # An earlier stamp (or a hand-stamped track) is the only bpm source: re-refine from ITS coarse value.
         coarse = float(meta.get("bpm_coarse") or meta["bpm"])
     else:
         raise ValueError(f"no vNNN/metadata.json under {track_dir} carries a bpm (extraction analysis missing)")
-    meta["bpm"] = float(coarse)
-    _refine_track_bpm(track_dir, meta, coarse=coarse)
+    if coarse is not None:
+        meta["bpm"] = float(coarse)
+        _refine_track_bpm(track_dir, meta, coarse=coarse)
     orig = track_dir / "original.wav"
     if orig.exists():
         import soundfile as sf
@@ -868,6 +877,23 @@ def params_valid(text: str) -> bool:
     return True
 
 
+def label_stale(track_dir: Path, labels_path: Path | None = None) -> bool:
+    """True when the owner's registry labels this track but its metadata.json was not stamped from that label.
+
+    Stage 1b stamps a track once; a label the owner adds afterwards (the registry's whole purpose: a track the kNN could
+    not place) must still reach it, without --force redoing every stage. An --genre override stamp is left alone.
+    """
+    import genre_knn as GK
+    lab = GK.load_labels(labels_path).get(Path(track_dir).name)
+    if not lab:
+        return False
+    mp = Path(track_dir) / "metadata.json"
+    meta = json.loads(mp.read_text()) if mp.is_file() else {}
+    if meta.get("genre_basis") == "override":
+        return False
+    return meta.get("genre_basis") != "label" or meta.get("genre") != lab["genre"]
+
+
 def newer_than(stamp: Path, *roots: Path) -> bool:
     """True when ``stamp`` is missing or any regular file under ``roots`` (other than ``stamp``) is newer than it.
 
@@ -902,6 +928,9 @@ def main(argv: list[str] | None = None) -> int:
     ct.add_argument("--exclude-key", required=True, help="cache_key of the track being scored")
     pv = sub.add_parser("params-valid", help="print ok|stale: is this best.params in the current calibration format")
     pv.add_argument("file", type=Path)
+    ls = sub.add_parser("label-stale", help="print stale|fresh: does the genre label registry disagree with the stamp")
+    ls.add_argument("track_dir", type=Path)
+    ls.add_argument("--labels", type=Path, default=None, help="genre label registry (default eval/datasets/genre_labels.yaml)")
     nw = sub.add_parser("newer", help="print stale|fresh: is any file under PATH newer than STAMP (or STAMP missing)")
     nw.add_argument("stamp", type=Path)
     nw.add_argument("paths", nargs="+", type=Path)
@@ -920,6 +949,7 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("track_dir", type=Path)
     st.add_argument("--genre", default=None, help="explicit genre override (logged in metadata)")
     st.add_argument("--detector-json", type=Path, default=None, help="detect_genre_dl.py -o output")
+    st.add_argument("--keep-tempo", action="store_true", help="genre-only re-stamp: keep the stamped (refined) bpm/key")
     pr = sub.add_parser("promote")
     pr.add_argument("--track-dir", required=True, type=Path)
     pr.add_argument("--mode", required=True, choices=GENERATION_MODES)
@@ -966,13 +996,16 @@ def main(argv: list[str] | None = None) -> int:
                                     run=args.run, margin=args.margin, labels_path=args.labels)
             print(json.dumps({"recorded": res is not None, "measured": res}))
         elif args.cmd == "stamp":
-            m = stamp_track_metadata(args.track_dir, genre_override=args.genre, detector_json=args.detector_json)
+            m = stamp_track_metadata(args.track_dir, genre_override=args.genre, detector_json=args.detector_json,
+                                     keep_tempo=args.keep_tempo)
             print(json.dumps({k: m.get(k) for k in ("bpm", "key", "genre", "genre_ref", "genre_basis", "genre_uncertain", "genre_candidates", "genre_detected", "genre_confidence", "genre_override", "duration", "style_heuristic")}))
         elif args.cmd == "instrumental":
             print(write_instrumental(args.track_dir, force=args.force))
         elif args.cmd == "params-valid":
             ok = args.file.is_file() and params_valid(args.file.read_text())
             print("ok" if ok else "stale")
+        elif args.cmd == "label-stale":
+            print("stale" if label_stale(args.track_dir, args.labels) else "fresh")
         elif args.cmd == "newer":
             print("stale" if newer_than(args.stamp, *args.paths) else "fresh")
         elif args.cmd == "control":

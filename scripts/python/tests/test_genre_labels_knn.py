@@ -160,12 +160,16 @@ def test_labels_registry_rejects_a_contradicting_duplicate(tmp_path):
         GK.load_labels(reg)
 
 
-def test_the_shipped_registry_labels_the_five_owner_tracks():
+def test_the_shipped_registry_labels_the_owner_tracks():
     import genre_knn as GK
     labels = GK.load_labels()
     funk = {k for k, v in labels.items() if v["genre"] == "brazilian_funk"}
     assert funk == {"VAGABUNDO NÃO NAMORA", "Regime CLT (Dj Brunin XM, Aurora Shukita)", "Dumb Blond Bitches",
-                    "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM"}
+                    "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM",
+                    # owner 2026-10-31: five Dj Brunin XM automotivo tracks
+                    "Automotivo Novinho Depressivo", "Automotivo Amar Ma Ma Ma - Bibi Babydoll, Dj Br",
+                    "Bibi Babydoll e DJ Brunin XM - Automotivo Bibi", "Automotivo XM, É Muita Treta (Dj Brunin XM, Mc",
+                    "Automotivo Holiday (Dj Brunin XM, Kinechan & Mc"}
     enter = labels["Enter - Nigdy Więcej Wojny (prod. Enter) (2022)"]
     assert enter["genre"] == "retro_wave" and "Polish electro" in enter["note"]
 
