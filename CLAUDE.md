@@ -1037,6 +1037,10 @@ A labelled genre without measured floors (`retro_wave`) gets the genre-wide/defa
 ("no measured floor for retro_wave"), no funk borrowing; `record-floor` writes a genre's mode floor only once >= 2 owner-labelled tracks of it exist (spec 004 §2.3 amended 2026-10-29), and palette `synthwave` (`sound_selector.GENRE_ALIASES`).
 Honest limit (leave-one-out over the 5 labelled tracks): CLAP embeddings separate funk from "electro with vocals" only
 weakly, so a funk track can come back `unknown`; add the track to the registry rather than lowering the rule.
+A label added after a track's first run reaches it on the next run: stage 1b re-stamps the genre when
+`pipeline_helpers.py label-stale` says the registry disagrees with the stamp (`stamp --keep-tempo`, so the refined bpm/key
+and everything built at them stay), and when that changes `genre_ref` the calibration workdirs' `best.code` is dropped so
+stage 7 recalibrates under the new floors and neighbours.
 
 ## Dependencies
 
