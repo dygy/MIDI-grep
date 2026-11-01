@@ -145,6 +145,9 @@ modes:
   # VAGABUNDO v072), synth 0.78/0.78 -> 0.79/0.77 (binding DBB v020 0.8094/0.7938; the section floor drops 0.01 because
   # DBB section-aware moved 0.7954 -> 0.7938, -0.0016, inside calibration noise). previous binding: sample DBB v010
   # 0.8714 / VAGABUNDO v060 0.8539, synth DBB v011 0.8026/0.7954.
+  # 2026-11-01 stem repair (stage 3c, the 808 Demucs filed under drums goes back to the bass the generator reads): all
+  # eight rebuilt. Same rule -> floors unchanged (sample binding DBB v021 0.8711 / VAGABUNDO v074 0.8566, synth binding
+  # DBB v022 0.8072/0.7943). previous: DBB v019 0.8700 / VAGABUNDO v072 0.8588, DBB v020 0.8094/0.7938.
   sample_instrument:
     genres:
       brazilian_funk: 0.85
@@ -152,21 +155,21 @@ modes:
       brazilian_funk: 0.84
     measured:
       brazilian_funk:
-        overall: 0.8700            # binding track: Dumb Blond Bitches v019; the other fields are from `run`
-        section_aware: 0.8588      # binding track: VAGABUNDO NÃO NAMORA v072
-        static: 0.9653
-        temporal: 0.7747
-        margin_over_chance: 0.2862
-        frequency_balance: 0.9668
+        overall: 0.8711            # binding track: Dumb Blond Bitches v021; the other fields are from `run`
+        section_aware: 0.8566      # binding track: VAGABUNDO NÃO NAMORA v074
+        static: 0.9666
+        temporal: 0.7757
+        margin_over_chance: 0.2873
+        frequency_balance: 0.9692
         tempo_similarity: 1.0000
-        run: "Dumb Blond Bitches/v019"
+        run: "Dumb Blond Bitches/v021"
         margin: 0.02
         editability: pass
         tracks:
-          - { run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v087", overall: 0.9093, section_aware: 0.9002, static: 0.9674, temporal: 0.8512, margin_over_chance: 0.3331 }
-          - { run: "VAGABUNDO NÃO NAMORA/v072", overall: 0.8816, section_aware: 0.8588, static: 0.9672, temporal: 0.7960, margin_over_chance: 0.3066 }
-          - { run: "Dumb Blond Bitches/v019", overall: 0.8700, section_aware: 0.8677, static: 0.9653, temporal: 0.7747, margin_over_chance: 0.2862 }
-          - { run: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM/v017", overall: 0.9000, section_aware: 0.8970, static: 0.9421, temporal: 0.8579, margin_over_chance: 0.2661 }
+          - { run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v089", overall: 0.9093, section_aware: 0.9002, static: 0.9674, temporal: 0.8512, margin_over_chance: 0.3331 }
+          - { run: "VAGABUNDO NÃO NAMORA/v074", overall: 0.8793, section_aware: 0.8566, static: 0.9667, temporal: 0.7919, margin_over_chance: 0.3043 }
+          - { run: "Dumb Blond Bitches/v021", overall: 0.8711, section_aware: 0.8684, static: 0.9666, temporal: 0.7757, margin_over_chance: 0.2873 }
+          - { run: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM/v019", overall: 0.9000, section_aware: 0.8968, static: 0.9423, temporal: 0.8577, margin_over_chance: 0.2661 }
     # 2026-10-10 history (static scale) - VAGABUNDO v002 fell short on section-aware (0.8721 < 0.90); fix #10 (per-bar
     # bass/lead/master correction from the comparison's section_windows) -> v004.
   synth:
@@ -179,20 +182,20 @@ modes:
       brazilian_funk: 0.77
     measured:
       brazilian_funk:
-        overall: 0.8094            # binding track: Dumb Blond Bitches v020; the other fields are from `run`
-        section_aware: 0.7938      # binding track: Dumb Blond Bitches v020
-        static: 0.9572
-        temporal: 0.6617
-        margin_over_chance: 0.2257
-        frequency_balance: 0.9834
+        overall: 0.8072            # binding track: Dumb Blond Bitches v022; the other fields are from `run`
+        section_aware: 0.7943      # binding track: Dumb Blond Bitches v022
+        static: 0.9534
+        temporal: 0.6610
+        margin_over_chance: 0.2234
+        frequency_balance: 0.9831
         tempo_similarity: 1.0000
-        run: "Dumb Blond Bitches/v020"
+        run: "Dumb Blond Bitches/v022"
         margin: 0.02
         editability: pass
         tracks:
-          - { run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v088", overall: 0.9136, section_aware: 0.9038, static: 0.9695, temporal: 0.8577, margin_over_chance: 0.3374 }
-          - { run: "VAGABUNDO NÃO NAMORA/v073", overall: 0.8395, section_aware: 0.8058, static: 0.9652, temporal: 0.7139, margin_over_chance: 0.2646 }
-          - { run: "Dumb Blond Bitches/v020", overall: 0.8094, section_aware: 0.7938, static: 0.9572, temporal: 0.6617, margin_over_chance: 0.2257 }
-          - { run: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM/v018", overall: 0.8624, section_aware: 0.8412, static: 0.9700, temporal: 0.7548, margin_over_chance: 0.2285 }
+          - { run: "Regime CLT (Dj Brunin XM, Aurora Shukita)/v090", overall: 0.9136, section_aware: 0.9038, static: 0.9695, temporal: 0.8577, margin_over_chance: 0.3374 }
+          - { run: "VAGABUNDO NÃO NAMORA/v075", overall: 0.8432, section_aware: 0.8086, static: 0.9617, temporal: 0.7248, margin_over_chance: 0.2683 }
+          - { run: "Dumb Blond Bitches/v022", overall: 0.8072, section_aware: 0.7943, static: 0.9534, temporal: 0.6610, margin_over_chance: 0.2234 }
+          - { run: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM/v020", overall: 0.8657, section_aware: 0.8417, static: 0.9699, temporal: 0.7616, margin_over_chance: 0.2318 }
     # 2026-10-10 history (static scale) - VAGABUNDO v003 (sample-instrument knobs on synth) 0.7209 / 0.7520, worst band 30.07%;
     # fix #11 (own synth calibration pass) -> v007.

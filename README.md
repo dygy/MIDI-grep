@@ -31,14 +31,14 @@ to 2 decimals.
 
 | Track | Mode | Run | Overall | Section-aware | Margin over a different song |
 |-------|------|-----|---------|---------------|------------------------------|
-| Regime CLT (Dj Brunin XM, Aurora Shukita) | sample-instrument | v087 | 0.9093 | 0.9002 | 0.3331 |
-| Regime CLT | synth | v088 | 0.9136 | 0.9038 | 0.3374 |
-| VAGABUNDO NÃO NAMORA (Christopher Luz) | sample-instrument | v072 | 0.8816 | 0.8588 | 0.3066 |
-| VAGABUNDO NÃO NAMORA | synth | v073 | 0.8395 | 0.8058 | 0.2646 |
-| Dumb Blond Bitches (Barbit) | sample-instrument | v019 | 0.8700 | 0.8677 | 0.2862 |
-| Dumb Blond Bitches | synth | v020 | 0.8094 | 0.7938 | 0.2257 |
-| Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM) | sample-instrument | v017 | 0.9000 | 0.8970 | 0.2661 |
-| Automotivo XM | synth | v018 | 0.8624 | 0.8412 | 0.2285 |
+| Regime CLT (Dj Brunin XM, Aurora Shukita) | sample-instrument | v089 | 0.9093 | 0.9002 | 0.3331 |
+| Regime CLT | synth | v090 | 0.9136 | 0.9038 | 0.3374 |
+| VAGABUNDO NÃO NAMORA (Christopher Luz) | sample-instrument | v074 | 0.8793 | 0.8566 | 0.3043 |
+| VAGABUNDO NÃO NAMORA | synth | v075 | 0.8432 | 0.8086 | 0.2683 |
+| Dumb Blond Bitches (Barbit) | sample-instrument | v021 | 0.8711 | 0.8684 | 0.2873 |
+| Dumb Blond Bitches | synth | v022 | 0.8072 | 0.7943 | 0.2234 |
+| Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM) | sample-instrument | v019 | 0.9000 | 0.8968 | 0.2661 |
+| Automotivo XM | synth | v020 | 0.8657 | 0.8417 | 0.2318 |
 
 | Mode | Overall floor | Section-aware floor |
 |------|---------------|---------------------|
@@ -107,7 +107,7 @@ flowchart TB
 
     %% ===== STAGES 2-6: material =====
     Instr --> S2["2: transcribe.py (Basic Pitch)<br/>bass.wav, melodic.wav → .mid"]
-    S2 --> S3["3: detect_drums_bands.py → drums_bands.json<br/>3b: bass_register.py → bass_f0.json"]
+    S2 --> S3["3: detect_drums_bands.py → drums_bands.json<br/>3b: bass_register.py → bass_f0.json<br/>3c: stem_repair.py → .pipeline/stems"]
     S3 --> S4["4: build_sample_pack.py<br/>drum one-shots + pitched multisamples"]
     S4 --> S5["5: midi-grep generative train --midi<br/>(one grain per note) + build_instruments.py<br/>→ instruments/samples.json + verification.json"]
     S5 --> S6{"6: host"}
@@ -229,7 +229,7 @@ midi-grep/
 │   │   └── strudel-validate.mjs
 │   └── python/
 │       ├── separate.py, analyze.py, tempo_refine.py, transcribe.py, cleanup.py
-│       ├── detect_genre_dl.py, detect_drums.py, detect_drums_bands.py, bass_register.py
+│       ├── detect_genre_dl.py, detect_drums.py, detect_drums_bands.py, bass_register.py, stem_repair.py
 │       ├── build_sample_pack.py, build_instruments.py, pitched_grains.py, upload_r2.py
 │       ├── generate_dynamic_strudel.py, sound_selector.py, lead_synth.py, bass_shape.py
 │       ├── renderer.py, render_jobs.py, solo_stems.py
@@ -340,7 +340,7 @@ summary.
 |-------|-----------|
 | 1 | `midi-grep extract --render none --iterate 0`: stems, BPM/key. 1b: genre (`--genre` > owner labels in `eval/datasets/genre_labels.yaml` > kNN of the CLAP embedding against the labelled tracks > CLAP zero-shot, flagged uncertain when kNN finds no supporting genre) + metadata stamp, tempo refined by phase coherence on the drums stem (`tempo_refine.py`) |
 | 2 | `transcribe.py` on `bass.wav` and `melodic.wav` (Basic Pitch). Vocals are not transcribed |
-| 3 | `detect_drums_bands.py` drum onsets; 3b: bass f0/register |
+| 3 | `detect_drums_bands.py` drum onsets; 3b: bass f0/register; 3c: `stem_repair.py` bass Demucs filed under drums |
 | 4 | `build_sample_pack.py`: drum one-shots cut from the detected hits, pitched multisamples |
 | 5 | `midi-grep generative train` (one grain per transcribed note) + `build_instruments.py`. Every sample is re-measured for pitch (`instruments/verification.json`) |
 | 6 | Host the pack: `upload_r2.py` (`--r2`, default) or a local CORS server (`--local`) |
