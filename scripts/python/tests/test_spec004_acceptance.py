@@ -433,10 +433,10 @@ def test_23_dataset_entry_missing_a_mode_or_run_is_detected():
 
 # Mode floors after the 2026-10-27 re-baseline (overall = 0.5 static + 0.5 temporal, vs instrumental.wav; each =
 # round(min over the mode's reference tracks - 0.02, 2)); "never lowered" == these exact values hold. History:
-# sample 0.80/0.77 and synth 0.79/0.74 (2026-10-23 re-baseline: Regime v057/v058, VAGABUNDO v036/v035), sample 0.70/0.69 and synth 0.70/0.68 (2026-10-19 runs, deleted from the cache), 0.65/0.63 (Regime v032 scored one bar mis-aligned), 0.64/0.60 and 0.54/0.53 (2026-10-18, BlackHole, full-mix reference), 0.88/0.90 and 0.77/0.81 (static-only scale).
+# sample 0.85/0.83 and synth 0.78/0.78 (2026-10-29 deterministic renderer: DBB v010/v011, VAGABUNDO v060; deleted from the cache), sample 0.80/0.77 and synth 0.79/0.74 (2026-10-23 re-baseline: Regime v057/v058, VAGABUNDO v036/v035), sample 0.70/0.69 and synth 0.70/0.68 (2026-10-19 runs, deleted from the cache), 0.65/0.63 (Regime v032 scored one bar mis-aligned), 0.64/0.60 and 0.54/0.53 (2026-10-18, BlackHole, full-mix reference), 0.88/0.90 and 0.77/0.81 (static-only scale).
 REGIME_FLOORS = {
-    "sample_instrument": {"genres": 0.85, "section_aware": 0.83},   # 2026-10-28: four reference tracks (owner decision)
-    "synth": {"genres": 0.78, "section_aware": 0.78},               # 2026-10-29 deterministic renderer: binding Dumb Blond Bitches v011
+    "sample_instrument": {"genres": 0.85, "section_aware": 0.84},   # 2026-10-31 rebuilt on main: DBB v019, VAGABUNDO v072
+    "synth": {"genres": 0.79, "section_aware": 0.77},               # 2026-10-31 rebuilt on main: binding Dumb Blond Bitches v020
 }
 OLD_STATIC_SA_FLOOR = 0.90      # pre-rescale sample-instrument section-aware floor (static scale), for fix #10's history
 

@@ -21,17 +21,17 @@ tracks:
     genre: brazilian_funk
     mode: sample-instrument
     cache_key: "Regime CLT (Dj Brunin XM, Aurora Shukita)"
-    version: v077
-    expected: pass               # deterministic renderer 2026-10-29 (was v069)
+    version: v087
+    expected: pass               # rebuilt on main ef309ee 2026-10-31 (was v077, deleted from the cache); deterministic renderer 2026-10-29 (was v069)
     # offline renderer, no vocal voice, scored vs instrumental.wav. previous: v057 0.8181 / 0.8043, v031 0.7794 / 0.7744
-    measured: { overall: 0.9081, section_aware: 0.9042, static: 0.9641, temporal: 0.8520, margin_over_chance: 0.3319 }
+    measured: { overall: 0.9093, section_aware: 0.9002, static: 0.9674, temporal: 0.8512, margin_over_chance: 0.3331 }
   - name: "Regime CLT (Dj Brunin XM, Aurora Shukita) — synth mode"
     genre: brazilian_funk
     mode: synth
     cache_key: "Regime CLT (Dj Brunin XM, Aurora Shukita)"
-    version: v078
-    expected: pass               # deterministic renderer 2026-10-29 (was v070); previous: v058 0.8823 / 0.8698; v032 0.7479 / 0.7361 (v027, BlackHole, failed the chance margin: history only). v056 (0.8803 / 0.8741) scored lower.
-    measured: { overall: 0.9136, section_aware: 0.9038, static: 0.9695, temporal: 0.8576, margin_over_chance: 0.3374 }
+    version: v088
+    expected: pass               # rebuilt on main ef309ee 2026-10-31 (was v078, deleted from the cache); deterministic renderer 2026-10-29 (was v070); previous: v058 0.8823 / 0.8698; v032 0.7479 / 0.7361 (v027, BlackHole, failed the chance margin: history only). v056 (0.8803 / 0.8741) scored lower.
+    measured: { overall: 0.9136, section_aware: 0.9038, static: 0.9695, temporal: 0.8577, margin_over_chance: 0.3374 }
   # - name: "Caravan Palace - Lone Digger"
   #   genre: electro_swing
   #   cache_key: "Caravan Palace - Lone Digger (Official MV)"
@@ -44,41 +44,41 @@ tracks:
     genre: brazilian_funk
     mode: sample-instrument
     cache_key: "VAGABUNDO NÃO NAMORA"
-    version: v060
-    expected: pass               # deterministic renderer 2026-10-29 (was v051); offline renderer, no vocal voice, scored vs instrumental.wav. previous: v036 0.8195 / 0.7886, v013 0.7170 / 0.7073
-    measured: { overall: 0.8738, section_aware: 0.8539, static: 0.9566, temporal: 0.7910, margin_over_chance: 0.2988 }
+    version: v072
+    expected: pass               # rebuilt on main ef309ee 2026-10-31 (was v060, deleted from the cache); deterministic renderer 2026-10-29 (was v051); offline renderer, no vocal voice, scored vs instrumental.wav. previous: v036 0.8195 / 0.7886, v013 0.7170 / 0.7073
+    measured: { overall: 0.8816, section_aware: 0.8588, static: 0.9672, temporal: 0.7960, margin_over_chance: 0.3066 }
   - name: "VAGABUNDO NÃO NAMORA (Christopher Luz) — synth mode"
     genre: brazilian_funk
     mode: synth
     cache_key: "VAGABUNDO NÃO NAMORA"
-    version: v061
-    expected: pass               # deterministic renderer 2026-10-29 (was v055); the synth piece from the fixed generator (no sample-loop table). previous: v052 0.8351 / 0.7989, v035 0.8069 / 0.7645, v014 0.7240 / 0.7007.
-    measured: { overall: 0.8379, section_aware: 0.8021, static: 0.9629, temporal: 0.7129, margin_over_chance: 0.2629 }
+    version: v073
+    expected: pass               # rebuilt on main ef309ee 2026-10-31 (was v061, deleted from the cache); deterministic renderer 2026-10-29 (was v055); the synth piece from the fixed generator (no sample-loop table). previous: v052 0.8351 / 0.7989, v035 0.8069 / 0.7645, v014 0.7240 / 0.7007.
+    measured: { overall: 0.8395, section_aware: 0.8058, static: 0.9652, temporal: 0.7139, margin_over_chance: 0.2646 }
   - name: "Dumb Blond Bitches (Barbit)"
     genre: brazilian_funk
     mode: sample-instrument
     cache_key: "Dumb Blond Bitches"
-    version: v010
-    expected: pass               # deterministic renderer 2026-10-29 (was v008); added 2026-10-28; before the PR #24 drum fixes v006 0.7514 / 0.7405 FAILED (drums stem 0.386)
-    measured: { overall: 0.8714, section_aware: 0.8685, static: 0.9638, temporal: 0.7791, margin_over_chance: 0.2877 }
+    version: v019
+    expected: pass               # rebuilt on main ef309ee 2026-10-31 (was v010, deleted from the cache); deterministic renderer 2026-10-29 (was v008); added 2026-10-28; before the PR #24 drum fixes v006 0.7514 / 0.7405 FAILED (drums stem 0.386)
+    measured: { overall: 0.8700, section_aware: 0.8677, static: 0.9653, temporal: 0.7747, margin_over_chance: 0.2862 }
   - name: "Dumb Blond Bitches (Barbit) — synth mode"
     genre: brazilian_funk
     mode: synth
     cache_key: "Dumb Blond Bitches"
-    version: v011
-    expected: pass               # deterministic renderer 2026-10-29 (was v009); added 2026-10-28; binding synth track
-    measured: { overall: 0.8026, section_aware: 0.7954, static: 0.9300, temporal: 0.6753, margin_over_chance: 0.2189 }
+    version: v020
+    expected: pass               # rebuilt on main ef309ee 2026-10-31 (was v011, deleted from the cache); deterministic renderer 2026-10-29 (was v009); added 2026-10-28; binding synth track
+    measured: { overall: 0.8094, section_aware: 0.7938, static: 0.9572, temporal: 0.6617, margin_over_chance: 0.2257 }
   - name: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM)"
     genre: brazilian_funk
     mode: sample-instrument
     cache_key: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM"
-    version: v006
-    expected: pass               # deterministic renderer 2026-10-29 (was v004); added 2026-10-28 (cache key = the extractor's truncated source title)
-    measured: { overall: 0.9002, section_aware: 0.8944, static: 0.9484, temporal: 0.8520, margin_over_chance: 0.2663 }
+    version: v017
+    expected: pass               # rebuilt on main ef309ee 2026-10-31 (was v006, deleted from the cache); deterministic renderer 2026-10-29 (was v004); added 2026-10-28 (cache key = the extractor's truncated source title)
+    measured: { overall: 0.9000, section_aware: 0.8970, static: 0.9421, temporal: 0.8579, margin_over_chance: 0.2661 }
   - name: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM) — synth mode"
     genre: brazilian_funk
     mode: synth
     cache_key: "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM"
-    version: v007
-    expected: pass               # deterministic renderer 2026-10-29 (was v005); added 2026-10-28
-    measured: { overall: 0.8533, section_aware: 0.8296, static: 0.9453, temporal: 0.7613, margin_over_chance: 0.2194 }
+    version: v018
+    expected: pass               # rebuilt on main ef309ee 2026-10-31 (was v007, deleted from the cache); deterministic renderer 2026-10-29 (was v005); added 2026-10-28
+    measured: { overall: 0.8624, section_aware: 0.8412, static: 0.9700, temporal: 0.7548, margin_over_chance: 0.2285 }
