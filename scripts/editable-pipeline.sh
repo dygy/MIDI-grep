@@ -45,8 +45,8 @@
 #              when working on the separation stage itself)
 #   --force    redo every stage even if its output exists
 #
-# Requires (checked per stage, not up front): BlackHole + Multi-Output selected, node recorder built
-# (scripts/node/dist), wrangler OAuth login for --r2. stdout carries ONLY the final JSON summary;
+# Requires (checked per stage, not up front): the renderer built (scripts/node/dist; BlackHole + Multi-Output only for
+# MIDIGREP_RENDERER=blackhole), wrangler OAuth login for --r2. stdout carries ONLY the final JSON summary;
 # progress goes to stderr.
 set -uo pipefail
 

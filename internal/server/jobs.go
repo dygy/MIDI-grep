@@ -9,6 +9,7 @@ import (
 
 	"github.com/dygy/midi-grep/internal/analysis"
 	"github.com/dygy/midi-grep/internal/audio"
+	"github.com/dygy/midi-grep/internal/codegen"
 	"github.com/dygy/midi-grep/internal/exec"
 	"github.com/dygy/midi-grep/internal/midi"
 )
@@ -205,26 +206,21 @@ func (m *JobManager) Process(job *Job) {
 	job.Stage = "Generating Strudel code..."
 	job.Updates <- job.Stage
 
-	// Call Python AI code generator
-	aiResult, aiErr := runner.RunScript(ctx, "ai_code_generator.py",
+	// The CLI's generator (codegen.ScriptSingle) on the transcribed notes. No placeholder: a failed generation is a
+	// failed job, never a one-note piece presented as the result.
+	aiOutput, aiErr := codegen.Generate(ctx, runner, codegen.ScriptSingle,
 		pianoPath,
 		"--bpm", fmt.Sprintf("%.0f", analysisResult.BPM),
 		"--key", analysisResult.Key,
-		"--duration", "30")
-
-	var strudelCode string
+		"--duration", "30",
+		"--notes-json", notesJSON)
 	if aiErr != nil {
-		// Fallback minimal code
-		strudelCode = fmt.Sprintf(`// MIDI-grep output
-// BPM: %.0f, Key: %s
-
-setcps(%.0f/60/4)
-
-$: note("c4").sound("gm_piano")
-`, analysisResult.BPM, analysisResult.Key, analysisResult.BPM)
-	} else {
-		strudelCode = aiResult.Stdout
+		job.Status = StatusFailed
+		job.Error = fmt.Sprintf("Strudel code generation failed: %v", aiErr)
+		job.Updates <- job.Error
+		return
 	}
+	strudelCode := aiOutput.Code
 
 	// Complete
 	job.Result = &JobResult{
@@ -368,26 +364,21 @@ func (m *JobManager) ProcessYouTube(job *Job, url string) {
 	job.Stage = "Generating Strudel code..."
 	job.Updates <- job.Stage
 
-	// Call Python AI code generator
-	aiResult, aiErr := runner.RunScript(ctx, "ai_code_generator.py",
+	// The CLI's generator (codegen.ScriptSingle) on the transcribed notes. No placeholder: a failed generation is a
+	// failed job, never a one-note piece presented as the result.
+	aiOutput, aiErr := codegen.Generate(ctx, runner, codegen.ScriptSingle,
 		pianoPath,
 		"--bpm", fmt.Sprintf("%.0f", analysisResult.BPM),
 		"--key", analysisResult.Key,
-		"--duration", "30")
-
-	var strudelCode string
+		"--duration", "30",
+		"--notes-json", notesJSON)
 	if aiErr != nil {
-		// Fallback minimal code
-		strudelCode = fmt.Sprintf(`// MIDI-grep output
-// BPM: %.0f, Key: %s
-
-setcps(%.0f/60/4)
-
-$: note("c4").sound("gm_piano")
-`, analysisResult.BPM, analysisResult.Key, analysisResult.BPM)
-	} else {
-		strudelCode = aiResult.Stdout
+		job.Status = StatusFailed
+		job.Error = fmt.Sprintf("Strudel code generation failed: %v", aiErr)
+		job.Updates <- job.Error
+		return
 	}
+	strudelCode := aiOutput.Code
 
 	// Complete
 	job.Result = &JobResult{

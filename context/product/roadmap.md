@@ -548,14 +548,16 @@ measured runs: `eval/thresholds.yaml` `modes:` and `eval/datasets/reference_trac
   fade-out, the bass lpf comes from the median over rests; silent / loopless bass samples enter the pack. Fix in progress
   (`improve/bass-sustain`).
 - [ ] **Mix brightness on "Enter - Nigdy Więcej Wojny"** (centroid 974 Hz vs 1706 Hz in the instrumental).
-- [ ] **Web UI codegen is broken:** `internal/server/jobs.go` still calls the deleted `ai_code_generator.py`.
+- [x] **Web UI codegen is broken:** `internal/server/jobs.go` still calls the deleted `ai_code_generator.py`. Fixed 2026-11-01:
+  `internal/codegen` (shared with the CLI); a failed generation fails the job.
 - [ ] **`--deep-genre` is a no-op on `midi-grep extract`:** `cmd/midi-grep/main.go` sets `useDeepGenre` but nothing reads it,
   and no Go code calls `detect_genre_dl.py` (CLAP only runs in editable-pipeline stage 1b).
-- [ ] **Python requirements drift:** `demucs` (used by `separate.py`) is missing from `requirements.txt`, while `spleeter` is listed
-  but imported nowhere; `essentia` is installed but `detect_genre_essentia.py` is unused.
-- [ ] **Stale comments in code / config headers** still say "BlackHole render" (`eval/thresholds.yaml`,
-  `reference_tracks.yaml`, `auto-calibrate.sh`, `editable-pipeline.sh` "Requires", `mcp_servers/loop/server.py`), and dead
-  `render-strudel-node.js` references remain in `cmd/midi-grep/main.go`, `synth_profiles.py`, `ai_learning_optimizer.py`.
+- [x] **Python requirements drift:** `demucs` (used by `separate.py`) is missing from `requirements.txt`, while `spleeter` is listed
+  but imported nowhere; `essentia` is installed but `detect_genre_essentia.py` is unused. Fixed 2026-11-01: `spleeter` out;
+  `demucs`, `torch`, `scipy`, `matplotlib`, `requests` (imported directly) in; the unused Essentia script deleted.
+- [ ] **Stale comment in `auto-calibrate.sh`** ("Requires: BlackHole device"): left for the next real change to the driver,
+  because the driver is part of the calibration code version and a comment edit would make every stored best rerun.
+  (2026-11-01: the other "BlackHole render" headers and every dead `render-strudel-node.js` reference are fixed.)
 - [ ] **Modulators `.lfo` / `.env` race mid-render** in the offline renderer.
 
 ---

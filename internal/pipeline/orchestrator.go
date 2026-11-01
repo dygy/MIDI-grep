@@ -14,6 +14,7 @@ import (
 	"github.com/dygy/midi-grep/internal/analysis"
 	"github.com/dygy/midi-grep/internal/audio"
 	"github.com/dygy/midi-grep/internal/cache"
+	"github.com/dygy/midi-grep/internal/codegen"
 	"github.com/dygy/midi-grep/internal/drums"
 	"github.com/dygy/midi-grep/internal/exec"
 	"github.com/dygy/midi-grep/internal/midi"
@@ -525,11 +526,7 @@ func (o *Orchestrator) Execute(ctx context.Context, cfg Config) (*Result, error)
 
 		// Call Ollama-powered code generator. "orchestrated" uses the job-based
 		// codegen_orchestrator.py (small validated jobs); default "single" uses ollama_codegen.py.
-		codegenScript := "ollama_codegen.py"
-		if cfg.CodegenMode == "orchestrated" {
-			codegenScript = "codegen_orchestrator.py"
-		}
-		aiResult, aiErr := o.runner.RunScript(ctx, codegenScript, aiArgs...)
+		aiOutput, aiErr := codegen.Generate(ctx, o.runner, codegen.Script(cfg.CodegenMode), aiArgs...)
 		if aiErr != nil {
 			o.progress.Warning("AI code generation failed: %v", aiErr)
 			// Fallback: generate minimal placeholder
@@ -542,32 +539,13 @@ setcps(%.0f/60/4)
 $: note("c4").sound("gm_piano")
 `, analysisResult.BPM, analysisResult.Key, analysisResult.BPM)
 		} else {
-			// Parse JSON output from AI generator
-			var aiOutput struct {
-				Code         string `json:"code"`
-				BestPrevious *struct {
-					Code       string  `json:"code"`
-					Similarity float64 `json:"similarity"`
-					Version    int     `json:"version"`
-				} `json:"best_previous"`
-			}
-			if json.Unmarshal([]byte(aiResult.Stdout), &aiOutput) == nil {
-				// Always use freshly generated code from Ollama
-				if aiOutput.Code != "" {
-					strudelCode = aiOutput.Code
-					if aiOutput.BestPrevious != nil {
-						o.progress.StageComplete("AI generated new Strudel code (best previous: v%d, %.0f%%)",
-							aiOutput.BestPrevious.Version, aiOutput.BestPrevious.Similarity*100)
-					} else {
-						o.progress.StageComplete("AI generated new Strudel code")
-					}
-				} else {
-					// Raw output (not JSON)
-					strudelCode = aiResult.Stdout
-				}
+			// Always use freshly generated code from Ollama
+			strudelCode = aiOutput.Code
+			if aiOutput.BestPrevious != nil {
+				o.progress.StageComplete("AI generated new Strudel code (best previous: v%d, %.0f%%)",
+					aiOutput.BestPrevious.Version, aiOutput.BestPrevious.Similarity*100)
 			} else {
-				// Not JSON, use raw output
-				strudelCode = aiResult.Stdout
+				o.progress.StageComplete("AI generated new Strudel code")
 			}
 		}
 

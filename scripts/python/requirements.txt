@@ -1,11 +1,16 @@
 # Target: Python 3.11 (basic-pitch needs TF 2.15 + keras<3; 3.12 not supported).
 # Do not use 3.12-only syntax (e.g. the `type X = ...` statement).
-spleeter>=2.4.0
+# Stem separation (separate.py)
+demucs>=4.0.1
+torch>=2.5.0          # also imported directly (detect_genre_dl.py); acids-rave pins 2.5.x
 basic-pitch>=0.3.0
 librosa>=0.10.0
 pretty_midi>=0.2.10
 numpy>=1.24.0,<2.0.0
 soundfile>=0.12.0
+scipy>=1.10.0
+matplotlib>=3.7.0     # compare_audio.py / generate_report.py charts
+requests>=2.31.0      # ai_improver.py (Ollama HTTP API)
 scikit-learn>=0.17,<=1.5.1
 # Pin keras for TensorFlow 2.15 compatibility (Keras 3.x breaks basic-pitch)
 keras>=2.15.0,<3.0.0
@@ -21,6 +26,9 @@ openl3>=0.4.1
 fastmcp>=2.0.0
 pydantic>=2.0   # pipeline_helpers.py / build_instruments.py models (not only via fastmcp)
 pyyaml>=6.0
+
+# Optional: Claude API for `extract --iterate --ollama=false` (ai_improver.py imports it when present)
+# anthropic
 
 # Optional: Full RAVE neural network training (for --mode rave)
 # Uncomment if you want to train full neural synthesizers (takes hours)

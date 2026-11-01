@@ -49,8 +49,8 @@ code** — all codegen is Python/LLM.*
 - **BPM / Key Detection:** librosa (`analyze.py`, candidates reported in output header);
   chords + sections via `smart_analyze.py`
 - **Genre Detection:** heuristics in `internal/pipeline/orchestrator.go`
-  (`shouldUseBrazilianFunkMode()` etc.), CLAP zero-shot (`detect_genre_dl.py`, default on),
-  Essentia (`detect_genre_essentia.py`); `--genre` bypasses detection
+  (`shouldUseBrazilianFunkMode()` etc.) on `extract` (its `--deep-genre` flag is still read by nothing, see the
+  roadmap); CLAP (`detect_genre_dl.py`) runs in editable-pipeline stage 1b; `--genre` bypasses detection
 - **Codegen (LLM-first):** `--codegen orchestrated` (**default**) runs
   `scripts/python/codegen_orchestrator.py` — small validated jobs (structure / voice.bass /
   voice.lead / drums) executed by `job_runner.py` (validate → retry ≤2 with error feedback → logged
@@ -209,9 +209,9 @@ steady-state file growth, `capture-rate.ts`): the wall-clock + `aresample=async=
 **Call sites:** through `scripts/python/renderer.py` (`MIDIGREP_RENDERER`): `scripts/python/ai_improver.py` (every
 `--iterate` round), `scripts/auto-calibrate.sh`, `scripts/editable-pipeline.sh`, `scripts/sample-pipeline.sh`,
 `scripts/python/stem_match.py`, `scripts/python/audition_drum_banks.py`, `mcp_servers/loop/server.py`. Directly:
-`cmd/midi-grep/main.go` (`renderStrudelBlackHole`, `--blackhole`). Residual references to `render-strudel-node.js`
-remain in `cmd/midi-grep/main.go` (`renderStrudelNodeJS`), `synth_profiles.py` and `ai_learning_optimizer.py`;
-they point at a file that no longer exists and are dead paths. **Only a real-Strudel render (offline renderer by default, or the BlackHole recorder) may
+`cmd/midi-grep/main.go` (`renderStrudel`: `extract --render`, `--blackhole` selects the recorder; no Python
+approximation stands in for a failed render). `internal/codegen`'s tests fail when the Go code names a script that does
+not exist (the web UI used to call the deleted `ai_code_generator.py`). **Only a real-Strudel render (offline renderer by default, or the BlackHole recorder) may
 gate accept/reject decisions.**
 
 ### Comparison & Eval Gate
@@ -533,7 +533,7 @@ midi-grep/
 │   └── python/
 │       ├── requirements.txt  # Python 3.11 pins (basic-pitch → TF 2.15, keras<3)
 │       ├── separate.py, analyze.py, smart_analyze.py, transcribe.py, cleanup.py, detect_drums.py
-│       ├── detect_genre_dl.py, detect_genre_essentia.py
+│       ├── detect_genre_dl.py
 │       ├── codegen_orchestrator.py  # DEFAULT codegen (job-based, validated)
 │       ├── job_runner.py            # Job DAG runner (validate → retry → logged fallback)
 │       ├── strudel_validation.py    # Single source of truth: valid sounds/banks/methods
