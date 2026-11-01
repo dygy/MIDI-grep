@@ -19,6 +19,11 @@
 #     [--iters N] [--mode sample-instrument|synth] \
 #     [--bass-sound regime_bass --lead-sound regime_lead] \
 #     [--dur <seconds>] [--workdir <tmp>] [--no-mix-dynamics] [--bass-shape stem|off] [--no-shape-trial] [--no-lead-fit] [--lead-fit-evals N]
+#     [--gen-stems <dir>]
+#
+# --gen-stems: the stems the generator and the bass-alone measurement read (default --stems). editable-pipeline.sh
+# passes stem_repair.py's view there when Demucs filed bass under drums; --stems stays the track (identity, memory,
+# the instrumental reference, the sample pack).
 #
 # After BEST, a loudness stage (mix_dynamics.py) moves --master-gain onto the instrumental's RMS (the score is level-
 # invariant, the loop cannot see loudness); --no-mix-dynamics skips it. The final gain is written to <workdir>/best.master.
@@ -134,7 +139,7 @@ render_one() {   # render_one STRU WAV LOG: the renderer's EXIT STATUS decides; 
   return 0
 }
 
-STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" GENRE_REF="" BARS="78"
+STEMS="" GEN_STEMS="" BASE="" INST="" BPM="136" KEY="" GENRE="brazilian_funk" GENRE_REF="" BARS="78"
 LEAD_FIT="${AC_LEAD_FIT:-1}"; LEAD_EVALS=10; LEAD_ARG=(); LSYN="${AC_LEAD_SYNTH:-$ROOT/scripts/python/lead_synth.py}"   # synth lead fit; see header
 BSHAPE="stem"; SHAPE_PIN=0; SHAPE_TESTED=0; SHAPE_TRIAL="${AC_SHAPE_TRIAL:-1}"   # generator --bass-shape; see header
 MIXDYN=1; ENV_START=""; ITERS=""; START_GIVEN=0; SEED=""; WARM_SOURCE="cold" DUR="" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
@@ -166,9 +171,11 @@ while [ $# -gt 0 ]; do case "$1" in
     for _v in "$BL" "$LH"; do awk -v v="$_v" 'BEGIN{exit !(v==0 || v>=20)}' || { echo "--start: BL/LH must be 0 or >= 20 Hz (got $_v) - old format with the removed CV field? drop the 7th value" >&2; exit 64; }; done
     shift 2;;
   --env-start) ENV_START="$2"; shift 2;;                        # per-bar env-correction JSON to apply from iteration 1
+  --gen-stems) GEN_STEMS="$2"; shift 2;;
   *) echo "unknown arg: $1" >&2; exit 64;;
 esac; done
 [ -n "$STEMS" ] && [ -n "$BASE" ] || { echo "need --stems and --base" >&2; exit 64; }
+GEN_STEMS="${GEN_STEMS:-$STEMS}"
 case "$MODE" in sample-instrument|synth) ;; *) echo "--mode must be sample-instrument or synth" >&2; exit 64;; esac
 # sample-instrument: the hosted pitched instruments + extracted kit (v023 setup). synth: leave
 # the sounds unset so the generator derives them from the genre palette; drums ride a bank.
@@ -258,7 +265,7 @@ gen_piece() {
   [ "$LH" -gt 0 ] 2>/dev/null && lh_arg=(--lead-hpf "$LH")   # 0 = generator default
   [ -n "$BASS_SOUND" ] && snd_arg+=(--bass-sound "$BASS_SOUND")
   [ -n "$LEAD_SOUND" ] && snd_arg+=(--lead-sound "$LEAD_SOUND")
-  "$PY" "$GEN" --stems-dir "$STEMS" --pack-dir "$PACK" \
+  "$PY" "$GEN" --stems-dir "$GEN_STEMS" --pack-dir "$PACK" \
     --bass-midi "$PACK/bass.mid" --lead-midi "$PACK/melodic.mid" \
     --drums-json "$PACK/drums_bands.json" --base-url "$BASE" ${inst_arg[@]+"${inst_arg[@]}"} ${snd_arg[@]+"${snd_arg[@]}"} \
     --mode "$MODE" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --num-bars "$BARS" \
@@ -281,7 +288,7 @@ solo_job() {
   local json="$WORK/$tag.$kind.json" msg="$WORK/$tag.$kind.msg"
   if [ "$kind" = bass ]; then
     render_one "$strudel" "$wav" "$rlog" \
-      && "$PY" "$BSOLO" measure --orig-bass "$STEMS/bass.wav" --solo "$wav" --master-gain "$MG" --seconds "$SONG_S" --out "$json" 2>"$mlog" \
+      && "$PY" "$BSOLO" measure --orig-bass "$GEN_STEMS/bass.wav" --solo "$wav" --master-gain "$MG" --seconds "$SONG_S" --out "$json" 2>"$mlog" \
       && { echo "[$tag] $(tail -1 "$mlog")" >"$msg"; return 0; }
     rm -f "$json"; echo "[$tag] WARNING: bass-alone measurement failed (see $rlog, $mlog) - bass layers follow the mix band shares this step" >"$msg"
   else
@@ -335,7 +342,7 @@ while [ "$i" -lt "$ITERS" ]; do
   # A solo that cannot be set up or measured only keeps the mix-share levers for this step (WARNING); a failed MIX render ends
   # the run (RENDER FAILED, exit 70) and the solos in flight are terminated.
   HAVE_BASS=0; HAVE_MEL=0
-  [ "$BSOLO" != off ] && [ -f "$STEMS/bass.wav" ] && "$PY" "$BSOLO" solo "$STRU" "$WORK/$TAG.bass.strudel" 2>/dev/null && HAVE_BASS=1
+  [ "$BSOLO" != off ] && [ -f "$GEN_STEMS/bass.wav" ] && "$PY" "$BSOLO" solo "$STRU" "$WORK/$TAG.bass.strudel" 2>/dev/null && HAVE_BASS=1
   # melodic: measured on sample-instrument only
   [ "$MSOLO" != off ] && [ "$MODE" = sample-instrument ] && [ -f "$STEMS/melodic.wav" ] && "$PY" "$MSOLO" solo "$STRU" "$WORK/$TAG.mel.strudel" 2>/dev/null && HAVE_MEL=1
   render_jobs_for $((1 + HAVE_BASS + HAVE_MEL))
