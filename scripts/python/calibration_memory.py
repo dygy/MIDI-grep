@@ -82,7 +82,7 @@ PACK_ROOTS = ("build_sample_pack.py",)
 INSTRUMENT_ROOTS = ("rave/trainer.py", "pitched_grains.py", "build_instruments.py")
 STAGE_ROOTS = {"pack": PACK_ROOTS, "instruments": INSTRUMENT_ROOTS}
 CALIBRATE_ROOTS = ("generate_dynamic_strudel.py", "calibrate_dynamic.py", "calibrate_loop.py", "mix_dynamics.py",
-                   "compare_audio.py") + PACK_ROOTS + INSTRUMENT_ROOTS
+                   "compare_audio.py", "stem_repair.py") + PACK_ROOTS + INSTRUMENT_ROOTS
 # the offline renderer every calibrated render is made by (its sources and their local imports), and the engine it runs:
 # a renderer change (2026-10-28: deterministic ducks/reverb moved scores by ~0.003) must not reuse renders it did not make
 RENDER_ROOT = "render-strudel-offline.ts"

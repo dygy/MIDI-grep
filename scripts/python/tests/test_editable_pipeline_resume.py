@@ -40,6 +40,7 @@ STUBS = {
         '(out / "verification.json").write_text("{}")\n'
         'model = Path(a[a.index("--models") + 1])\n(out / "bass.wav").write_bytes((model / "a.wav").read_bytes())\n',
     "bass_register.py": 'import sys\na = sys.argv[1:]\nopen(a[a.index("--out") + 1], "w").write("{}")\n',   # stage 3b (real one needs a real stem)
+    "stem_repair.py": 'import sys\na = sys.argv[1:]\nprint(a[a.index("--track") + 1])\n',   # stage 3c: nothing moved -> the track dir
     # the real planner (pack_sync, symlinked in) decides; only the network step is stubbed
     "upload_r2.py": 'import sys\nfrom pathlib import Path\nimport pack_sync\n'
         'a = sys.argv[1:]\npack = Path(a[a.index("--pack-dir") + 1])\n'

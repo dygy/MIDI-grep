@@ -106,11 +106,11 @@ The `docs-freshness` hook reminds you once per session when a pipeline file chan
    - AI analyzes differences and generates new parameters
    - Store learnings in ClickHouse for future tracks
 
-**Current state (2026-10-31; source of truth `eval/thresholds.yaml` `modes:` + `eval/datasets/reference_tracks.yaml`):**
+**Current state (2026-11-01; source of truth `eval/thresholds.yaml` `modes:` + `eval/datasets/reference_tracks.yaml`):**
 four brazilian_funk reference tracks (Regime CLT, VAGABUNDO NÃO NAMORA, Dumb Blond Bitches, Automotivo XM), each built in
 both modes on the seeded offline renderer, scored against `instrumental.wav` with a different-song `--control`. Floors =
-round(min over the tracks − 0.02, 2): sample-instrument **0.85 / 0.84** (binding: Dumb Blond Bitches v019 overall 0.8700,
-VAGABUNDO v072 section-aware 0.8588), synth **0.79 / 0.77** (binding: Dumb Blond Bitches v020, 0.8094 / 0.7938). Quote
+round(min over the tracks − 0.02, 2): sample-instrument **0.85 / 0.84** (binding: Dumb Blond Bitches v021 overall 0.8711,
+VAGABUNDO v074 section-aware 0.8566), synth **0.79 / 0.77** (binding: Dumb Blond Bitches v022, 0.8072 / 0.7943). Quote
 numbers from those files, never from memory.
 
 **History — the lessons that still bind (details: `git log`, `context/fix-log-*.md`, the comments in `thresholds.yaml`):**
@@ -164,6 +164,13 @@ a following master-bus stage (`mix_dynamics.py derive-bus`/`next-bus`) can repla
 kept only if level, crest and ceiling match and the score holds.
 Per-hap `.compressor` and per-layer tanh saturators were measured and do not bound the sum (see `mix_dynamics.py`);
 per-stem share gains from the Demucs stems scored worse/inconsistent (bleed), so `mix_dynamics.py shares` only reports them.
+
+**Bass filed under drums (2026-11-01, `scripts/python/stem_repair.py`, editable-pipeline stage 3c):** in intros/breaks Demucs
+often puts the sustained 808 in `drums.wav` (Novinho: bass stem -59 dB, drums a held G1 at -11 dB), so the generator muted
+the bass and played the kick louder there. Stage 3c moves the harmonic (one-beat HPSS) low band of the drums to the bass
+only in the envelope steps the generator plays silent, into a view `.pipeline/stems/` that `auto-calibrate.sh --gen-stems`
+hands to the generator and the bass-alone measurement; `--stems` stays the track (identity, memory, the instrumental
+reference, the pack). bass+drums is unchanged, so the score's reference is too.
 
 **Bass voice level (2026-10-23, `scripts/python/bass_solo.py`, run by `auto-calibrate.sh` every iteration):** the
 bass layers used to follow whole-mix band shares that the kick also fills (VAGABUNDO: mix sub share matched while the bass

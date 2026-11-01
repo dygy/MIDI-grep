@@ -10,6 +10,7 @@
 #   1 stems+analysis   ./bin/midi-grep extract --url U --render none --iterate 0
 #   2 MIDI per stem    transcribe.py {bass,melodic}.wav -> sample_pack/*.mid (vocals are never transcribed or generated)
 #   3 drum onsets      detect_drums_bands.py drums.wav --bpm B -> sample_pack/drums_bands.json
+#   3b/3c bass         bass_register.py measure (bass f0); stem_repair.py build (bass filed under drums -> .pipeline/stems view)
 #   4 sample pack      build_sample_pack.py
 #   5 instruments      midi-grep generative train (bass, lead) + build_instruments.py
 #   6 host             upload_r2.py (--r2) | local CORS server on :5555 (--local)
@@ -262,6 +263,14 @@ log "stage 3b: bass f0 / register"
 "$PY" "$SP/bass_register.py" measure --stem "$TRACK/bass.wav" --out "$PW/bass_f0.json" >&2 \
   || die "stage 3b bass_register measure failed"
 
+# ---------------------------------------------------------------- stage 3c: bass Demucs filed under drums
+# stem_repair.py moves the sustained sub of the drums stem to the bass where the bass stem is silent (no-op when the
+# stamp matches) and prints the stems dir the generator and the bass-alone measurement read: its view
+# $PW/stems, or the track dir when nothing moved. Stems, MIDI, pack and drum onsets are not touched.
+log "stage 3c: bass in the drums stem"
+GEN_STEMS="$("$PY" "$SP/stem_repair.py" build --track "$TRACK" --out "$PW/stems" --bpm "$BPM" --bars "$BARS" \
+  --bass-f0 "$PW/bass_f0.json")" || die "stage 3c stem_repair failed"
+
 # ---------------------------------------------------------------- stage 4: sample pack
 # the pack is stamped with the code that cut it (pack.code): a builder change must reach the one-shots
 PACK_VER="$("$PY" "$SP/calibration_memory.py" code-version --stage pack 2>/dev/null)"
@@ -380,7 +389,7 @@ run_sample_instrument() {
   preflight_render
   log "stage 7: auto-calibrate sample-instrument (iters cap=${ITERS:-default})"
   key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
-  "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --base "$BASE" --inst "$INST_BASE""samples.json" \
+  "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --gen-stems "$GEN_STEMS" --base "$BASE" --inst "$INST_BASE""samples.json" \
     --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --genre-ref "$GENRE_REF" --bars "$BARS" ${ITERS:+--iters "$ITERS"} --dur "$DUR" \
     --bass-sound "${SND}_bass" --lead-sound "${SND}_lead" \
     --mode sample-instrument --workdir "$W" 2>&1 | tee "$W/calibrate.log" >&2
@@ -418,7 +427,7 @@ run_synth() {
   fi
   local key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
   log "stage 7: auto-calibrate synth (iters cap=${SYNTH_ITERS:-default})"
-  "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --base "$BASE" \
+  "$ROOT/scripts/auto-calibrate.sh" --stems "$TRACK" --gen-stems "$GEN_STEMS" --base "$BASE" \
     --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --genre-ref "$GENRE_REF" --bars "$BARS" ${SYNTH_ITERS:+--iters "$SYNTH_ITERS"} --dur "$DUR" \
     --mode synth --workdir "$W" ${start_arg[@]+"${start_arg[@]}"} 2>&1 | tee "$W/calibrate.log" >&2
   local cal_rc="${PIPESTATUS[0]}"

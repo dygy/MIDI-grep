@@ -461,6 +461,7 @@ def bar_env_pattern(stem_path: Path, nbars: int, bpm: float, *,
     return [[float(norm[b * steps + s]) for s in range(steps)] for b in range(nbars)]
 
 
+ENV_STEPS = 4   # --env-steps default: envelope steps per bar (one per beat); stem_repair.py gates on the same grid
 ENV_CORRECTION_VOICES = ("bass", "lead", "master")
 ENV_CORRECTION_CLAMP = "clamp"   # reserved key in load_env_correction()'s result
 
@@ -723,7 +724,7 @@ def main() -> int:
     ap.add_argument("--master-bus", type=Path, default=None,
                     help="JSON from mix_dynamics.py derive-bus/next-bus: emit the measured master-bus lines (bus compressor + "
                          "brickwall limiter, each guarded so engines without them ignore the line). Voice gains are NOT touched")
-    ap.add_argument("--env-steps", type=int, default=4,
+    ap.add_argument("--env-steps", type=int, default=ENV_STEPS,
                     help="sub-bar resolution of the per-voice loudness envelope baked into .gain() "
                          "(1=per-bar arrangement only, 4=per-beat [default], 8=8ths, 16=16ths). Higher "
                          "carries more of the original's intra-bar dynamics/accents and true silence; "
