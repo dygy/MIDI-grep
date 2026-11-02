@@ -332,26 +332,20 @@ All outputs are cached in `.cache/stems/{key}/` by URL or file hash:
 
 ### Audio Rendering & AI Analysis
 
-The `--render` flag synthesizes WAV audio from patterns:
+The `--render` flag renders the generated piece with the selected Strudel renderer (`scripts/python/renderer.py`:
+the offline renderer by default, `--blackhole` = the recorder). A failed render leaves no render; no Python
+approximation stands in (the old `render_audio.py` / `render_with_models.py` / `iterative_render.py` fallbacks were
+not Strudel and were deleted 2026-11-01):
 
 ```bash
 ./bin/midi-grep extract --url "..." --render auto  # Save to cache
 ./bin/midi-grep extract --url "..." --render out.wav  # Custom path
 ```
 
-**Synthesis (`scripts/python/render_audio.py`):**
-- Kick: Pitch envelope + distortion (808 style)
-- Snare: Body tone + high-passed noise
-- Hi-hat: Filtered noise with decay
-- Bass: Sawtooth + sub-octave, LPF
-- Vocal chops: Square wave with fast attack
-- Chord stabs: Filtered sawtooth
-- Lead: Triangle wave with vibrato
-
 **Node.js Strudel Renderer — REMOVED (Jun 2026):** `render-strudel-node.ts` (offline synthesis
-emulating Strudel sounds, ~16% similarity vs the real engine) was deleted. Dead references to
-`render-strudel-node.js` still exist in `cmd/midi-grep/main.go` (`renderStrudelNodeJS`), `synth_profiles.py` and
-`ai_learning_optimizer.py` — tracked in spec 003 tasks. (The `loop` MCP server no longer has a `recorder` option.)
+emulating Strudel sounds, ~16% similarity vs the real engine) was deleted; its last references (and
+`ai_learning_optimizer.py`, which tuned only its config) went 2026-11-01, and `internal/codegen` has a test that every
+script the Go code names exists. (The `loop` MCP server no longer has a `recorder` option.)
 
 **Offline Strudel Renderer (`scripts/node/src/render-strudel-offline.ts`) — DEFAULT since 2026-10-19:**
 - Strudel's OWN export path (`renderPatternAudio` → `OfflineAudioContext`), i.e. the real superdough
@@ -443,11 +437,6 @@ in-run drift.)*
 - Thins drum patterns to match original's onset density
 - Prevents tempo detection errors from too many drum hits
 - Parses and modifies Strudel bar arrays
-
-**Model-based Renderer (`scripts/python/render_with_models.py`):** *(deprecated — a Python approximation, not Strudel;
-used only by `extract --render` before its fallbacks; never gates)*
-- Audio rendering using trained granular models
-- Loads pitched samples from model directories
 
 **Editability / Replay Detector (`scripts/python/editability_check.py`, spec 003 Slice 1):**
 - Static analysis of a `.strudel` file against `values.md`: R1 `slice(N,run(N)).slow(N)`/`loopAt`
@@ -586,24 +575,19 @@ midi-grep/
 │       ├── separate.py         # Demucs stem separation (melodic/bass/drums/vocals)
 │       ├── analyze.py          # BPM/key detection with candidates
 │       ├── detect_drums.py     # Drum onset detection and classification
-│       ├── render_audio.py     # WAV audio synthesis from patterns
 │       ├── smart_analyze.py    # Advanced chord/section detection
 │       ├── chord_to_strudel.py # Chord-based Strudel generation
 │       ├── transcribe.py       # Basic Pitch transcription
 │       ├── cleanup.py          # MIDI quantization
 │       ├── detect_genre_dl.py  # CLAP-based deep learning genre detection
-│       ├── detect_genre_essentia.py # Essentia-based genre detection
 │       ├── audio_to_strudel_params.py # AI-driven effect parameter suggestion
 │       ├── compare_audio.py    # Rendered vs original audio comparison
 │       ├── generate_report.py  # HTML report generation
 │       ├── ollama_codegen.py   # Ollama LLM code gen with genre sound RAG
-│       ├── ai_learning_optimizer.py # AI learning optimization
 │       ├── spectrogram_analyzer.py # Mel spectrogram deep analysis for AI
 │       ├── sound_selector.py   # Complete sound catalog (67 drums, 128 GM)
 │       ├── synth_profiles.py   # Per-genre synthesis profiles + sidechain depth/instruction
 │       ├── thin_patterns.py    # Pattern density control
-│       ├── render_with_models.py # Render using trained granular models
-│       ├── iterative_render.py # AI-driven iterative audio refinement
 │       ├── learn_artist.py     # Artist-specific learning
 │       ├── seed_knowledge.py   # Knowledge base seeding
 │       ├── requirements.txt
@@ -670,7 +654,8 @@ defer ws.Cleanup()
 - HTMX for reactivity (no JavaScript frameworks)
 - SSE for real-time progress updates
 - Go templates with PicoCSS styling
-- Known defect: `internal/server/jobs.go` still calls `ai_code_generator.py`, which was deleted
+- Job runner (`internal/server/jobs.go`) generates through `internal/codegen` with the CLI's generator
+  (`ollama_codegen.py`); a failed generation fails the job (no placeholder piece)
 
 ## Common Tasks
 

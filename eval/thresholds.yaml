@@ -5,7 +5,7 @@
 # them and fails pytest on a breach.
 #
 # Numbers are the HONEST `overall_similarity` from compare_audio.py (0.0–1.0), measured against a
-# BlackHole render (NOT the Node.js synth - it reads ~16% and must not gate). Since 2026-10-18 overall =
+# real-Strudel render: the offline renderer since 2026-10-19 (earlier: the BlackHole recorder; never the deleted Node.js synth). Since 2026-10-18 overall =
 # 0.5 * static (the old MAE-based time-averaged score) + 0.5 * temporal (time-aligned chroma / log-mel /
 # onset F1 / RMS envelope). The per-MODE floors in `modes:` are on that new scale. The genre-wide
 # `genres:` / `section_aware:` tables below are on the STATIC scale (measured before the temporal half
@@ -91,7 +91,7 @@ section_aware:
 # Mode keys are normalised the same way as genres (`sample-instrument` → `sample_instrument`).
 #
 # RULE: every value here is a REGRESSION FLOOR taken from a real, detector-PASSING
-# (editability: pass) BlackHole render of that mode: floor = measured − a stated margin, and
+# (editability: pass) real-Strudel render of that mode: floor = measured − a stated margin, and
 # the raw measurement + the run it came from is recorded under `measured:` so the number is
 # reproducible. NEVER type a guessed value — leave the entry absent until it is measured
 # (Slice 4 of context/spec/003-editable-strudel-generation/tasks.md fills it in).

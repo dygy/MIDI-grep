@@ -30,10 +30,10 @@ Profile schema (all keys optional):
         },
     }
 
-The fields the Node renderer reads (``voices.*.gain``, ``sub_octave_gain``,
-``lpf``, ``transient_boost``, ``master.hpf``, ``master.high_shelf_boost``) are
-exactly what these profiles touch, so genre tuning takes effect even through the
-already-compiled ``dist/render-strudel-node.js`` — no source changes needed.
+Only ``sidechain.depth`` reaches a render: the codegen prompts (``sidechain_instruction``) and
+``ai_improver.apply_sidechain_to_code`` write it into the Strudel code. The ``voices`` / ``master`` fields were read
+by the Node synthesis renderer, deleted in Jun 2026; renders are real Strudel now (``renderer.py``), so they only
+shape ``synth_config.json``, which ``compare_audio.py --config`` still reads for its BPM and tempo tolerance.
 """
 
 from copy import deepcopy

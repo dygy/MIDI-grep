@@ -160,8 +160,8 @@ flowchart LR
     Improver --> Done
 ```
 
-`extract --render` without `--iterate` uses older paths in `cmd/midi-grep/main.go`: the BlackHole recorder with
-`--blackhole`, otherwise `render_with_models.py`, `iterative_render.py` or `render_audio.py`.
+`extract --render` without `--iterate` renders once with the same renderer (`renderer.py`; `--blackhole` selects the
+recorder). A failed render leaves no render; no Python approximation stands in.
 
 **Renderer.** `scripts/python/renderer.py` is the one switch (`MIDIGREP_RENDERER`, default `offline`). The offline
 renderer `scripts/node/src/render-strudel-offline.ts` runs Strudel's own `renderPatternAudio` on an
@@ -194,7 +194,7 @@ and is a cross-check only. It has a known pitch defect, described under [Rendere
 | **Ollama / Claude API** | Local LLM / HTTP API | Only for `extract` codegen and `--iterate` |
 | **BlackHole** | macOS audio driver | Optional cross-check renderer only |
 
-`detect_genre_essentia.py` exists, but nothing in the pipeline calls it. The stage-1b genre is the owner's label when the track is in `eval/datasets/genre_labels.yaml`, else a kNN of its CLAP embedding against the labelled tracks (`genre_knn.py`), with CLAP zero-shot only as the flagged-uncertain fallback.
+The stage-1b genre is the owner's label when the track is in `eval/datasets/genre_labels.yaml`, else a kNN of its CLAP embedding against the labelled tracks (`genre_knn.py`), with CLAP zero-shot only as the flagged-uncertain fallback.
 
 ### Module Structure
 
@@ -506,8 +506,8 @@ calibration iteration. The report embeds mp3 copies of the audio.
 - **`midi-grep generative`** (`gen`, `rave`): `train <audio> --mode granular|rave [--midi notes.mid]`, `search`,
   `list`, `process`, `serve --port 5555`.
 - **`midi-grep report <cache-dir> [--version N]`**: rebuild an HTML report with the Go generator.
-- **`midi-grep serve --port 8080`**: the HTMX web UI. Known defect: its job runner (`internal/server/jobs.go`) still calls
-  `ai_code_generator.py`, which was deleted.
+- **`midi-grep serve --port 8080`**: the HTMX web UI. Its job runner (`internal/server/jobs.go`) generates through
+  `internal/codegen` with the CLI's generator (`ollama_codegen.py`); a failed generation fails the job.
 - **`scripts/sample-pipeline.sh`**: the earlier sample-pack driver (`--mode loops|instrument|hybrid`). Its
   `loops` output replays per-bar audio and is not a valid deliverable under `values.md`.
 - **`loop` MCP server** (`mcp_servers/loop/server.py`, registered in `.mcp.json`): `render_strudel`,
@@ -527,8 +527,9 @@ hook/JSON checks. Renders and anything that needs ML models run locally.
 ## No longer present
 
 - The Node.js synthesis renderer `render-strudel-node.ts` was deleted in Jun 2026. It was an emulation and read
-  about 16% against the real engine. Dead references remain in `cmd/midi-grep/main.go`, `synth_profiles.py` and
-  `ai_learning_optimizer.py`.
+  about 16% against the real engine. Its last references, `ai_learning_optimizer.py` (which tuned only its config) and
+  the Python render approximations `render_audio.py`, `render_with_models.py`, `iterative_render.py` were removed on
+  2026-11-01.
 - The app `Dockerfile` was retired in Oct 2026. Only `docker-compose.clickhouse.yml` remains.
 - The vocal voice, its instrument and its calibration knob were removed on 2026-10-19.
 - Similarity numbers from before 2026-10-18 are on the old time-averaged scale. Numbers from before the Jun 2026

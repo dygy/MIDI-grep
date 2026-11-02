@@ -5,8 +5,8 @@
 # this list and asserts each track's overall_similarity clears its genre floor in thresholds.yaml.
 #
 # How to add a track:
-#   1. Run an extraction that produces a BlackHole render + comparison:
-#        ./bin/midi-grep extract --url "..." --genre electro_swing
+#   1. Build both modes with the editable pipeline (offline renderer, scored vs instrumental.wav with a control):
+#        scripts/editable-pipeline.sh --url "..." --mode both
 #   2. Find the resulting comparison.json under .cache/stems/<key>/vNNN/comparison.json
 #   3. Add an entry below. `comparison` may be:
 #        - a path relative to repo root, OR

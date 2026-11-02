@@ -263,7 +263,7 @@ def verify_strudel(
 ) -> dict:
     """Check, render and verify a Strudel file against the original in one call (loop-closer).
 
-    Order: editability detector (spec 003) → BlackHole render → compare_audio.py --strudel →
+    Order: editability detector (spec 003) → render (renderer.py: offline by default) → compare_audio.py --strudel →
     eval gate. A replay / non-editable file stops at stage "editability" with its violations and
     is never rendered or scored. Returns the gate verdict so the agent can decide accept/reject.
     """

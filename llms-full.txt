@@ -69,7 +69,7 @@ Generative flags: `--mode granular|rave`, `--models`, `--github`, `--threshold`,
 | `analyze.py` / `smart_analyze.py` | BPM/key with candidates / chord+section detection |
 | `transcribe.py`, `cleanup.py` | Basic Pitch → MIDI, then quantization |
 | `detect_drums.py` | Drum onset detection/classification |
-| `detect_genre_dl.py` / `detect_genre_essentia.py` | CLAP / Essentia genre detection (window-mean over the whole track, margin rule; also emits the track's mean audio embedding) |
+| `detect_genre_dl.py` | CLAP genre detection (window-mean over the whole track, margin rule; also emits the track's mean audio embedding) |
 | `genre_knn.py` | owner-label registry (`eval/datasets/genre_labels.yaml`) + kNN on CLAP embeddings (cached in `.cache/genre-embeddings/`); `ensure` embeds the labelled tracks, `loo` prints the leave-one-out evaluation |
 
 Genre resolution (stage 1b, `pipeline_helpers.py stamp`; `genre_basis` in `metadata.json`): `--genre` override
