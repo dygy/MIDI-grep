@@ -2,8 +2,8 @@
 
 - **Topic:** Give every generated piece a visual: a realistic scene that fits the track, animated by Hydra so that it
   moves with the piece's own voices.
-- **Status:** In progress — built 2026-10-29; first reference track (VAGABUNDO v063) PASSES 2026-10-30; image
-  determinism and the no-Ollama path not yet exercised
+- **Status:** Completed — verified 2026-11-02 (`/awos:verify`): 10/10 matrix runs on 5 reference tracks PASS, image
+  determinism and the no-Ollama path exercised on the current code
 - **Author:** (with user) — prompt, 2026-10-29
 - **Ticket:** prompt (no issue); roadmap Phase "Alternative output formats" → "Hydra: visual pattern suggestions based on audio"
 - **Decisions (owner, 2026-10-29):** a self-hosted image model paints the scene and a self-hosted Ollama model writes
@@ -29,9 +29,14 @@ coder is editing: change a bass bar and the wave changes with it.
       mood ranking of `instrumental.wav`, spectral centroid), not chosen per track. *(VAGABUNDO v063: CLAP top scenes
       snowy mountain 0.318 / nightclub 0.295 / rainforest 0.235, moods euphoric / menacing / dark; mistral-small chose a
       neon nightclub dance floor — `visuals.json`.)*
-- [ ] The image is painted locally (default `stabilityai/sd-turbo`; `--image-model` selects another diffusers model)
-      with a recorded seed; the same inputs paint the same image.
-- [ ] Ollama unavailable → the run still completes with the CLAP-derived prompt and the fallback chain (recorded).
+- [x] The image is painted locally (default `stabilityai/sd-turbo`; `--image-model` selects another diffusers model)
+      with a recorded seed; the same inputs paint the same image. *(2026-11-02, current code: two pipeline runs and a
+      repaint with seed 7 are byte-identical, sha256 c0af166d…; seed 8 differs — `logs/determinism.log` in the evidence
+      folder; the seed and model are recorded in `visuals.json` → `image`.)*
+- [x] Ollama unavailable → the run still completes with the CLAP-derived prompt and the fallback chain (recorded).
+      *(2026-11-02, Dumb Blond Bitches v019 copy, Ollama unreachable: `chain_source` "fallback (Ollama failed:
+      ConnectionError)", `image_prompt` built from the CLAP top scene + mood, check PASS 0.886; `--no-llm` gives the
+      same — `logs/failmode-*.log`.)*
 
 ### 2.2 Visuals wired to the stems
 

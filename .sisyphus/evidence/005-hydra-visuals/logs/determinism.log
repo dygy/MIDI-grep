@@ -1,6 +1,11 @@
-You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
-You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
-You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
+# 2026-11-02 re-run on the current code (scene_image.paint), prompt + params from the Ollama-unreachable run (Dumb Blond Bitches v019)
+model stabilityai/sd-turbo seed 7 steps 2 size [640, 384]
+pipeline run (noollama) c0af166dc3133231
+pipeline run (nollm)    c0af166dc3133231
+repaint, same seed      c0af166dc3133231 identical
+control: seed+1         9fb092325e6d3c6e DIFFERENT
+
+# earlier run (VAGABUNDO v063, 2026-10-30)
 model stabilityai/sd-turbo seed 7 steps 2 size [640, 384]
 v063 visual.jpg (pipeline run)   sha256 fe8224c74de2ea58  max|dpx|   0  mean|dpx| 0.000
 repaint #1, same seed            sha256 fe8224c74de2ea58  max|dpx|   0  mean|dpx| 0.000

@@ -55,5 +55,5 @@ is one run. "layout" is the gate (scene correlation at block-mean scale, >= 0.5)
 
 - `logs/failmode-no-llm.log`, `logs/failmode-ollama-unreachable.log` (2026-11-02, Dumb Blond Bitches v019 copy):
   both complete on the fallback chain, check PASS 0.886.
-- `logs/pytest_full.log`: full Python suite. `logs/determinism.log`: same seed → same scene image.
+- `logs/pytest_full.log`: full Python suite. `logs/determinism.log`: same seed → same scene image (re-run 2026-11-02 on the current code).
   `logs/scene-metric-calibration.log`: why the gate measures layout, not pixels. `logs/go.log`: Go build/vet/test.
