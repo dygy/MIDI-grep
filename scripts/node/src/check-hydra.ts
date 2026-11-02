@@ -90,14 +90,18 @@ function corr(a, b) { let ma = 0, mb = 0; for (let i = 0; i < a.length; i++) { m
 // one window: cycles [c0, c0 + n/fps*cps), one Hydra tick per frame
 window.__window = (c0, frames, fps, cps) => {
   const g = window.__grab.getContext('2d', { willReadFrequently: true }), out = []; let prev = null;
+  // Hydra's time = the seconds the piece has played at each frame, as in the REPL. Ticking on from 0 across the windows
+  // reached ~18 s, so a chain whose speed a control drives (phase jump = time * change) looked calm here and jumped
+  // dozens of wave periods per hit two minutes into the live piece (2026-11-02)
   for (let f = 0; f < frames; f++) {
     window.__clock = c0 + f / fps * cps;
+    hydra.synth.time = window.__clock / cps - 1 / fps; // tick adds the frame's 1/fps: the frame renders at the clock
     hydra.tick(1000 / fps);
     g.drawImage(window.__canvas, 0, 0);
     const L = lum(g.getImageData(0, 0, window.__W, window.__H).data);
     let motion = 0; if (prev) { for (let i = 0; i < L.length; i++) motion += Math.abs(L[i] - prev[i]); motion /= L.length; }
     const ctl = {}; for (const [k, fn] of Object.entries(window.__vis)) ctl[k] = Number(fn());
-    out.push({ cycle: window.__clock, sceneCorr: corr(__blockMeans(L, window.__W, window.__H, window.__block), window.__sceneCoarse),
+    out.push({ cycle: window.__clock, hydraTime: hydra.synth.time, sceneCorr: corr(__blockMeans(L, window.__W, window.__H, window.__block), window.__sceneCoarse),
       pixelCorr: corr(L, window.__sceneLum), motion: prev ? motion : null, ctl });
     prev = L;
   }
@@ -114,7 +118,7 @@ window.__sweep = (cycles) => {
   }
   return ranges;
 };
-window.__frameAt = (cycle, fps) => { window.__clock = cycle; hydra.tick(1000 / fps); window.__grab.getContext('2d').drawImage(window.__canvas, 0, 0); return window.__png(); };
+window.__frameAt = (cycle, fps, cps) => { window.__clock = cycle; hydra.synth.time = cycle / cps - 1 / fps; hydra.tick(1000 / fps); window.__grab.getContext('2d').drawImage(window.__canvas, 0, 0); return window.__png(); };
 </script>`;
 
 function arg(name: string, def?: string): string | undefined {
@@ -178,7 +182,7 @@ async function main() {
     for (const s of windows) {
       const fr: any[] = await page.evaluate((c0, n, f, cp) => (window as any).__window(c0, n, f, cp), s.bar, frames, fps, cps);
       const best = fr.reduce((a, b) => (b.ctl.kick > a.ctl.kick ? b : a), fr[0]);
-      const png = await page.evaluate((cy, f) => (window as any).__frameAt(cy, f), best.cycle, fps) as string;
+      const png = await page.evaluate((cy, f, cp) => (window as any).__frameAt(cy, f, cp), best.cycle, fps, cps) as string;
       fs.writeFileSync(path.join(outDir, `frame_${s.name}_${s.bar}.png`), Buffer.from(png, 'base64'));
       perSection.push({ section: s.name, bar: s.bar, frames: fr });
       console.log(`[check-hydra] ${s.name}@${s.bar}: ${fr.length} frames`);
@@ -206,7 +210,7 @@ async function main() {
       ratio: mean(low) > 0 ? mean(high) / mean(low) : (mean(high) > 0 ? Infinity : 0) };
     result.control_ranges = ranges;            // over the probe windows
     result.control_ranges_piece = sweep;       // over the whole piece (the liveness gate)
-    result.sections = perSection.map(s => ({ section: s.section, bar: s.bar, scene_corr: mean(s.frames.map((f: any) => f.sceneCorr)), pixel_corr: mean(s.frames.map((f: any) => f.pixelCorr)),
+    result.sections = perSection.map(s => ({ section: s.section, bar: s.bar, hydra_time: s.frames[0].hydraTime, scene_corr: mean(s.frames.map((f: any) => f.sceneCorr)), pixel_corr: mean(s.frames.map((f: any) => f.pixelCorr)),
       motion: mean(s.frames.filter((f: any) => f.motion !== null).map((f: any) => f.motion)) }));
     result.page_errors = pageErrors;
     const fails: string[] = [];

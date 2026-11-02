@@ -53,6 +53,11 @@ coder is editing: change a bass bar and the wave changes with it.
       function, bare PI/sin/... (not Math's in the REPL), a SOURCE where a number belongs, true/false, and a speed on the
       photo itself; a rejected chain goes back to the LLM once with the errors. Matrix of 10 runs, 5 tracks: 9 LLM chains
       passed the check, 1 fell back — `.sisyphus/evidence/005-hydra-visuals/README.md`.)*
+      *(Amended 2026-11-02, later: the background raced in the live REPL. 9 of those 10 chains drove osc's speed or
+      frequency with kick/bassWave, and Hydra multiplies both by the seconds since start, so each hit jumped the waves by
+      time x change. The whitelist now takes only constant speeds (osc speed; osc frequency unless its speed is 0; noise
+      offset; gradient and rotate speed), each at most one pattern period per bar of the piece. Re-run: 10/10 PASS, 8 on
+      the LLM's chain, motion per frame flat over the piece instead of rising with time.)*
 
 ### 2.3 Verified, and audio untouched
 
@@ -62,7 +67,8 @@ coder is editing: change a bass bar and the wave changes with it.
       street at 0.479 because a one-pixel warp decorrelates fine texture; calibration in `.sisyphus/evidence/005-hydra-visuals`); every wired
       control changed value; the quarter of frames with the strongest pulse moves >= 1.2x the weakest quarter. The
       reference is the scene as the chain shows it at rest (zoomed by the edge margin; amended 2026-10-30 after the
-      unzoomed reference failed every LLM chain on 4 tracks).
+      unzoomed reference failed every LLM chain on 4 tracks). Hydra runs at the piece's own time (the seconds played at each frame), as in the REPL
+      (amended 2026-11-02: ticking from 0 reached ~18 s over all windows and hid a speed that a control drives).
 - [x] `output.strudel` is never modified; the visuals go to `vNNN/visuals.strudel` (+ `visual.jpg`, `visuals.json`,
       `visuals_check/`), so no similarity score or gate changes.
 - [x] The block runs in the live REPL (strudel.dygy.app) with the piece playing. *(2026-10-29, `/embed`, VAGABUNDO v063 +

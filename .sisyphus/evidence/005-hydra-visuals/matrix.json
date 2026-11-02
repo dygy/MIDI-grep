@@ -3,166 +3,941 @@
   "track": "VAGABUNDO NÃO NAMORA",
   "v": "v073",
   "mode": "synth",
-  "prompt": "A vibrant tropical rainforest with dense foliage in deep greens and browns, misty atmosphere, and a bright yellow sun piercing through the canopy. The forest floor is covered in lush ferns and mosses, with dappled sunlight creating a warm, inviting glow.",
+  "prompt": "A dense, misty tropical rainforest with deep greens and blues, lit by a warm, low sun. The forest floor is covered in vibrant ferns and mosses, while tall trees stretch upwards towards a hazy sky.",
   "chain_source": "mistral-small (validated)",
-  "chain": "src(s0).modulate(osc(() => bassWave(), () => 1.5 + 0.2 * kick()), () => 0.03).rotate(() => 0.071 * Math.sin(bassWave() * Math.PI), 0).scale(() => 1 - 0.04 * energy()).hue(() => 0.1 * leadHue()).saturate(() => 1 + 0.2 * snare()).brightness(() => 0.1 * chordDepth()).out()",
+  "chain": "src(s0).modulate(osc(() => bassWave() * Math.PI / 2, 0, 0), () => 0.05 * kick()).scale(() => 1 + 0.08 * chordDepth()).hue(() => 0.1 * leadHue()).saturate(() => 1 - 0.2 * snare()).contrast(() => 1 + 0.2 * snare()).modulateRotate(osc(() => bassWave() * Math.PI / 4, 0, 0), () => 0.071 * kick(), 0).out()",
   "validator_fix_round": true,
+  "first_errors": [
+   "a SOURCE where a number is expected (rotate): those arguments take numbers or () => ... functions; warp with .modulate*(SOURCE, amount) instead"
+  ],
   "rejected": null,
   "verdict": "PASS",
-  "scene": 0.789,
-  "pixel": 0.488,
-  "motion": 3.05,
-  "dead": [],
-  "unwired": []
+  "scene": 0.927,
+  "pixel": 0.762,
+  "motion": 8.1,
+  "failures": [],
+  "section_motion": [
+   {
+    "section": "intro",
+    "bar": 0,
+    "hydra_time_s": 0.0,
+    "motion_per_frame": 0.05
+   },
+   {
+    "section": "build",
+    "bar": 16,
+    "hydra_time_s": 29.54,
+    "motion_per_frame": 0.05
+   },
+   {
+    "section": "drop",
+    "bar": 26,
+    "hydra_time_s": 48.0,
+    "motion_per_frame": 25.31
+   },
+   {
+    "section": "drop",
+    "bar": 37,
+    "hydra_time_s": 68.31,
+    "motion_per_frame": 24.89
+   },
+   {
+    "section": "drop",
+    "bar": 49,
+    "hydra_time_s": 90.47,
+    "motion_per_frame": 8.93
+   },
+   {
+    "section": "drop",
+    "bar": 67,
+    "hydra_time_s": 123.7,
+    "motion_per_frame": 24.83
+   },
+   {
+    "section": "outro",
+    "bar": 76,
+    "hydra_time_s": 140.32,
+    "motion_per_frame": 3.82
+   }
+  ]
  },
  {
   "track": "VAGABUNDO NÃO NAMORA",
   "v": "v072",
   "mode": "sample-instrument",
-  "prompt": "A vibrant nightclub dance floor with neon lights in shades of purple, blue, and pink, illuminated by a mix of bright strobes and dim, warm spotlights. The floor is packed with dancing silhouettes, and smoke machines create a misty atmosphere.",
-  "chain_source": "mistral-small (validated)",
-  "chain": "src(s0).modulate(osc(() => bassWave() * 2, () => kick(), 0), () => 0.05 * bassHit()).scale(() => 1 + 0.08 * Math.sin(leadHue())).rotate(() => 0.071 * Math.cos(bassWave()), 0).hue(() => 0.15 * leadHue()).saturate(() => 1 - 0.2 * snare()).contrast(() => 1 + 0.2 * snare()).brightness(() => 0.1 * energy()).blend(src(o0), () => 0.3 * chordDepth()).out()",
-  "validator_fix_round": false,
-  "rejected": null,
+  "prompt": "A dark alleyway in Rio de Janeiro at night, with neon signs reflecting off wet cobblestones, deep blue shadows, and warm yellow streetlights.",
+  "chain_source": "fallback (mistral-small chain failed the check)",
+  "chain": "src(s0).modulate(osc(() => 2 * bassWave(), 0, 0).rotate(Math.PI / 2), () => 0.003 + 0.02 * kick() + 0.01 * bassHit()).scale(() => 1 + 0.03 * kick()).modulateScale(noise(4, 0.3), () => 0.03 * snare()).hue(() => 0.08 * leadHue()).saturate(() => 1 + 0.4 * chordDepth()).brightness(() => 0.05 * hat()).blend(src(o0).scale(1.005), () => 0.2 + 0.3 * energy()).out()",
+  "validator_fix_round": true,
+  "first_errors": [
+   "a SOURCE where a number is expected (rotate): those arguments take numbers or () => ... functions; warp with .modulate*(SOURCE, amount) instead"
+  ],
+  "rejected": {
+   "chain": "src(s0).modulate(osc(() => bassWave() * 3.40, 0, () => 0.1 * kick()), 0.05).modulateRotate(osc(() => bassWave() * 3.40, 0, 0), 0.071, 0).hue(() => 0.1 * leadHue()).saturate(() => 1 + 0.2 * snare()).contrast(() => 1 - 0.2 * hat()).brightness(() => 0.5 * energy()).out()",
+   "check": {
+    "input": "visuals.strudel",
+    "image": "visual.jpg",
+    "size": [
+     640,
+     384
+    ],
+    "fps": 30,
+    "window_s": 2,
+    "thresholds": {
+     "min_scene_corr": 0.5,
+     "min_motion_ratio": 1.2
+    },
+    "scene_zoom": 1.1,
+    "cps": 0.541621,
+    "scene_corr": {
+     "mean": 0.4889378703359792,
+     "min": 0.4105969864728869,
+     "scale_px": 16
+    },
+    "pixel_corr": {
+     "mean": 0.26016368240048426,
+     "min": 0.18351089904966086
+    },
+    "motion": {
+     "pulse_high": 9.43261073421503,
+     "pulse_low": 0.602011135025824,
+     "n_high": 103,
+     "n_low": 103,
+     "ratio": 15.668498779196844
+    },
+    "control_ranges": {
+     "kick": [
+      0,
+      0.9698923494683901
+     ],
+     "snare": [
+      0,
+      0.9848311273860052
+     ],
+     "hat": [
+      0,
+      0.9698923494683901
+     ],
+     "bassHit": [
+      0,
+      0.9848311273860828
+     ],
+     "leadHit": [
+      0,
+      0.9855795773242559
+     ],
+     "bassWave": [
+      1,
+      2
+     ],
+     "leadHue": [
+      0,
+      0.6666666666666666
+     ],
+     "chordDepth": [
+      0,
+      0.75
+     ],
+     "energy": [
+      0.19444444444444445,
+      0.8333333333333334
+     ]
+    },
+    "control_ranges_piece": {
+     "kick": [
+      0,
+      0.7071067811865476
+     ],
+     "snare": [
+      0,
+      0.7071067811865476
+     ],
+     "hat": [
+      0,
+      0.7071067811865476
+     ],
+     "bassHit": [
+      0,
+      0.7071067811865476
+     ],
+     "leadHit": [
+      0,
+      0.7071067811865476
+     ],
+     "bassWave": [
+      1,
+      3.563594872561357
+     ],
+     "leadHue": [
+      0,
+      0.9166666666666666
+     ],
+     "chordDepth": [
+      0,
+      1
+     ],
+     "energy": [
+      0.027777777777777776,
+      1
+     ]
+    },
+    "sections": [
+     {
+      "section": "intro",
+      "bar": 0,
+      "hydra_time": 6.938893903907228e-18,
+      "scene_corr": 0.47039609862342785,
+      "pixel_corr": 0.24305039159246203,
+      "motion": 2.7308734321590555
+     },
+     {
+      "section": "build",
+      "bar": 16,
+      "hydra_time": 29.54095206795896,
+      "scene_corr": 0.47208438563090865,
+      "pixel_corr": 0.2535036962188914,
+      "motion": 1.408828444291159
+     },
+     {
+      "section": "drop",
+      "bar": 26,
+      "hydra_time": 48.00404711043331,
+      "scene_corr": 0.5900341336954323,
+      "pixel_corr": 0.3504755040543475,
+      "motion": 3.498441734858448
+     },
+     {
+      "section": "drop",
+      "bar": 37,
+      "hydra_time": 68.3134516571551,
+      "scene_corr": 0.42043563283466184,
+      "pixel_corr": 0.18809416146167532,
+      "motion": 3.7088501294732814
+     },
+     {
+      "section": "drop",
+      "bar": 49,
+      "hydra_time": 90.46916570812431,
+      "scene_corr": 0.4754419604060488,
+      "pixel_corr": 0.24314499251629204,
+      "motion": 3.45651108790189
+     },
+     {
+      "section": "drop",
+      "bar": 67,
+      "hydra_time": 123.70273678457814,
+      "scene_corr": 0.42092263745728176,
+      "pixel_corr": 0.18812698649573242,
+      "motion": 3.674051906748302
+     },
+     {
+      "section": "outro",
+      "bar": 76,
+      "hydra_time": 140.31952232280506,
+      "scene_corr": 0.5732502437040896,
+      "pixel_corr": 0.35475004446398944,
+      "motion": 2.810997020710249
+     }
+    ],
+    "page_errors": [],
+    "verdict": "FAIL",
+    "failures": [
+     "scene not recognizable: mean layout-scale luminance correlation 0.489 < 0.5"
+    ]
+   }
+  },
   "verdict": "PASS",
-  "scene": 0.757,
-  "pixel": 0.541,
-  "motion": 4.81,
-  "dead": [],
-  "unwired": []
+  "scene": 0.878,
+  "pixel": 0.526,
+  "motion": 4.94,
+  "failures": [],
+  "section_motion": [
+   {
+    "section": "intro",
+    "bar": 0,
+    "hydra_time_s": 0.0,
+    "motion_per_frame": 7.1
+   },
+   {
+    "section": "build",
+    "bar": 16,
+    "hydra_time_s": 29.54,
+    "motion_per_frame": 11.04
+   },
+   {
+    "section": "drop",
+    "bar": 26,
+    "hydra_time_s": 48.0,
+    "motion_per_frame": 13.77
+   },
+   {
+    "section": "drop",
+    "bar": 37,
+    "hydra_time_s": 68.31,
+    "motion_per_frame": 15.54
+   },
+   {
+    "section": "drop",
+    "bar": 49,
+    "hydra_time_s": 90.47,
+    "motion_per_frame": 6.21
+   },
+   {
+    "section": "drop",
+    "bar": 67,
+    "hydra_time_s": 123.7,
+    "motion_per_frame": 14.92
+   },
+   {
+    "section": "outro",
+    "bar": 76,
+    "hydra_time_s": 140.32,
+    "motion_per_frame": 8.48
+   }
+  ]
  },
  {
   "track": "Regime CLT (Dj Brunin XM, Aurora Shukita)",
   "v": "v088",
   "mode": "synth",
-  "prompt": "A vast cathedral interior with stained glass windows casting deep reds and purples onto cold stone walls, illuminated by a dim, flickering light.",
-  "chain_source": "mistral-small (validated)",
-  "chain": "src(s0).modulate(osc(() => bassWave(), () => 0.02 * kick()), () => 0.05 * kick()).rotate(() => 0.071 * Math.sin(bassWave() * Math.PI / 4), 0).hue(() => 0.1 * leadHue()).saturate(() => 1 + 0.2 * snare()).contrast(() => 1 + 0.2 * snare()).brightness(() => -0.1 * energy()).out()",
-  "validator_fix_round": false,
-  "rejected": null,
+  "prompt": "A vast cathedral interior with stained glass windows casting deep reds and purples onto cold stone walls under a dim, eerie light.",
+  "chain_source": "fallback (mistral-small chain failed the check)",
+  "chain": "src(s0).modulate(osc(() => 2 * bassWave(), 0, 0).rotate(Math.PI / 2), () => 0.003 + 0.02 * kick() + 0.01 * bassHit()).scale(() => 1 + 0.03 * kick()).modulateScale(noise(4, 0.3), () => 0.03 * snare()).hue(() => 0.08 * leadHue()).saturate(() => 1 + 0.4 * chordDepth()).brightness(() => 0.05 * hat()).blend(src(o0).scale(1.005), () => 0.2 + 0.3 * energy()).out()",
+  "validator_fix_round": true,
+  "first_errors": [
+   "noise's speed argument (() => 0.5 + 0.3 * hat()) must be a plain number: Hydra multiplies it by the seconds since start, so a control there makes the noise jump further the longer the piece plays; drive the AMOUNT of the step that uses it instead"
+  ],
+  "rejected": {
+   "chain": "src(s0).modulate(osc(() => bassWave(), 0), () => 0.02 * kick()).modulateScale(noise(0.1, 0.5), 1, () => 0.3 * hat()).hue(() => 0.1 * leadHue() - 0.075).saturate(() => 1 + 0.2 * snare()).contrast(() => 1 + 0.2 * energy()).brightness(() => 0.3 * bassWave()).out()",
+   "check": {
+    "input": "visuals.strudel",
+    "image": "visual.jpg",
+    "size": [
+     640,
+     384
+    ],
+    "fps": 30,
+    "window_s": 2,
+    "thresholds": {
+     "min_scene_corr": 0.5,
+     "min_motion_ratio": 1.2
+    },
+    "scene_zoom": 1.1,
+    "cps": 0.562571,
+    "scene_corr": {
+     "mean": 0.01330776336009948,
+     "min": -0.374055249590495,
+     "scale_px": 16
+    },
+    "pixel_corr": {
+     "mean": 0.004276358360184375,
+     "min": -0.14908620972363398
+    },
+    "motion": {
+     "pulse_high": 51.10767499681226,
+     "pulse_low": 51.26138166885239,
+     "n_high": 118,
+     "n_low": 118,
+     "ratio": 0.997001511331999
+    },
+    "control_ranges": {
+     "kick": [
+      0,
+      0.9989506640089608
+     ],
+     "snare": [
+      0,
+      0.000244140625
+     ],
+     "hat": [
+      0,
+      0.9989506640089608
+     ],
+     "bassHit": [
+      0,
+      0.9997375627103519
+     ],
+     "leadHit": [
+      1.7524985789981942e-05,
+      0.9997375627103195
+     ],
+     "bassWave": [
+      1,
+      1.2599210498948732
+     ],
+     "leadHue": [
+      0,
+      0.9166666666666666
+     ],
+     "chordDepth": [
+      0,
+      0.8571428571428571
+     ],
+     "energy": [
+      0.16666666666666666,
+      0.9444444444444444
+     ]
+    },
+    "control_ranges_piece": {
+     "kick": [
+      0,
+      0.7071067811865476
+     ],
+     "snare": [
+      0,
+      0.7071067811865476
+     ],
+     "hat": [
+      0,
+      0.7071067811865476
+     ],
+     "bassHit": [
+      0,
+      0.7071067811865476
+     ],
+     "leadHit": [
+      0,
+      0.7071067811865476
+     ],
+     "bassWave": [
+      1,
+      1.2599210498948732
+     ],
+     "leadHue": [
+      0.08333333333333333,
+      0.9166666666666666
+     ],
+     "chordDepth": [
+      0,
+      1
+     ],
+     "energy": [
+      0.018518518518518517,
+      1
+     ]
+    },
+    "sections": [
+     {
+      "section": "intro",
+      "bar": 0,
+      "hydra_time": 6.938893903907228e-18,
+      "scene_corr": -0.1521360109764153,
+      "pixel_corr": -0.054833580860943545,
+      "motion": 47.930897058197175
+     },
+     {
+      "section": "drop",
+      "bar": 9,
+      "hydra_time": 15.997980699325062,
+      "scene_corr": -0.010830823891132735,
+      "pixel_corr": -0.006052673186633215,
+      "motion": 50.30524560807978
+     },
+     {
+      "section": "verse",
+      "bar": 25,
+      "hydra_time": 44.438835275902946,
+      "scene_corr": 0.040189316507395434,
+      "pixel_corr": 0.013887839944365304,
+      "motion": 50.555147933835784
+     },
+     {
+      "section": "drop",
+      "bar": 32,
+      "hydra_time": 56.881709153155775,
+      "scene_corr": 0.15697380233552563,
+      "pixel_corr": 0.05423519823943113,
+      "motion": 45.69035549258423
+     },
+     {
+      "section": "verse",
+      "bar": 37,
+      "hydra_time": 65.76947620833637,
+      "scene_corr": 0.002607856350427853,
+      "pixel_corr": 0.0025685136607482848,
+      "motion": 50.35687755811802
+     },
+     {
+      "section": "drop",
+      "bar": 45,
+      "hydra_time": 79.9899034966253,
+      "scene_corr": 0.032128159479317776,
+      "pixel_corr": 0.01196738764974675,
+      "motion": 53.624372862268885
+     },
+     {
+      "section": "verse",
+      "bar": 61,
+      "hydra_time": 108.4307580732032,
+      "scene_corr": 0.0641310292711993,
+      "pixel_corr": 0.020055147781411552,
+      "motion": 49.03579977252414
+     },
+     {
+      "section": "drop",
+      "bar": 68,
+      "hydra_time": 120.87363195045602,
+      "scene_corr": -0.026601222195522203,
+      "pixel_corr": -0.007616966346651293,
+      "motion": 56.97827021795811
+     }
+    ],
+    "page_errors": [],
+    "verdict": "FAIL",
+    "failures": [
+     "scene not recognizable: mean layout-scale luminance correlation 0.013 < 0.5",
+     "picture does not move with the hits: motion ratio 1.00 < 1.2"
+    ]
+   }
+  },
   "verdict": "PASS",
-  "scene": 0.691,
-  "pixel": 0.238,
-  "motion": 3.71,
-  "dead": [],
-  "unwired": []
+  "scene": 0.84,
+  "pixel": 0.299,
+  "motion": 4.07,
+  "failures": [],
+  "section_motion": [
+   {
+    "section": "intro",
+    "bar": 0,
+    "hydra_time_s": 0.0,
+    "motion_per_frame": 13.86
+   },
+   {
+    "section": "drop",
+    "bar": 9,
+    "hydra_time_s": 16.0,
+    "motion_per_frame": 17.4
+   },
+   {
+    "section": "verse",
+    "bar": 25,
+    "hydra_time_s": 44.44,
+    "motion_per_frame": 15.54
+   },
+   {
+    "section": "drop",
+    "bar": 32,
+    "hydra_time_s": 56.88,
+    "motion_per_frame": 17.62
+   },
+   {
+    "section": "verse",
+    "bar": 37,
+    "hydra_time_s": 65.77,
+    "motion_per_frame": 3.71
+   },
+   {
+    "section": "drop",
+    "bar": 45,
+    "hydra_time_s": 79.99,
+    "motion_per_frame": 17.65
+   },
+   {
+    "section": "verse",
+    "bar": 61,
+    "hydra_time_s": 108.43,
+    "motion_per_frame": 15.62
+   },
+   {
+    "section": "drop",
+    "bar": 68,
+    "hydra_time_s": 120.87,
+    "motion_per_frame": 16.82
+   }
+  ]
  },
  {
   "track": "Regime CLT (Dj Brunin XM, Aurora Shukita)",
   "v": "v087",
   "mode": "sample-instrument",
-  "prompt": "A vast cathedral interior with stained glass windows casting deep reds and purples onto cold stone walls, illuminated by a dim, flickering light.",
+  "prompt": "A dark cathedral interior with stained glass windows casting deep reds, purples, and blues onto cold stone walls.",
   "chain_source": "mistral-small (validated)",
-  "chain": "src(s0).modulate(osc(() => bassWave(), () => 0.5 * kick()), () => 0.04 * energy()).hue(() => 0.1 * leadHue()).saturate(() => 1 + 0.2 * snare()).contrast(() => 1 + 0.2 * chordDepth()).brightness(() => 0.1 * bassWave()).modulateRotate(osc(() => bassWave(), () => 0.5 * kick()), () => 0.071, 0).out()",
+  "chain": "src(s0).modulate(osc(() => bassWave() * 2, 0, () => Math.sin(bassWave())), () => 0.03 * kick()).contrast(() => 1 + 0.2 * snare()).hue(() => 0.15 * leadHue()).saturate(() => 1 - 0.1 * chordDepth()).modulateRotate(osc(() => bassWave() * 2, 0, () => Math.sin(bassWave())), () => 0.071, 0).out()",
   "validator_fix_round": true,
+  "first_errors": [
+   "a SOURCE where a number is expected (rotate): those arguments take numbers or () => ... functions; warp with .modulate*(SOURCE, amount) instead"
+  ],
   "rejected": null,
   "verdict": "PASS",
-  "scene": 0.689,
-  "pixel": 0.279,
-  "motion": 3.73,
-  "dead": [],
-  "unwired": []
+  "scene": 0.837,
+  "pixel": 0.384,
+  "motion": 5.06,
+  "failures": [],
+  "section_motion": [
+   {
+    "section": "intro",
+    "bar": 0,
+    "hydra_time_s": 0.0,
+    "motion_per_frame": 0.94
+   },
+   {
+    "section": "drop",
+    "bar": 9,
+    "hydra_time_s": 16.0,
+    "motion_per_frame": 19.31
+   },
+   {
+    "section": "verse",
+    "bar": 25,
+    "hydra_time_s": 44.44,
+    "motion_per_frame": 13.3
+   },
+   {
+    "section": "drop",
+    "bar": 32,
+    "hydra_time_s": 56.88,
+    "motion_per_frame": 19.25
+   },
+   {
+    "section": "verse",
+    "bar": 37,
+    "hydra_time_s": 65.77,
+    "motion_per_frame": 0.17
+   },
+   {
+    "section": "drop",
+    "bar": 45,
+    "hydra_time_s": 79.99,
+    "motion_per_frame": 19.31
+   },
+   {
+    "section": "verse",
+    "bar": 61,
+    "hydra_time_s": 108.43,
+    "motion_per_frame": 13.34
+   },
+   {
+    "section": "drop",
+    "bar": 68,
+    "hydra_time_s": 120.87,
+    "motion_per_frame": 19.22
+   }
+  ]
  },
  {
   "track": "Dumb Blond Bitches",
   "v": "v020",
   "mode": "synth",
-  "prompt": "A vibrant nightclub dance floor with neon blue and purple lights reflecting off a crowded space, warm yellow lights from the bar area, and misty air.",
+  "prompt": "A vibrant nightclub dance floor with neon blue and purple lights reflecting off a crowded dance area. The floor is filled with energetic dancers moving to the beat.",
   "chain_source": "mistral-small (validated)",
-  "chain": "src(s0).modulate(osc(() => bassWave() * Math.PI / 2, () => kick()), () => 0.05 + 0.01 * snare()).rotate(() => 0.071 * Math.sin(kick()) * hat(), 0).hue(() => 0.15 * leadHue()).saturate(() => 1 - 0.2 * energy()).contrast(() => 1 + 0.2 * snare()).brightness(() => -0.1 * chordDepth()).out()",
+  "chain": "src(s0).modulate(osc(() => bassWave() * 3.53, 0), () => 0.02 * kick()).scale(() => 1 + 0.04 * Math.sin(bassWave())).rotate(() => 0.071 * hat(), 0).hue(() => leadHue() * 0.15).saturate(() => 1 + 0.2 * snare()).contrast(() => 1 + 0.2 * energy()).brightness(() => 0.3 * chordDepth()).out()",
   "validator_fix_round": false,
+  "first_errors": null,
   "rejected": null,
   "verdict": "PASS",
-  "scene": 0.569,
-  "pixel": 0.33,
-  "motion": 1.6,
-  "dead": [],
-  "unwired": []
+  "scene": 0.67,
+  "pixel": 0.401,
+  "motion": 5.53,
+  "failures": [],
+  "section_motion": [
+   {
+    "section": "intro",
+    "bar": 0,
+    "hydra_time_s": 0.0,
+    "motion_per_frame": 3.19
+   },
+   {
+    "section": "build",
+    "bar": 4,
+    "hydra_time_s": 7.11,
+    "motion_per_frame": 25.16
+   },
+   {
+    "section": "drop",
+    "bar": 11,
+    "hydra_time_s": 19.55,
+    "motion_per_frame": 19.84
+   },
+   {
+    "section": "verse",
+    "bar": 21,
+    "hydra_time_s": 37.33,
+    "motion_per_frame": 18.11
+   },
+   {
+    "section": "drop",
+    "bar": 27,
+    "hydra_time_s": 48.0,
+    "motion_per_frame": 24.49
+   },
+   {
+    "section": "verse",
+    "bar": 39,
+    "hydra_time_s": 69.33,
+    "motion_per_frame": 21.62
+   },
+   {
+    "section": "drop",
+    "bar": 44,
+    "hydra_time_s": 78.22,
+    "motion_per_frame": 21.78
+   },
+   {
+    "section": "verse",
+    "bar": 54,
+    "hydra_time_s": 95.99,
+    "motion_per_frame": 18.18
+   },
+   {
+    "section": "drop",
+    "bar": 60,
+    "hydra_time_s": 106.66,
+    "motion_per_frame": 24.36
+   }
+  ]
  },
  {
   "track": "Dumb Blond Bitches",
   "v": "v019",
   "mode": "sample-instrument",
-  "prompt": "A vibrant nightclub dance floor with neon blue and purple lights reflecting off a crowded dance floor. The club is dimly lit with dark red walls, creating a warm atmosphere.",
+  "prompt": "A vibrant nightclub dance floor with neon blue and purple lights reflecting off a crowded dance floor. The air is thick with smoke from the strobe lights.",
   "chain_source": "mistral-small (validated)",
-  "chain": "src(s0).modulate(osc(() => bassWave() * 2, () => kick()), () => 0.03 + 0.01 * snare()).rotate(() => Math.sin(bassWave()) * 0.071, 0).scale(() => 1 + 0.05 * hat()).hue(() => 0.1 * leadHue() - 0.05 * energy()).saturate(() => 1 + 0.2 * snare()).contrast(() => 1 + 0.2 * snare()).brightness(() => 0.1 * bassWave()).out()",
+  "chain": "src(s0).modulate(osc(() => bassWave() * 2 + 1, 0), () => 0.05 * kick()).rotate(() => 0.071 * Math.sin(kick()), 0).saturate(() => 1 - 0.3 * snare()).contrast(() => 1 + 0.2 * snare()).brightness(() => 0.1 * energy()).out()",
   "validator_fix_round": false,
+  "first_errors": null,
   "rejected": null,
   "verdict": "PASS",
-  "scene": 0.568,
-  "pixel": 0.322,
-  "motion": 1.55,
-  "dead": [],
-  "unwired": []
+  "scene": 0.768,
+  "pixel": 0.575,
+  "motion": 3.76,
+  "failures": [],
+  "section_motion": [
+   {
+    "section": "intro",
+    "bar": 0,
+    "hydra_time_s": 0.0,
+    "motion_per_frame": 0.07
+   },
+   {
+    "section": "build",
+    "bar": 4,
+    "hydra_time_s": 7.11,
+    "motion_per_frame": 21.23
+   },
+   {
+    "section": "drop",
+    "bar": 11,
+    "hydra_time_s": 19.55,
+    "motion_per_frame": 20.66
+   },
+   {
+    "section": "verse",
+    "bar": 21,
+    "hydra_time_s": 37.33,
+    "motion_per_frame": 20.74
+   },
+   {
+    "section": "drop",
+    "bar": 27,
+    "hydra_time_s": 48.0,
+    "motion_per_frame": 25.53
+   },
+   {
+    "section": "verse",
+    "bar": 39,
+    "hydra_time_s": 69.33,
+    "motion_per_frame": 21.3
+   },
+   {
+    "section": "drop",
+    "bar": 44,
+    "hydra_time_s": 78.22,
+    "motion_per_frame": 18.93
+   },
+   {
+    "section": "verse",
+    "bar": 54,
+    "hydra_time_s": 95.99,
+    "motion_per_frame": 20.73
+   },
+   {
+    "section": "drop",
+    "bar": 60,
+    "hydra_time_s": 106.66,
+    "motion_per_frame": 25.33
+   }
+  ]
  },
  {
   "track": "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM",
   "v": "v018",
   "mode": "synth",
-  "prompt": "A vibrant nightclub dance floor with neon blue and purple lights reflecting off a polished black surface, strobe effects creating a dynamic atmosphere. The colors are bright and energetic, with a deep contrast between the cool blues and warm purples.",
+  "prompt": "A vibrant nightclub dance floor with neon lights in shades of blue, purple, and pink, illuminated by strobe effects. The floor is empty but the atmosphere is electric.",
   "chain_source": "mistral-small (validated)",
-  "chain": "src(s0).modulate(osc(() => bassWave(), () => 1.5 * kick()), () => 0.02 + 0.03 * bassHit()).hue(() => 0.1 * leadHue()).saturate(() => 1 - 0.1 * snare()).contrast(() => 1 + 0.2 * snare()).modulateRotate(osc(() => bassWave(), () => 0.5), () => 0.071).scale(() => 1 + 0.04 * Math.sin(Math.PI * energy())).out()",
-  "validator_fix_round": true,
+  "chain": "src(s0).modulate(osc(() => bassWave() * 1.5, 0), () => 0.03 * kick()).rotate(() => 0.071 * Math.sin(bassWave()), 0).hue(() => 0.1 * leadHue()).saturate(() => 1 + 0.2 * snare()).contrast(() => 1 + 0.2 * energy()).brightness(() => 0.5 * chordDepth()).out()",
+  "validator_fix_round": false,
+  "first_errors": null,
   "rejected": null,
   "verdict": "PASS",
-  "scene": 0.522,
-  "pixel": 0.278,
-  "motion": 4.62,
-  "dead": [],
-  "unwired": []
+  "scene": 0.679,
+  "pixel": 0.406,
+  "motion": 14.02,
+  "failures": [],
+  "section_motion": [
+   {
+    "section": "intro",
+    "bar": 0,
+    "hydra_time_s": 0.0,
+    "motion_per_frame": 2.04
+   },
+   {
+    "section": "build",
+    "bar": 2,
+    "hydra_time_s": 3.56,
+    "motion_per_frame": 0.17
+   },
+   {
+    "section": "drop",
+    "bar": 8,
+    "hydra_time_s": 14.22,
+    "motion_per_frame": 18.76
+   },
+   {
+    "section": "verse",
+    "bar": 33,
+    "hydra_time_s": 58.66,
+    "motion_per_frame": 1.13
+   },
+   {
+    "section": "drop",
+    "bar": 40,
+    "hydra_time_s": 71.11,
+    "motion_per_frame": 18.68
+   }
+  ]
  },
  {
   "track": "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM",
   "v": "v017",
   "mode": "sample-instrument",
-  "prompt": "A vibrant nightclub dance floor with neon lights in shades of purple, blue, and pink, illuminated by strobe effects. The floor is crowded with dancers moving to the beat, but no faces are visible.",
-  "chain_source": "fallback (mistral-small chain failed the check)",
-  "chain": "src(s0).modulate(osc(() => 2 * bassWave(), 0.05, 0).rotate(Math.PI / 2), () => 0.003 + 0.02 * kick() + 0.01 * bassHit()).scale(() => 1 + 0.03 * kick()).modulateScale(noise(4, 0.3), () => 0.03 * snare()).hue(() => 0.08 * leadHue()).saturate(() => 1 + 0.4 * chordDepth()).brightness(() => 0.05 * hat()).blend(src(o0).scale(1.005), () => 0.2 + 0.3 * energy()).out()",
+  "prompt": "A vibrant nightclub dance floor with neon blue and purple lights reflecting off a polished black surface, strobe effects creating a dynamic atmosphere. The colors are bright and energetic, with deep shadows and highlights.",
+  "chain_source": "mistral-small (validated)",
+  "chain": "src(s0).modulate(osc(() => bassWave(), 0), () => 0.03 * kick()).scale(() => 1 + 0.05 * Math.sin(energy() * 2 * Math.PI)).hue(() => 0.1 * leadHue()).saturate(() => 1 - 0.1 * snare()).contrast(() => 1 + 0.2 * snare()).brightness(() => 0.3 * energy()).out()",
   "validator_fix_round": false,
-  "rejected": {
-   "chain": "src(s0).modulate(osc(() => bassWave() * 3, () => kick()), () => 0.05).rotate(() => 0.071 * Math.sin(bassWave()), 0).hue(() => 0.15 * leadHue()).saturate(() => 1 + 0.2 * snare()).contrast(() => 1 + 0.2 * energy()).brightness(() => -0.1 * chordDepth()).out()",
-   "scene": 0.318,
-   "failures": [
-    "scene not recognizable: mean layout-scale luminance correlation 0.318 < 0.5"
-   ]
-  },
+  "first_errors": null,
+  "rejected": null,
   "verdict": "PASS",
-  "scene": 0.86,
-  "pixel": 0.564,
-  "motion": 5.07,
-  "dead": [],
-  "unwired": []
+  "scene": 0.908,
+  "pixel": 0.623,
+  "motion": 26.53,
+  "failures": [],
+  "section_motion": [
+   {
+    "section": "intro",
+    "bar": 0,
+    "hydra_time_s": 0.0,
+    "motion_per_frame": 0.11
+   },
+   {
+    "section": "build",
+    "bar": 2,
+    "hydra_time_s": 3.56,
+    "motion_per_frame": 0.28
+   },
+   {
+    "section": "drop",
+    "bar": 8,
+    "hydra_time_s": 14.22,
+    "motion_per_frame": 14.19
+   },
+   {
+    "section": "verse",
+    "bar": 33,
+    "hydra_time_s": 58.66,
+    "motion_per_frame": 0.32
+   },
+   {
+    "section": "drop",
+    "bar": 40,
+    "hydra_time_s": 71.11,
+    "motion_per_frame": 14.19
+   }
+  ]
  },
  {
   "track": "Enter - Nigdy Więcej Wojny (prod. Enter) (2022)",
   "v": "v011",
   "mode": "synth",
-  "prompt": "A vast empty desert road stretching under a starry night sky with deep blue hues and warm yellows from distant streetlights.",
+  "prompt": "A vast empty desert road stretching under a starry night sky with deep blue hues and warm yellows from distant streetlights. The sand is a dark brown, contrasting with the bright stars above.",
   "chain_source": "mistral-small (validated)",
-  "chain": "src(s0).modulate(osc(() => bassWave(), () => 0.1 * kick()), 0.05).rotate(() => 0.071 * Math.sin(bassWave() * 2 * Math.PI), 0).hue(() => 0.15 * leadHue()).saturate(() => 1 + 0.2 * snare()).contrast(() => 1 - 0.2 * hat()).brightness(() => 0.1 * energy()).out()",
-  "validator_fix_round": false,
+  "chain": "src(s0).modulate(osc(() => bassWave(), 0, () => 1 + 0.02 * kick()), 0.03).scale(() => 1 + 0.05 * Math.sin(Math.PI * energy())).rotate(() => 0.071 * leadHue(), 0).hue(() => 0.15 * snare()).saturate(() => 1 - 0.2 * chordDepth()).brightness(() => 0.3 * bassWave()).out()",
+  "validator_fix_round": true,
+  "first_errors": [
+   "write Math.PI, not a bare PI (PI): the bare names are not Math's in the REPL"
+  ],
   "rejected": null,
   "verdict": "PASS",
-  "scene": 0.734,
-  "pixel": 0.406,
-  "motion": 4.18,
-  "dead": [],
-  "unwired": []
+  "scene": 0.892,
+  "pixel": 0.526,
+  "motion": 87.48,
+  "failures": [],
+  "section_motion": [
+   {
+    "section": "intro",
+    "bar": 0,
+    "hydra_time_s": 0.0,
+    "motion_per_frame": 2.62
+   },
+   {
+    "section": "drop",
+    "bar": 10,
+    "hydra_time_s": 16.44,
+    "motion_per_frame": 2.24
+   },
+   {
+    "section": "break",
+    "bar": 60,
+    "hydra_time_s": 98.64,
+    "motion_per_frame": 2.61
+   },
+   {
+    "section": "drop",
+    "bar": 77,
+    "hydra_time_s": 126.59,
+    "motion_per_frame": 1.24
+   }
+  ]
  },
  {
   "track": "Enter - Nigdy Więcej Wojny (prod. Enter) (2022)",
   "v": "v010",
   "mode": "sample-instrument",
-  "prompt": "A vast, empty desert road stretching under a starry night sky with deep blues and purples, illuminated by a bright moon. The sand is a warm orange-brown, contrasting with the cool tones of the sky.",
+  "prompt": "A vast, empty desert road stretching under a starry night sky with deep blues and purples, illuminated by a bright moon. The sand is a warm beige, contrasting with the cool tones of the sky.",
   "chain_source": "mistral-small (validated)",
-  "chain": "src(s0).modulate(osc(() => bassWave() * 4, () => Math.sin(kick())), () => 0.05 + 0.02 * energy()).hue(() => leadHue() * 0.15).saturate(() => 1 - 0.2 * snare()).contrast(() => 1 + 0.3 * chordDepth()).modulateRotate(osc(() => bassWave(), () => Math.sin(kick())), () => 0.071, 0).scale(() => 1 + 0.08 * Math.cos(bassWave())).out()",
-  "validator_fix_round": true,
+  "chain": "src(s0).modulate(osc(() => bassWave() * 3, 0, 0), () => 0.02 * kick()).rotate(() => Math.sin(kick()) * 0.071, 0).hue(() => 0.15 * leadHue()).saturate(() => 1 + 0.2 * snare()).contrast(() => 1 + 0.3 * energy()).brightness(() => -0.1 * chordDepth()).out()",
+  "validator_fix_round": false,
+  "first_errors": null,
   "rejected": null,
   "verdict": "PASS",
-  "scene": 0.757,
-  "pixel": 0.42,
-  "motion": 1.52,
-  "dead": [],
-  "unwired": []
+  "scene": 0.973,
+  "pixel": 0.84,
+  "motion": 2.21,
+  "failures": [],
+  "section_motion": [
+   {
+    "section": "intro",
+    "bar": 0,
+    "hydra_time_s": 0.0,
+    "motion_per_frame": 0.46
+   },
+   {
+    "section": "drop",
+    "bar": 10,
+    "hydra_time_s": 16.44,
+    "motion_per_frame": 11.01
+   },
+   {
+    "section": "break",
+    "bar": 60,
+    "hydra_time_s": 98.64,
+    "motion_per_frame": 0.75
+   },
+   {
+    "section": "drop",
+    "bar": 77,
+    "hydra_time_s": 126.59,
+    "motion_per_frame": 11.21
+   }
+  ]
  }
 ]

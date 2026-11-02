@@ -5,15 +5,14 @@ Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF
   warnings.warn(
 [visuals] /Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/Enter - Nigdy Więcej Wojny (prod. Enter) (2022)/v010
 [visuals] vision: {"title": "Enter - Nigdy Więcej Wojny (prod. Enter) (2022)", "genre": "brazilian_funk", "key": "C# minor", "mode": "minor", "bpm": 145.987, "centroid_hz": 1706.3, "clap": {"scenes": [{"text": "an empty desert road under a starry sky", "score": 0.2235}, {"text": "a snowy mountain landscape", "score": 0.2016}, {"text": "a tropical rainforest with mist", "score": 0.1948}], "moods": [{"text": "euphori
-[visuals] LLM chain rejected, asking for a fix: ['a SOURCE where a number is expected (rotate): those arguments take numbers or () => ... functions; warp with .modulate*(SOURCE, amount) instead']
-[visuals] scene: A vast, empty desert road stretching under a starry night sky with deep blues and purples, illuminated by a bright moon. The sand is a warm orange-brown, contrasting with the cool tones of the sky.
+[visuals] scene: A vast, empty desert road stretching under a starry night sky with deep blues and purples, illuminated by a bright moon. The sand is a warm beige, contrasting with the cool tones of the sky.
 [visuals] chain: mistral-small (validated)
-Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  80%|████████  | 4/5 [00:00<00:00, 23.09it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00, 20.28it/s]
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  40%|████      | 2/5 [00:00<00:00,  9.46it/s]Loading pipeline components...:  60%|██████    | 3/5 [00:00<00:00,  8.78it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00, 12.80it/s]
 You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
 [check-hydra] intro@0: 60 frames
 [check-hydra] drop@10: 60 frames
 [check-hydra] break@60: 60 frames
 [check-hydra] drop@77: 60 frames
-[check-hydra] PASS scene_corr 0.757 motion_ratio 1.52
+[check-hydra] PASS scene_corr 0.973 motion_ratio 2.21
 [visuals] wrote /Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/Enter - Nigdy Więcej Wojny (prod. Enter) (2022)/v010/visuals.strudel
 [visuals] check: PASS

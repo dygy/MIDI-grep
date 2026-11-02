@@ -95,7 +95,7 @@ def main(argv=None) -> int:
             if isinstance(ans.get("image_prompt"), str) and HC.scene_prompt(ans["image_prompt"]):
                 plan["image_prompt"] = HC.scene_prompt(ans["image_prompt"])
                 plan["negative_prompt"] = str(ans.get("negative_prompt") or plan["negative_prompt"])
-            errs = HC.validate_chain(str(ans.get("chain") or ""))
+            errs = HC.validate_chain(str(ans.get("chain") or ""), vision.get("bpm"))
             if errs:  # one repair round: the errors go back to the LLM with its own answer
                 print(f"[visuals] LLM chain rejected, asking for a fix: {errs}")
                 plan["llm"]["first_answer"], plan["llm"]["first_errors"] = ans, errs
@@ -103,7 +103,7 @@ def main(argv=None) -> int:
                 if isinstance(fixed.get("chain"), str):
                     ans = {**ans, "chain": fixed["chain"]}
                     plan["llm"]["answer"] = ans
-                    errs = HC.validate_chain(ans["chain"])
+                    errs = HC.validate_chain(ans["chain"], vision.get("bpm"))
             plan["llm"]["chain_errors"] = errs
             if errs:
                 plan["chain_source"] = f"fallback ({args.ollama_model} chain rejected: {errs[0]})"

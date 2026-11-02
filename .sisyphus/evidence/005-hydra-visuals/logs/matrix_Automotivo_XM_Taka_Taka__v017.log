@@ -5,22 +5,15 @@ Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF
   warnings.warn(
 [visuals] /Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM/v017
 [visuals] vision: {"title": "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM...", "genre": "brazilian_funk", "key": "G minor", "mode": "minor", "bpm": 135.007, "centroid_hz": 1779.3, "clap": {"scenes": [{"text": "a snowy mountain landscape", "score": 0.3002}, {"text": "a packed nightclub dance floor with strobe lights", "score": 0.2296}, {"text": "an empty desert road under a starry sky", "score": 0.2261}], "moods":
-[visuals] scene: A vibrant nightclub dance floor with neon lights in shades of purple, blue, and pink, illuminated by strobe effects. The floor is crowded with dancers moving to the beat, but no faces are visible.
+[visuals] scene: A vibrant nightclub dance floor with neon blue and purple lights reflecting off a polished black surface, strobe effects creating a dynamic atmosphere. The colors are bright and energetic, with deep shadows and highlights.
 [visuals] chain: mistral-small (validated)
-Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  40%|████      | 2/5 [00:00<00:00, 12.67it/s]Loading pipeline components...:  80%|████████  | 4/5 [00:00<00:00, 14.04it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00, 16.35it/s]
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  60%|██████    | 3/5 [00:00<00:00, 17.13it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00, 17.07it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00, 17.08it/s]
 You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
 [check-hydra] intro@0: 60 frames
 [check-hydra] build@2: 60 frames
 [check-hydra] drop@8: 60 frames
 [check-hydra] verse@33: 60 frames
 [check-hydra] drop@40: 60 frames
-[check-hydra] FAIL scene_corr 0.318 motion_ratio 7.20 — scene not recognizable: mean layout-scale luminance correlation 0.318 < 0.5
-[visuals] mistral-small (validated) failed the check (scene not recognizable: mean layout-scale luminance correlation 0.318 < 0.5); re-checking with the fallback chain
-[check-hydra] intro@0: 60 frames
-[check-hydra] build@2: 60 frames
-[check-hydra] drop@8: 60 frames
-[check-hydra] verse@33: 60 frames
-[check-hydra] drop@40: 60 frames
-[check-hydra] PASS scene_corr 0.860 motion_ratio 5.07
+[check-hydra] PASS scene_corr 0.908 motion_ratio 26.53
 [visuals] wrote /Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM/v017/visuals.strudel
 [visuals] check: PASS

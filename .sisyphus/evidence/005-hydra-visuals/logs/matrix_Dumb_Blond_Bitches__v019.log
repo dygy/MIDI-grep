@@ -5,9 +5,9 @@ Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF
   warnings.warn(
 [visuals] /Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/Dumb Blond Bitches/v019
 [visuals] vision: {"title": "Dumb Blond Bitches", "genre": "brazilian_funk", "key": "D minor", "mode": "minor", "bpm": 135.012, "centroid_hz": 1851.3, "clap": {"scenes": [{"text": "a packed nightclub dance floor with strobe lights", "score": 0.2757}, {"text": "a snowy mountain landscape", "score": 0.2504}, {"text": "a tropical rainforest with mist", "score": 0.2101}], "moods": [{"text": "euphoric", "score": 0.2641}
-[visuals] scene: A vibrant nightclub dance floor with neon blue and purple lights reflecting off a crowded dance floor. The club is dimly lit with dark red walls, creating a warm atmosphere.
+[visuals] scene: A vibrant nightclub dance floor with neon blue and purple lights reflecting off a crowded dance floor. The air is thick with smoke from the strobe lights.
 [visuals] chain: mistral-small (validated)
-Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  20%|██        | 1/5 [00:00<00:00,  9.47it/s]Loading pipeline components...:  80%|████████  | 4/5 [00:00<00:00, 19.21it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00, 19.32it/s]
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  20%|██        | 1/5 [00:00<00:00,  9.91it/s]Loading pipeline components...:  40%|████      | 2/5 [00:00<00:00,  5.37it/s]Loading pipeline components...:  80%|████████  | 4/5 [00:00<00:00,  7.50it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00,  8.43it/s]
 You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
 [check-hydra] intro@0: 60 frames
 [check-hydra] build@4: 60 frames
@@ -18,6 +18,6 @@ You have disabled the safety checker for <class 'diffusers.pipelines.stable_diff
 [check-hydra] drop@44: 60 frames
 [check-hydra] verse@54: 60 frames
 [check-hydra] drop@60: 60 frames
-[check-hydra] PASS scene_corr 0.568 motion_ratio 1.55
+[check-hydra] PASS scene_corr 0.768 motion_ratio 3.76
 [visuals] wrote /Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/Dumb Blond Bitches/v019/visuals.strudel
 [visuals] check: PASS

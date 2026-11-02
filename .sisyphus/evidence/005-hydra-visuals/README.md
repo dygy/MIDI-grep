@@ -10,21 +10,26 @@ is one run. "layout" is the gate (scene correlation at block-mean scale, >= 0.5)
 
 | Track | Version | Mode | Chain | Layout | Motion |
 |---|---|---|---|---|---|
-| VAGABUNDO NÃO NAMORA | v073 | synth | mistral-small | 0.789 | 3.05 |
-| VAGABUNDO NÃO NAMORA | v072 | sample-instrument | mistral-small | 0.757 | 4.81 |
-| Regime CLT | v088 | synth | mistral-small | 0.691 | 3.71 |
-| Regime CLT | v087 | sample-instrument | mistral-small | 0.689 | 3.73 |
-| Dumb Blond Bitches | v020 | synth | mistral-small | 0.569 | 1.60 |
-| Dumb Blond Bitches | v019 | sample-instrument | mistral-small | 0.568 | 1.55 |
-| Automotivo XM | v018 | synth | mistral-small | 0.522 | 4.62 |
-| Automotivo XM | v017 | sample-instrument | fallback (LLM chain 0.318) | 0.860 | 5.07 |
-| Enter - Nigdy Więcej Wojny | v011 | synth | mistral-small | 0.734 | 4.18 |
-| Enter - Nigdy Więcej Wojny | v010 | sample-instrument | mistral-small | 0.757 | 1.52 |
+| VAGABUNDO NÃO NAMORA | v073 | synth | mistral-small | 0.927 | 8.10 |
+| VAGABUNDO NÃO NAMORA | v072 | sample-instrument | fallback (LLM chain failed the check) | 0.878 | 4.94 |
+| Regime CLT | v088 | synth | fallback (LLM chain failed the check) | 0.840 | 4.07 |
+| Regime CLT | v087 | sample-instrument | mistral-small | 0.837 | 5.06 |
+| Dumb Blond Bitches | v020 | synth | mistral-small | 0.670 | 5.53 |
+| Dumb Blond Bitches | v019 | sample-instrument | mistral-small | 0.768 | 3.76 |
+| Automotivo XM | v018 | synth | mistral-small | 0.679 | 14.02 |
+| Automotivo XM | v017 | sample-instrument | mistral-small | 0.908 | 26.53 |
+| Enter - Nigdy Więcej Wojny | v011 | synth | mistral-small | 0.892 | 87.48 |
+| Enter - Nigdy Więcej Wojny | v010 | sample-instrument | mistral-small | 0.973 | 2.21 |
 
-- 10/10 PASS; 9 of them on the LLM's own chain, none a copy of the fallback (`hydra_code.copies_example`).
-- Thin margins: Dumb Blond Bitches (0.57) and Automotivo XM v018 (0.52) clear 0.5 by little.
-- Every run needed the validator's repair round once (`visuals.json` → `llm.first_errors`).
-- Memory: Ollama empty after every run (`keep_alive: 0`), runs 67-164 s, swap 10-13 GB, nothing killed.
+- Re-run 2026-11-02 after the speed fix (below). 10/10 PASS; 8 of them on the LLM's own chain, 2 fell back after the
+  LLM chain failed the check. Every LLM chain now gives its osc speed 0: the motion comes from the hits and the bass.
+- Motion now follows the music, not the clock: per-frame motion by section (`matrix.json` → `section_motion`, with
+  Hydra's time) is flat across the piece, ~0 in the intros and in breaks without drums (Regime v087, verse at bar 37:
+  0.2) and steady in the drops (Dumb Blond v019: 21.2 at 7 s, 25.3 at 107 s). Before, the same check run at the piece's
+  time put the old VAGABUNDO v073 chain at 9.0 in the intro and 31-36 in the drops at bars 26-67, rising with time.
+- Motion ratios are higher than before (2.2-87): between hits the photo now holds still instead of drifting.
+- Every run kept the validator's repair round available; 5 of 10 used it (`visuals.json` → `llm.first_errors`).
+- The previous matrix (before the speed fix) is in git history (`a6994f0`).
 
 ## What changed on the way (each found in a run, fixed with a regression test in `tests/test_hydra_visuals.py`)
 
@@ -42,6 +47,8 @@ is one run. "layout" is the gate (scene correlation at block-mean scale, >= 0.5)
 | Hard seam at x = 1 − shift: Hydra's scroll*/modulateScroll* end in `fract(_st)` | scroll functions removed | column jump 21-24 (3.5-4x median) at x 607-616 → none |
 | Turn + modulate together past the margin wrapped sky into a corner | scene read through `scene` (src, mirrored edges) | sky in bottom rows: 1.8 % → 0 % (Enter v011), 13.2 % → 0 % (test) |
 | Strudel's formatter split `1e-4` into `1` / `e-4` | generator writes `0.0001`; strudel-client fixed and deployed (`d404f49`) | prod bundles carry the new rule |
+| The background raced in the live REPL: 9 of 10 chains drove osc's speed or frequency with kick/bassWave, and Hydra multiplies both by the seconds since start, so each hit jumped the waves by time x change | the whitelist takes only constant speeds (osc speed, osc frequency unless speed 0, noise offset, gradient/rotate speed), bounded to one pattern period per bar of the piece | the 10 old chains: all rejected; new chains: motion flat over the piece |
+| The check ran Hydra from 0 s (~18 s over all windows), not at the piece's time: it could not see that | `check-hydra` sets Hydra's time to the seconds played at each frame; `check.json` → `sections[].hydra_time` | old VAGABUNDO v073 chain at the piece's time: drops 31-36 per frame vs 10-15 in the old check |
 
 ## Live REPL (`img/`)
 

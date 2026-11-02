@@ -5,9 +5,10 @@ Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF
   warnings.warn(
 [visuals] /Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/Regime CLT (Dj Brunin XM, Aurora Shukita)/v088
 [visuals] vision: {"title": "Regime CLT (Dj Brunin XM, Aurora Shukita)", "genre": "brazilian_funk", "key": "C# minor", "mode": "minor", "bpm": 135.017, "centroid_hz": 1245.0, "clap": {"scenes": [{"text": "a snowy mountain landscape", "score": 0.3651}, {"text": "a cathedral interior with stained glass light", "score": 0.2789}, {"text": "an empty desert road under a starry sky", "score": 0.2648}], "moods": [{"text": 
-[visuals] scene: A vast cathedral interior with stained glass windows casting deep reds and purples onto cold stone walls, illuminated by a dim, flickering light.
+[visuals] LLM chain rejected, asking for a fix: ["noise's speed argument (() => 0.5 + 0.3 * hat()) must be a plain number: Hydra multiplies it by the seconds since start, so a control there makes the noise jump further the longer the piece plays; drive the AMOUNT of the step that uses it instead"]
+[visuals] scene: A vast cathedral interior with stained glass windows casting deep reds and purples onto cold stone walls under a dim, eerie light.
 [visuals] chain: mistral-small (validated)
-Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  40%|████      | 2/5 [00:00<00:00, 17.55it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00, 20.36it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00, 19.96it/s]
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  20%|██        | 1/5 [00:00<00:00,  7.59it/s]Loading pipeline components...:  60%|██████    | 3/5 [00:00<00:00, 13.23it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00, 15.96it/s]
 You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
 [check-hydra] intro@0: 60 frames
 [check-hydra] drop@9: 60 frames
@@ -17,6 +18,16 @@ You have disabled the safety checker for <class 'diffusers.pipelines.stable_diff
 [check-hydra] drop@45: 60 frames
 [check-hydra] verse@61: 60 frames
 [check-hydra] drop@68: 60 frames
-[check-hydra] PASS scene_corr 0.691 motion_ratio 3.71
+[check-hydra] FAIL scene_corr 0.013 motion_ratio 1.00 — scene not recognizable: mean layout-scale luminance correlation 0.013 < 0.5; picture does not move with the hits: motion ratio 1.00 < 1.2
+[visuals] mistral-small (validated) failed the check (scene not recognizable: mean layout-scale luminance correlation 0.013 < 0.5; picture does not move with the hits: motion ratio 1.00 < 1.2); re-checking with the fallback chain
+[check-hydra] intro@0: 60 frames
+[check-hydra] drop@9: 60 frames
+[check-hydra] verse@25: 60 frames
+[check-hydra] drop@32: 60 frames
+[check-hydra] verse@37: 60 frames
+[check-hydra] drop@45: 60 frames
+[check-hydra] verse@61: 60 frames
+[check-hydra] drop@68: 60 frames
+[check-hydra] PASS scene_corr 0.840 motion_ratio 4.07
 [visuals] wrote /Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/Regime CLT (Dj Brunin XM, Aurora Shukita)/v088/visuals.strudel
 [visuals] check: PASS

@@ -88,8 +88,9 @@ _IDENT = re.compile(r"[A-Za-z_$][A-Za-z0-9_$]*")
 _FORBIDDEN = re.compile(r"[;{}\[\]`'\"\\]|\bawait\b|\bnew\b|\bfunction\b|\bthis\b")
 
 
-def validate_chain(chain: str) -> list[str]:
-    """Problems with an LLM-written Hydra chain; empty = acceptable to embed in the piece."""
+def validate_chain(chain: str, bpm: float | None = None) -> list[str]:
+    """Problems with an LLM-written Hydra chain; empty = acceptable to embed in the piece. ``bpm`` bounds the speeds
+    (one pattern period per bar); without it only their constancy is checked."""
     c = " ".join(chain.split())
     errs = []
     if not c.startswith("src(s0)"):
@@ -142,7 +143,94 @@ def validate_chain(chain: str) -> list[str]:
         # time, so the scene slid away section by section (corr 0.89 -> 0.19; 0.86 with the speed at 0)
         errs.append(f"a speed argument on the photo itself ({', '.join(drifting)}) accumulates and slides the scene away: "
                     f"set it to 0 or move the motion into a SOURCE")
+    errs += _speed_errors(c, bpm)
     return errs
+
+
+# Hydra multiplies these arguments by `time`, the seconds since Hydra started (glsl-functions.js: osc
+# sin((x + time*sync) * frequency), noise(_st*scale, offset*time), gradient sin(time*speed), rotate angle + speed*time).
+# A control there moves the phase by time * (its change) on every hit: 9 of the 10 chains of 2026-11-02 drove osc's
+# speed or frequency with kick/bassWave, so the waves jumped further the longer the piece played - at minute 2 a kick
+# shifts osc(bassWave(), kick()) by ~120 * bassWave rad, dozens of wave periods in one frame. index -> default
+_TIME_ARGS = {"osc": ((1, 0.1),), "noise": ((1, 0.1),), "gradient": ((0, 0.0),), "rotate": ((1, 0.0),)}
+_OSC_FREQ_DEFAULT = 60.0
+# how far one unit of a time argument moves the pattern per second, in wave periods: osc and gradient are sines of
+# speed*time (2 pi per period); noise's offset*time walks through value noise whose features are ~1 unit apart; a turn
+# (2 pi) of rotate brings stripes back twice, but a full turn per bar is the bound kept there too
+_PERIOD = {"osc": 2 * math.pi, "noise": 1.0, "gradient": 2 * math.pi, "rotate": 2 * math.pi}
+
+
+def bar_seconds(bpm: float) -> float:
+    """One 4/4 bar of the piece (the pipeline's bars*240/bpm)."""
+    return 240.0 / bpm
+
+
+def max_speed(fn: str, bpm: float, frequency: float = 1.0) -> float:
+    """The largest speed argument that moves ``fn``'s pattern by at most one period per bar of the piece: the visuals
+    keep the music's pace, and the hits (pulses on the amounts) carry the faster motion."""
+    return _PERIOD[fn] / (bar_seconds(bpm) * (frequency if fn == "osc" else 1.0))
+
+
+def _const(expr: str) -> float | None:
+    """A numeric argument's value when it is a constant (digits, + - * / ( ), Math.PI); None when it moves."""
+    e = expr.strip().replace("Math.PI", repr(math.pi))
+    if not e or not re.fullmatch(r"[\d.eE+\-*/() ]+", e):
+        return None
+    try:
+        return float(eval(e, {"__builtins__": {}}, {}))  # only the characters above reach eval
+    except Exception:
+        return None
+
+
+def _speed_errors(chain: str, bpm: float | None) -> list[str]:
+    errs = []
+    for fn, args in _calls(chain, set(_TIME_ARGS)):
+        for i, default in _TIME_ARGS[fn]:
+            raw = args[i] if len(args) > i else repr(default)
+            speed = _const(raw)
+            if speed is None:
+                errs.append(f"{fn}'s speed argument ({raw.strip()}) must be a plain number: Hydra multiplies it by the "
+                            f"seconds since start, so a control there makes the {fn} jump further the longer the piece "
+                            f"plays; drive the AMOUNT of the step that uses it instead")
+                continue
+            freq = 1.0
+            if fn == "osc":
+                f = _const(args[0]) if args else _OSC_FREQ_DEFAULT
+                if f is None:
+                    if speed != 0:
+                        errs.append(f"osc's frequency ({args[0].strip()}) moves while its speed is {speed:g}: frequency "
+                                    f"also multiplies time; give the osc speed 0 to let a control drive its frequency")
+                    continue
+                freq = abs(f)
+            if bpm and abs(speed) > max_speed(fn, bpm, freq) + 1e-9:
+                errs.append(f"{fn} speed {speed:g} moves its pattern {abs(speed) / max_speed(fn, bpm, freq):.1f} periods "
+                            f"per bar; at {bpm:g} BPM keep it <= {max_speed(fn, bpm, freq):.3g}"
+                            + (f" for frequency {freq:g}" if fn == "osc" else ""))
+    return errs
+
+
+def _calls(chain: str, names: set[str]) -> list[tuple[str, list[str]]]:
+    """Every call of one of ``names`` anywhere in the chain (sources and steps) with its top-level arguments."""
+    out = []
+    for m in re.finditer(rf"(?<![\w$])({'|'.join(sorted(names))})\(", chain):
+        out.append((m.group(1), _args_at(chain, m.end())[0]))
+    return out
+
+
+def _args_at(chain: str, start: int) -> tuple[list[str], int]:
+    """The top-level arguments of the call whose '(' ends at ``start``, and the index after its ')'."""
+    depth, j, args, s = 1, start, [], start
+    while j < len(chain) and depth:
+        ch = chain[j]
+        if ch == "(":
+            depth += 1
+        elif ch == ")":
+            depth -= 1
+        if (ch == "," and depth == 1) or depth == 0:
+            args.append(chain[s:j])
+            s = j + 1
+        j += 1
+    return [a for a in args if a.strip()], j
 
 
 # steps whose arguments are all numbers (the SOURCE-taking ones are modulate*, blend, add, mult, diff, layer, mask)
@@ -157,19 +245,8 @@ def _photo_steps(chain: str) -> list[tuple[str, list[str]]]:
     """The methods called on the chain itself (outside every argument list) with their top-level arguments."""
     steps, i = [], 0
     while (m := re.compile(r"\.([A-Za-z_]\w*)\(").search(chain, i)):
-        depth, j, args, start = 1, m.end(), [], m.end()
-        while j < len(chain) and depth:
-            ch = chain[j]
-            if ch == "(":
-                depth += 1
-            elif ch == ")":
-                depth -= 1
-            if (ch == "," and depth == 1) or depth == 0:
-                args.append(chain[start:j])
-                start = j + 1
-            j += 1
-        steps.append((m.group(1), [a for a in args if a.strip()]))
-        i = j
+        args, i = _args_at(chain, m.end())
+        steps.append((m.group(1), args))
     return steps
 
 
@@ -213,7 +290,8 @@ def scene_prompt(text: str) -> str:
 def fallback_chain() -> str:
     """The chain used when the LLM is off or its answer fails validation: the same wiring the prompt asks for."""
     return ("src(s0)"
-            ".modulate(osc(() => 2 * bassWave(), 0.05, 0).rotate(Math.PI / 2), () => 0.003 + 0.02 * kick() + 0.01 * bassHit())"
+            # speed 0: the frequency follows the bass, and a moving frequency with a speed would jump (validate_chain)
+            ".modulate(osc(() => 2 * bassWave(), 0, 0).rotate(Math.PI / 2), () => 0.003 + 0.02 * kick() + 0.01 * bassHit())"
             ".scale(() => 1 + 0.03 * kick())"
             ".modulateScale(noise(4, 0.3), () => 0.03 * snare())"
             ".hue(() => 0.08 * leadHue())"
@@ -240,6 +318,7 @@ def build_prompt(vision: dict, wiring: dict) -> str:
     """The LLM prompt. ``wiring`` (controls_js) says which controls the piece drives: no example chain is shown, since
     mistral-small returned the one it was given verbatim on 2 of 5 tracks (2026-11-01)."""
     controls = "\n".join(f"- {k}(): {v}" for k, v in CONTROLS.items())
+    bpm = float(vision["bpm"])
     live = "\n".join(f"    - {k}: {'live, from ' + v if v else 'always 0 (no such voice)'}" for k, v in wiring.items())
     return f"""You design the visuals for a piece of music: a REAL-LOOKING photo of a scene, animated by Hydra (hydra.ojack.xyz)
 so that it moves with the music's voices.
@@ -274,8 +353,14 @@ Return ONE JSON object with keys:
   * in THIS piece:
 {live}
     build the motion from the live ones; a control that is always 0 here moves nothing
+  * speeds are plain numbers, never controls: osc's speed, noise's offset, gradient's speed and rotate's speed are
+    multiplied by the seconds since start, so a control there makes the pattern jump further the longer the piece
+    plays. Keep the pace of the music, at most one wave period per bar ({bar_seconds(bpm):.2f} s here): osc
+    frequency x speed <= {max_speed("osc", bpm):.2f}, noise offset <= {max_speed("noise", bpm):.2f}, rotate/gradient
+    speed <= {max_speed("rotate", bpm):.2f}. The hits move the picture through the AMOUNTS, not the speeds
   * must use kick and bassWave; the photo must WAVE with the bass: modulate it with a SOURCE whose frequency follows
-    bassWave(), and a small amount; a .rotate on the photo itself turns it by at most {MAX_PHOTO_TURN} rad
+    bassWave() - give that osc speed 0, a moving frequency also multiplies time - or whose amount follows it, and a
+    small amount; a .rotate on the photo itself turns it by at most {MAX_PHOTO_TURN} rad
     (about 4 degrees: more shows the image's edges); larger turns belong inside a SOURCE
   * the speed argument of .rotate on the photo must be 0 (a speed accumulates every frame and turns the scene away);
     put continuous motion inside a SOURCE instead

@@ -60,11 +60,11 @@ $: stack(
 
 def test_fallback_chain_passes_and_the_whitelist_rejects_what_breaks_the_scene_or_the_sandbox():
     assert HC.validate_chain(HC.fallback_chain()) == []
-    assert HC.validate_chain("src(s0).modulate(osc(() => bassWave()), () => 0.01 * kick()).blend(src(o0), 0.2).out()") == []
-    assert any("kaleid" in e for e in HC.validate_chain("src(s0).modulate(osc(() => bassWave()), () => kick()).kaleid(4).out()"))
+    assert HC.validate_chain("src(s0).modulate(osc(() => bassWave(), 0), () => 0.01 * kick()).blend(src(o0), 0.2).out()") == []
+    assert any("kaleid" in e for e in HC.validate_chain("src(s0).modulate(osc(() => bassWave(), 0), () => kick()).kaleid(4).out()"))
     assert any("one expression" in e for e in HC.validate_chain("src(s0).scale(() => kick()); fetch('x'); osc(bassWave).out()"))
-    assert any("must use the kick" in e for e in HC.validate_chain("src(s0).modulate(osc(() => bassWave()), 0.01).out()"))
-    assert any("must start with src(s0)" in e for e in HC.validate_chain("osc(() => bassWave()).scale(() => kick()).out()"))
+    assert any("must use the kick" in e for e in HC.validate_chain("src(s0).modulate(osc(() => bassWave(), 0), 0.01).out()"))
+    assert any("must start with src(s0)" in e for e in HC.validate_chain("osc(() => bassWave(), 0).scale(() => kick()).out()"))
     assert any("unknown names: window" in e for e in HC.validate_chain("src(s0).scale(() => kick() + window.x + bassWave()).out()"))
 
 
@@ -190,7 +190,7 @@ def test_scene_gate_measures_the_layout_not_the_pixel_texture(tmp_path):
 
 
 def test_checker_fails_a_chain_that_washes_the_scene_out(tmp_path):
-    chain = "src(s0).blend(osc(() => 40 * bassWave(), 0.2, 1), () => 0.95 + 0.05 * kick()).out()"
+    chain = "src(s0).blend(osc(() => 40 * bassWave(), 0, 1), () => 0.95 + 0.05 * kick()).out()"
     assert HC.validate_chain(chain) == []                       # the whitelist alone lets it through
     r = _check(tmp_path, chain)
     assert r["verdict"] == "FAIL" and any("not recognizable" in f for f in r["failures"])
@@ -217,7 +217,7 @@ def test_a_chain_copied_from_the_prompts_example_is_not_counted_as_the_llms():
 
 def test_the_prompt_shows_no_chain_to_copy_and_names_the_pieces_live_controls():
     controls, wiring = HC.controls_js(PIECE)
-    prompt = HC.build_prompt({"title": "test"}, wiring)
+    prompt = HC.build_prompt({"title": "test", "bpm": 120}, wiring)
     assert "".join(HC.fallback_chain().split()) not in "".join(prompt.split())
     assert "- kick: live, from" in prompt and "- snare: always 0" in prompt
 
@@ -226,9 +226,9 @@ def test_the_prompt_shows_no_chain_to_copy_and_names_the_pieces_live_controls():
     # VAGABUNDO v073 (2026-11-01), the first answer without an example chain to copy
     ("src(s0).modulate(osc(bassWave() * Math.PI / 4, 1), bassHit()).rotate(Math.sin(kick()) * PI / 20, energy())"
      ".hue(leadHue() * 0.15).out()", "bassHit, bassWave, energy, kick, leadHue"),
-    ("src(s0).modulate(osc(() => 2 * bassWave(), 0.1, 0), bassHit()).out()", "bassHit"),           # a sibling's arrow
-    ("src(s0).modulate(osc(() => 2 * bassWave(), 0.1, 0), () => 0.02 * kick()).hue(leadHue()).out()", "leadHue"),
-    ("src(s0).modulate(osc(() => 2 * bassWave(), 0.1, 0), () => 0.02 * kick()).hue(() => Math.min(0.1, leadHue())).out()",
+    ("src(s0).modulate(osc(() => 2 * bassWave(), 0, 0), bassHit()).out()", "bassHit"),           # a sibling's arrow
+    ("src(s0).modulate(osc(() => 2 * bassWave(), 0, 0), () => 0.02 * kick()).hue(leadHue()).out()", "leadHue"),
+    ("src(s0).modulate(osc(() => 2 * bassWave(), 0, 0), () => 0.02 * kick()).hue(() => Math.min(0.1, leadHue())).out()",
      None),                                                                                            # nested in an arrow
 ])
 def test_a_control_read_outside_an_arrow_function_is_rejected(chain, bare):
@@ -239,7 +239,7 @@ def test_a_control_read_outside_an_arrow_function_is_rejected(chain, bare):
 
 def test_a_speed_on_the_photo_itself_is_rejected_but_not_inside_a_source():
     # VAGABUNDO v073 (2026-11-01): scrollY speed on the photo, scene corr 0.89 -> 0.19 over the sections
-    drift = ("src(s0).modulate(osc(() => bassWave() * Math.PI / 2), () => kick() * 0.04 + 0.01)"
+    drift = ("src(s0).modulate(osc(() => bassWave() * Math.PI / 2, 0), () => kick() * 0.04 + 0.01)"
              ".rotate(() => snare() * 0.03, () => energy() * 0.02).out()")
     assert any("speed argument on the photo itself (rotate)" in e for e in HC.validate_chain(drift))
     assert not any("speed" in e for e in HC.validate_chain(drift.replace("() => energy() * 0.02", "0")))
@@ -252,7 +252,7 @@ def test_a_speed_on_the_photo_itself_is_rejected_but_not_inside_a_source():
 def test_a_source_where_a_number_belongs_and_boolean_arguments_are_rejected():
     # Dumb Blond Bitches v020 / Enter v010 (2026-11-01): .scrollX(osc(...), 0) compiled to a black frame;
     # 4 of 10 answers wrote osc(f, true) for a "sync" they read as boolean
-    black = "src(s0).modulate(osc(() => 2 * bassWave(), 0.1, 0), () => 0.02 * kick()).scale(osc(() => bassWave() * 0.5)).out()"
+    black = "src(s0).modulate(osc(() => 2 * bassWave(), 0, 0), () => 0.02 * kick()).scale(osc(() => bassWave() * 0.5)).out()"
     assert any("a SOURCE where a number is expected (scale)" in e for e in HC.validate_chain(black))
     boolean = "src(s0).modulate(osc(() => 2 * bassWave(), false), () => 0.02 * kick()).out()"
     assert any("true/false" in e for e in HC.validate_chain(boolean))
@@ -262,7 +262,7 @@ def test_a_source_where_a_number_belongs_and_boolean_arguments_are_rejected():
 def test_the_photo_turn_bound_follows_from_the_edge_margin():
     # a turn by MAX_PHOTO_TURN moves a corner (0.707 from the centre in uv) by MAX_WARP: the margin EDGE_ZOOM covers
     assert HC.MAX_PHOTO_TURN * np.hypot(0.5, 0.5) == pytest.approx(HC.MAX_WARP, abs=1e-3)
-    assert f"at most {HC.MAX_PHOTO_TURN} rad" in HC.build_prompt({"title": "test"}, HC.controls_js(PIECE)[1])
+    assert f"at most {HC.MAX_PHOTO_TURN} rad" in HC.build_prompt({"title": "test", "bpm": 120}, HC.controls_js(PIECE)[1])
 
 
 def test_the_generated_block_has_no_exponent_literals():
@@ -287,7 +287,7 @@ def test_scrolling_the_photo_is_rejected():
 
 def test_the_prompt_gives_each_colour_steps_unchanged_value():
     # 2026-11-02: contrast/saturate/brightness read as amounts around 0 turned the photo flat grey (scene corr 0.000)
-    prompt = HC.build_prompt({"title": "test"}, HC.controls_js(PIECE)[1])
+    prompt = HC.build_prompt({"title": "test", "bpm": 120}, HC.controls_js(PIECE)[1])
     for step in (".saturate(factor: 1 = unchanged", ".contrast(factor: 1 = unchanged", ".brightness(offset: 0 = unchanged"):
         assert step in prompt
 
@@ -295,7 +295,7 @@ def test_the_prompt_gives_each_colour_steps_unchanged_value():
 def test_math_names_must_come_from_math():
     # VAGABUNDO v073 (2026-11-02): .rotate(() => 0.071 * Math.sin(bassWave() * PI), 0) passed the whitelist, then the
     # check (scene corr -0.065, no page error); with Math.PI it scores 0.788
-    bare = "src(s0).modulate(osc(() => 2 * bassWave(), 0.1, 0), () => 0.02 * kick()).rotate(() => 0.071 * Math.sin(bassWave() * PI), 0).out()"
+    bare = "src(s0).modulate(osc(() => 2 * bassWave(), 0, 0), () => 0.02 * kick()).rotate(() => 0.071 * Math.sin(bassWave() * PI), 0).out()"
     assert any(e.startswith("write Math.PI, not a bare PI") for e in HC.validate_chain(bare))
     assert HC.validate_chain(bare.replace("* PI)", "* Math.PI)")) == []
 
@@ -317,3 +317,41 @@ def test_warps_that_add_up_past_the_margin_show_the_same_edge_not_the_opposite_o
     print("bottom sky share, wrap vs mirror:", bottom_sky(tmp_path / "wrap"), bottom_sky(tmp_path / "mirror"))
     assert bottom_sky(tmp_path / "wrap") > 0.01
     assert bottom_sky(tmp_path / "mirror") == 0
+
+
+@pytest.mark.parametrize("chain, err", [
+    # the 10 LLM chains of 2026-11-02: kick/bassWave in osc's speed or frequency. Hydra multiplies both by the seconds
+    # since start, so each hit jumped the waves by time * change - further the longer the piece played
+    ("src(s0).modulate(osc(() => bassWave(), () => 1.5 + 0.2 * kick()), () => 0.03).out()", "osc's speed argument"),
+    ("src(s0).modulate(osc(() => 2 * bassWave(), 0.1, 0), () => 0.02 * kick()).out()", "osc's frequency"),
+    ("src(s0).modulate(osc(() => 2 * bassWave()), () => 0.02 * kick()).out()", "osc's frequency"),  # default speed 0.1
+    ("src(s0).modulate(noise(4, () => kick()), () => 0.02 * bassWave()).out()", "noise's speed argument"),
+    ("src(s0).modulate(osc(8, 0.1).rotate(0, () => kick()), () => 0.02 * bassWave()).out()", "rotate's speed argument"),
+    ("src(s0).modulate(osc(() => 2 * bassWave(), 0, 0), () => 0.02 * kick()).out()", None),  # speed 0: frequency may move
+    ("src(s0).modulate(osc(8, 0.05), () => 0.02 * kick() + 0.01 * bassWave()).out()", None),
+])
+def test_a_control_in_a_speed_that_hydra_multiplies_by_time_is_rejected(chain, err):
+    errs = HC.validate_chain(chain, 120)
+    assert any(e.startswith(err) for e in errs) if err else errs == [], errs
+
+
+def test_speeds_keep_the_pieces_pace_one_period_per_bar():
+    # 120 BPM: a bar is 2 s, so osc(f, s) moves (f * s / 2 pi) periods per second <= 1 per bar -> f * s <= pi
+    assert HC.bar_seconds(120) == 2.0
+    assert HC.max_speed("osc", 120, frequency=4) == pytest.approx(np.pi / 4)
+    ok = "src(s0).modulate(osc(4, 0.78), () => 0.02 * kick() + 0.01 * bassWave()).out()"
+    assert HC.validate_chain(ok, 120) == []
+    fast = ok.replace("0.78", "1.5")
+    assert any(e.startswith("osc speed 1.5 moves its pattern 1.9 periods per bar") for e in HC.validate_chain(fast, 120))
+    assert HC.validate_chain(fast) == []                        # no tempo: only constancy is checked
+    assert HC.validate_chain(HC.fallback_chain(), 120) == []
+    prompt = HC.build_prompt({"title": "test", "bpm": 120}, HC.controls_js(PIECE)[1])
+    assert "osc\n    frequency x speed <= 3.14" in prompt or "frequency x speed <= 3.14" in " ".join(prompt.split())
+
+
+def test_the_check_runs_hydra_at_the_pieces_own_time(tmp_path):
+    # the check ticked Hydra on from 0 across its windows (~18 s in all), while in the REPL time is the seconds the
+    # piece has played: a chain whose speed a control drives looked calm in the check and jumped live (2026-11-02)
+    r = _check(tmp_path, HC.fallback_chain())
+    for s in r["sections"]:
+        assert s["hydra_time"] == pytest.approx(s["bar"] / r["cps"], abs=1e-6), s

@@ -1,10 +1,10 @@
-VAGABUNDO NÃO NAMORA   v073 synth             PASS  layout 0.789  pixel 0.488  motion 3.05  chain: mistral-small (validated)
-VAGABUNDO NÃO NAMORA   v072 sample-instrument PASS  layout 0.757  pixel 0.541  motion 4.81  chain: mistral-small (validated)
-Regime CLT (Dj Brunin  v088 synth             PASS  layout 0.691  pixel 0.238  motion 3.71  chain: mistral-small (validated)
-Regime CLT (Dj Brunin  v087 sample-instrument PASS  layout 0.689  pixel 0.279  motion 3.73  chain: mistral-small (validated)
-Dumb Blond Bitches     v020 synth             PASS  layout 0.569  pixel 0.330  motion 1.60  chain: mistral-small (validated)
-Dumb Blond Bitches     v019 sample-instrument PASS  layout 0.568  pixel 0.322  motion 1.55  chain: mistral-small (validated)
-Automotivo XM, Taka Ta v018 synth             PASS  layout 0.522  pixel 0.278  motion 4.62  chain: mistral-small (validated)
-Automotivo XM, Taka Ta v017 sample-instrument PASS  layout 0.860  pixel 0.564  motion 5.07  chain: fallback (mistral-small chain failed the check)
-Enter - Nigdy Więcej W v011 synth             PASS  layout 0.734  pixel 0.406  motion 4.18  chain: mistral-small (validated)
-Enter - Nigdy Więcej W v010 sample-instrument PASS  layout 0.757  pixel 0.420  motion 1.52  chain: mistral-small (validated)
+VAGABUNDO NÃO NAMORA v073 rc=0 111s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.927 motion_ratio 8.10 [visuals] check: PASS 
+VAGABUNDO NÃO NAMORA v072 rc=0 125s | [visuals] chain: mistral-small (validated) [check-hydra] FAIL scene_corr 0.489 motion_ratio 15.67 — scene not recognizable: mean layout-scale luminance correlation 0.489 < 0.5 [check-hydra] PASS scene_corr 0.878 motion_ratio 4.94 [visuals] check: PASS 
+Regime CLT (Dj Brunin XM, Aurora Shukita) v088 rc=0 123s | [visuals] chain: mistral-small (validated) [check-hydra] FAIL scene_corr 0.013 motion_ratio 1.00 — scene not recognizable: mean layout-scale luminance correlation 0.013 < 0.5; picture does not move with the hits: motion ratio 1.00 < 1.2 [check-hydra] PASS scene_corr 0.840 motion_ratio 4.07 [visuals] check: PASS 
+Regime CLT (Dj Brunin XM, Aurora Shukita) v087 rc=0 228s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.837 motion_ratio 5.06 [visuals] check: PASS 
+Dumb Blond Bitches v020 rc=0 216s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.670 motion_ratio 5.53 [visuals] check: PASS 
+Dumb Blond Bitches v019 rc=0 122s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.768 motion_ratio 3.76 [visuals] check: PASS 
+Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM v018 rc=0 99s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.679 motion_ratio 14.02 [visuals] check: PASS 
+Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM v017 rc=0 77s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.908 motion_ratio 26.53 [visuals] check: PASS 
+Enter - Nigdy Więcej Wojny (prod. Enter) (2022) v011 rc=0 110s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.892 motion_ratio 87.48 [visuals] check: PASS 
+Enter - Nigdy Więcej Wojny (prod. Enter) (2022) v010 rc=0 138s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.973 motion_ratio 2.21 [visuals] check: PASS 

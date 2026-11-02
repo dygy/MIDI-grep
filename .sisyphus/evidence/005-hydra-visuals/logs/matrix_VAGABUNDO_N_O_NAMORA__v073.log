@@ -5,10 +5,10 @@ Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF
   warnings.warn(
 [visuals] /Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/VAGABUNDO NÃO NAMORA/v073
 [visuals] vision: {"title": "VAGABUNDO NÃO NAMORA", "genre": "brazilian_funk", "key": "C# minor", "mode": "minor", "bpm": 129.989, "centroid_hz": 1656.0, "clap": {"scenes": [{"text": "a snowy mountain landscape", "score": 0.3176}, {"text": "a packed nightclub dance floor with strobe lights", "score": 0.2946}, {"text": "a tropical rainforest with mist", "score": 0.2348}], "moods": [{"text": "euphoric", "score": 0.35
-[visuals] LLM chain rejected, asking for a fix: ["write Math.PI, not a bare PI (PI): the bare names are not Math's in the REPL"]
-[visuals] scene: A vibrant tropical rainforest with dense foliage in deep greens and browns, misty atmosphere, and a bright yellow sun piercing through the canopy. The forest floor is covered in lush ferns and mosses, with dappled sunlight creating a warm, inviting glow.
+[visuals] LLM chain rejected, asking for a fix: ['a SOURCE where a number is expected (rotate): those arguments take numbers or () => ... functions; warp with .modulate*(SOURCE, amount) instead']
+[visuals] scene: A dense, misty tropical rainforest with deep greens and blues, lit by a warm, low sun. The forest floor is covered in vibrant ferns and mosses, while tall trees stretch upwards towards a hazy sky.
 [visuals] chain: mistral-small (validated)
-Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  40%|████      | 2/5 [00:00<00:00,  8.07it/s]Loading pipeline components...:  60%|██████    | 3/5 [00:00<00:00,  4.16it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00,  5.72it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00,  5.61it/s]
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  40%|████      | 2/5 [00:00<00:00, 16.91it/s]Loading pipeline components...:  80%|████████  | 4/5 [00:00<00:00, 15.27it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00, 14.00it/s]
 You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
 [check-hydra] intro@0: 60 frames
 [check-hydra] build@16: 60 frames
@@ -17,6 +17,6 @@ You have disabled the safety checker for <class 'diffusers.pipelines.stable_diff
 [check-hydra] drop@49: 60 frames
 [check-hydra] drop@67: 60 frames
 [check-hydra] outro@76: 60 frames
-[check-hydra] PASS scene_corr 0.789 motion_ratio 3.05
+[check-hydra] PASS scene_corr 0.927 motion_ratio 8.10
 [visuals] wrote /Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/VAGABUNDO NÃO NAMORA/v073/visuals.strudel
 [visuals] check: PASS
