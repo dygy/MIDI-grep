@@ -222,7 +222,9 @@ scene prompt + Hydra chain, paints the scene with a self-hosted diffusers model 
 and writes `vNNN/visuals.strudel` = `output.strudel` + a Hydra block whose controls are queried from the piece's own
 bar arrays at Strudel's clock. `scripts/node/src/check-hydra.ts` runs the file headless (pinned @strudel/web +
 hydra-synth 1.4.0) and gates the chain (scene recognizable at layout scale, controls move, motion follows the pulses); a chain that
-fails falls back to the rule-built one. `output.strudel`, renders and scores are untouched.
+fails falls back to the rule-built one. `output.strudel`, renders and scores are untouched. The editable pipeline runs it as
+stage 11 on every promoted piece, after all renders (the Ollama and diffusion models never load beside the renderer on
+24 GB); a visuals failure is recorded in the run summary, not a run failure.
 
 ### Comparison & Eval Gate
 

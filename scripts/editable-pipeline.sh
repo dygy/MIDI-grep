@@ -22,11 +22,15 @@
 #                      stem_comparison.json,iterations.json,iterations/}; render stems = the renderer with one voice
 #                      group sounding (default; --render-stems demucs = Demucs on the render) + Demucs on each
 #                      calibration iteration render (~2 min each). A missing/failed report is an ERROR, never a skip.
+#  11 visuals          python -m visuals <track> --version vNNN per promoted piece (spec 005) -> vNNN/{visuals.strudel,
+#                      visual.jpg,visuals.json,visuals_check/}; after every render, so the Ollama model and the diffusion
+#                      model never load beside the renderer (24 GB). output.strudel and the scores stay untouched; a
+#                      visuals failure is logged and recorded in the summary ("visuals"), it does not fail the run.
 #
 # Usage:
 #   scripts/editable-pipeline.sh --url <youtube> [--title "<cache folder title>"] [--prefix <slug>]
 #       [--genre <g>] [--mode sample-instrument|synth|both] [--iters N] [--synth-iters N] [--dur <seconds>]
-#       [--r2 | --local] [--no-iteration-stems] [--render-stems solo|demucs] [--force]
+#       [--r2 | --local] [--no-iteration-stems] [--render-stems solo|demucs] [--no-visuals] [--force]
 #
 #   --url      YouTube link (required unless --title names an already-extracted track dir)
 #   --title    locate an already-extracted track dir .cache/stems/<title> (skips stage 1 when complete)
@@ -43,6 +47,7 @@
 #   --render-stems  stage 10: how vNNN/render_{melodic,drums,bass,vocals} are made. solo (default) = the renderer,
 #              one voice group sounding per render (vocals = silence); demucs = Demucs on render.wav (only
 #              when working on the separation stage itself)
+#   --no-visuals  skip stage 11
 #   --force    redo every stage even if its output exists
 #
 # Requires (checked per stage, not up front): the renderer built (scripts/node/dist; BlackHole + Multi-Output only for
@@ -71,7 +76,7 @@ else
   RENDER_NOTE="record-strudel-blackhole.js RAW capture + uniform speed correction (ffmpeg wallclock restamp)"
 fi
 
-URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="" SYNTH_ITERS="" DUR="" HOSTING="r2" FORCE="" ITER_STEMS_ARG=() RENDER_STEMS_ARG=()
+URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="" SYNTH_ITERS="" DUR="" HOSTING="r2" FORCE="" ITER_STEMS_ARG=() RENDER_STEMS_ARG=() VISUALS="1"
 
 usage() { sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
 log() { echo "[editable-pipeline] $*" >&2; }
@@ -90,6 +95,7 @@ while [ $# -gt 0 ]; do case "$1" in
   --local) HOSTING="local"; shift;;
   --no-iteration-stems) ITER_STEMS_ARG=(--no-iteration-stems); shift;;
   --render-stems) RENDER_STEMS_ARG=(--render-stems "${2:?--render-stems needs solo|demucs}"); shift 2;;
+  --no-visuals) VISUALS=""; shift;;
   --force) FORCE="1"; shift;;
   -h|--help) usage; exit 0;;
   *) echo "unknown arg: $1 (see --help)" >&2; exit 64;;
@@ -522,12 +528,42 @@ for m in $(modes); do
   score_and_promote "$m"
 done
 
+# ---------------------------------------------------------------- stage 11: visuals
+# visuals_stage <mode>: the Hydra visuals for the mode's promoted piece. Writes $PW/<mode>/visuals.status (the summary
+# reads it): "ok", "skipped (--no-visuals)" or "FAILED rc=N (see visuals.log)".
+visuals_stage() {
+  local mode="$1" W="$PW/$1" vdir rc=0
+  vdir="$TRACK/$(basename "$(jget "$W/result.json" version_dir)")"
+  if [ -z "$VISUALS" ]; then echo "skipped (--no-visuals)" > "$W/visuals.status"; return 0; fi
+  if stage_done "$vdir/visuals.strudel" "$vdir/visuals.json"; then
+    log "stage 11 skip ($mode): $(basename "$vdir")/visuals.strudel exists"; echo ok > "$W/visuals.status"; return 0
+  fi
+  log "stage 11: visuals $mode -> $vdir (log $W/visuals.log)"
+  (cd "$SP" && "$PY" -m visuals "$TRACK" --version "$(basename "$vdir")") >"$W/visuals.log" 2>&1 || rc=$?
+  if [ "$rc" -eq 0 ] && [ -s "$vdir/visuals.strudel" ]; then
+    echo ok > "$W/visuals.status"
+    log "stage 11: $mode $(grep -E '^\[visuals\] (chain|check):' "$W/visuals.log" | tr '\n' ' ')"
+  else
+    echo "FAILED rc=$rc (see $W/visuals.log)" > "$W/visuals.status"
+    log "stage 11: WARNING - visuals FAILED for $mode (rc=$rc): $(tail -3 "$W/visuals.log" | tr '\n' ' ')"
+  fi
+}
+for m in $(modes); do visuals_stage "$m"; done
+
 # ---------------------------------------------------------------- final JSON summary (stdout)
 RESULTS=(); for m in $(modes); do RESULTS+=("$PW/$m/result.json"); done
 "$PY" - "$TRACK" "$SLUG" "$BPM" "$KEY" "$GENRE" "$BARS" "$BASE" "$HOSTING" ${RESULTS[@]+"${RESULTS[@]}"} <<'PYS'
-import json, sys
+import json, os, sys
 track, slug, bpm, key, genre, bars, base, hosting, *results = sys.argv[1:]
 runs = [json.load(open(p)) for p in results]
+for p, r in zip(results, runs):  # stage 11: visuals.status beside result.json; the version dir's visuals.json if made
+    st = os.path.join(os.path.dirname(p), "visuals.status")
+    vj = os.path.join(track, os.path.basename(r["version_dir"]), "visuals.json")
+    r["visuals"] = open(st).read().strip() if os.path.exists(st) else "not run"
+    if os.path.exists(vj):
+        v = json.load(open(vj))
+        r["visuals_chain"] = v.get("chain_source")
+        r["visuals_check"] = (v.get("check") or {}).get("verdict")
 print(json.dumps({
     "track_dir": track, "slug": slug, "bpm": float(bpm), "key": key, "genre": genre, "num_bars": int(bars),
     "hosting": hosting, "samples_base": base, "runs": runs,
