@@ -1,0 +1,20 @@
+VAGABUNDO NÃO NAMORA v073 rc=0 164s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.789 motion_ratio 3.05 [visuals] check: PASS 
+  swap: 7559.50M ollama: 
+VAGABUNDO NÃO NAMORA v072 rc=0 80s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.757 motion_ratio 4.81 [visuals] check: PASS 
+  swap: 9086.00M ollama: 
+Regime CLT (Dj Brunin XM, Aurora Shukita) v088 rc=0 68s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.691 motion_ratio 3.71 [visuals] check: PASS 
+  swap: 9210.94M ollama: 
+Regime CLT (Dj Brunin XM, Aurora Shukita) v087 rc=0 115s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.689 motion_ratio 3.73 [visuals] check: PASS 
+  swap: 8910.25M ollama: 
+Dumb Blond Bitches v020 rc=0 75s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.569 motion_ratio 1.60 [visuals] check: PASS 
+  swap: 9339.12M ollama: 
+Dumb Blond Bitches v019 rc=0 74s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.568 motion_ratio 1.55 [visuals] check: PASS 
+  swap: 9197.81M ollama: 
+Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM v018 rc=0 111s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.522 motion_ratio 4.62 [visuals] check: PASS 
+  swap: 9213.44M ollama: 
+Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM v017 rc=0 82s | [visuals] chain: mistral-small (validated) [check-hydra] FAIL scene_corr 0.318 motion_ratio 7.20 — scene not recognizable: mean layout-scale luminance correlation 0.318 < 0.5 [check-hydra] PASS scene_corr 0.860 motion_ratio 5.07 [visuals] check: PASS 
+  swap: 9036.75M ollama: 
+Enter - Nigdy Więcej Wojny (prod. Enter) (2022) v011 rc=0 67s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.734 motion_ratio 4.18 [visuals] check: PASS 
+  swap: 9263.69M ollama: 
+Enter - Nigdy Więcej Wojny (prod. Enter) (2022) v010 rc=0 105s | [visuals] chain: mistral-small (validated) [check-hydra] PASS scene_corr 0.757 motion_ratio 1.52 [visuals] check: PASS 
+  swap: 8824.56M ollama: 

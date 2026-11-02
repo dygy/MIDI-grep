@@ -16,6 +16,7 @@ A voice the piece does not have yields a control that is always 0.
 from __future__ import annotations
 
 import json
+import math
 import os
 import re
 from collections import Counter
@@ -33,24 +34,52 @@ CONTROLS = {
 }
 
 # Hydra functions a chain may call. Left out on purpose: kaleid, pixelate, posterize, voronoi, shape, repeat* —
-# they turn the photo into an abstract pattern, and the scene must stay recognizable.
+# they turn the photo into an abstract pattern, and the scene must stay recognizable; and scroll* / modulateScroll*,
+# whose GLSL ends in `return fract(_st)`: they wrap the frame themselves, past any edge margin (Enter v011, 2026-11-02:
+# modulateScrollX by up to 0.05 put a hard seam at x = 1 - shift, a column jump 3.5-4x the median, in the live REPL).
 HYDRA_FUNCS = {
     "src", "osc", "noise", "gradient", "solid",
-    "modulate", "modulateScale", "modulateRotate", "modulateScrollX", "modulateScrollY",
-    "scale", "rotate", "scrollX", "scrollY",
+    "modulate", "modulateScale", "modulateRotate",
+    "scale", "rotate",
     "hue", "saturate", "contrast", "brightness", "luma", "colorama", "color", "invert", "thresh",
     "blend", "add", "mult", "diff", "layer", "mask", "out",
 }
-JS_NAMES = {"Math", "PI", "sin", "cos", "abs", "min", "max", "pow", "sqrt", "s0", "o0", "time"}
+_MATH_NAMES = {"PI", "sin", "cos", "abs", "min", "max", "pow", "sqrt"}  # allowed only as Math.<name>
+JS_NAMES = {"Math", "s0", "o0", "time"} | _MATH_NAMES
 ALLOWED = HYDRA_FUNCS | JS_NAMES | set(CONTROLS)
 REQUIRED = ("kick", "bassWave")
+MAX_WARP = 0.05  # the largest modulate offset a chain may use (told to the LLM; the fallback stays under it)
+# Hydra's src() samples fract(uv): a coordinate warped past an edge shows the OPPOSITE edge (a stripe of the image's
+# top along the bottom, seen in the live REPL 2026-10-30). Zooming the scene in by 1 + 2*MAX_WARP before any warp keeps
+# every offset within the cap inside the image.
+EDGE_ZOOM = round(1 + 2 * MAX_WARP, 4)
+# the same margin bounds a rotation of the photo itself: a turn by a (rad) about the centre moves the frame's corners,
+# hypot(0.5, 0.5) from it in uv, by ~0.707 * a, so a <= MAX_WARP / 0.707 keeps them inside it (~4 degrees). The LLM
+# turned the photo by pi/4 and pi/2 (VAGABUNDO v073, Enter v010/v011; 2026-10-30..11-02): scene corr ~0
+MAX_PHOTO_TURN = round(MAX_WARP / math.hypot(0.5, 0.5), 3)
+
+
+# Warps on the photo add up past the margin each one fits: Enter v011 (2026-11-02) turned it by 0.071 rad (corners
+# 0.05) and modulated it by 0.05, and the live REPL showed a sliver of sky in the bottom-right corner (1.8 % of the
+# bottom rows in one check frame). The scene is read through `scene`: src with the coordinate MIRRORED at the edges,
+# so past an edge shows that same edge, never the opposite one (0 % in every frame; scene corr 0.720 -> 0.724).
+SCENE_SOURCE = ("setFunction({ name: 'scene', type: 'src', inputs: [{ type: 'sampler2D', name: 'tex', default: NaN }], "
+                "glsl: 'return texture2D(tex, 1.0 - abs(mod(_st, 2.0) - 1.0));' })")
+
+
+def with_edge_margin(chain: str) -> str:
+    """The chain with the scene read through `scene` (mirrored edges) and zoomed by EDGE_ZOOM at its source (the first
+    src(s0))."""
+    return chain.replace("src(s0)", f"scene(s0).scale({EDGE_ZOOM})", 1)
 SIGNATURES = "\n".join("    " + x for x in (
-    "osc(frequency, sync, offset)  noise(scale, offset)  gradient(speed)  solid(r, g, b, a)  src(s0 | o0)",
+    "osc(frequency, speed, offset)  noise(scale, offset)  gradient(speed)  solid(r, g, b, a)  src(s0 | o0)",
     ".modulate(SOURCE, amount)  .modulateScale(SOURCE, multiple, offset)  .modulateRotate(SOURCE, multiple, offset)",
-    ".modulateScrollX(SOURCE, scrollX, speed)  .modulateScrollY(SOURCE, scrollY, speed)",
-    ".scale(amount)  .rotate(angle, speed)  .scrollX(scrollX, speed)  .scrollY(scrollY, speed)",
-    ".hue(amount)  .saturate(amount)  .contrast(amount)  .brightness(amount)  .luma(threshold, tolerance)",
-    ".colorama(amount)  .color(r, g, b)  .invert(amount)  .thresh(threshold, tolerance)",
+    ".scale(amount)  .rotate(angle, speed)",
+    # the value that leaves the photo unchanged, from hydra-synth's GLSL: mistral-small read contrast/saturate as
+    # amounts around 0 (contrast(() => 0.3 * snare()) = flat grey between hits; 9 of 10 chains failed, 2026-11-02)
+    ".hue(shift: 0 = unchanged)  .saturate(factor: 1 = unchanged, 0 = grey)  .contrast(factor: 1 = unchanged, 0 = flat grey)",
+    ".brightness(offset: 0 = unchanged)  .color(r, g, b: 1, 1, 1 = unchanged)  .invert(0 = unchanged, 1 = negative)",
+    ".colorama(amount)  .luma(threshold, tolerance)  .thresh(threshold, tolerance)",
     ".blend(SOURCE, amount)  .add(SOURCE, amount)  .mult(SOURCE, amount)  .diff(SOURCE)  .layer(SOURCE)  .mask(SOURCE)",
     ".out()",
 ))  # the image must move with the kick and wave with the bass
@@ -76,7 +105,19 @@ def validate_chain(chain: str) -> list[str]:
             break
     if depth != 0:
         errs.append("unbalanced parentheses")
-    unknown = sorted({w for w in _IDENT.findall(re.sub(r"(?<![\w$.])\d*\.?\d+(e-?\d+)?", " ", c)) if w not in ALLOWED})
+    if re.search(r"\b(true|false)\b", c):
+        # mistral-small read osc(frequency, sync, offset) as a boolean sync (4 of 10 answers, 2026-11-01)
+        errs.append("true/false are not Hydra arguments: osc(frequency, speed, offset) takes three numbers")
+    bare = sorted({n for n in _MATH_NAMES if re.search(rf"(?<!Math\.)\b{n}\b", c)})
+    if bare:
+        # VAGABUNDO v073 (2026-11-02): rotate(... * PI) - no error, but PI is not pi in the REPL: scene corr -0.065,
+        # 0.788 with Math.PI
+        errs.append(f"write Math.{bare[0]}, not a bare {bare[0]} ({', '.join(bare)}): the bare names are not Math's in the REPL")
+    scrolls = sorted(set(re.findall(r"\b((?:modulateS|s)croll[XY]?)\(", c)))
+    if scrolls:
+        errs.append(f"{', '.join(scrolls)}: Hydra wraps a scrolled frame around (its right edge shows the left one); "
+                    f"move the photo with .modulate(SOURCE, amount) instead")
+    unknown = sorted({w for w in _IDENT.findall(re.sub(r"(?<![\w$.])\d*\.?\d+(e-?\d+)?", " ", c)) if w not in ALLOWED and w not in scrolls})
     if unknown:
         errs.append(f"unknown names: {', '.join(unknown)} (allowed: Hydra {sorted(HYDRA_FUNCS)}, controls {sorted(CONTROLS)}, Math)")
     for name in REQUIRED:
@@ -84,7 +125,89 @@ def validate_chain(chain: str) -> list[str]:
             errs.append(f"must use the {name} control")
     if c.count(".out(") != 1:
         errs.append("exactly one .out()")
+    bare = sorted({m.group(1) for m in re.finditer(rf"\b({'|'.join(CONTROLS)})\(\)", c) if not _in_arrow(c, m.start())})
+    if bare:
+        # VAGABUNDO v073 (2026-11-01): modulate(osc(...), bassHit()) - read once when the block runs, never moves
+        errs.append(f"controls outside an arrow function (read once, never move): {', '.join(bare)}; write () => ... {bare[0]}() ...")
+    misplaced = sorted({name for name, args in _photo_steps(c) if name in _NUMERIC_STEPS
+                        and any(_SOURCE_CALL.match(a.strip()) for a in args)})
+    if misplaced:
+        # Dumb Blond Bitches v020, Enter v010 (2026-11-01): .scrollX(osc(...), 0) - the shader does not compile, black frame
+        errs.append(f"a SOURCE where a number is expected ({', '.join(misplaced)}): those arguments take numbers or "
+                    f"() => ... functions; warp with .modulate*(SOURCE, amount) instead")
+    drifting = sorted({name for name, args in _photo_steps(c) if name in _SPEED_ARG and len(args) > _SPEED_ARG[name]
+                       and args[_SPEED_ARG[name]].strip() not in ("0", "0.0")})
+    if drifting:
+        # VAGABUNDO v073 (2026-11-01): .scrollY(..., () => energy() * 0.02) on the photo; the offset accumulates with
+        # time, so the scene slid away section by section (corr 0.89 -> 0.19; 0.86 with the speed at 0)
+        errs.append(f"a speed argument on the photo itself ({', '.join(drifting)}) accumulates and slides the scene away: "
+                    f"set it to 0 or move the motion into a SOURCE")
     return errs
+
+
+# steps whose arguments are all numbers (the SOURCE-taking ones are modulate*, blend, add, mult, diff, layer, mask)
+_NUMERIC_STEPS = {"scale", "rotate", "hue", "saturate", "contrast", "brightness", "luma",
+                  "colorama", "color", "invert", "thresh"}
+_SOURCE_CALL = re.compile(r"(src|osc|noise|gradient|solid)\(")
+# the speed argument's index: a non-zero speed advances the offset/angle every frame, without bound
+_SPEED_ARG = {"rotate": 1}
+
+
+def _photo_steps(chain: str) -> list[tuple[str, list[str]]]:
+    """The methods called on the chain itself (outside every argument list) with their top-level arguments."""
+    steps, i = [], 0
+    while (m := re.compile(r"\.([A-Za-z_]\w*)\(").search(chain, i)):
+        depth, j, args, start = 1, m.end(), [], m.end()
+        while j < len(chain) and depth:
+            ch = chain[j]
+            if ch == "(":
+                depth += 1
+            elif ch == ")":
+                depth -= 1
+            if (ch == "," and depth == 1) or depth == 0:
+                args.append(chain[start:j])
+                start = j + 1
+            j += 1
+        steps.append((m.group(1), [a for a in args if a.strip()]))
+        i = j
+    return steps
+
+
+def _in_arrow(chain: str, pos: int) -> bool:
+    """Whether ``pos`` lies in the body of an arrow function: an arrow's body runs to the end of its argument, so the
+    argument holding ``pos``, or an argument enclosing it, has '=>' between its start and the nested call."""
+    depth, end, skipping = 0, pos, False
+    for i in range(pos - 1, -1, -1):
+        ch = chain[i]
+        if ch == ")":
+            depth += 1
+        elif ch == "(" and depth > 0:
+            depth -= 1
+        elif depth == 0 and ch == ",":
+            if not skipping and "=>" in chain[i + 1:end]:
+                return True
+            skipping = True  # earlier sibling arguments do not cover pos
+        elif depth == 0 and ch == "(":
+            if not skipping and "=>" in chain[i + 1:end]:
+                return True
+            end, skipping = i, False  # step out: the enclosing argument runs up to this call
+    return False
+
+
+# music words the diffusion model cannot paint: the LLM wrote "The key of C# minor suggests deep blues ..." into the
+# scene prompt (Regime CLT, Enter, Automotivo XM; 2026-10-30)
+_MUSIC_TERMS = re.compile(r"\b[A-G][#b♯♭]?\s*(major|minor)\b|\bkey\b|\bbpm\b|\btempo\b", re.I)
+
+
+def scene_prompt(text: str) -> str:
+    """The LLM's image prompt without the sentences that talk about the music instead of the picture ('' if none left).
+
+    A one-sentence prompt keeps its clauses that describe the picture ("..., real lighting, colors in G minor key.")."""
+    sentences = re.split(r"(?<=[.!?])\s+", " ".join(text.split()))
+    kept = [x for x in sentences if not _MUSIC_TERMS.search(x)]
+    if not kept and len(sentences) == 1:
+        kept = [", ".join(c.strip() for c in sentences[0].rstrip(".").split(",") if c.strip() and not _MUSIC_TERMS.search(c))]
+    return " ".join(kept).strip()
 
 
 def fallback_chain() -> str:
@@ -100,6 +223,11 @@ def fallback_chain() -> str:
             ".out()")
 
 
+def copies_example(chain: str) -> bool:
+    """The chain is the prompt's example (the fallback chain) verbatim, whitespace aside: the LLM designed nothing."""
+    return "".join(chain.split()) == "".join(fallback_chain().split())
+
+
 def fallback_image_prompt(vision: dict) -> str:
     clap = vision.get("clap") or {}
     scene = (clap.get("scenes") or [{"text": "a city street at night"}])[0]["text"]
@@ -108,8 +236,11 @@ def fallback_image_prompt(vision: dict) -> str:
     return f"{scene}, {mood} atmosphere, {genre} music video still, photorealistic, 35mm film photo, natural light"
 
 
-def build_prompt(vision: dict) -> str:
+def build_prompt(vision: dict, wiring: dict) -> str:
+    """The LLM prompt. ``wiring`` (controls_js) says which controls the piece drives: no example chain is shown, since
+    mistral-small returned the one it was given verbatim on 2 of 5 tracks (2026-11-01)."""
     controls = "\n".join(f"- {k}(): {v}" for k, v in CONTROLS.items())
+    live = "\n".join(f"    - {k}: {'live, from ' + v if v else 'always 0 (no such voice)'}" for k, v in wiring.items())
     return f"""You design the visuals for a piece of music: a REAL-LOOKING photo of a scene, animated by Hydra (hydra.ojack.xyz)
 so that it moves with the music's voices.
 
@@ -121,7 +252,9 @@ Measured track vision (JSON):
 
 Return ONE JSON object with keys:
 - "image_prompt": a text-to-image prompt (max 60 words) for a photorealistic scene that fits the vision: a real place,
-  real lighting, the colours the key, mood and brightness suggest. No text, no logos, no people's faces in close-up.
+  real lighting, the colours the key, mood and brightness suggest. Describe only what a camera would see: name the
+  colours themselves, never the key, tempo or any other music term (the image model cannot paint "C# minor").
+  No text, no logos, no people's faces in close-up.
 - "negative_prompt": what to avoid (cartoon, illustration, text, watermark ...).
 - "chain": ONE Hydra expression over the photo. Rules:
   * starts with src(s0) and ends with .out()
@@ -129,28 +262,63 @@ Return ONE JSON object with keys:
   * signatures (every number may be an arrow function returning a number; a SOURCE is src(s0), src(o0), osc(...),
     noise(...), gradient(...) or solid(...)):
 {SIGNATURES}
-  * example of the shape wanted (do not copy the numbers):
-    {fallback_chain()}
+  * shape: src(s0), then a warp of the photo, then colour/scale moves, optionally feedback, then .out() - e.g.
+    src(s0).modulate(<osc or noise SOURCE driven by bassWave>, <small amount driven by a pulse>)
+           .<colour or scale step driven by another voice>( ... ) ... .out()
+    (the numbers, the SOURCEs, which steps and their order are yours to choose)
   * dynamic arguments are arrow functions using these controls (each returns a number):
 {controls}
-  * must use kick and bassWave; the photo must WAVE with the bass: modulate it with osc(() => ... bassWave() ...)
-    rotated or not, and a small amount
-  * keep the scene recognizable: modulate amounts <= 0.05, scale within 1 +- 0.08, hue shifts <= 0.15,
+    write every control inside an arrow function, e.g. .hue(() => 0.1 * leadHue()); a bare leadHue() is read once
+    and never moves. Arguments are numbers or such arrow functions only (no true/false, no strings); a SOURCE goes
+    only where the signature says SOURCE (.scale(osc(...)) does not compile: the frame goes black).
+  * in THIS piece:
+{live}
+    build the motion from the live ones; a control that is always 0 here moves nothing
+  * must use kick and bassWave; the photo must WAVE with the bass: modulate it with a SOURCE whose frequency follows
+    bassWave(), and a small amount; a .rotate on the photo itself turns it by at most {MAX_PHOTO_TURN} rad
+    (about 4 degrees: more shows the image's edges); larger turns belong inside a SOURCE
+  * the speed argument of .rotate on the photo must be 0 (a speed accumulates every frame and turns the scene away);
+    put continuous motion inside a SOURCE instead
+  * every step must answer the vision: which voice drives it, and why its colour/speed fits the mood and brightness
+  * a colour step moves AROUND its unchanged value (see the signatures): .contrast(() => 1 + 0.2 * snare()), not
+    .contrast(() => 0.2 * snare())
+  * keep the scene recognizable: modulate amounts <= {MAX_WARP}, scale within 1 +- 0.08, hue shifts <= 0.15,
     feedback via blend(src(o0)...) amount <= 0.5
   * no strings, no semicolons, no variables
 - "rationale": one sentence on why this scene and this motion fit the track.
 """
 
 
-def ask_ollama(vision: dict, model: str, seed: int, url: str | None = None) -> dict:
-    import requests
+def ask_ollama(vision: dict, wiring: dict, model: str, seed: int, url: str | None = None,
+               repair: tuple[dict, list[str]] | None = None) -> dict:
+    """The LLM's answer; ``repair`` = (its previous answer, the errors: the validator's or the check's) asks it to fix
+    that chain."""
     url = url or os.environ.get("OLLAMA_URL", "http://localhost:11434")
+    messages = [{"role": "user", "content": build_prompt(vision, wiring)}]
+    if repair:
+        prev, errs = repair
+        messages += [{"role": "assistant", "content": json.dumps(prev, ensure_ascii=False)},
+                     {"role": "user", "content": "The chain was rejected:\n" + "\n".join(f"- {e}" for e in errs)
+                      + "\nReturn the same JSON object with a corrected chain that keeps your design."}]
+    try:
+        return _chat(url, model, messages, seed)
+    except json.JSONDecodeError as exc:
+        # Automotivo XM v018 (2026-11-01): "Expecting ',' delimiter" - the error goes back once, like a rejected chain
+        return _chat(url, model, messages + [{"role": "assistant", "content": exc.doc},
+                                             {"role": "user", "content": f"That is not valid JSON ({exc.msg} at char "
+                                                                         f"{exc.pos}). Return the JSON object only."}], seed)
+
+
+def _chat(url: str, model: str, messages: list[dict], seed: int) -> dict:
+    import requests
     r = requests.post(f"{url}/api/chat", json={
         "model": model,
-        "messages": [{"role": "user", "content": build_prompt(vision)}],
+        "messages": messages,
         "format": "json",
         "stream": False,
-        "keep_alive": "30s",  # free the RAM for the diffusion model that runs next
+        # unload as soon as it answers: the diffusion model loads seconds later, and a 30 s keep-alive held mistral-small
+        # (~14 GB) resident beside it, which on a 24 GB machine filled swap and got the matrix run killed (2026-10-30)
+        "keep_alive": 0,
         "options": {"temperature": 0.4, "seed": seed, "num_predict": 1024, "num_ctx": 8192},
     }, timeout=600)
     r.raise_for_status()
@@ -223,7 +391,7 @@ def controls_js(code: str) -> tuple[str, dict]:
         "  return Math.pow(0.5, (t - Math.max(...hs.map(h => h.whole.begin.valueOf()))) / visGrid)",
         "}",
         "const visHeld = (pat, f) => { let last = 0; return () => {",
-        "  const t = getTime(), hs = pat.queryArc(t, t + 1e-4)",
+        "  const t = getTime(), hs = pat.queryArc(t, t + 0.0001)",
         "  if (hs.length) last = f(hs)",
         "  return last",
         "} }",
@@ -266,7 +434,7 @@ def controls_js(code: str) -> tuple[str, dict]:
                   "  for (const h of visChords.queryArc(i, i + 1)) if (h.hasOnset()) at[h.whole.begin] = (at[h.whole.begin] || 0) + 1",
                   "  return Math.max(0, ...Object.values(at))",
                   "}))",
-                  "const chordDepth = () => visChords.queryArc(getTime(), getTime() + 1e-4).length / visChordMax"]
+                  "const chordDepth = () => visChords.queryArc(getTime(), getTime() + 0.0001).length / visChordMax"]
         wiring["chordDepth"] = chords
     else:
         lines.append("const chordDepth = visNone")

@@ -1,0 +1,16 @@
+BUILD_OK
+VET_OK
+ok  	github.com/dygy/midi-grep/cmd/midi-grep	1.204s
+?   	github.com/dygy/midi-grep/internal/analysis	[no test files]
+ok  	github.com/dygy/midi-grep/internal/audio	0.639s
+ok  	github.com/dygy/midi-grep/internal/cache	0.895s
+?   	github.com/dygy/midi-grep/internal/drums	[no test files]
+?   	github.com/dygy/midi-grep/internal/errors	[no test files]
+?   	github.com/dygy/midi-grep/internal/exec	[no test files]
+?   	github.com/dygy/midi-grep/internal/generative	[no test files]
+?   	github.com/dygy/midi-grep/internal/midi	[no test files]
+?   	github.com/dygy/midi-grep/internal/pipeline	[no test files]
+?   	github.com/dygy/midi-grep/internal/progress	[no test files]
+ok  	github.com/dygy/midi-grep/internal/report	0.389s
+?   	github.com/dygy/midi-grep/internal/server	[no test files]
+?   	github.com/dygy/midi-grep/internal/workspace	[no test files]

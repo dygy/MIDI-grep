@@ -32,8 +32,14 @@ def latest_version(track_dir: Path) -> Path:
     return vs[-1]
 
 
+def checker_args(vis: Path, image: Path, out_dir: Path, wiring: dict) -> list[str]:
+    """check-hydra.js arguments: the scene reference carries the chain's source zoom (``with_edge_margin``)."""
+    return [str(vis), "--image", str(image), "-o", str(out_dir),
+            "--wired", ",".join(k for k, v in wiring.items() if v), "--scene-zoom", str(HC.EDGE_ZOOM)]
+
+
 def hydra_block(controls: str, image_src: str, plan: dict, wiring: dict) -> str:
-    chain = " ".join(plan["chain"].split())
+    chain = HC.with_edge_margin(" ".join(plan["chain"].split()))
     pretty = re.sub(r"\)\.(?=[a-zA-Z])", ")\n  .", chain)
     wired = "\n".join(f"// │   {k:<10} ← {v or 'not in this piece (always 0)'}" for k, v in wiring.items())
     img = plan["image"]
@@ -47,6 +53,7 @@ def hydra_block(controls: str, image_src: str, plan: dict, wiring: dict) -> str:
 {wired}
 // └──────────────────────────────────────────────────────────────────────────────
 await initHydra({{ detectAudio: false }})
+{HC.SCENE_SOURCE}
 s0.initImage('{image_src}')
 {controls}
 
@@ -78,20 +85,33 @@ def main(argv=None) -> int:
     vision = VI.build_vision(track, code, use_clap=not args.no_clap)
     print(f"[visuals] vision: {json.dumps({k: v for k, v in vision.items() if k != 'sections'}, ensure_ascii=False)[:400]}")
 
+    controls, wiring = HC.controls_js(code)
     plan = {"image_prompt": HC.fallback_image_prompt(vision), "negative_prompt": "cartoon, illustration, text, watermark",
             "chain": HC.fallback_chain(), "chain_source": "fallback (no LLM)", "llm": None}
     if not args.no_llm:
         try:
-            ans = HC.ask_ollama(vision, args.ollama_model, args.seed)
+            ans = HC.ask_ollama(vision, wiring, args.ollama_model, args.seed)
             plan["llm"] = {"model": args.ollama_model, "answer": ans}
-            if isinstance(ans.get("image_prompt"), str) and ans["image_prompt"].strip():
-                plan["image_prompt"] = " ".join(ans["image_prompt"].split())
+            if isinstance(ans.get("image_prompt"), str) and HC.scene_prompt(ans["image_prompt"]):
+                plan["image_prompt"] = HC.scene_prompt(ans["image_prompt"])
                 plan["negative_prompt"] = str(ans.get("negative_prompt") or plan["negative_prompt"])
             errs = HC.validate_chain(str(ans.get("chain") or ""))
+            if errs:  # one repair round: the errors go back to the LLM with its own answer
+                print(f"[visuals] LLM chain rejected, asking for a fix: {errs}")
+                plan["llm"]["first_answer"], plan["llm"]["first_errors"] = ans, errs
+                fixed = HC.ask_ollama(vision, wiring, args.ollama_model, args.seed, repair=(ans, errs))
+                if isinstance(fixed.get("chain"), str):
+                    ans = {**ans, "chain": fixed["chain"]}
+                    plan["llm"]["answer"] = ans
+                    errs = HC.validate_chain(ans["chain"])
             plan["llm"]["chain_errors"] = errs
             if errs:
                 plan["chain_source"] = f"fallback ({args.ollama_model} chain rejected: {errs[0]})"
                 print(f"[visuals] LLM chain rejected: {errs}")
+            elif HC.copies_example(ans["chain"]):
+                # VAGABUNDO v073, Dumb Blond Bitches v020 (2026-11-01): the answer was the prompt's example verbatim
+                plan["chain_source"] = f"fallback ({args.ollama_model} copied the prompt's example chain)"
+                print(f"[visuals] LLM chain is the prompt's example verbatim")
             else:
                 plan["chain"], plan["chain_source"] = ans["chain"], f"{args.ollama_model} (validated)"
         except Exception as exc:
@@ -106,7 +126,6 @@ def main(argv=None) -> int:
                                       plan["negative_prompt"])
     image_src = args.image_url or "data:image/jpeg;base64," + base64.b64encode(img_path.read_bytes()).decode()
 
-    controls, wiring = HC.controls_js(code)
     out = vdir / "visuals.strudel"
 
     def write_and_check() -> dict | None:
@@ -115,8 +134,7 @@ def main(argv=None) -> int:
             return None
         if not CHECKER.exists():
             sys.exit(f"{CHECKER} missing: cd scripts/node && npm run build (or pass --no-check)")
-        r = subprocess.run(["node", str(CHECKER), str(out), "--image", str(img_path), "-o", str(vdir / "visuals_check"),
-                            "--wired", ",".join(k for k, v in wiring.items() if v)],
+        r = subprocess.run(["node", str(CHECKER), *checker_args(out, img_path, vdir / "visuals_check", wiring)],
                            capture_output=True, text=True)
         sys.stdout.write(r.stdout)
         sys.stderr.write(r.stderr[-2000:])

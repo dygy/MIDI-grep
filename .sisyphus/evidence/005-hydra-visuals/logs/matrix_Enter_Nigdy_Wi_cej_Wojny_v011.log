@@ -1,0 +1,18 @@
+/Users/arkadiishvartcman/GolandProjects/MIDI-grep/scripts/python/.venv/lib/python3.11/site-packages/resampy/filters.py:50: UserWarning: pkg_resources is deprecated as an API. See https://setuptools.pypa.io/en/latest/pkg_resources.html. The pkg_resources package is slated for removal as early as 2025-11-30. Refrain from using this package or pin to Setuptools<81.
+  import pkg_resources
+Warning: You are sending unauthenticated requests to the HF Hub. Please set a HF_TOKEN to enable higher rate limits and faster downloads.
+/Users/arkadiishvartcman/GolandProjects/MIDI-grep/scripts/python/.venv/lib/python3.11/site-packages/huggingface_hub/utils/_validators.py:202: UserWarning: The `local_dir_use_symlinks` argument is deprecated and ignored in `hf_hub_download`. Downloading to a local directory does not use symlinks anymore.
+  warnings.warn(
+[visuals] /Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/Enter - Nigdy Więcej Wojny (prod. Enter) (2022)/v011
+[visuals] vision: {"title": "Enter - Nigdy Więcej Wojny (prod. Enter) (2022)", "genre": "brazilian_funk", "key": "C# minor", "mode": "minor", "bpm": 145.987, "centroid_hz": 1706.3, "clap": {"scenes": [{"text": "an empty desert road under a starry sky", "score": 0.2235}, {"text": "a snowy mountain landscape", "score": 0.2016}, {"text": "a tropical rainforest with mist", "score": 0.1948}], "moods": [{"text": "euphori
+[visuals] scene: A vast empty desert road stretching under a starry night sky with deep blue hues and warm yellows from distant streetlights.
+[visuals] chain: mistral-small (validated)
+Loading pipeline components...:   0%|          | 0/5 [00:00<?, ?it/s]Loading pipeline components...:  40%|████      | 2/5 [00:00<00:00, 14.92it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00, 21.13it/s]Loading pipeline components...: 100%|██████████| 5/5 [00:00<00:00, 20.11it/s]
+You have disabled the safety checker for <class 'diffusers.pipelines.stable_diffusion.pipeline_stable_diffusion.StableDiffusionPipeline'> by passing `safety_checker=None`. Ensure that you abide to the conditions of the Stable Diffusion license and do not expose unfiltered results in services or applications open to the public. Both the diffusers team and Hugging Face strongly recommend to keep the safety filter enabled in all public facing circumstances, disabling it only for use-cases that involve analyzing network behavior or auditing its results. For more information, please have a look at https://github.com/huggingface/diffusers/pull/254 .
+[check-hydra] intro@0: 60 frames
+[check-hydra] drop@10: 60 frames
+[check-hydra] break@60: 60 frames
+[check-hydra] drop@77: 60 frames
+[check-hydra] PASS scene_corr 0.734 motion_ratio 4.18
+[visuals] wrote /Users/arkadiishvartcman/GolandProjects/MIDI-grep/.cache/stems/Enter - Nigdy Więcej Wojny (prod. Enter) (2022)/v011/visuals.strudel
+[visuals] check: PASS

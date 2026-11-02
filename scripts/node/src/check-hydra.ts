@@ -8,12 +8,15 @@
  * detectAudio off), evaluates the WHOLE file with the REPL's evaluate, then drives Strudel's clock (setTime) by hand
  * and ticks Hydra at 30 fps through a window at the start of every section (every 16 bars without sections).
  *
- * Measured per frame: correlation of the frame's luminance with the scene image's (recognizable), the mean absolute
- * luminance change from the previous frame (motion), and every control's value. Verdict PASS when the block evaluated
+ * Measured per frame: correlation of the frame's luminance with the scene image's at layout scale (block means, ~40
+ * blocks across; recognizable = the bright and dark masses stay where they were) and at pixel scale (reported only), the mean absolute
+ * luminance change from the previous frame (motion), and every control's value; every control is also swept over the
+ * whole piece at half-grid steps (liveness: a wired control must change value somewhere in the piece). Verdict PASS when the block evaluated
  * without page errors, the mean scene correlation >= --min-scene-corr, every control the piece wires changed value,
  * and the quarter of frames with the strongest pulse move more than the quarter with the weakest by --min-motion-ratio.
  *
  * Usage: node dist/check-hydra.js visuals.strudel --image visual.jpg -o outdir [--wired kick,bassWave,...] [--fps 30] [--window 2]
+ *        [--scene-zoom Z]  (the zoom the chain applies to s0 at its source; the reference is the image's centre 1/Z)
  * Writes outdir/check.json and outdir/frame_<section>.png (one frame per section, at its strongest kick).
  */
 import puppeteer from 'puppeteer';
@@ -45,11 +48,16 @@ window.initHydra = async (options = {}) => {
   return hydra;
 };
 window.__clock = 0;
-window.__init = async (code, W, H) => {
+window.__init = async (code, W, H, zoom) => {
   window.__W = W; window.__H = H;
   const repl = await strudel.initStrudel({});
+  // nothing plays here, so a sample-instrument piece's samples(...) loads nothing: the check must not depend on the
+  // pack host. This bundle's transpiler turns every "double-quoted" string into mini(), the URL included (the live
+  // REPL does not); same rewrite to single quotes as render-strudel-offline.ts
+  globalThis.samples = async () => {};
+  code = code.replace(/\bsamples\(\s*"([^"']*)"/g, (m, u) => "samples('" + u + "'");
   // expose the block's controls to the probe (const declarations are local to the evaluated code)
-  const probe = "\nwindow.__vis = { kick, snare, hat, bassHit, leadHit, bassWave, leadHue, chordDepth, energy }\n";
+  const probe = "\nwindow.__vis = { kick, snare, hat, bassHit, leadHit, bassWave, leadHue, chordDepth, energy }\nwindow.__visGrid = visGrid\n";
   await repl.evaluate(code + probe, false);
   strudel.setTime(() => window.__clock); // after evaluate: the REPL points the time source at its scheduler there
   if (!window.__vis) throw new Error('evaluate did not reach the end of the block: ' + window.__errors.join(' | '));
@@ -59,12 +67,23 @@ window.__init = async (code, W, H) => {
   const img = globalThis.s0 && globalThis.s0.src;
   if (!(img && img.naturalWidth)) throw new Error('s0 image did not load');
   const c = document.createElement('canvas'); c.width = W; c.height = H;
-  const g = c.getContext('2d', { willReadFrequently: true }); g.drawImage(img, 0, 0, W, H);
+  // the reference is the scene as the chain shows it at rest: the generator zooms it in at the source (edge margin,
+  // hydra_code.with_edge_margin), and Hydra's scale() zooms about the centre, i.e. the centre 1/zoom of the image
+  const sw = img.naturalWidth / zoom, sh = img.naturalHeight / zoom;
+  const g = c.getContext('2d', { willReadFrequently: true });
+  g.drawImage(img, (img.naturalWidth - sw) / 2, (img.naturalHeight - sh) / 2, sw, sh, 0, 0, W, H);
   window.__sceneLum = lum(g.getImageData(0, 0, W, H).data);
+  window.__block = Math.max(1, Math.round(W / 40)); // layout scale: ~40 blocks across the frame
+  window.__sceneCoarse = __blockMeans(window.__sceneLum, W, H, window.__block);
   window.__grab = document.createElement('canvas'); window.__grab.width = W; window.__grab.height = H;
   return { cps: repl.scheduler.cps };
 };
 function lum(d) { const n = d.length / 4, out = new Float32Array(n); for (let i = 0; i < n; i++) out[i] = 0.299 * d[4*i] + 0.587 * d[4*i+1] + 0.114 * d[4*i+2]; return out; }
+// block means: the scene's layout (where the bright and dark masses are), not its pixel texture, which a one-pixel
+// warp decorrelates while the place stays plainly recognizable (Regime CLT cobblestones: pixel corr 0.36, same street)
+function __blockMeans(L, W, H, k) { const w = Math.floor(W / k), h = Math.floor(H / k), out = new Float32Array(w * h);
+  for (let y = 0; y < h * k; y++) for (let x = 0; x < w * k; x++) out[Math.floor(y / k) * w + Math.floor(x / k)] += L[y * W + x] / (k * k);
+  return out; }
 function corr(a, b) { let ma = 0, mb = 0; for (let i = 0; i < a.length; i++) { ma += a[i]; mb += b[i]; } ma /= a.length; mb /= b.length;
   let sab = 0, saa = 0, sbb = 0; for (let i = 0; i < a.length; i++) { const x = a[i] - ma, y = b[i] - mb; sab += x * y; saa += x * x; sbb += y * y; }
   return saa && sbb ? sab / Math.sqrt(saa * sbb) : 0; }
@@ -78,12 +97,23 @@ window.__window = (c0, frames, fps, cps) => {
     const L = lum(g.getImageData(0, 0, window.__W, window.__H).data);
     let motion = 0; if (prev) { for (let i = 0; i < L.length; i++) motion += Math.abs(L[i] - prev[i]); motion /= L.length; }
     const ctl = {}; for (const [k, fn] of Object.entries(window.__vis)) ctl[k] = Number(fn());
-    out.push({ cycle: window.__clock, sceneCorr: corr(L, window.__sceneLum), motion: prev ? motion : null, ctl });
+    out.push({ cycle: window.__clock, sceneCorr: corr(__blockMeans(L, window.__W, window.__H, window.__block), window.__sceneCoarse),
+      pixelCorr: corr(L, window.__sceneLum), motion: prev ? motion : null, ctl });
     prev = L;
   }
   return out;
 };
 window.__png = () => window.__grab.toDataURL('image/png').split(',')[1];
+// every control over the WHOLE piece at half-grid steps (no rendering): a sparse voice (Automotivo XM: 3 snare hits in
+// 81 bars) can miss every probe window, which says nothing about whether its control follows the pattern
+window.__sweep = (cycles) => {
+  const ranges = {};
+  for (let t = 0; t < cycles; t += window.__visGrid / 2) {
+    window.__clock = t;
+    for (const [k, fn] of Object.entries(window.__vis)) { const v = Number(fn()); const r = ranges[k] || (ranges[k] = [v, v]); r[0] = Math.min(r[0], v); r[1] = Math.max(r[1], v); }
+  }
+  return ranges;
+};
 window.__frameAt = (cycle, fps) => { window.__clock = cycle; hydra.tick(1000 / fps); window.__grab.getContext('2d').drawImage(window.__canvas, 0, 0); return window.__png(); };
 </script>`;
 
@@ -101,6 +131,7 @@ async function main() {
   const windowS = Number(arg('--window', '2'));
   const minSceneCorr = Number(arg('--min-scene-corr', '0.5'));
   const minMotionRatio = Number(arg('--min-motion-ratio', '1.2'));
+  const sceneZoom = Number(arg('--scene-zoom', '1')); // the zoom the chain applies to s0 before any warp
   fs.mkdirSync(outDir, { recursive: true });
   const code = fs.readFileSync(input, 'utf8');
 
@@ -133,14 +164,14 @@ async function main() {
   // no --use-angle=swiftshader: on macOS it leaves headless Chromium with no WebGL context at all
   const browser = await puppeteer.launch({ headless: true, protocolTimeout: 900000, args: ['--no-sandbox', '--enable-unsafe-swiftshader'] });
   const result: any = { input: path.basename(input), image: path.basename(image), size: [W, H], fps, window_s: windowS,
-    thresholds: { min_scene_corr: minSceneCorr, min_motion_ratio: minMotionRatio } };
+    thresholds: { min_scene_corr: minSceneCorr, min_motion_ratio: minMotionRatio }, scene_zoom: sceneZoom };
   try {
     const page = await browser.newPage();
     const pageErrors: string[] = [];
     page.on('pageerror', e => pageErrors.push(String((e as any).message || e)));
     page.setDefaultTimeout(600000); // swiftshader WebGL + a busy machine: the per-section windows can take minutes
     await page.goto(`http://localhost:${port}/`, { waitUntil: 'load', timeout: 120000 });
-    const { cps } = await page.evaluate((c, w, h) => (window as any).__init(c, w, h), code, W, H) as any;
+    const { cps } = await page.evaluate((c, w, h, z) => (window as any).__init(c, w, h, z), code, W, H, sceneZoom) as any;
     result.cps = cps;
     const frames = Math.round(windowS * fps);
     const perSection: any[] = [];
@@ -166,20 +197,23 @@ async function main() {
     const ranges: Record<string, number[]> = {};
     for (const k of Object.keys(all[0].ctl)) { const v = all.map(f => f.ctl[k]); ranges[k] = [Math.min(...v), Math.max(...v)]; }
     const wired = (arg('--wired', '') || '').split(',').filter(Boolean);
-    const dead = wired.filter(k => ranges[k] && ranges[k][0] === ranges[k][1]);
+    const sweep: Record<string, number[]> = await page.evaluate((c) => (window as any).__sweep(c), bars);
+    const dead = wired.filter(k => sweep[k] && sweep[k][0] === sweep[k][1]);
     const nonFinite = Object.entries(ranges).filter(([, r]) => !r.every(Number.isFinite)).map(([k]) => k);
-    result.scene_corr = { mean: mean(all.map(f => f.sceneCorr)), min: Math.min(...all.map(f => f.sceneCorr)) };
+    result.scene_corr = { mean: mean(all.map(f => f.sceneCorr)), min: Math.min(...all.map(f => f.sceneCorr)), scale_px: await page.evaluate(() => (window as any).__block) };
+    result.pixel_corr = { mean: mean(all.map(f => f.pixelCorr)), min: Math.min(...all.map(f => f.pixelCorr)) }; // reported, not gated
     result.motion = { pulse_high: mean(high), pulse_low: mean(low), n_high: high.length, n_low: low.length,
       ratio: mean(low) > 0 ? mean(high) / mean(low) : (mean(high) > 0 ? Infinity : 0) };
-    result.control_ranges = ranges;
-    result.sections = perSection.map(s => ({ section: s.section, bar: s.bar, scene_corr: mean(s.frames.map((f: any) => f.sceneCorr)),
+    result.control_ranges = ranges;            // over the probe windows
+    result.control_ranges_piece = sweep;       // over the whole piece (the liveness gate)
+    result.sections = perSection.map(s => ({ section: s.section, bar: s.bar, scene_corr: mean(s.frames.map((f: any) => f.sceneCorr)), pixel_corr: mean(s.frames.map((f: any) => f.pixelCorr)),
       motion: mean(s.frames.filter((f: any) => f.motion !== null).map((f: any) => f.motion)) }));
     result.page_errors = pageErrors;
     const fails: string[] = [];
     if (pageErrors.length) fails.push(`page errors: ${pageErrors.slice(0, 3).join(' | ')}`);
-    if (result.scene_corr.mean < minSceneCorr) fails.push(`scene not recognizable: mean luminance correlation ${result.scene_corr.mean.toFixed(3)} < ${minSceneCorr}`);
+    if (result.scene_corr.mean < minSceneCorr) fails.push(`scene not recognizable: mean layout-scale luminance correlation ${result.scene_corr.mean.toFixed(3)} < ${minSceneCorr}`);
     if (nonFinite.length) fails.push(`non-finite controls: ${nonFinite.join(', ')}`);
-    if (dead.length) fails.push(`wired controls never changed: ${dead.join(', ')}`);
+    if (dead.length) fails.push(`wired controls never changed anywhere in the piece: ${dead.join(', ')}`);
     if (!high.length || !low.length) fails.push('the pulses never change over the probed windows: cannot test motion');
     else if (result.motion.ratio < minMotionRatio) fails.push(`picture does not move with the hits: motion ratio ${result.motion.ratio.toFixed(2)} < ${minMotionRatio}`);
     result.verdict = fails.length ? 'FAIL' : 'PASS';

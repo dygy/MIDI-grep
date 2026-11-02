@@ -38,6 +38,9 @@ def paint(prompt: str, out: Path, model: str, seed: int, width: int, height: int
     image = pipe(prompt=prompt, negative_prompt=None if turbo else (negative_prompt or None),
                  num_inference_steps=steps, guidance_scale=0.0 if turbo else 5.0,
                  width=width, height=height, generator=gen).images[0]
+    del pipe  # the LLM may load again for a fix round after the check: hand the diffusion model's memory back first
+    if device == "mps":
+        torch.mps.empty_cache()
     out.parent.mkdir(parents=True, exist_ok=True)
     image.save(out, quality=88)
     return {"model": model, "device": device, "seed": seed, "steps": steps, "size": [width, height], "file": out.name}

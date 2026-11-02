@@ -221,7 +221,7 @@ An optional stage after promotion, outside scoring: `python -m visuals <track di
 scene prompt + Hydra chain, paints the scene with a self-hosted diffusers model (default `stabilityai/sd-turbo`, MPS),
 and writes `vNNN/visuals.strudel` = `output.strudel` + a Hydra block whose controls are queried from the piece's own
 bar arrays at Strudel's clock. `scripts/node/src/check-hydra.ts` runs the file headless (pinned @strudel/web +
-hydra-synth 1.4.0) and gates the chain (scene recognizable, controls move, motion follows the pulses); a chain that
+hydra-synth 1.4.0) and gates the chain (scene recognizable at layout scale, controls move, motion follows the pulses); a chain that
 fails falls back to the rule-built one. `output.strudel`, renders and scores are untouched.
 
 ### Comparison & Eval Gate

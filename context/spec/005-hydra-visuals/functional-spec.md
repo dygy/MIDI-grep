@@ -40,15 +40,28 @@ coder is editing: change a bass bar and the wave changes with it.
 - [x] An LLM chain is used only if it passes the whitelist (src(s0) base, allowed Hydra functions, controls, Math; no
       strings or statements; must use kick and bassWave) AND the headless check; otherwise the fallback chain is used and
       the rejection is recorded in `visuals.json`. *(VAGABUNDO v063: the mistral-small chain passed the whitelist but
-      failed the check — scene correlation 0.437 < 0.5 — and the fallback chain passed: 0.660, motion ratio 5.70.)*
+      failed the check — scene correlation 0.437 < 0.5 — and the fallback chain passed: 0.660, motion ratio 5.70; both at the
+      pixel scale used before the 2026-10-30 amendment below.)*
+      *(Amended 2026-11-02: the prompt shows no example chain — mistral-small returned the one it was given verbatim on 2
+      of 5 tracks — only the shape, the piece's live controls and each colour step's unchanged value. The whitelist also
+      rejects scroll*/modulateScroll* (Hydra wraps a scrolled frame: a seam at x = 1 - shift), controls outside an arrow
+      function, bare PI/sin/... (not Math's in the REPL), a SOURCE where a number belongs, true/false, and a speed on the
+      photo itself; a rejected chain goes back to the LLM once with the errors. Matrix of 10 runs, 5 tracks: 9 LLM chains
+      passed the check, 1 fell back — `.sisyphus/evidence/005-hydra-visuals/README.md`.)*
 
 ### 2.3 Verified, and audio untouched
 
 - [x] `check-hydra.js` runs the whole `visuals.strudel` in headless Chromium (pinned @strudel/web + hydra-synth) and
-      PASSES only when: no page errors; mean luminance correlation with the scene >= 0.5 (recognizable); every wired
-      control changed value; the quarter of frames with the strongest pulse moves >= 1.2x the weakest quarter.
+      PASSES only when: no page errors; mean luminance correlation with the scene at layout scale (block means ~1/40 of the
+      width) >= 0.5 (recognizable — amended 2026-10-30 from pixel scale, which failed a plainly recognizable Regime CLT
+      street at 0.479 because a one-pixel warp decorrelates fine texture; calibration in `.sisyphus/evidence/005-hydra-visuals`); every wired
+      control changed value; the quarter of frames with the strongest pulse moves >= 1.2x the weakest quarter. The
+      reference is the scene as the chain shows it at rest (zoomed by the edge margin; amended 2026-10-30 after the
+      unzoomed reference failed every LLM chain on 4 tracks).
 - [x] `output.strudel` is never modified; the visuals go to `vNNN/visuals.strudel` (+ `visual.jpg`, `visuals.json`,
       `visuals_check/`), so no similarity score or gate changes.
 - [x] The block runs in the live REPL (strudel.dygy.app) with the piece playing. *(2026-10-29, `/embed`, VAGABUNDO v063 +
       the block with a stand-in image: evaluated with no page errors, hydra-canvas up, s0 loaded; `getTime`, `noteToMidi`,
-      `initHydra` are REPL globals.)*
+      `initHydra` are REPL globals.)* *(2026-11-02, `/embed`, Enter v011 with its LLM chain: no page errors, no edge seam
+      or wrapped sky in 6 frames — `img/enter_repl_*.jpg` in the evidence folder; the scene is read through `scene`, src
+      with mirrored edges.)*
