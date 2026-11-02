@@ -24,6 +24,7 @@ from __future__ import annotations
 
 import argparse
 import filecmp
+import hashlib
 import json
 import math
 import re
@@ -75,11 +76,15 @@ class RunMetadata(BaseModel):
 
 
 def slug_from_title(title: str) -> str:
-    """Kebab-case ASCII slug; accents are folded ("NÃO" -> "nao")."""
+    """Kebab-case ASCII slug; accents are folded ("NÃO" -> "nao"). A title written only in a non-Latin script gets
+    "track-" + a stable hash of it: "אסף אמדורסקי - רכבת לצפון" folded to nothing and stopped the pipeline at stage 1
+    (2026-11-02); hosting prefixes and model names need ASCII, and the hash keeps two such tracks apart."""
     folded = unicodedata.normalize("NFKD", title).encode("ascii", "ignore").decode("ascii")
     slug = re.sub(r"[^a-z0-9]+", "-", folded.lower()).strip("-")
+    if not slug and any(ch.isalnum() for ch in title):
+        slug = "track-" + hashlib.sha1(unicodedata.normalize("NFC", title.strip()).encode()).hexdigest()[:10]
     if not slug:
-        raise ValueError(f"title {title!r} has no ASCII letters or digits to build a slug from")
+        raise ValueError(f"title {title!r} has no letters or digits to build a slug from")
     return slug
 
 
