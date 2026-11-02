@@ -19,6 +19,11 @@ keras>=2.15.0,<3.0.0
 transformers>=4.30.0
 laion-clap>=1.1.4
 
+# Hydra visuals (scripts/python/visuals, spec 005): self-hosted text-to-image. Pinned against this venv's
+# huggingface_hub 1.3.7 / transformers 5.0 (newer diffusers pull huggingface_hub 2.x).
+diffusers==0.39.0
+accelerate==1.15.0
+
 # RAVE generative pipeline
 openl3>=0.4.1
 
