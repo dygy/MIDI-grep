@@ -449,6 +449,27 @@ class _Cal(BaseModel):
     similarity: float | None
     section_aware: float | None
     editability: str | None
+    label: str | None = None      # a finishing-stage render (mix2 (loudness) ...); None = "iter N"
+
+
+# auto-calibrate.sh's stages after the loop re-render BEST and may promote that render instead of a calN:
+# the bass-shape trial, the lead fit, the loudness rounds, the master-bus rounds (glob, label), in the order they run
+_FINISHING_STAGES = (("shape_off.wav", "bass shape"), ("leadfit_*.wav", "lead fit"), ("mix*.wav", "loudness"),
+                     ("bus*.wav", "master bus"))
+
+
+def _finishing_render(workdir: Path, render: Path, after: int) -> _Cal | None:
+    """The finishing-stage render that IS the promoted render (byte-identical, with its cmp.json), numbered after the
+    loop's iterations; None when no stage render matches."""
+    for pattern, stage in _FINISHING_STAGES:
+        for wav in sorted(workdir.glob(pattern), key=lambda p: p.name):
+            cmp_json = wav.with_suffix(".cmp.json")
+            if cmp_json.is_file() and filecmp.cmp(wav, render, shallow=False):
+                sim, sa, edit = _read_scores(cmp_json)
+                strudel = wav.with_suffix(".strudel")
+                return _Cal(n=after + 1, wav=wav, strudel=strudel if strudel.is_file() else None, similarity=sim,
+                            section_aware=sa, editability=edit, label=f"{wav.stem} ({stage})")
+    return None
 
 
 def _find_audio(directory: Path, stem: str) -> Path | None:
@@ -524,6 +545,9 @@ def _write_iterations(vdir: Path, cals: list[_Cal], *, workdir: Path, render: Pa
     idir = vdir / "iterations"
     idir.mkdir(exist_ok=True)
     matched = [c.n for c in cals if filecmp.cmp(c.wav, render, shallow=False)]
+    if not matched and (final := _finishing_render(workdir, render, after=max(c.n for c in cals))) is not None:
+        cals = [*cals, final]
+        matched = [final.n]
     best_n = matched[0] if matched else None      # lineage: best == byte-identical to the promoted render, nothing else
     if best_n is None:
         print(f"pipeline_helpers: WARNING: no iteration in {workdir} is byte-identical to {render}; "
@@ -531,7 +555,7 @@ def _write_iterations(vdir: Path, cals: list[_Cal], *, workdir: Path, render: Pa
     entries: list[IterationEntry] = []
     for c in cals:
         tag = f"cal{c.n}"
-        entry = IterationEntry(version=c.n, label=f"iter {c.n}", editability=c.editability,
+        entry = IterationEntry(version=c.n, label=c.label or f"iter {c.n}", editability=c.editability,
                                similarity=None if c.similarity is None else round(c.similarity, 6),
                                section_aware=None if c.section_aware is None else round(c.section_aware, 6),
                                was_best=c.n == best_n)

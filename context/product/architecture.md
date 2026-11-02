@@ -310,7 +310,8 @@ driven by generated/edited `note()` bar arrays — the "dynamic Strudel" path in
 **Editable pipeline stage 10 (report).** `scripts/editable-pipeline.sh` ends every promoted `vNNN/` with
 `pipeline_helpers.py report` (`build_report`): charts (made in a temp dir — `compare_audio.py --chart`
 overwrites `comparison.json`), render stems (`solo_stems.py`: the renderer plays one voice group at a time, the others muted with a trailing `.gain(0)` so orbits and ducking survive; `--render-stems demucs` keeps Demucs on the render), `stem_comparison.json`, `iterations.json` from the
-calibration workdir (`was_best` only for a byte-identical render) and `report.html`. Report audio is 128k mp3
+calibration workdir (`was_best` only for a byte-identical render; when a finishing stage - bass-shape trial, lead fit,
+loudness or master-bus round - promoted its own render, that render is appended as the last iteration, e.g. `mix1 (loudness)`) and `report.html`. Report audio is 128k mp3
 twins (`render.mp3`, `embed/`, `iterations/`), reused only while newer than their source. The report is
 mandatory: a failed or missing `report.html` aborts the driver.
 

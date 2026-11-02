@@ -283,6 +283,28 @@ def test_lineage_best_only_when_byte_identical(track: tuple[Path, Path, Path], c
     assert doc["iterations"][1]["label"] == "iter 2"
 
 
+def test_a_render_promoted_by_the_loudness_stage_is_the_last_iteration_and_the_best(
+        track: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
+    # auto-calibrate's loudness stage re-renders BEST at the measured --master-gain (mixN.*) and promotes that round:
+    # the promoted render is then none of the calN renders, and every report since 2026-10-20 marked no best
+    t, v, w = track
+    _sine(w / "mix1.wav", 331)
+    _sine(w / "mix2.wav", 332)
+    for n, sim in ((1, 0.905), (2, 0.912)):
+        (w / f"mix{n}.strudel").write_text(f"// mix{n}")
+        (w / f"mix{n}.cmp.json").write_text(json.dumps({"comparison": {"overall_similarity": sim,
+                                                                         "section_aware_similarity": sim - 0.01}}))
+    (v / "render.wav").write_bytes((w / "mix2.wav").read_bytes())
+    (w / "best.wav").write_bytes((w / "mix2.wav").read_bytes())
+    build_report(t, v, seconds=1, calib_workdir=w, run=FakeRunner())
+    doc = json.loads((v / "iterations.json").read_text())
+    assert doc["matched_promoted"] is True
+    assert [(i["label"], i["was_best"]) for i in doc["iterations"]] == \
+        [("iter 1", False), ("iter 2", False), ("mix2 (loudness)", True)]
+    assert doc["iterations"][2]["similarity"] == 0.912 and doc["iterations"][2]["version"] == 3
+    assert "byte-identical" not in capsys.readouterr().err
+
+
 def test_lineage_mismatch_marks_no_best_and_warns(track: tuple[Path, Path, Path], capsys: pytest.CaptureFixture[str]) -> None:
     t, v, w = track
     _sine(v / "render.wav", 777)                      # promoted render is from some other run
