@@ -7,8 +7,10 @@ source: uploaders tag their genre ("funk carioca", "automotivo", "phonk") and na
 (``eval/datasets/genre_labels_auto.yaml``); neither source decides alone.
 
 The answer is restricted to the genres the pipeline knows (``detect_genre_dl.GENRE_DEFINITIONS``) or ``unknown``, and
-it must QUOTE its evidence: every quoted piece has to occur verbatim in the metadata, else the verdict is ``unknown``
-(a model that names a genre without anything in the text to point at is answering from nothing).
+it must QUOTE its evidence: every quoted piece has to occur verbatim in the metadata, and at least one of them has to
+NAME the genre (``names_genre``: "funk carioca" names brazilian_funk; "Mc Erikah" or "BibiBabydoll" names an artist),
+else the verdict is ``unknown``. A model that names a genre without anything in the text to point at, or only from what
+it believes about an artist, is answering from its own prior, not from the metadata.
 
     genre_text.py <track_dir> -o <track>/.pipeline/genre_text.json [--model mistral-small]
 
@@ -22,11 +24,13 @@ import argparse
 import hashlib
 import json
 import os
+import re
 import subprocess
+import unicodedata
 import sys
 from pathlib import Path
 
-PROMPT_VERSION = 1
+PROMPT_VERSION = 2          # also the automatic-label rule version (genre_knn: an auto label of another version is void)
 DEFAULT_MODEL = "mistral-small"
 INFO_FIELDS = ("title", "channel", "uploader", "artist", "track", "album", "tags", "categories", "description")
 DESCRIPTION_CHARS = 1500     # the head of the description carries the credits/tags; the rest is links and boilerplate
@@ -113,8 +117,36 @@ def genre_choices() -> dict[str, str]:
     return {g: d["descriptions"][0] for g, d in GENRE_DEFINITIONS.items()}
 
 
+def _name_parts(text: str) -> list[str]:
+    return [w for w in re.split(r"[^0-9a-z]+", text.casefold()) if w]
+
+
+def genre_names(genre: str, genres=None) -> set[str]:
+    """The words that NAME ``genre``: the parts of its key and of its palette alias (``sound_selector.GENRE_ALIASES``),
+    minus every word another genre's name also has ("brazilian" names both funk and phonk, so it names neither)."""
+    from detect_genre_dl import GENRE_DEFINITIONS
+    from sound_selector import GENRE_ALIASES
+    genres = list(GENRE_DEFINITIONS) if genres is None else list(genres)
+
+    def own(g: str) -> set[str]:
+        return set(_name_parts(g)) | set(_name_parts(GENRE_ALIASES.get(g, "")))
+    shared = set().union(*(own(g) for g in genres if g != genre)) if len(genres) > 1 else set()
+    return own(genre) - shared
+
+
+def names_genre(quote: str, genre: str) -> bool:
+    """True when ``quote`` names ``genre``: one of its words (accents folded; two adjacent words also joined, so "Lo-Fi"
+    reads as "lofi") STARTS with one of ``genre_names`` ("funkeiro" names funk; "shockwave" does not name retro wave)."""
+    folded = "".join(c for c in unicodedata.normalize("NFKD", quote) if not unicodedata.combining(c))
+    words = _name_parts(folded)
+    cands = words + [a + b for a, b in zip(words, words[1:])]
+    names = genre_names(genre)
+    return any(c.startswith(n) for c in cands for n in names)
+
+
 def build_prompt(info: dict, choices: dict[str, str]) -> str:
-    opts = "\n".join(f'- "{g}": {desc}' for g, desc in choices.items())
+    opts = "\n".join(f'- "{g}": {desc} (names: {", ".join(sorted(genre_names(g, choices)))})'
+                     for g, desc in choices.items())
     return f"""You classify the music GENRE of one track from its YouTube metadata.
 
 Allowed answers (pick exactly one key):
@@ -122,10 +154,12 @@ Allowed answers (pick exactly one key):
 - "{UNKNOWN}": the metadata does not let you tell which of these genres it is, or it is none of them.
 
 Rules:
-- Decide only from the metadata below plus what you know about the named artists, labels and scenes.
-- "evidence" must list the words from the metadata that support your answer, each copied EXACTLY as it appears
-  (a tag, a word of the title, an artist or channel name). No paraphrase, no translation.
-- If nothing in the metadata points at one allowed genre, answer "{UNKNOWN}" with empty evidence.
+- Decide only from the metadata below. An artist, label or channel name alone is NOT enough, whatever you know
+  about them: the metadata itself has to name the genre (a tag, a title word, a description word containing one of
+  the genre's names above).
+- "evidence" must list the words from the metadata that support your answer, each copied EXACTLY as it appears.
+  At least one of them must contain a name of the genre. No paraphrase, no translation.
+- If the metadata names none of the allowed genres, answer "{UNKNOWN}" with empty evidence.
 
 Metadata:
 {info_text(info)}
@@ -150,6 +184,9 @@ def ground(answer: dict, info: dict, choices: dict[str, str]) -> dict:
         out.update(genre=UNKNOWN, why=f"answer {genre!r} is not an allowed genre")
     elif not grounded:
         out.update(genre=UNKNOWN, why="no quoted evidence occurs in the metadata")
+    elif not any(names_genre(q, genre) for q in grounded):
+        out.update(genre=UNKNOWN, why=f"no quoted evidence names the genre ({', '.join(sorted(genre_names(genre)))}); "
+                                      "artist / label names alone are not evidence")
     return out
 
 

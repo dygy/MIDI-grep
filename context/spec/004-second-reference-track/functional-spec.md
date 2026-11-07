@@ -203,4 +203,6 @@ the pipeline broke on the new song was fixed in the pipeline rather than patched
   label goes to `eval/datasets/genre_labels_auto.yaml` and counts like an owner label - kNN reference member and the
   >= 2 labelled tracks this §2.3 floor rule needs; an owner label still wins. Neither source alone labels; on
   disagreement the track stays as before (kNN / unreferenced) and nobody is asked. Covered by
-  `tests/test_genre_auto_label.py`.
+  `tests/test_genre_auto_label.py`. Same day, tightened: at least one quoted piece must NAME the genre (artist names
+  alone - "BibiBabydoll", "Mc Erikah" - had labelled three tracks from the model's prior about the artist); automatic
+  rows carry the rule version and rows from an older version are void, so those tracks are re-decided.

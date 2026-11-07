@@ -62,7 +62,15 @@ def _read_registry(p: Path) -> dict[str, dict]:
         if key in out and out[key]["genre"] != genre:
             raise ValueError(f"{p}: {key!r} is labelled both {out[key]['genre']!r} and {genre!r}")
         out[key] = {"genre": genre, "source": row.get("source", ""), "note": row.get("note", "")}
+        if "rule" in row:
+            out[key]["rule"] = row["rule"]
     return out
+
+
+def auto_rule() -> int:
+    """The version of the rule an automatic label is decided by (``genre_text.PROMPT_VERSION``: prompt + grounding)."""
+    from genre_text import PROMPT_VERSION
+    return PROMPT_VERSION
 
 
 def load_labels(path: Path | str | None = None, include_auto: bool = True) -> dict[str, dict]:
@@ -70,11 +78,15 @@ def load_labels(path: Path | str | None = None, include_auto: bool = True) -> di
 
     An automatic label is written by stage 1b only when two independent sources agree (the audio verdict and the
     published-metadata verdict, ``genre_text.py``); it counts like an owner label (kNN membership, floors). The owner's
-    label always wins: an automatic label for a key the owner labelled is ignored."""
+    label always wins: an automatic label for a key the owner labelled is ignored. An automatic label decided under
+    another rule version (``auto_rule``) is void: the track is re-decided on its next run (``label_stale``)."""
     p = Path(path) if path else LABELS_PATH
     out = _read_registry(p)
     if include_auto:
+        rule = auto_rule()
         for key, row in _read_registry(auto_labels_path(p)).items():
+            if row.get("rule") != rule:
+                continue
             if key in out:
                 if out[key]["genre"] != row["genre"]:
                     print(f"genre_knn: automatic label {row['genre']!r} for {key!r} is overridden by the owner's "
@@ -90,11 +102,31 @@ def add_auto_label(key: str, genre: str, note: str, owner_path: Path | str | Non
     p = auto_labels_path(owner_path)
     doc = (yaml.safe_load(p.read_text(encoding="utf-8")) if p.is_file() else None) or {}
     rows = [r for r in (doc.get("labels") or []) if r.get("cache_key") != key]
-    rows.append({"cache_key": key, "genre": genre, "source": "auto", "note": note})
+    rows.append({"cache_key": key, "genre": genre, "source": "auto", "rule": auto_rule(), "note": note})
+    return _write_auto(p, rows)
+
+
+def remove_auto_label(key: str, owner_path: Path | str | None = None) -> bool:
+    """Drop ``key`` from the automatic registry (a re-decision under the current rule no longer agrees). True if it was there."""
+    import yaml
+    p = auto_labels_path(owner_path)
+    if not p.is_file():
+        return False
+    rows = (yaml.safe_load(p.read_text(encoding="utf-8")) or {}).get("labels") or []
+    keep = [r for r in rows if r.get("cache_key") != key]
+    if len(keep) == len(rows):
+        return False
+    _write_auto(p, keep)
+    return True
+
+
+def _write_auto(p: Path, rows: list) -> Path:
+    import yaml
     doc = {"labels": rows}
     header = ("# AUTOMATIC genre labels, written by editable-pipeline stage 1b (pipeline_helpers.py stamp) when the audio\n"
               "# verdict (kNN / CLAP) and the published-metadata verdict (genre_text.py) agree. Owner labels in\n"
-              "# genre_labels.yaml always win over these. Delete a row to have the track re-decided on its next run.\n")
+              "# genre_labels.yaml always win over these. Delete a row to have the track re-decided on its next run;\n"
+              "# a row whose `rule` is not the current rule version (genre_text.PROMPT_VERSION) is void and re-decided.\n")
     tmp = p.with_suffix(p.suffix + ".tmp")
     tmp.write_text(header + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
     tmp.replace(p)

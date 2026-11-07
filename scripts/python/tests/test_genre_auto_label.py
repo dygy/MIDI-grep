@@ -157,3 +157,60 @@ def test_the_verdict_is_cached_per_metadata_and_model(tmp_path):
         GT.classify(track, tmp_path / "o.json", fetch=lambda url: INFO, ask=ask)
     GT.classify(track, tmp_path / "o.json", model="other", fetch=lambda url: INFO, ask=ask)
     assert calls == ["mistral-small", "other"]
+
+
+# --- evidence must NAME the genre (2026-11-07: "BibiBabydoll" / "Mc Erikah" alone labelled tracks funk) -------------
+
+def test_artist_names_alone_are_not_evidence(tmp_path):
+    r = _classify(tmp_path, {"genre": "brazilian_funk", "evidence": ["Dj Brunin XM", "Mc Lullu"], "reason": "artists"})
+    assert r["genre"] == "unknown" and "names the genre" in r["why"]
+    assert r["evidence"] == ["Dj Brunin XM", "Mc Lullu"]          # still recorded: grounded, just not enough
+
+
+def test_a_quote_naming_the_genre_carries_the_artist_quotes(tmp_path):
+    r = _classify(tmp_path, {"genre": "brazilian_funk", "evidence": ["Dj Brunin XM", "funk tamborzao"]})
+    assert r["genre"] == "brazilian_funk"
+
+
+def test_genre_names_come_from_the_genre_set_not_a_word_list():
+    import genre_text as GT
+    assert GT.names_genre("Funk Carioca", "brazilian_funk")
+    assert GT.names_genre("FUNKEIRO", "brazilian_funk")
+    assert not GT.names_genre("brazilian", "brazilian_funk")      # shared with brazilian_phonk: names neither
+    assert GT.names_genre("Phonk Brasileiro", "brazilian_phonk")
+    assert GT.names_genre("synthwave mix", "retro_wave")          # the genre's palette alias (sound_selector)
+    assert GT.names_genre("Retrowave", "retro_wave")
+    assert GT.names_genre("Lo-Fi beats", "lofi")                  # separators between the parts of a name
+    assert not GT.names_genre("Mc Erikah", "brazilian_funk")
+    assert not GT.names_genre("Shockwave", "retro_wave")          # a name inside another word is not the name
+
+
+def test_an_auto_label_from_an_older_rule_is_not_a_label_and_the_track_is_re_decided(tmp_path):
+    import genre_knn as GK
+    from pipeline_helpers import label_stale
+    reg, root = _world(tmp_path, funk=4)
+    _stamp(tmp_path, "new", _det(_cluster(0, 1, seed=7)[0]), reg, root, text_json=_text(tmp_path, "new", "brazilian_funk"))
+    assert "new" in GK.load_labels(reg)
+    p = GK.auto_labels_path(reg)
+    doc = yaml.safe_load(p.read_text())
+    for row in doc["labels"]:
+        row.pop("rule", None)                                     # written before the rule had a version
+    p.write_text(yaml.safe_dump(doc))
+    assert "new" not in GK.load_labels(reg)
+    assert label_stale(tmp_path / "tracks" / "new", reg) is True
+    # re-decided: the metadata no longer agrees -> the stale row leaves the registry
+    from pipeline_helpers import stamp_track_metadata
+    stamp_track_metadata(tmp_path / "tracks" / "new", detector_json=tmp_path / "new.genre.json", labels_path=reg,
+                         embeddings_root=root, stems_root=tmp_path / "stems",
+                         text_json=_text(tmp_path, "new", "unknown", evidence=()))
+    assert "new" not in _auto_rows(reg)
+    assert label_stale(tmp_path / "tracks" / "new", reg) is False   # decided under the current rule: fresh
+
+
+def test_a_track_stamped_from_a_label_that_is_gone_is_stale(tmp_path):
+    import genre_knn as GK
+    from pipeline_helpers import label_stale
+    reg, root = _world(tmp_path, funk=4)
+    _stamp(tmp_path, "new", _det(_cluster(0, 1, seed=7)[0]), reg, root, text_json=_text(tmp_path, "new", "brazilian_funk"))
+    GK.auto_labels_path(reg).unlink()                            # the row was deleted ("delete a row to re-decide")
+    assert label_stale(tmp_path / "tracks" / "new", reg) is True

@@ -1021,10 +1021,13 @@ feed the Go run). Precedence, recorded as `genre_basis` in the track's `metadata
 2b. the AUTOMATIC registry beside it, `eval/datasets/genre_labels_auto.yaml` (`auto-label`; owner request 2026-11-07: the
    owner gives no hints). Stage 1b runs `scripts/python/genre_text.py`: the local Ollama model (`mistral-small`, temperature 0)
    reads the track's published YouTube metadata (title, channel, tags, description) and answers one detector genre key or
-   `unknown`, quoting evidence that must occur verbatim in the metadata. When that verdict equals the audio verdict (the kNN
+   `unknown`, quoting evidence that must occur verbatim in the metadata, at least one quote NAMING the genre (a word
+   of its key or palette alias that no other genre shares, `genre_text.names_genre`: "funk carioca" yes; an artist name
+   like "Mc Erikah" no - that is the model's prior about the artist, not the metadata). When that verdict equals the audio verdict (the kNN
    genre, or CLAP's when it cleared its margin rule and the kNN supports nothing - how a new genre gets its first members)
    the stamp writes an automatic label; it then counts like an owner label (kNN member, the >= 2 tracks a floor needs).
-   Neither source labels alone; the owner's label wins;
+   Neither source labels alone; the owner's label wins. Each automatic row carries the rule version
+   (`genre_text.PROMPT_VERSION`); a row from another version is void and the track is re-decided on its next run;
 3. kNN of the track's CLAP audio embedding against the labelled tracks (`scripts/python/genre_knn.py`; `knn`). A genre G
    supports the track iff G has >= 2 labelled members and the track's mean cosine to them is >= the lowest leave-one-out
    score among them (conformal-style, level 1/(k+1); no tuned constant). Embeddings are cached under

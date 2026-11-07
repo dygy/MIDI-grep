@@ -330,6 +330,9 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
             path = GK.add_auto_label(key, audio, note, owner_path=labels_path)
             labels = GK.load_labels(labels_path)
             print(f"pipeline_helpers: AUTO-LABEL {key!r} -> {audio} ({note}); written to {path}", file=sys.stderr)
+        elif GK.remove_auto_label(key, owner_path=labels_path):   # a void (older-rule) row the current rule does not confirm
+            print(f"pipeline_helpers: automatic label for {key!r} withdrawn: under the current rule the audio "
+                  f"({audio}) and the metadata ({said}) do not agree", file=sys.stderr)
     if genre_override:
         meta["genre"] = genre_override
         meta["genre_override"] = True
@@ -944,7 +947,9 @@ def label_stale(track_dir: Path, labels_path: Path | None = None) -> bool:
 
     * a registry (owner's or automatic) labels this track but its metadata.json was not stamped from that label, or
     * the track is unlabelled and its stamp has no published-metadata verdict yet (stamped before automatic labelling,
-      or the text classifier was unavailable last time) - so automatic labelling reaches tracks stamped earlier.
+      or the text classifier was unavailable last time) - so automatic labelling reaches tracks stamped earlier, or
+    * the track was stamped from a label that no registry holds any more (a row deleted, or an automatic label decided
+      under an older rule version, which ``load_labels`` treats as void).
 
     Stage 1b stamps a track once; a label the owner adds afterwards (the registry's whole purpose: a track the kNN could
     not place) must still reach it, without --force redoing every stage. An --genre override stamp is left alone.
@@ -956,7 +961,8 @@ def label_stale(track_dir: Path, labels_path: Path | None = None) -> bool:
     if meta.get("genre_basis") == "override":
         return False
     if not lab:
-        return (meta.get("genre_text") or {}).get("status") != "ok"
+        return (meta.get("genre_basis") in ("label", "auto-label")
+                or (meta.get("genre_text") or {}).get("status") != "ok")
     return meta.get("genre_basis") != _label_basis(lab) or meta.get("genre") != lab["genre"]
 
 
