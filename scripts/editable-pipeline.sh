@@ -180,7 +180,7 @@ META="$TRACK/metadata.json"
 KEEP_TEMPO=()
 if [ -n "$(jget "$META" bpm)" ] && [ -n "$(jget "$META" bpm_method)" ] && [ -z "$FORCE" ] && [ -z "$GENRE_OVERRIDE" ] \
    && [ "$("${PH[@]}" label-stale "$TRACK" 2>/dev/null)" = stale ]; then
-  KEEP_TEMPO=(--keep-tempo); log "stage 1b: the genre label registry labels this track differently than its stamp - re-stamping the genre"
+  KEEP_TEMPO=(--keep-tempo); log "stage 1b: the genre stamp is stale (a registry labels the track differently, or it has no metadata verdict yet) - re-stamping the genre"
 fi
 if [ -z "$(jget "$META" bpm)" ] || [ -z "$(jget "$META" bpm_method)" ] || [ -n "$FORCE" ] || [ ${#KEEP_TEMPO[@]} -gt 0 ]; then
   mkdir -p "$TRACK/.pipeline"
@@ -199,7 +199,17 @@ if [ -z "$(jget "$META" bpm)" ] || [ -z "$(jget "$META" bpm_method)" ] || [ -n "
     "$PY" "$SP/genre_knn.py" ensure >"$TRACK/.pipeline/genre_knn_ensure.json" 2>>"$TRACK/.pipeline/genre.err" \
       || log "stage 1b: could not embed the labelled tracks for the kNN (see .pipeline/genre.err) - CLAP decides"
   fi
-  "${PH[@]}" stamp "$TRACK" ${GENRE_OVERRIDE:+--genre "$GENRE_OVERRIDE"} ${GJ:+--detector-json "$GJ"} ${KEEP_TEMPO[@]+"${KEEP_TEMPO[@]}"} >&2 \
+  # Automatic labelling: the genre the track's published metadata (YouTube title/channel/tags/description) names, read
+  # by the local LLM (genre_text.py). When it agrees with the audio verdict the stamp writes an automatic label
+  # (eval/datasets/genre_labels_auto.yaml); nobody is asked. Unavailable (Ollama / yt-dlp down) = no text evidence.
+  TJ=""
+  if [ -z "$GENRE_OVERRIDE" ]; then
+    TJ="$TRACK/.pipeline/genre_text.json"
+    log "stage 1b: genre from the published metadata (genre_text.py)"
+    "$PY" "$SP/genre_text.py" "$TRACK" -o "$TJ" >/dev/null 2>>"$TRACK/.pipeline/genre.err" \
+      || log "stage 1b: genre_text.py failed (see .pipeline/genre.err) - no metadata evidence this run"
+  fi
+  "${PH[@]}" stamp "$TRACK" ${GENRE_OVERRIDE:+--genre "$GENRE_OVERRIDE"} ${GJ:+--detector-json "$GJ"} ${TJ:+--text-json "$TJ"} ${KEEP_TEMPO[@]+"${KEEP_TEMPO[@]}"} >&2 \
     || die "stage 1b stamp failed"
   NEW_REF="$(jget "$META" genre_ref)"; [ -n "$NEW_REF" ] || NEW_REF="$(jget "$META" genre)"
   if [ -n "$OLD_REF" ] && [ "$OLD_REF" != "$NEW_REF" ]; then

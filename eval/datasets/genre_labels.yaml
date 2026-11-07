@@ -6,6 +6,9 @@
 # so adding a labelled track makes every later classification better supported. A genre needs >= 2 labelled
 # tracks before a new track can be assigned to it by kNN (one member gives no within-genre spread).
 #
+# Automatic labels (no owner input) live beside this file in genre_labels_auto.yaml: stage 1b writes one when the audio
+# verdict and the published-metadata verdict (genre_text.py) agree. A row here always wins over an automatic one.
+#
 # This file is only about genre. eval/datasets/reference_tracks.yaml stays the similarity-gate dataset (versions,
 # measured scores); a track can be labelled here without being a gate reference (e.g. retro_wave has no floors).
 labels:

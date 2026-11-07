@@ -132,9 +132,18 @@ def test_a_label_that_changes_the_genre_is_stale(tmp_path: Path) -> None:
 def test_a_stamp_from_the_label_an_unlabelled_track_and_an_override_are_fresh(tmp_path: Path) -> None:
     lab = _labels(tmp_path, "T", "brazilian_funk")
     assert not ph.label_stale(_stamped(tmp_path, "T", genre="brazilian_funk", genre_basis="label"), lab)
-    assert not ph.label_stale(_stamped(tmp_path, "Other", genre="x", genre_basis="knn"), lab)
+    # unlabelled and already given its published-metadata verdict (automatic labelling ran): fresh
+    assert not ph.label_stale(_stamped(tmp_path, "Other", genre="x", genre_basis="knn",
+                                       genre_text={"status": "ok", "genre": "unknown"}), lab)
     lab2 = _labels(tmp_path, "O", "brazilian_funk")
     assert not ph.label_stale(_stamped(tmp_path, "O", genre="trance", genre_basis="override"), lab2)
+
+
+def test_an_unlabelled_track_stamped_before_automatic_labelling_is_stale(tmp_path: Path) -> None:
+    # owner request 2026-11-07: tracks stamped earlier must get the automatic labelling on their next run
+    lab = _labels(tmp_path, "T", "brazilian_funk")
+    assert ph.label_stale(_stamped(tmp_path, "Old", genre="x", genre_basis="knn"), lab)
+    assert ph.label_stale(_stamped(tmp_path, "Down", genre="x", genre_basis="knn", genre_text={"status": "unavailable"}), lab)
 
 
 def test_label_stale_cli_prints_the_verdict(tmp_path: Path) -> None:

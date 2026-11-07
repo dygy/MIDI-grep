@@ -79,11 +79,11 @@ the pipeline broke on the new song was fixed in the pipeline rather than patched
           per-mode minimums for that genre, then the result is either "cleared" or an honestly recorded
           shortfall with a follow-up task — the minimums are never lowered to make it pass.
           — verified 2026-10-10: genre brazilian_funk: gate FAIL recorded honestly — v002 section-aware 0.8721 < 0.90 (overall 0.9282 clears 0.88); v003 0.7209/0.7520 < 0.77/0.81 + worst band 30.07%; floors unchanged (0.88/0.90, 0.77/0.81 from Regime CLT); `expected: shortfall` records equal the runs; follow-ups GitHub #10, #11 — §2.3 tests
-    - [x] Given the track's genre turns out to be something else and at least two owner-labelled tracks of that
-          genre exist, when its scores are recorded, then new per-mode minimums for that genre are set from the
+    - [x] Given the track's genre turns out to be something else and at least two labelled tracks of that
+          genre exist (owner-labelled, or labelled automatically when the audio and the published metadata agree), when its scores are recorded, then new per-mode minimums for that genre are set from the
           measured scores minus the stated margin — never typed by hand. With fewer than two labelled tracks no
           minimum is recorded and the gate reports "no measured floor" for the genre.
-          *(amended 2026-10-29 — see Change Log)*
+          *(amended 2026-10-29 and 2026-11-07 — see Change Log)*
           — verified 2026-10-10: not exercised on this track (genre brazilian_funk: CLAP 0.50 with bpm prior, override logged, floors already exist). The rule is implemented as `pipeline_helpers.py record-floor` (floor = round(measured − 0.02, 2) + measured block, no-op when a floor exists or the run is not detector-passing), called by driver stage 8; covered by `test_record_mode_floor_derives_from_measurement_and_never_touches_existing` — added after review finding #4 flagged the earlier claim as unbacked.
     - [x] When the project's quality claims are read (the "current achievement" section), then the
           second track's numbers appear next to the first track's, labelled with the run they come from.
@@ -196,3 +196,11 @@ the pipeline broke on the new song was fixed in the pipeline rather than patched
   keeps reporting "no measured floor for <genre>". Implemented in `pipeline_helpers.py record_mode_floor`
   (`genre_knn.MIN_MEMBERS`, the same >= 2 rule as the genre kNN); covered by
   `test_a_floor_is_recorded_only_once_the_genre_has_two_labelled_tracks`.
+- **2026-11-07 — automatic genre labels (owner request: "I should not have to hint anything").** A track is labelled
+  without the owner when two independent sources agree: the audio verdict (kNN against the labelled tracks, or CLAP's
+  own verdict when it cleared its margin rule and the kNN supports no genre) and the verdict from the track's published
+  metadata (`genre_text.py`: local LLM over the YouTube title/channel/tags/description, evidence quoted verbatim). The
+  label goes to `eval/datasets/genre_labels_auto.yaml` and counts like an owner label - kNN reference member and the
+  >= 2 labelled tracks this §2.3 floor rule needs; an owner label still wins. Neither source alone labels; on
+  disagreement the track stays as before (kNN / unreferenced) and nobody is asked. Covered by
+  `tests/test_genre_auto_label.py`.

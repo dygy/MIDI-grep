@@ -43,10 +43,14 @@ def embeddings_root() -> Path:
 
 # --- the label registry -------------------------------------------------------------------------------------------
 
-def load_labels(path: Path | str | None = None) -> dict[str, dict]:
-    """{cache_key: {genre, source, note}} from the owner's registry (empty when the file is absent)."""
+def auto_labels_path(owner_path: Path | str | None = None) -> Path:
+    """The automatic registry lives beside the owner's: ``genre_labels.yaml`` -> ``genre_labels_auto.yaml``."""
+    p = Path(owner_path) if owner_path else LABELS_PATH
+    return p.with_name(p.stem + "_auto" + p.suffix)
+
+
+def _read_registry(p: Path) -> dict[str, dict]:
     import yaml
-    p = Path(path) if path else LABELS_PATH
     if not p.is_file():
         return {}
     doc = yaml.safe_load(p.read_text(encoding="utf-8")) or {}
@@ -59,6 +63,42 @@ def load_labels(path: Path | str | None = None) -> dict[str, dict]:
             raise ValueError(f"{p}: {key!r} is labelled both {out[key]['genre']!r} and {genre!r}")
         out[key] = {"genre": genre, "source": row.get("source", ""), "note": row.get("note", "")}
     return out
+
+
+def load_labels(path: Path | str | None = None, include_auto: bool = True) -> dict[str, dict]:
+    """{cache_key: {genre, source, note}}: the owner's registry, plus (``include_auto``) the automatic one beside it.
+
+    An automatic label is written by stage 1b only when two independent sources agree (the audio verdict and the
+    published-metadata verdict, ``genre_text.py``); it counts like an owner label (kNN membership, floors). The owner's
+    label always wins: an automatic label for a key the owner labelled is ignored."""
+    p = Path(path) if path else LABELS_PATH
+    out = _read_registry(p)
+    if include_auto:
+        for key, row in _read_registry(auto_labels_path(p)).items():
+            if key in out:
+                if out[key]["genre"] != row["genre"]:
+                    print(f"genre_knn: automatic label {row['genre']!r} for {key!r} is overridden by the owner's "
+                          f"{out[key]['genre']!r}", file=sys.stderr)
+                continue
+            out[key] = row
+    return out
+
+
+def add_auto_label(key: str, genre: str, note: str, owner_path: Path | str | None = None) -> Path:
+    """Append (or replace) ``key`` in the automatic registry, atomically. Returns the registry path."""
+    import yaml
+    p = auto_labels_path(owner_path)
+    doc = (yaml.safe_load(p.read_text(encoding="utf-8")) if p.is_file() else None) or {}
+    rows = [r for r in (doc.get("labels") or []) if r.get("cache_key") != key]
+    rows.append({"cache_key": key, "genre": genre, "source": "auto", "note": note})
+    doc = {"labels": rows}
+    header = ("# AUTOMATIC genre labels, written by editable-pipeline stage 1b (pipeline_helpers.py stamp) when the audio\n"
+              "# verdict (kNN / CLAP) and the published-metadata verdict (genre_text.py) agree. Owner labels in\n"
+              "# genre_labels.yaml always win over these. Delete a row to have the track re-decided on its next run.\n")
+    tmp = p.with_suffix(p.suffix + ".tmp")
+    tmp.write_text(header + yaml.safe_dump(doc, sort_keys=False, allow_unicode=True), encoding="utf-8")
+    tmp.replace(p)
+    return p
 
 
 # --- the embedding cache ------------------------------------------------------------------------------------------

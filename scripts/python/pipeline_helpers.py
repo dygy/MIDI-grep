@@ -213,10 +213,14 @@ def _refine_track_bpm(track_dir: Path, meta: dict, *, coarse: float) -> None:
 UNREFERENCED = "unreferenced"   # genre key meaning "no trusted genre": the gate uses its default floor, memory finds no neighbours
 
 
+def _label_basis(lab: dict) -> str:
+    return "auto-label" if lab.get("source") == "auto" else "label"
+
+
 def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
                          detector_json: Path | None = None, labels_path: Path | None = None,
                          embeddings_root: Path | None = None, stems_root: Path | None = None,
-                         keep_tempo: bool = False) -> dict:
+                         keep_tempo: bool = False, text_json: Path | None = None) -> dict:
     """Consolidate the per-track facts the pipeline needs into ``<track>/metadata.json``.
 
     The Go cache writes only title/url/video_id there; bpm/key/style live in the latest
@@ -228,6 +232,13 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
     against the labelled tracks (``genre_knn.py``) > the CLAP zero-shot verdict > the heuristic style. When the kNN
     ran and no labelled genre supports the track, the CLAP verdict stays as the palette guess but is marked
     uncertain / unreferenced. Nothing here is a per-track constant.
+
+    Automatic labelling (``text_json`` = ``genre_text.py`` output, the verdict from the track's published metadata): a
+    track that is neither overridden nor labelled gets an AUTOMATIC label (``eval/datasets/genre_labels_auto.yaml``,
+    ``genre_basis: auto-label``) when the audio verdict - the kNN genre, or, when the kNN supports none, CLAP's verdict
+    if it cleared CLAP's own margin rule - names the same genre as the metadata verdict. Two independent sources must
+    agree; neither decides alone, and nobody is asked. The label then counts like an owner label (kNN reference
+    member, floors), so the registry grows with every agreeing track.
 
     ``keep_tempo``: a re-stamp for the genre only (a label added later) keeps the refined bpm/key already stamped -
     re-refining moves the bpm by the last digit (VAGABUNDO 129.989 -> 129.988), and every stage built at the old bpm
@@ -267,9 +278,10 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
     key = track_dir.name
     labels = GK.load_labels(labels_path)
     for stale in ("genre_knn", "genre_label_source", "genre_uncertain", "genre_candidates", "genre_margin_z",
-                  "genre_uncertain_reasons"):
+                  "genre_uncertain_reasons", "genre_text", "genre_auto"):
         meta.pop(stale, None)          # a re-stamp must not inherit another run's evidence
     embedding = model_id = None
+    clap_confident = False
     if detector_json is not None and Path(detector_json).exists():
         det = json.loads(Path(detector_json).read_text())
         meta["genre_detected"] = det.get("detected_genre")
@@ -278,6 +290,7 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
         meta["genre_detector"] = f"detect_genre_dl.py ({mt})"
         # Old detector JSON has no verdict on its own noise: such a result is NOT trusted as certain.
         meta["genre_uncertain"] = bool(det.get("uncertain", True))
+        clap_confident = not meta["genre_uncertain"] and bool(det.get("detected_genre"))
         meta["genre_candidates"] = list(det.get("candidates") or [det.get("detected_genre")])
         meta["genre_margin_z"] = det.get("margin_z")
         meta["genre_uncertain_reasons"] = list(det.get("uncertain_reasons") or
@@ -297,6 +310,26 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
                              "loo_min": {g: round(p["loo_min"], 4) for g, p in knn["per_genre"].items() if "loo_min" in p},
                              "n_members": {g: p["n_members"] for g, p in knn["per_genre"].items()},
                              "reasons": knn["reasons"]}
+    text = None
+    if not genre_override and key not in labels and text_json is not None and Path(text_json).is_file():
+        text = json.loads(Path(text_json).read_text())
+        meta["genre_text"] = {k: text.get(k) for k in ("status", "genre", "evidence", "reason", "model", "why")
+                              if text.get(k) not in (None, "", [])}
+    if text is not None:
+        # The audio verdict: the kNN's, or CLAP's own when the kNN supports no labelled genre (a genre with < 2 members
+        # cannot support anything yet - that is how a new genre gets its first members).
+        audio, audio_src = (knn["genre"], "kNN") if knn is not None and knn["genre"] else (None, None)
+        if audio is None and clap_confident:
+            audio, audio_src = meta["genre_detected"], "CLAP"
+        said = text.get("genre") if text.get("status") == "ok" else None
+        agree = bool(audio) and audio == said
+        meta["genre_auto"] = {"audio": audio, "audio_source": audio_src, "text": said, "labelled": agree}
+        if agree:
+            note = (f"auto {datetime.now().strftime('%Y-%m-%d')}: audio ({audio_src}) and metadata ({text.get('model')}: "
+                    + ", ".join(repr(e) for e in text.get("evidence") or []) + ") agree")
+            path = GK.add_auto_label(key, audio, note, owner_path=labels_path)
+            labels = GK.load_labels(labels_path)
+            print(f"pipeline_helpers: AUTO-LABEL {key!r} -> {audio} ({note}); written to {path}", file=sys.stderr)
     if genre_override:
         meta["genre"] = genre_override
         meta["genre_override"] = True
@@ -307,7 +340,7 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
     elif key in labels:
         lab = labels[key]
         meta["genre"] = lab["genre"]; meta["genre_override"] = False
-        meta["genre_basis"] = "label"; meta["genre_uncertain"] = False
+        meta["genre_basis"] = _label_basis(lab); meta["genre_uncertain"] = False
         meta["genre_candidates"] = [lab["genre"]]
         meta["genre_label_source"] = f"{lab['source']}: {lab['note']}".strip(": ")
     elif knn is not None and knn["genre"]:
@@ -330,12 +363,12 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
     # label itself only when it is trusted (override, owner label, kNN, or a detection that cleared the margin
     # rule), else UNREFERENCED. `genre` stays the best guess (sound palette, generator header).
     if meta.get("genre"):
-        meta["genre_ref"] = meta["genre"] if meta.get("genre_basis") in ("override", "label", "knn", "detector") else UNREFERENCED
+        meta["genre_ref"] = meta["genre"] if meta.get("genre_basis") in ("override", "label", "auto-label", "knn", "detector") else UNREFERENCED
         if meta["genre_ref"] == UNREFERENCED:
             print(f"pipeline_helpers: GENRE UNCERTAIN - using {meta['genre']!r} for the sound palette only; no genre "
                   f"floors / calibration neighbours are applied (basis {meta.get('genre_basis')}, candidates "
-                  f"{meta.get('genre_candidates')}, reasons {meta.get('genre_uncertain_reasons')}). Pass --genre to decide "
-                  f"or add the track to eval/datasets/genre_labels.yaml.", file=sys.stderr)
+                  f"{meta.get('genre_candidates')}, reasons {meta.get('genre_uncertain_reasons')}; automatic labelling: "
+                  f"{meta.get('genre_auto')}). The audio and the published metadata did not agree on a genre.", file=sys.stderr)
     meta["stamped_at"] = datetime.now().astimezone().isoformat(timespec="seconds")
     meta_path.write_text(json.dumps(meta, indent=2, ensure_ascii=False) + "\n")
     return meta
@@ -907,20 +940,24 @@ def params_valid(text: str) -> bool:
 
 
 def label_stale(track_dir: Path, labels_path: Path | None = None) -> bool:
-    """True when the owner's registry labels this track but its metadata.json was not stamped from that label.
+    """True when the genre stamp should be redone (genre only, ``stamp --keep-tempo``):
+
+    * a registry (owner's or automatic) labels this track but its metadata.json was not stamped from that label, or
+    * the track is unlabelled and its stamp has no published-metadata verdict yet (stamped before automatic labelling,
+      or the text classifier was unavailable last time) - so automatic labelling reaches tracks stamped earlier.
 
     Stage 1b stamps a track once; a label the owner adds afterwards (the registry's whole purpose: a track the kNN could
     not place) must still reach it, without --force redoing every stage. An --genre override stamp is left alone.
     """
     import genre_knn as GK
     lab = GK.load_labels(labels_path).get(Path(track_dir).name)
-    if not lab:
-        return False
     mp = Path(track_dir) / "metadata.json"
     meta = json.loads(mp.read_text()) if mp.is_file() else {}
     if meta.get("genre_basis") == "override":
         return False
-    return meta.get("genre_basis") != "label" or meta.get("genre") != lab["genre"]
+    if not lab:
+        return (meta.get("genre_text") or {}).get("status") != "ok"
+    return meta.get("genre_basis") != _label_basis(lab) or meta.get("genre") != lab["genre"]
 
 
 def newer_than(stamp: Path, *roots: Path) -> bool:
@@ -979,6 +1016,7 @@ def main(argv: list[str] | None = None) -> int:
     st.add_argument("--genre", default=None, help="explicit genre override (logged in metadata)")
     st.add_argument("--detector-json", type=Path, default=None, help="detect_genre_dl.py -o output")
     st.add_argument("--keep-tempo", action="store_true", help="genre-only re-stamp: keep the stamped (refined) bpm/key")
+    st.add_argument("--text-json", type=Path, default=None, help="genre_text.py output (published-metadata verdict)")
     pr = sub.add_parser("promote")
     pr.add_argument("--track-dir", required=True, type=Path)
     pr.add_argument("--mode", required=True, choices=GENERATION_MODES)
@@ -1026,7 +1064,7 @@ def main(argv: list[str] | None = None) -> int:
             print(json.dumps({"recorded": res is not None, "measured": res}))
         elif args.cmd == "stamp":
             m = stamp_track_metadata(args.track_dir, genre_override=args.genre, detector_json=args.detector_json,
-                                     keep_tempo=args.keep_tempo)
+                                     keep_tempo=args.keep_tempo, text_json=args.text_json)
             print(json.dumps({k: m.get(k) for k in ("bpm", "key", "genre", "genre_ref", "genre_basis", "genre_uncertain", "genre_candidates", "genre_detected", "genre_confidence", "genre_override", "duration", "style_heuristic")}))
         elif args.cmd == "instrumental":
             print(write_instrumental(args.track_dir, force=args.force))
