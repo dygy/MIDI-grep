@@ -307,8 +307,17 @@ fi
 # ---------------------------------------------------------------- stage 5: instruments
 # each model is stamped with the code that cut its grains (.code): a trainer/grain fix must reach the instruments
 INST_VER="$("$PY" "$SP/calibration_memory.py" code-version --stage instruments 2>/dev/null)"
+INST_MODELS=()   # the instruments this track has: a stem with no transcribed notes has no part to play
 for pair in "bass:bass.wav" "lead:melodic.wav"; do
   role="${pair%%:*}"; src="${pair##*:}"; mdir="$ROOT/models/${SND}_$role"
+  # A stem Basic Pitch found no notes in has no such part (Tatuagem No Pescoco 2026-11-07: the bass stem is Demucs
+  # bleed at -63 dB, the low end is a tuned 808 KICK in the drums stem). The generator then writes no voice for it;
+  # there is nothing to cut grains from. An unreadable MIDI prints nothing and is trained as before (and fails there).
+  if [ "$("${PH[@]}" midi-notes "$PACK/${src%.wav}.mid" 2>/dev/null)" = 0 ]; then
+    log "stage 5: no $role part (${src%.wav}.mid has no notes) - no ${SND}_$role instrument, the piece has no $role voice"
+    continue
+  fi
+  INST_MODELS+=("$mdir")
   # a model trained before note-aligned grains (no grain_mode) or by other grain code is retrained
   if stage_done "$mdir/metadata.json" && [ "$(jget "$mdir/metadata.json" grain_mode)" = notes ] \
      && [ -n "$INST_VER" ] && [ "$(cat "$mdir/.code" 2>/dev/null)" = "$INST_VER" ]; then
@@ -322,11 +331,12 @@ for pair in "bass:bass.wav" "lead:melodic.wav"; do
 done
 # the manifest is rebuilt when its inputs (the drum kit from stage 4, the models trained above) are newer than it
 if stage_done "$PACK/instruments/samples.json" "$PACK/instruments/verification.json" && base_ok "$PACK/instruments/samples.json" "$INST_BASE" \
-   && fresh "$PACK/instruments/samples.json" "$PACK/drums" "$ROOT/models/${SND}_bass" "$ROOT/models/${SND}_lead"; then
+   && fresh "$PACK/instruments/samples.json" "$PACK/drums" ${INST_MODELS[@]+"${INST_MODELS[@]}"}; then
   log "stage 5 skip: instruments/samples.json exists for $INST_BASE"
 else
   log "stage 5: assemble instruments manifest"
-  "$PY" "$SP/build_instruments.py" --models "$ROOT/models/${SND}_bass" "$ROOT/models/${SND}_lead" \
+  [ ${#INST_MODELS[@]} -gt 0 ] || die "stage 5: neither the bass nor the melodic stem has transcribed notes - no pitched part to build"
+  "$PY" "$SP/build_instruments.py" --models ${INST_MODELS[@]+"${INST_MODELS[@]}"} \
     --kit "$PACK/drums" --out "$PACK/instruments" --base-url "$INST_BASE" >&2 \
     || die "stage 5 build_instruments failed"
 fi
