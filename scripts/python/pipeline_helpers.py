@@ -27,6 +27,7 @@ import filecmp
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -540,6 +541,22 @@ def _finishing_render(workdir: Path, render: Path, after: int) -> _Cal | None:
     return None
 
 
+STEM_SOURCES = "stem_sources.json"   # vNNN/: the original stem each render stem was compared with (track-relative)
+
+
+def _rel_to(p: Path, base: Path) -> str:
+    """``p`` relative to ``base`` when inside it (a snapshot/moved checkout keeps working), else absolute."""
+    rp, rb = Path(os.path.abspath(p)), Path(os.path.abspath(base))
+    try:
+        return str(rp.relative_to(rb))
+    except ValueError:
+        return str(rp)
+
+
+def _default_sources(track_dir: Path) -> dict[str, str]:
+    return {s: _rel_to(p, track_dir) for s in RENDER_STEMS if (p := _find_audio(track_dir, s)) is not None}
+
+
 def _find_audio(directory: Path, stem: str) -> Path | None:
     # "melodic" falls back to the legacy "piano" stem exactly like generate_report.py's find_stem
     for name in (stem, "piano") if stem == "melodic" else (stem,):
@@ -729,7 +746,8 @@ def solo_render_stems(vdir: Path, render: Path, *, run: Runner) -> None:
 def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_workdir: Path | None = None,
                  iteration_stems: bool = True, force: bool = False, config: Path | None = None,
                  gate: GateVerdict | None = None, run: Runner = subprocess_runner,
-                 python: str = sys.executable, render_stems: str = DEFAULT_RENDER_STEMS) -> ReportResult:
+                 python: str = sys.executable, render_stems: str = DEFAULT_RENDER_STEMS,
+                 stems_view: Path | None = None) -> ReportResult:
     """Stage 10: make a promoted ``vNNN`` complete and write ``vNNN/report.html``. Idempotent.
 
     1. charts: ``compare_audio.py --chart`` into a temp dir; only ``comparison.png`` + ``chart_*.png`` are copied
@@ -737,7 +755,10 @@ def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_wo
     2. render stems -> ``render_{melodic,drums,bass,vocals}``: ``render_stems="solo"`` (default) renders
        ``output.strudel`` once per voice group with the other groups' ``$:`` channels commented out (see
        ``solo_stems.py``) and writes silence for vocals; ``"demucs"`` runs ``separate.py render.wav --prefix render``;
-    3. per-stem comparison: ``compare_audio.py --stems`` -> ``stem_comparison.json`` + ``chart_stem_*.png``;
+    3. per-stem comparison: ``compare_audio.py --stems`` -> ``stem_comparison.json`` + ``chart_stem_*.png``; a stem the
+       stage-3c view (``stems_view``) holds is compared with the view's (BibiBabydoll 2026-11-08: the render's bass, the
+       808 the view moved, was scored against the track's bass.wav = vocal bleed - 13 false RED bass flags). The
+       originals used are written to ``stem_sources.json`` (relative to the track) and a change of them redoes step 3;
     4. iteration history from ``calib_workdir`` (``iterations.json`` + ``iterations/``); untouched when None;
     5. ``generate_report.py`` -> ``report.html``.
 
@@ -758,6 +779,11 @@ def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_wo
     missing = [s for s, p in orig_stems.items() if p is None]
     if missing:
         raise FileNotFoundError(f"report: original stems missing in {track_dir}: {', '.join(missing)}")
+    if stems_view is not None and Path(stems_view).resolve() != track_dir.resolve():
+        orig_stems.update({s: p for s in RENDER_STEMS if (p := _find_audio(Path(stems_view), s)) is not None})
+    sources = {s: _rel_to(p, track_dir) for s, p in orig_stems.items()}
+    sources_json = vdir / STEM_SOURCES
+    old_sources = json.loads(sources_json.read_text()) if sources_json.is_file() else None
     cfg = ["--config", config] if config is not None else []
     rebuilt = force
     external_calls: list[int] = []
@@ -787,12 +813,14 @@ def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_wo
 
     rendered = {s_: _need_stem(vdir, f"render_{s_}") for s_ in RENDER_STEMS}   # compare_audio reads mp3 or wav
     stem_json = vdir / "stem_comparison.json"
-    if force or not stem_json.is_file() or not (vdir / "chart_stem_overview.png").is_file():
+    if force or not stem_json.is_file() or not (vdir / "chart_stem_overview.png").is_file() \
+            or (old_sources if old_sources is not None else _default_sources(track_dir)) != sources:
         rebuilt = True
         pairs = [a for s_ in RENDER_STEMS
                  for a in (f"--original-{s_}", orig_stems[s_], f"--rendered-{s_}", rendered[s_])]
         run([python, SCRIPTS_DIR / "compare_audio.py", "--stems", "--output-dir", vdir, *pairs, "-d", seconds, *cfg])
         _need(stem_json, "stem_comparison.json")
+        sources_json.write_text(json.dumps(sources, indent=1) + "\n", encoding="utf-8")
 
     # Size + freshness: the report base64-embeds audio, so it gets 128k mp3 twins (never decoded from a lossy
     # intermediate: encoded from the Demucs file / original wav). A twin is reused only if not older than its source.
@@ -1087,6 +1115,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="how render_{melodic,drums,bass,vocals} are made: solo = the renderer, one voice group "
                          "sounding per render (vocals = silence); demucs = separate.py on render.wav (only when "
                          "working on the separation stage)")
+    rp.add_argument("--stems-view", type=Path, default=None,
+                    help="stage-3c view dir: its stems are the originals the render stems are compared with")
     rp.add_argument("--gate-verdict", choices=("PASS", "FAIL"), default=None)
     rp.add_argument("--gate-message", default="")
     args = ap.parse_args(argv)
@@ -1097,7 +1127,7 @@ def main(argv: list[str] | None = None) -> int:
             res = build_report(args.track_dir, args.track_dir / vname, seconds=args.seconds,
                                calib_workdir=args.calib_workdir, iteration_stems=not args.no_iteration_stems,
                                force=args.force, config=args.config, gate=gate,
-                               render_stems=args.render_stems)
+                               render_stems=args.render_stems, stems_view=args.stems_view)
             print(res.report)
         elif args.cmd == "slug":
             print(slug_from_title(args.title))

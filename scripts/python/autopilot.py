@@ -148,6 +148,32 @@ def run_pipeline(title: str, *extra: str, log: Path) -> dict | None:
         return None
 
 
+def mix_components(summary: dict | None) -> dict[str, dict[str, float]]:
+    """``mode -> {mix.<component>: value}`` of a pipeline summary's pieces (diagnose.metrics on each version dir)."""
+    import diagnose as D
+    out = {}
+    for r in (summary or {}).get("runs") or []:
+        try:
+            m = D.metrics(Path(r["version_dir"]))
+        except (KeyError, OSError, ValueError):
+            continue
+        out[r.get("mode") or "?"] = {k: v for k, v in m.items() if k.startswith("mix.")
+                                     and k not in ("mix.overall_similarity", "mix.section_aware_similarity")}
+    return out
+
+
+def movers(base: dict[str, dict[str, float]], trial: dict[str, dict[str, float]], eps: float) -> dict[str, list]:
+    """Per mode, the components a trial moved by more than the calibration noise, largest move first - why a trial
+    won or lost (BibiBabydoll at 150 BPM 2026-11-08: sample-instrument tempo 0.28 -> 0.87, synth brightness 0.91 ->
+    0.61: a mixed verdict the means alone hid)."""
+    out = {}
+    for mode, t in trial.items():
+        b = base.get(mode) or {}
+        d = [(k, round(t[k] - b[k], 3)) for k in t if k in b and abs(t[k] - b[k]) > eps]
+        out[mode] = sorted(d, key=lambda kv: -abs(kv[1]))
+    return out
+
+
 def mean_overall(summary: dict | None) -> float | None:
     runs = (summary or {}).get("runs") or []
     vals = [r["similarity_overall"] for r in runs if isinstance(r.get("similarity_overall"), (int, float))]
@@ -171,6 +197,12 @@ def tempo_candidates(track: Path) -> list[dict]:
             out.append({"bpm": round(res["bpm"], 3), "ratio": round(r, 4), "confidence": round(res["confidence"], 4),
                         "stamp_confidence": base})
     return sorted(out, key=lambda c: -c["confidence"])
+
+
+# A trial only needs its scores and diagnosis: no visuals (diffusion + Ollama, minutes and ~14 GB RAM per mode) and no
+# Demucs on every calibration iteration (the trial copy is deleted right after; 2026-11-08 BibiBabydoll's tempo trial
+# spent its tail painting visuals nobody would see).
+TRIAL_FLAGS = ("--local", "--no-visuals", "--no-iteration-stems")
 
 
 def make_trial(track: Path, label: str) -> Path:
@@ -314,14 +346,16 @@ def work_track(s: Status, entry: dict, out_dir: Path, report: dict, eps: float, 
         for c in order_candidates(rem.name, rem.candidates(track))[:max_trials]:
             trial = make_trial(track, c["label"])
             try:
-                ts = run_checked(trial.name, *c["args"], "--local", log=out_dir / f"{s.track} trial {c['label']}.log",
+                ts = run_checked(trial.name, *c["args"], *TRIAL_FLAGS, log=out_dir / f"{s.track} trial {c['label']}.log",
                                  report=report)
+                moved = movers(mix_components(summary), mix_components(ts), eps)   # before the copy is deleted
             finally:
                 shutil.rmtree(trial, ignore_errors=True)
             tm = mean_overall(ts)
             won = decide(best, tm, eps)
             decision = {"remedy": rem.name, "candidate": {k: c[k] for k in ("key", "label", "args")},
                         "detail": c.get("detail"), "baseline_mean": best, "trial_mean": tm, "adopted": won,
+                        "moved": moved,
                         "trial_runs": [{k: r.get(k) for k in ("mode", "similarity_overall", "similarity_section_aware")}
                                        for r in (ts or {}).get("runs", [])]}
             entry["decisions"].append(decision)
@@ -418,6 +452,14 @@ def markdown(rep: dict) -> str:
         if e.get("error"):
             d = (d + "; " if d else "") + f"ОШИБКА: {e['error']}"
         lines.append(f"| {e['track']} | {b} | {a or '-'} | {d or '-'} |")
+    why = [(e["track"], x) for e in rep["tracks"] for x in e["decisions"] if x.get("moved")]
+    if why:
+        lines += ["", "## Что сдвинула каждая проба (больше шума калибровки)", ""]
+        for track, x in why:
+            lines.append(f"- **{track[:40]}**, {x['remedy']} {x['candidate']['label']}:")
+            for mode, mv in x["moved"].items():
+                lines.append(f"  - {mode}: " + (", ".join(f"{k.removeprefix('mix.')} {v:+.3f}" for k, v in mv)
+                                                or "ничего за пределами шума"))
     sysm = systemic(rep)
     if sysm:
         lines += ["", "## Системные проблемы (красные метрики по всей пачке)", "",

@@ -60,7 +60,7 @@ def test_a_tempo_trial_that_scores_better_is_adopted_on_the_real_track(env, monk
     def fake_run(title, *extra, log):
         calls.append((title, extra))
         if AP.TRIAL_TAG in title:
-            assert (env / title / "drums.wav").is_symlink() and "--local" in extra
+            assert (env / title / "drums.wav").is_symlink() and {"--local", "--no-visuals"} <= set(extra)
             return {"runs": [{"similarity_overall": 0.85}, {"similarity_overall": 0.83}]}
         return {"runs": [{"similarity_overall": 0.86 if "--bpm" in extra else 0.74}, {"similarity_overall": 0.72}]}
     monkeypatch.setattr(AP, "run_pipeline", fake_run)
@@ -156,3 +156,19 @@ def test_the_report_names_systemic_problems_by_total_cost():
     assert s[0]["metric"] == "mix.brightness_similarity" and len(s[0]["tracks"]) == 3   # 0.06 total beats one 0.05
     md = AP.markdown(rep)
     assert "Системные проблемы" in md and "mix.brightness_similarity | 0.060 | 3" in md
+
+
+def test_a_trial_names_the_components_it_moved_per_mode(tmp_path):
+    # BibiBabydoll at 150 BPM (2026-11-08): the means said "reject" and hid a mixed verdict - sample-instrument tempo
+    # 0.28 -> 0.87 while synth brightness fell 0.91 -> 0.61. The report must show what moved, mode by mode.
+    base = {"sample-instrument": {"mix.tempo_similarity": 0.275, "mix.brightness_similarity": 0.632},
+            "synth": {"mix.tempo_similarity": 0.167, "mix.brightness_similarity": 0.913}}
+    trial = {"sample-instrument": {"mix.tempo_similarity": 0.872, "mix.brightness_similarity": 0.634},
+             "synth": {"mix.tempo_similarity": 0.167, "mix.brightness_similarity": 0.605}}
+    mv = AP.movers(base, trial, eps=0.005)
+    assert mv == {"sample-instrument": [("mix.tempo_similarity", 0.597)], "synth": [("mix.brightness_similarity", -0.308)]}
+    rep = {"started": "x", "references": [], "tracks": [{"track": "Bibi", "before": {"modes": {}}, "decisions": [
+        {"remedy": "tempo", "candidate": {"label": "150 BPM"}, "adopted": False, "trial_mean": 0.745,
+         "baseline_mean": 0.753, "moved": mv}]}]}
+    md = AP.markdown(rep)
+    assert "tempo_similarity +0.597" in md and "brightness_similarity -0.308" in md

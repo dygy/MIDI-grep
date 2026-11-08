@@ -521,7 +521,7 @@ report_stage() {
     --gate-message "$(tr '\n' ' ' < "$W/gate.txt")")
   log "stage 10: report $mode -> $vdir"
   "${PH[@]}" report --track-dir "$TRACK" --version "$(basename "$vdir")" --seconds "$COMPARE_SECONDS" \
-    --calib-workdir "$W" ${ITER_STEMS_ARG[@]+"${ITER_STEMS_ARG[@]}"} ${RENDER_STEMS_ARG[@]+"${RENDER_STEMS_ARG[@]}"} ${FORCE:+--force} ${gate_arg[@]+"${gate_arg[@]}"} >&2 \
+    --calib-workdir "$W" --stems-view "$GEN_STEMS" ${ITER_STEMS_ARG[@]+"${ITER_STEMS_ARG[@]}"} ${RENDER_STEMS_ARG[@]+"${RENDER_STEMS_ARG[@]}"} ${FORCE:+--force} ${gate_arg[@]+"${gate_arg[@]}"} >&2 \
     || die "stage 10 report failed for $mode ($vdir)"
   [ -s "$vdir/report.html" ] || die "stage 10 produced no $vdir/report.html"
 }

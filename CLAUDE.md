@@ -191,7 +191,10 @@ reference by more than `calibration_noise` is RED, ranked by its cost in the ove
 `TEMPORAL_COMPONENTS` / `STATIC_SHARE`). The tempo stamp is cross-checked against the original's and the render's measured
 tempo (one tempogram bin, x1/x2/x0.5) and its confidence against the references' lowest. Worst sections name the component
 that drags them. Writes `vNNN/diagnosis.json`; the summary carries `runs[].diagnosis` and `red_flags`; no audio is loaded.
-`diagnose.py table <summary.json>...` prints a batch with its flags - report batches from it.
+`diagnose.py table <summary.json>...` prints a batch with its flags - report batches from it. Per-stem metrics are judged against the
+original each render stem was compared with: when stage 3c made a view, stage 10 compares the render's bass/drums with the
+VIEW's stems (`report --stems-view`, recorded in `vNNN/stem_sources.json`, track-relative) - before, BibiBabydoll's render
+bass (the moved 808) was scored against the track's bass.wav (vocal bleed) and showed 13 false RED bass flags.
 
 **Disk budget (2026-11-08, `scripts/python/cache_budget.py`, editable-pipeline preflight + stage 13):** `.cache` once reached
 42 GB and swap filled the rest; the owner deleted ~70 GB by hand. Before a run: prune to `MIDIGREP_CACHE_BUDGET_GB` (default
@@ -226,7 +229,9 @@ refined, more phase-coherent than the stamp) is TRIED on a throw-away copy (`<tr
 `--local`) and adopted on the real track only when the trial's mean overall beats the run's by > `calibration_noise`.
 Coherence alone never decides (Regime CLT, 0.91 at 135 BPM, is more coherent on the x5/4 grid). A track's crash is
 recorded and the batch goes on; a failed run triggers the doctor and one retry when it repaired something. The
-references run ONCE at the end as the regression check. Every trial is appended to `.cache/runlogs/autopilot/remedies.jsonl`
+references run ONCE at the end as the regression check. Trials run `--local --no-visuals --no-iteration-stems` (only scores and the diagnosis are needed); each decision records,
+per mode, the mix components the trial moved by more than the noise (`moved`, shown in the batch report - BibiBabydoll
+at 150 BPM: sample-instrument tempo +0.60 while synth brightness -0.31, a mixed verdict the means hid). Every trial is appended to `.cache/runlogs/autopilot/remedies.jsonl`
 (past winners are tried first); the batch writes `<time>.json` + `.md`. `editable-pipeline.sh --bpm B` decides a tempo
 (`pipeline_helpers.py set-bpm`, `bpm_decided` outranks the extraction's estimate in every later stamp). Stage 7 now also
 reruns when its INPUTS changed (`best.inputs`: bpm, drum hits, instruments manifest, stage-3c view) - before, a new bpm

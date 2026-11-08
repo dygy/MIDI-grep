@@ -71,8 +71,16 @@ def _mode(comp: dict, vdir: Path) -> str:
     return str(meta.get("generation_mode") or meta.get("mode") or "unknown")
 
 
-def absent_stems(track: Path) -> list[str]:
-    """Stems whose RMS is below the generator's gate silence fraction of the loudest stem's (bleed, not a part)."""
+def stem_sources(vdir: Path, track: Path) -> dict[str, Path]:
+    """The original each render stem was compared with: ``vNNN/stem_sources.json`` (stage 10 writes it; a stage-3c
+    view's bass/drums when one existed), else the track's own stems."""
+    rec = _load(vdir / "stem_sources.json") or {}
+    return {st: (track / rec[st]) if st in rec else (track / f"{st}.wav") for st in STEMS}
+
+
+def absent_stems(track: Path, sources: dict[str, Path] | None = None) -> list[str]:
+    """Stems whose RMS is below the generator's gate silence fraction of the loudest stem's (bleed, not a part).
+    ``sources`` = the files the stem comparison used (:func:`stem_sources`); default the track's stems."""
     import inspect
     import numpy as np
     import soundfile as sf
@@ -80,7 +88,7 @@ def absent_stems(track: Path) -> list[str]:
     silence = inspect.signature(G.bar_env_pattern).parameters["silence"].default
     rms = {}
     for st in STEMS:
-        p = track / f"{st}.wav"
+        p = (sources or {}).get(st) or track / f"{st}.wav"
         if p.is_file():
             y, _ = sf.read(str(p), dtype="float32", always_2d=True)
             rms[st] = float(np.sqrt(np.mean(np.square(y.mean(1)))))
@@ -173,7 +181,7 @@ def diagnose(vdir: Path, track: Path | None = None, refs_path: Path = REFS) -> d
     allrefs = _load(refs_path) or {}
     refs = (allrefs.get("modes") or {}).get(mode) or {}
     noise = _noise()
-    absent = absent_stems(track)
+    absent = absent_stems(track, stem_sources(vdir, track))
     vals = metrics(vdir, tuple(absent))
     red, ok = [], []
     for name, v in sorted(vals.items()):

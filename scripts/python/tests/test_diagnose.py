@@ -105,3 +105,21 @@ def test_a_stem_the_original_does_not_have_is_skipped_not_flagged(tmp_path, refs
     d = D.diagnose(v, refs_path=refs)
     assert d["absent_stems"] == ["bass"]
     assert not any(r["metric"].startswith("bass.") for r in d["red_metrics"] + d["within_reference_range"])
+
+
+def test_a_stem_is_judged_absent_from_the_file_it_was_compared_with(tmp_path, refs):
+    # BibiBabydoll (2026-11-08): the track's bass.wav is quiet bleed, the view's bass is the 808 the render plays;
+    # the diagnosis must judge the view's file (stem_sources.json), not skip the bass as absent.
+    import numpy as np
+    sf = pytest.importorskip("soundfile")
+    v = _piece(tmp_path, "bibi", _comparison(135.0, 135.0), 135.0, 0.6)
+    view = v.parent / ".pipeline" / "stems"
+    view.mkdir(parents=True)
+    t = np.arange(22050) / 22050
+    for d, name, amp in ((v.parent, "bass", 0.0007), (view, "bass", 0.5), (v.parent, "drums", 0.5),
+                         (v.parent, "melodic", 0.4)):
+        sf.write(str(d / f"{name}.wav"), (amp * np.sin(2 * np.pi * 110 * t)).astype(np.float32), 22050)
+    assert D.diagnose(v, refs_path=refs)["absent_stems"] == ["bass"]          # no record: the track's bleed
+    (v / "stem_sources.json").write_text(json.dumps({"bass": ".pipeline/stems/bass.wav", "drums": "drums.wav",
+                                                    "melodic": "melodic.wav"}))
+    assert D.diagnose(v, refs_path=refs)["absent_stems"] == []
