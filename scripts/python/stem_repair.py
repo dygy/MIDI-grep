@@ -114,8 +114,10 @@ def build(track: Path, out: Path, bpm: float, nbars: int, bass_f0: Path, steps: 
     if rec.is_file():
         try:
             old = json.loads(rec.read_text())
-            if old.get("stamp") == stamp:
-                return old
+            # the view's location is where it is NOW (--out), never the recorded absolute path: a moved repo or an
+            # autopilot snapshot (2026-11-08) left repair.json pointing into a directory that no longer exists
+            if old.get("stamp") == stamp and (not old.get("moved_steps") or (out / "bass.wav").is_file()):
+                return {**old, "view": str(out) if old.get("moved_steps") else None}
         except (OSError, ValueError):
             pass
     window = BR.Register.load(bass_f0).window()

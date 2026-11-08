@@ -137,3 +137,23 @@ def test_a_kick_body_ringing_over_a_playing_bass_stays_in_the_drums(tmp_path):
     sf.write(str(d / "drums.wav"), (y + ring[:, None]).astype(np.float32), SRATE, subtype="FLOAT")
     s = _build(d)
     assert s["moved_bars"] == [0, 1]
+
+
+def test_a_reused_view_is_reported_where_it_is_now_not_where_it_was_recorded(tmp_path):
+    # 2026-11-08: repair.json recorded the view's absolute path inside an autopilot snapshot; the next run reused the
+    # stamp, printed that path, and stage 3c's transcription failed on a directory that no longer existed.
+    d = _track(tmp_path, misrouted=True)
+    first = _build(d)
+    rec = Path(first["view"]) / "repair.json"
+    doc = json.loads(rec.read_text())
+    rec.write_text(json.dumps({**doc, "view": "/gone/autopilot-snapshot/.pipeline/stems"}))
+    again = _build(d)
+    assert again["view"] == str(d / ".pipeline" / "stems") and again["stamp"] == first["stamp"]
+
+
+def test_a_recorded_view_whose_files_are_gone_is_rebuilt(tmp_path):
+    d = _track(tmp_path, misrouted=True)
+    first = _build(d)
+    (Path(first["view"]) / "bass.wav").unlink()
+    again = _build(d)
+    assert (Path(again["view"]) / "bass.wav").is_file()
