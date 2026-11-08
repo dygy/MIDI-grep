@@ -113,7 +113,18 @@ def select(rows: list[Row], n: float) -> Row:
     return max(group, key=lambda r: (r.overall, r.sa))
 
 
-def next_step(rows: list[Row], cap: int, patience: int, n: float) -> tuple:
+def effective_cap(rows: list[Row], cap: int, promise: float | None, n: float) -> int:
+    """The short warm-start budget holds only while cal1 reproduces what its source scored. A warm start that misses
+    its promise by more than noise is a new search and gets the full MAX_ITERS (BibiBabydoll synth 2026-11-08: a
+    neighbour's knobs promised 0.762, cal1 scored 0.687, and the 3-render budget ended with sub_bass/bass still
+    +14.6 / -15.3 points off - the same split that is RED on 12 synth pieces)."""
+    if promise is None or not rows or cap >= MAX_ITERS:
+        return cap
+    return MAX_ITERS if rows[0].overall < promise - n else cap
+
+
+def next_step(rows: list[Row], cap: int, patience: int, n: float, promise: float | None = None) -> tuple:
+    cap = effective_cap(rows, cap, promise, n)
     best = select(rows, n)
     stall = 0
     for i in range(len(rows)):
@@ -187,6 +198,8 @@ def main() -> int:
     s = sp.add_parser("select"); s.add_argument("tsv")
     x = sp.add_parser("next"); x.add_argument("tsv"); x.add_argument("--cap", type=int, required=True)
     x.add_argument("--patience", type=int, default=None)
+    x.add_argument("--promise", type=float, default=None,
+                   help="overall the warm start's source scored (calibration_memory warm-start); see effective_cap")
     b = sp.add_parser("blend"); b.add_argument("--parent", required=True); b.add_argument("--prop", required=True)
     b.add_argument("--eff", default="0 0"); b.add_argument("--alpha", type=float, required=True)
     h = sp.add_parser("shape"); h.add_argument("tsv"); h.add_argument("best_tag"); h.add_argument("shape_tsv")
@@ -206,7 +219,12 @@ def main() -> int:
         print(noise())
     elif a.cmd == "next":
         pat = a.patience if a.patience is not None else int(os.environ.get("AC_PATIENCE", PATIENCE))
-        print(*next_step(rows_of(a.tsv), a.cap, pat, noise()))
+        rows = rows_of(a.tsv)
+        eff = effective_cap(rows, a.cap, a.promise, noise())
+        if eff != a.cap and len(rows) == 1:
+            print(f"warm start missed its promise: cal1 {rows[0].overall:.4f} < {a.promise:.4f} - noise -> "
+                  f"iteration cap {a.cap} -> {eff}", file=sys.stderr)
+        print(*next_step(rows, a.cap, pat, noise(), a.promise))
     elif a.cmd == "blend":
         print(*blend_knobs(a.parent.split(), a.prop.split(), [float(v) for v in a.eff.split()], a.alpha))
     elif a.cmd == "shape":

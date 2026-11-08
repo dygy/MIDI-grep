@@ -237,6 +237,12 @@ at 150 BPM: sample-instrument tempo +0.60 while synth brightness -0.31, a mixed 
 reruns when its INPUTS changed (`best.inputs`: bpm, drum hits, instruments manifest, stage-3c view) - before, a new bpm
 or drum detector never reached a calibrated piece.
 
+**Warm-start budget is conditional (2026-11-08, `calibrate_loop.effective_cap`):** a warm start (this track's recorded best
+or the nearest track's) earns the short `WARM_ITERS` budget only while cal1 reproduces what its source scored (the
+`promise`, `calibration_memory.py warm-start` 8th field) within `calibration_noise`; otherwise it is a new search and gets
+`MAX_ITERS` (`--iters N` still wins). BibiBabydoll synth: a neighbour promised 0.762, cal1 scored 0.687, and 3 renders
+ended with sub_bass/bass +14.6 / -15.3 points off - most failing tracks start from a neighbour.
+
 **RAM guard (2026-11-08, `scripts/python/mem_guard.py`):** mistral-small (~14 GB) was loaded with ~6 GB available - 16.8
 of 17 GB swap, the swap files ate the disk. Both Ollama calls (stage 1b `genre_text.py`, stage 11 visuals) wait up to
 `MIDIGREP_MEM_WAIT_S` (600 s) for the model's own size (Ollama `/api/tags`) to be available, else skip with the reason

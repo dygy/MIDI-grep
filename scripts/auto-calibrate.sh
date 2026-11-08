@@ -232,7 +232,7 @@ RESP_ARG=()
 if [ "$START_GIVEN" = 0 ] && [ "$MEM_ON" = 1 ]; then
   WARM="$("$PY" "$MEM" warm-start "${MEM_ARGS[@]}" --track-key "$TRACK_KEY" --env-out "$WORK/warm.env.json" 2> >(grep -v '^  \[ClickHouse\]' >&2))" || WARM=""
   if [ -n "$WARM" ]; then
-    IFS=$'\t' read -r WARM_SOURCE WARM_CAP WARM_KNOBS WARM_ENV WARM_DETAIL WARM_SHAPE WARM_SHAPE_TESTED <<<"$WARM"
+    IFS=$'\t' read -r WARM_SOURCE WARM_CAP WARM_KNOBS WARM_ENV WARM_DETAIL WARM_SHAPE WARM_SHAPE_TESTED WARM_PROMISE <<<"$WARM"
     if [ "$WARM_SOURCE" != cold ]; then
       read -r BM SG CL LLPF HG MG BL LH SU <<<"$WARM_KNOBS"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"
       [ -z "$ENV_START" ] && [ "$WARM_ENV" != "-" ] && ENV_START="$WARM_ENV"
@@ -250,6 +250,11 @@ if [ "$WARM_SOURCE" = cold ] && [ -n "$SEED" ]; then
   echo "warm start: seed - caller's fallback knobs: $SEED"
 fi
 [ "$START_GIVEN" = 1 ] && WARM_SOURCE=explicit
+# The short warm budget is conditional: kept only while cal1 reproduces what the source scored (calibrate_loop
+# effective_cap). Not with --iters (the caller's cap always wins) or an explicit/seed/cold start.
+PROMISE_ARG=()
+case "$WARM_SOURCE" in track|neighbour) [ -z "$ITERS_GIVEN" ] && [ -n "${WARM_PROMISE:-}" ] && [ "$WARM_PROMISE" != "-" ] \
+  && PROMISE_ARG=(--promise "$WARM_PROMISE");; esac
 # Budget from history: a warm start earns calibrate_loop.WARM_ITERS, anything else the full MAX_ITERS; --iters N always wins.
 if [ -z "$ITERS_GIVEN" ]; then ITERS="$("$PY" "$LOOP" cap "$([ "$WARM_SOURCE" = explicit ] && echo cold || echo "$WARM_SOURCE")")" || exit 2; fi
 echo "start: $WARM_SOURCE; knobs: $BM $SG $CL $LLPF $HG $MG $BL $LH $SU; bass shape: $BSHAPE (tested for this code version: $SHAPE_TESTED, pinned: $SHAPE_PIN); iteration cap: $ITERS"
@@ -310,7 +315,9 @@ rm -f "$WORK/best.env.json" "$WORK/best.master" "$WORK/best.leadsynth.json"   # 
 PREV_ENV="${ENV_START:-}"   # env-correction JSON measured from the previous iteration (fed to the next generation); --env-start seeds it
 PARENT=""; ALPHA="1"   # the iteration these knobs were stepped from, and the fraction of its proposed step taken
 i=0
-while [ "$i" -lt "$ITERS" ]; do
+# the hard bound: the cap, or MAX_ITERS while a warm promise can still widen it (the loop's `next` decides when to stop)
+LOOP_BOUND="$ITERS"; [ ${#PROMISE_ARG[@]} -gt 0 ] && LOOP_BOUND="$("$PY" "$LOOP" max-iters)"
+while [ "$i" -lt "$LOOP_BOUND" ]; do
   i=$((i+1))
   TAG="cal$i"; STRU="$WORK/$TAG.strudel"; WAV="$WORK/$TAG.wav"; CJ="$WORK/$TAG.cmp.json"
   env_arg=();  [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && env_arg=(--env-correction "$PREV_ENV")
@@ -428,7 +435,7 @@ while [ "$i" -lt "$ITERS" ]; do
   echo "$BM $SG $CL $LLPF $HG $MG $BL $LH $SU" >"$WORK/$TAG.prop"
 
   # next step: continue from this iteration, or revert to the best and shorten the step; stop when nothing improves
-  NEXT="$("$PY" "$LOOP" next "$WORK/iters.tsv" --cap "$ITERS")" || { echo "[$TAG] loop control FAILED"; RC=70; break; }
+  NEXT="$("$PY" "$LOOP" next "$WORK/iters.tsv" --cap "$ITERS" ${PROMISE_ARG[@]+"${PROMISE_ARG[@]}"})" || { echo "[$TAG] loop control FAILED"; RC=70; break; }
   read -r DECISION NPARENT NALPHA <<<"$NEXT"
   if [ "$DECISION" != "CONTINUE" ]; then echo "[$TAG] stop: ${NEXT#STOP }"; break; fi
   if [ "$NPARENT" != "$TAG" ]; then
