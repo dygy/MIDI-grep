@@ -24,7 +24,7 @@ SLUG, TITLE = "trk", "Trk"
 
 STUBS = {
     "detect_drums_bands.py": 'import sys, json\nfrom pathlib import Path\n'
-        'a = sys.argv[1:]\nout = a[a.index("--out") + 1]\n'
+        'a = sys.argv[1:]\nif "--version" in a: print(2); sys.exit(0)\nout = a[a.index("--out") + 1]\n'
         'open(Path(__file__).parent / "calls.log", "a").write("drums_bands bpm=" + a[a.index("--bpm") + 1] + "\\n")\n'
         'open(out, "w").write("{}")\n',
     "build_sample_pack.py": 'import sys, json\nfrom pathlib import Path\n'
@@ -178,11 +178,21 @@ def _code_version(repo, stage: str = "calibrate") -> str:
                            "code-version", "--stage", stage], capture_output=True, text=True, check=True).stdout.strip()
 
 
-def _seed_best(repo, mode: str, params: str, code: str | None = None) -> Path:
+def _inputs_key(repo) -> str:
+    """What the pipeline's stage 7 will compute (pipeline_helpers.py inputs-key) for the repo's current inputs."""
+    bpm = json.loads((repo.track / "metadata.json").read_text())["bpm"]
+    pack = repo.track / "sample_pack"
+    return subprocess.run([sys.executable, str(repo.root / "scripts" / "python" / "pipeline_helpers.py"), "inputs-key",
+                           str(bpm), str(pack / "drums_bands.json"), str(pack / "instruments" / "samples.json"),
+                           str(repo.track / "repair.json")], capture_output=True, text=True, check=True).stdout.strip()
+
+
+def _seed_best(repo, mode: str, params: str, code: str | None = None, inputs: str | None = None) -> Path:
     w = repo.pw / mode
     w.mkdir(parents=True, exist_ok=True)
     for n, body in (("best.strudel", "//"), ("best.wav", "w"), ("best.cmp.json", "{}"), ("best.params", params + "\n"),
-                    ("result.json", "{}"), ("best.code", (code if code is not None else _code_version(repo)) + "\n")):
+                    ("result.json", "{}"), ("best.code", (code if code is not None else _code_version(repo)) + "\n"),
+                    ("best.inputs", (inputs if inputs is not None else _inputs_key(repo)) + "\n")):
         (w / n).write_text(body)
     return w
 
@@ -195,7 +205,9 @@ def test_old_format_best_params_reruns_the_stage_and_invalidates_its_result(repo
 
 
 def test_current_format_best_params_is_reused(repo):
-    _seed_best(repo, "sample-instrument", NEW)
+    run(repo, "--local", "--mode", "sample-instrument")           # builds the inputs a calibration is made from
+    _seed_best(repo, "sample-instrument", NEW)                     # a current best made from exactly those inputs
+    (repo.calls).write_text("")
     r = run(repo, "--local", "--mode", "sample-instrument")
     assert not any(c.startswith("auto-calibrate") for c in calls(repo)), r.stderr
     assert "stage 7 skip (sample-instrument)" in r.stderr
@@ -219,6 +231,16 @@ def test_synth_is_seeded_with_the_sample_magnitudes_but_not_its_sub_octave(repo)
     run(repo, "--local", "--mode", "synth")
     ac = [c for c in calls(repo) if c.startswith("auto-calibrate")][0]
     assert f"--seed {NEW}" in ac and f"--seed {NEW} 1" not in ac, ac
+
+
+def test_best_from_other_inputs_reruns_the_stage(repo):
+    """2026-11-08: a new bpm / drum detector / instruments manifest never reached a calibrated piece."""
+    run(repo, "--local", "--mode", "sample-instrument")
+    w = _seed_best(repo, "sample-instrument", NEW, inputs="129.989|0000000000000000")
+    (repo.calls).write_text("")
+    r = run(repo, "--local", "--mode", "sample-instrument")
+    assert any(c.startswith("auto-calibrate") for c in calls(repo)), r.stderr
+    assert "made from other inputs" in r.stderr and not (w / "result.json").exists()
 
 
 # --- a best render calibrated by other code is rerun (a code change must reach the output) ----------------

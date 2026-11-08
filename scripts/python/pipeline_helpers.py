@@ -210,6 +210,36 @@ def _refine_track_bpm(track_dir: Path, meta: dict, *, coarse: float) -> None:
     meta["bpm_confidence"] = round(float(r["confidence"]), 4)
 
 
+def inputs_key(bpm: str, paths: list[Path]) -> str:
+    """What a calibration was made FROM (editable-pipeline.sh stage 7 ``best.inputs``): the bpm + a digest of the input
+    files that exist (drum hits, instruments manifest, stage-3c repair record). A best render from other inputs is
+    stale even when the code is not."""
+    import hashlib
+    h = hashlib.sha256()
+    for p in paths:
+        p = Path(p)
+        h.update(p.name.encode())
+        if p.is_file():
+            h.update(p.read_bytes())
+    return f"{bpm}|{h.hexdigest()[:16]}"
+
+
+def set_decided_bpm(track_dir: Path, coarse: float, *, by: str, evidence: dict | None = None) -> dict:
+    """Stamp a DECIDED tempo: refine around ``coarse`` and record ``bpm_decided`` so every later stamp starts from it
+    instead of the extraction's tempogram estimate. The autopilot writes it when a trial at this tempo scored better
+    than the stamped one (BibiBabydoll 2026-11-08: the extractor locked onto a dotted subdivision, 112.5 BPM at
+    phase-coherence 0.045); ``editable-pipeline.sh --bpm`` writes it for a trial run."""
+    track_dir = Path(track_dir)
+    meta_path = track_dir / "metadata.json"
+    meta = json.loads(meta_path.read_text())
+    meta["bpm_decided"] = {"bpm_coarse": float(coarse), "by": by, "evidence": evidence or {}}
+    _refine_track_bpm(track_dir, meta, coarse=float(coarse))
+    tmp = meta_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+    tmp.replace(meta_path)
+    return meta
+
+
 UNREFERENCED = "unreferenced"   # genre key meaning "no trusted genre": the gate uses its default floor, memory finds no neighbours
 
 
@@ -260,6 +290,8 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
             if src in vmeta and vmeta[src] not in (None, ""):
                 meta[dst] = vmeta[src]
         coarse = float(vmeta["bpm"])
+        if isinstance(meta.get("bpm_decided"), dict):     # a decided tempo (set_decided_bpm) outranks the extraction's
+            coarse = float(meta["bpm_decided"]["bpm_coarse"])
     elif keep_tempo:
         coarse = None
     elif meta.get("bpm") not in (None, ""):
@@ -1019,6 +1051,13 @@ def main(argv: list[str] | None = None) -> int:
     rf.add_argument("--run", required=True)
     rf.add_argument("--margin", type=float, default=0.02)
     rf.add_argument("--labels", type=Path, default=None, help="genre label registry (default eval/datasets/genre_labels.yaml)")
+    ik = sub.add_parser("inputs-key", help="the stage-7 input key: bpm + digest of the input files")
+    ik.add_argument("bpm")
+    ik.add_argument("paths", type=Path, nargs="*")
+    sb = sub.add_parser("set-bpm", help="stamp a decided tempo (refined around BPM) that later stamps keep")
+    sb.add_argument("track_dir", type=Path)
+    sb.add_argument("bpm", type=float)
+    sb.add_argument("--by", default="editable-pipeline.sh --bpm")
     st = sub.add_parser("stamp")
     st.add_argument("track_dir", type=Path)
     st.add_argument("--genre", default=None, help="explicit genre override (logged in metadata)")
@@ -1070,6 +1109,11 @@ def main(argv: list[str] | None = None) -> int:
             res = record_mode_floor(args.thresholds, mode=args.mode, genre=args.genre, comparison_path=args.comparison,
                                     run=args.run, margin=args.margin, labels_path=args.labels)
             print(json.dumps({"recorded": res is not None, "measured": res}))
+        elif args.cmd == "inputs-key":
+            print(inputs_key(args.bpm, args.paths))
+        elif args.cmd == "set-bpm":
+            m = set_decided_bpm(args.track_dir, args.bpm, by=args.by)
+            print(json.dumps({k: m.get(k) for k in ("bpm", "bpm_coarse", "bpm_method", "bpm_confidence", "bpm_decided")}))
         elif args.cmd == "stamp":
             m = stamp_track_metadata(args.track_dir, genre_override=args.genre, detector_json=args.detector_json,
                                      keep_tempo=args.keep_tempo, text_json=args.text_json)

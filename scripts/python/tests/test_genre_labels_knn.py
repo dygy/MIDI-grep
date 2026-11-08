@@ -162,7 +162,7 @@ def test_labels_registry_rejects_a_contradicting_duplicate(tmp_path):
 
 def test_the_shipped_registry_labels_the_owner_tracks():
     import genre_knn as GK
-    labels = GK.load_labels()
+    labels = GK.load_labels(include_auto=False)    # the owner's registry; automatic rows are runtime data (stage 1b)
     funk = {k for k, v in labels.items() if v["genre"] == "brazilian_funk"}
     assert funk == {"VAGABUNDO NÃO NAMORA", "Regime CLT (Dj Brunin XM, Aurora Shukita)", "Dumb Blond Bitches",
                     "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM",

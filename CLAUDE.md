@@ -171,6 +171,32 @@ the bass and played the kick louder there. Stage 3c moves the harmonic (one-beat
 only in the envelope steps the generator plays silent, into a view `.pipeline/stems/` that `auto-calibrate.sh --gen-stems`
 hands to the generator and the bass-alone measurement; `--stems` stays the track (identity, memory, the instrumental
 reference, the pack). bass+drums is unchanged, so the score's reference is too.
+Rule v3 (2026-11-08): a step moves where the bass does not carry the low end - the generator's gate plays it silent, OR in the
+same band the bass stem is under that gate's `silence` fraction of the drums' sustained part (BibiBabydoll: vocal bleed at
+250-500 Hz made the full-band gate call the bass present; 48% -> 84% of the 808 moved, sample-instrument 0.611 -> 0.744). It
+is a fraction, not "quieter than the drums": a playing bass under a ringing kick body (Dumb Blond Bitches, bass ~0.44 of it)
+must stay - moving the body doubled the kick (-0.009 / -0.013). `bass_shape.repitch_contradicted` also gives a written bass
+note the stem's f0 pitch when the f0 AND the chroma contradict it (VEM CÁ: Basic Pitch wrote the 808's 3rd harmonic, a fifth
+too high after octave folding; 21% of its notes, 1-2% on the references; sample-instrument 0.637 -> 0.790).
+
+**Self-diagnosis (2026-11-08, `scripts/python/diagnose.py`, editable-pipeline stage 12):** never report a run by its overall
+score alone (owner: BibiBabydoll was reported while `tempo_similarity` sat at 0.17). Every score component of the mix and of
+each stem is compared with the range the reference tracks reach in the same mode (`eval/datasets/reference_metrics.json`,
+committed, rewritten by `diagnose.py record-refs <vNNN>...` whenever the references are rebuilt); a component below every
+reference by more than `calibration_noise` is RED, ranked by its cost in the overall score (`compare_audio.STATIC_WEIGHTS` /
+`TEMPORAL_COMPONENTS` / `STATIC_SHARE`). The tempo stamp is cross-checked against the original's and the render's measured
+tempo (one tempogram bin, x1/x2/x0.5) and its confidence against the references' lowest. Worst sections name the component
+that drags them. Writes `vNNN/diagnosis.json`; the summary carries `runs[].diagnosis` and `red_flags`; no audio is loaded.
+`diagnose.py table <summary.json>...` prints a batch with its flags - report batches from it.
+
+**Disk budget (2026-11-08, `scripts/python/cache_budget.py`, editable-pipeline preflight + stage 13):** `.cache` once reached
+42 GB and swap filled the rest; the owner deleted ~70 GB by hand. Before a run: prune to `MIDIGREP_CACHE_BUDGET_GB` (default
+25) and refuse (exit) when free disk < the largest growth a run has shown (`.cache/runlogs/disk_growth.json`) + RAM size (swap
+headroom). After a run: record the growth, prune. Tiers, cheapest loss first: calibration iteration renders (always; `best.wav`
+stays - stage 7's skip key), unprotected vNNN (protected = newest + best per mode + versions `reference_tracks.yaml` pins), the
+report sources of non-newest protected pieces (`render_<stem>.wav`, `iterations/`, `embed/` - `report.html` embeds them), the
+compare/sample caches (LRU), stage-3c views. Stems, metadata, `sample_pack/` and calibration memory are never deleted; a track a
+run holds (`.pipeline/running.pid`) is skipped. `cache_budget.py report` shows the sizes.
 
 **Bass voice level (2026-10-23, `scripts/python/bass_solo.py`, run by `auto-calibrate.sh` every iteration):** the
 bass layers used to follow whole-mix band shares that the kick also fills (VAGABUNDO: mix sub share matched while the bass
@@ -184,6 +210,34 @@ power x master-gain^2, and spectral centroid). cal-lead takes the full sqrt step
 lead-lpf follows the voices' own centroid, instead of whole-mix shares the bass/kick/hats also fill (VAGABUNDO: voices 7-9 dB
 under the stem at 200 Hz-1.3 kHz). The sampled lead/chord high-pass is now derived (the lowest fundamental played, `sample_lead_hpf`),
 not a fixed 300 Hz. `AC_MSOLO=off` skips it.
+
+**Autopilot (2026-11-08, `scripts/python/autopilot.py`; owner: "the orchestrator is too dumb, absolutely unreliable"):**
+`autopilot.py run` is how improvement batches run - not hand-picked tracks. One batch (one at a time, `autopilot.pid`):
+the environment doctor (`doctor.py --fix`: venv imports, Node build, the renderer's Chromium (`~/.cache/puppeteer`), ffmpeg, `bin/clickhouse` on `.clickhouse/db` -
+without it calibration memory silently returns nothing and every calibration starts cold -, `bin/midi-grep`, disk
+preflight, RAM, Ollama) repairs what it can or stops the batch with the reason; QUEUE = non-reference tracks whose newest
+piece fails its floor or carries a RED tempo flag, worst deficit first (`autopilot.py queue` prints it); each track runs,
+then each REMEDY whose diagnosis applies (`Remedy` subclasses; `TempoRemedy`: the stamp at x4/3, x3/4, x3/2, x2/3,
+refined, more phase-coherent than the stamp) is TRIED on a throw-away copy (`<track> ~trial <label>`, stems symlinked,
+`--local`) and adopted on the real track only when the trial's mean overall beats the run's by > `calibration_noise`.
+Coherence alone never decides (Regime CLT, 0.91 at 135 BPM, is more coherent on the x5/4 grid). A track's crash is
+recorded and the batch goes on; a failed run triggers the doctor and one retry when it repaired something. The
+references run ONCE at the end as the regression check. Every trial is appended to `.cache/runlogs/autopilot/remedies.jsonl`
+(past winners are tried first); the batch writes `<time>.json` + `.md`. `editable-pipeline.sh --bpm B` decides a tempo
+(`pipeline_helpers.py set-bpm`, `bpm_decided` outranks the extraction's estimate in every later stamp). Stage 7 now also
+reruns when its INPUTS changed (`best.inputs`: bpm, drum hits, instruments manifest, stage-3c view) - before, a new bpm
+or drum detector never reached a calibrated piece.
+
+**RAM guard (2026-11-08, `scripts/python/mem_guard.py`):** mistral-small (~14 GB) was loaded with ~6 GB available - 16.8
+of 17 GB swap, the swap files ate the disk. Both Ollama calls (stage 1b `genre_text.py`, stage 11 visuals) wait up to
+`MIDIGREP_MEM_WAIT_S` (600 s) for the model's own size (Ollama `/api/tags`) to be available, else skip with the reason
+(no metadata verdict / fallback chain).
+
+**Drum hits in a loud bar (2026-11-08, `detect_drums_bands.py` v2):** a bar the generator's gate calls loud never ends
+with no hit - Creagina bars 4-7 / 34-35 held a pitched riff Demucs filed under drums, no band fired, the render was
+digitally silent there. Such a bar's full-band onsets are kept, each as the band loudest relative to its own median hit
+(one-shot proxy on Creagina: temporal 0.601 -> 0.640; no other track has such a bar). A locally adaptive threshold for
+every band was measured and REJECTED (more hits, worse envelope on 3 of 4 tracks).
 
 **Hydra visuals** (`scripts/python/visuals/`, spec 005; `cd scripts/python && .venv/bin/python -m visuals <track dir> [--version vNNN]`): a realistic scene painted by a self-hosted diffusion model (`--image-model`, default `stabilityai/sd-turbo` via diffusers on MPS) from a prompt the self-hosted Ollama model (`--ollama-model`, default `mistral-small`) writes from the measured track vision (metadata, CLAP scene/mood ranking of `instrumental.wav`, centroid, sections), animated by a Hydra chain whose controls (kick/snare/hat, bassHit/bassWave, leadHit/leadHue, chordDepth, energy) are queried live from the piece's own bar arrays at Strudel's clock. Writes `vNNN/visuals.strudel` (the piece + the Hydra block; `output.strudel` is untouched, no score changes), `visual.jpg`, `visuals.json`. `scripts/editable-pipeline.sh` runs it as stage 11 on every promoted piece, after all renders (`--no-visuals` skips; a failure is logged and recorded in the summary's `visuals`, it does not fail the run). The LLM chain must pass a whitelist and the headless check `scripts/node/dist/check-hydra.js` (scene luminance corr at layout scale - block means ~1/40 of the width - >= 0.5 against the scene zoomed as the chain shows it, every wired control moves, strongest-pulse quarter of frames moves >= 1.2x the weakest), else the fallback chain is used. The prompt shows no example chain (mistral-small copied it), only the shape, the piece's live controls and each colour step's unchanged value; the whitelist also rejects scroll*/modulateScroll* (Hydra wraps them: a seam), controls outside arrow functions, bare `PI` (not Math's in the REPL), a SOURCE in a number slot, a speed on the photo and a control in any argument Hydra multiplies by `time` (osc speed, osc frequency unless its speed is 0, noise offset, gradient/rotate speed: each hit jumped the waves by time x change, further the longer the piece played), and bounds those speeds to one pattern period per bar of the piece, with one LLM repair round on the errors. The check runs Hydra at the piece's own time (seconds played at each frame), as the REPL does. The scene is read through `scene` (src with mirrored edges, `hydra_code.SCENE_SOURCE`) zoomed by 1 + 2*MAX_WARP, so warps that add up past the margin show the same edge, never the opposite one. Ollama unloads after each answer (`keep_alive: 0`): mistral-small (~14 GB) beside the diffusion model filled swap on 24 GB and got runs killed.
 

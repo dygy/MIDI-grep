@@ -1,0 +1,481 @@
+{
+ "note": "written by scripts/python/diagnose.py record-refs; ranges the reference tracks reach per mode",
+ "modes": {
+  "sample-instrument": {
+   "sources": [
+    "Regime CLT (Dj Brunin XM, Aurora Shukita)/v091",
+    "VAGABUNDO NÃO NAMORA/v078",
+    "Dumb Blond Bitches/v027",
+    "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM/v023"
+   ],
+   "metrics": {
+    "mix.frequency_balance_similarity": [
+     0.9799,
+     0.9726,
+     0.9736,
+     0.9478
+    ],
+    "mix.mfcc_similarity": [
+     0.9962,
+     0.9966,
+     0.9964,
+     0.9974
+    ],
+    "mix.energy_similarity": [
+     0.9064,
+     0.9037,
+     0.8751,
+     0.9218
+    ],
+    "mix.brightness_similarity": [
+     0.9338,
+     0.9332,
+     0.9806,
+     0.8324
+    ],
+    "mix.tempo_similarity": [
+     1.0,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "mix.chroma_similarity": [
+     0.9872,
+     0.9975,
+     0.9898,
+     0.9959
+    ],
+    "mix.temporal.chroma_corr": [
+     0.7002,
+     0.7361,
+     0.6246,
+     0.8644
+    ],
+    "mix.temporal.mel_corr": [
+     0.8734,
+     0.7774,
+     0.7772,
+     0.8518
+    ],
+    "mix.temporal.onset_f1": [
+     0.9267,
+     0.7408,
+     0.883,
+     0.8488
+    ],
+    "mix.temporal.envelope_corr": [
+     0.91,
+     0.927,
+     0.8164,
+     0.8413
+    ],
+    "mix.overall_similarity": [
+     0.9096,
+     0.8795,
+     0.8709,
+     0.8966
+    ],
+    "mix.section_aware_similarity": [
+     0.9052,
+     0.8561,
+     0.8682,
+     0.8933
+    ],
+    "mix.margin_over_chance": [
+     0.3334,
+     0.3046,
+     0.2872,
+     0.2627
+    ],
+    "bass.overall_similarity": [
+     0.7799,
+     0.7721,
+     0.7576,
+     0.7819
+    ],
+    "bass.frequency_balance_similarity": [
+     0.9728,
+     0.9973,
+     0.986,
+     0.941
+    ],
+    "bass.brightness_similarity": [
+     0.2539,
+     0.3351,
+     0.401,
+     0.2601
+    ],
+    "bass.energy_similarity": [
+     0.9005,
+     0.7748,
+     0.7883,
+     0.8686
+    ],
+    "bass.temporal.chroma_corr": [
+     0.7032,
+     0.6953,
+     0.8474,
+     0.7911
+    ],
+    "bass.temporal.mel_corr": [
+     0.6275,
+     0.6041,
+     0.7991,
+     0.6938
+    ],
+    "bass.temporal.onset_f1": [
+     0.5479,
+     0.5823,
+     0.4478,
+     0.5432
+    ],
+    "bass.temporal.envelope_corr": [
+     0.9354,
+     0.8343,
+     0.604,
+     0.8469
+    ],
+    "drums.overall_similarity": [
+     0.6712,
+     0.6734,
+     0.8286,
+     0.8347
+    ],
+    "drums.frequency_balance_similarity": [
+     0.573,
+     0.9274,
+     0.9552,
+     0.984
+    ],
+    "drums.brightness_similarity": [
+     0.819,
+     0.2798,
+     0.9987,
+     0.5469
+    ],
+    "drums.energy_similarity": [
+     0.7246,
+     0.7937,
+     0.8147,
+     0.8157
+    ],
+    "drums.temporal.chroma_corr": [
+     0.2029,
+     0.3651,
+     0.4993,
+     0.5981
+    ],
+    "drums.temporal.mel_corr": [
+     0.3188,
+     0.315,
+     0.5722,
+     0.6319
+    ],
+    "drums.temporal.onset_f1": [
+     0.937,
+     0.6333,
+     0.9089,
+     0.9408
+    ],
+    "drums.temporal.envelope_corr": [
+     0.8691,
+     0.7516,
+     0.8364,
+     0.9181
+    ],
+    "melodic.overall_similarity": [
+     0.8218,
+     0.8239,
+     0.7984,
+     0.8772
+    ],
+    "melodic.frequency_balance_similarity": [
+     0.9041,
+     0.9362,
+     0.9519,
+     0.9947
+    ],
+    "melodic.brightness_similarity": [
+     0.9747,
+     0.9349,
+     0.7706,
+     0.9428
+    ],
+    "melodic.energy_similarity": [
+     0.868,
+     0.8374,
+     0.8073,
+     0.8695
+    ],
+    "melodic.temporal.chroma_corr": [
+     0.5815,
+     0.6523,
+     0.613,
+     0.8895
+    ],
+    "melodic.temporal.mel_corr": [
+     0.8726,
+     0.6631,
+     0.6989,
+     0.7429
+    ],
+    "melodic.temporal.onset_f1": [
+     0.7411,
+     0.6763,
+     0.7282,
+     0.8528
+    ],
+    "melodic.temporal.envelope_corr": [
+     0.6671,
+     0.8546,
+     0.6837,
+     0.6799
+    ]
+   },
+   "bpm_confidence": [
+    0.1008,
+    0.42,
+    0.1037,
+    0.4914
+   ]
+  },
+  "synth": {
+   "sources": [
+    "Regime CLT (Dj Brunin XM, Aurora Shukita)/v092",
+    "VAGABUNDO NÃO NAMORA/v079",
+    "Dumb Blond Bitches/v028",
+    "Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM/v024"
+   ],
+   "metrics": {
+    "mix.frequency_balance_similarity": [
+     0.9945,
+     0.977,
+     0.9833,
+     0.9906
+    ],
+    "mix.mfcc_similarity": [
+     0.991,
+     0.9833,
+     0.9873,
+     0.9921
+    ],
+    "mix.energy_similarity": [
+     0.9144,
+     0.8894,
+     0.8186,
+     0.9033
+    ],
+    "mix.brightness_similarity": [
+     0.9699,
+     0.9585,
+     0.9396,
+     0.9364
+    ],
+    "mix.tempo_similarity": [
+     0.883,
+     1.0,
+     1.0,
+     1.0
+    ],
+    "mix.chroma_similarity": [
+     0.9926,
+     0.9848,
+     0.9831,
+     0.9926
+    ],
+    "mix.temporal.chroma_corr": [
+     0.8097,
+     0.6413,
+     0.5455,
+     0.8564
+    ],
+    "mix.temporal.mel_corr": [
+     0.8135,
+     0.696,
+     0.7195,
+     0.6775
+    ],
+    "mix.temporal.onset_f1": [
+     0.9161,
+     0.6568,
+     0.8759,
+     0.7859
+    ],
+    "mix.temporal.envelope_corr": [
+     0.8824,
+     0.9021,
+     0.5042,
+     0.7207
+    ],
+    "mix.overall_similarity": [
+     0.9139,
+     0.844,
+     0.8075,
+     0.8652
+    ],
+    "mix.section_aware_similarity": [
+     0.8998,
+     0.8072,
+     0.7936,
+     0.8419
+    ],
+    "mix.margin_over_chance": [
+     0.3377,
+     0.269,
+     0.2237,
+     0.2313
+    ],
+    "bass.overall_similarity": [
+     0.8054,
+     0.7445,
+     0.7752,
+     0.8022
+    ],
+    "bass.frequency_balance_similarity": [
+     0.9812,
+     0.9442,
+     0.928,
+     0.9677
+    ],
+    "bass.brightness_similarity": [
+     0.2612,
+     0.2373,
+     0.2737,
+     0.2582
+    ],
+    "bass.energy_similarity": [
+     0.908,
+     0.73,
+     0.8146,
+     0.8826
+    ],
+    "bass.temporal.chroma_corr": [
+     0.7435,
+     0.6393,
+     0.8817,
+     0.8608
+    ],
+    "bass.temporal.mel_corr": [
+     0.6228,
+     0.623,
+     0.8741,
+     0.7019
+    ],
+    "bass.temporal.onset_f1": [
+     0.6962,
+     0.6646,
+     0.4451,
+     0.5822
+    ],
+    "bass.temporal.envelope_corr": [
+     0.9391,
+     0.7409,
+     0.6649,
+     0.8428
+    ],
+    "drums.overall_similarity": [
+     0.5266,
+     0.6175,
+     0.6562,
+     0.7511
+    ],
+    "drums.frequency_balance_similarity": [
+     0.2128,
+     0.8779,
+     0.9689,
+     0.8836
+    ],
+    "drums.brightness_similarity": [
+     0.7709,
+     0.4082,
+     0.8533,
+     0.9602
+    ],
+    "drums.energy_similarity": [
+     0.6981,
+     0.5318,
+     0.544,
+     0.7192
+    ],
+    "drums.temporal.chroma_corr": [
+     0.0947,
+     0.1002,
+     0.0,
+     0.3038
+    ],
+    "drums.temporal.mel_corr": [
+     0.0,
+     0.3163,
+     0.3945,
+     0.4485
+    ],
+    "drums.temporal.onset_f1": [
+     0.9404,
+     0.7411,
+     0.9111,
+     0.9408
+    ],
+    "drums.temporal.envelope_corr": [
+     0.7975,
+     0.6164,
+     0.3708,
+     0.7004
+    ],
+    "melodic.overall_similarity": [
+     0.7981,
+     0.7817,
+     0.5582,
+     0.816
+    ],
+    "melodic.frequency_balance_similarity": [
+     0.9401,
+     0.9384,
+     0.3252,
+     0.9879
+    ],
+    "melodic.brightness_similarity": [
+     0.7146,
+     0.8831,
+     0.7365,
+     0.9734
+    ],
+    "melodic.energy_similarity": [
+     0.8638,
+     0.8027,
+     0.7217,
+     0.8569
+    ],
+    "melodic.temporal.chroma_corr": [
+     0.8021,
+     0.7124,
+     0.6188,
+     0.8611
+    ],
+    "melodic.temporal.mel_corr": [
+     0.6935,
+     0.4732,
+     0.4426,
+     0.3849
+    ],
+    "melodic.temporal.onset_f1": [
+     0.7506,
+     0.7704,
+     0.5674,
+     0.9062
+    ],
+    "melodic.temporal.envelope_corr": [
+     0.554,
+     0.8032,
+     0.3259,
+     0.5598
+    ]
+   },
+   "bpm_confidence": [
+    0.1008,
+    0.42,
+    0.1037,
+    0.4914
+   ]
+  }
+ }
+}

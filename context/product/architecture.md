@@ -560,6 +560,11 @@ midi-grep/
 │       ├── build_sample_pack.py, drum_oneshots.py, generate_sample_strudel.py, upload_r2.py  # Sample-pack mode
 │       ├── melodic_shape.py, bass_shape.py, bass_register.py  # Generator note shape
 │       ├── stem_repair.py   # stage 3c: the 808 Demucs filed under drums -> the bass view the generator reads
+│       ├── diagnose.py      # stage 12: every component vs the references' range, tempo cross-check, worst sections
+│       ├── cache_budget.py  # preflight + stage 13: disk budget, prune regenerable material, refuse a run the disk cannot hold
+│       ├── doctor.py        # environment check + repair (venv, node, clickhouse, midi-grep, disk, RAM, ollama)
+│       ├── mem_guard.py     # Ollama stages wait for the model's RAM or skip (no swap storms)
+│       ├── autopilot.py     # improvement batches: queue failing tracks, run, try remedies on copies, keep only gains
 │       ├── solo_stems.py, bass_solo.py, melodic_solo.py  # Voice-group solo renders (report stems, calibration)
 │       ├── stem_match.py, cross_track_eval.py, analyze_synth_params.py, synth_profiles.py
 │       ├── sound_selector.py, spectrogram_analyzer.py, thin_patterns.py, generate_report.py
