@@ -14,6 +14,14 @@ that instrument:
   snare (sd) : mid band   180-1200 Hz (skin/body) — gated to avoid kick bleed
   hat (hh)   : high band  6-11 kHz
 
+A loud bar never ends with no hits (2026-11-08): Creagina bars 4-7 / 34-35 hold a pitched riff (93% of the energy at
+500-2000 Hz, harmonic/percussive 10-25, ~9 attacks per bar) that Demucs filed under drums; no band's global threshold
+fired there, the generator wrote empty drum bars and the render was digitally silent where the original played
+(-15 dB vs the original, the track's worst envelope error). In a bar the generator's own gate calls present
+(``bar_env_pattern``: RMS >= ``silence`` x the median active bar) with no hit from any band, the full-band onsets of
+that bar are kept, each as the band whose peak is loudest relative to that band's own median hit. On the 18 other
+tracks (2026-11-08) no bar qualifies, so nothing changes there.
+
 Output is drums.json-compatible: {"hits": [{"time": s, "type": "bd|sd|hh", "strength": peak}], "bpm": ...}.
 ``strength`` is the linear peak of the hit's own band around its onset; the generator turns strength / class
 median into the per-hit velocity it writes into the drum patterns.
@@ -31,6 +39,7 @@ import librosa
 import scipy.signal as sps
 
 SR = 22050
+VERSION = 2   # stage 3 rebuilds drums_bands.json when this changes (editable-pipeline.sh, $PW/drums_bands.bpm)
 # window around a detected onset in which the band peak is read: the attack lands within the detector's
 # frame resolution before it (hop 256 @ 22.05 kHz = 11.6 ms), the hit's body within the next 60 ms
 STRENGTH_PRE_S = 0.012
@@ -88,13 +97,52 @@ def detect(stem_path: Path, bpm: float | None) -> dict:
             if np.min(np.abs(bd_times - h["time"])) < 0.04:
                 continue
         cleaned.append(h)
+    if bpm:
+        cleaned += _uncovered_bar_hits(y, bpm, cleaned, {t: (lo, hi) for t, (lo, hi, _) in bands.items()})
     cleaned.sort(key=lambda h: h["time"])
-    counts["sd"] = sum(1 for h in cleaned if h["type"] == "sd")
-    return {"hits": cleaned, "bpm": bpm, "counts": counts}
+    counts = {t: sum(1 for h in cleaned if h["type"] == t) for t in bands}
+    counts["uncovered_bar_hits"] = sum(1 for h in cleaned if h.get("uncovered_bar"))
+    return {"hits": cleaned, "bpm": bpm, "counts": counts, "version": VERSION}
+
+
+def _uncovered_bar_hits(y: np.ndarray, bpm: float, hits: list[dict], bands: dict[str, tuple[int, int]]) -> list[dict]:
+    """Hits for the bars the generator's gate calls loud but no band fired in (see the module docstring)."""
+    import inspect
+    sys.path.insert(0, str(Path(__file__).parent))
+    import generate_dynamic_strudel as G
+    silence = inspect.signature(G.bar_env_pattern).parameters["silence"].default
+    bar = 240.0 / bpm
+    hb = int(round(bar * SR))
+    n = len(y) // hb
+    if n == 0:
+        return []
+    rms = np.array([np.sqrt(np.mean(y[i * hb:(i + 1) * hb] ** 2)) for i in range(n)])
+    active = rms[rms > rms.max() * 0.01]            # bar_env_pattern's reference: the median ACTIVE unit
+    ref = float(np.median(active)) if active.size else 0.0
+    covered = {int(h["time"] // bar) for h in hits}
+    filt = {t: _bandpass(y, lo, hi) for t, (lo, hi) in bands.items()}
+    med = {t: float(np.median([h["strength"] for h in hits if h["type"] == t]))
+           for t in bands if any(h["type"] == t for h in hits)}
+    out = []
+    for i in range(n):
+        if i in covered or rms[i] < silence * ref or not med:
+            continue
+        seg = y[i * hb:(i + 1) * hb]
+        for tm in librosa.onset.onset_detect(y=seg, sr=SR, units="time"):
+            t_abs = i * bar + float(tm)
+            i0 = max(0, int((t_abs - STRENGTH_PRE_S) * SR))
+            i1 = min(len(y), int((t_abs + STRENGTH_POST_S) * SR) + 1)
+            peak = {t: float(np.max(np.abs(filt[t][i0:i1]))) for t in med}
+            band = max(peak, key=lambda t: peak[t] / med[t])
+            out.append({"time": t_abs, "type": band, "strength": peak[band], "uncovered_bar": True})
+    return out
 
 
 def main() -> int:
     ap = argparse.ArgumentParser(description="Band-split drum onset detector.")
+    if "--version" in sys.argv[1:]:
+        print(VERSION)
+        return 0
     ap.add_argument("stem", type=Path, help="drum stem wav")
     ap.add_argument("--bpm", type=float, default=None)
     ap.add_argument("--out", type=Path, required=True)

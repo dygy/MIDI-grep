@@ -104,3 +104,36 @@ def test_the_view_is_reused_until_a_stem_changes(tmp_path):
     y, _ = sf.read(str(d / "drums.wav"))
     sf.write(str(d / "drums.wav"), (y * 0.5).astype(np.float32), SRATE, subtype="FLOAT")
     assert _build(d)["stamp"] != first["stamp"]
+
+
+def test_bleed_above_the_bass_register_does_not_hide_the_808_in_the_drums(tmp_path):
+    # BibiBabydoll (2026-11-07): where the 808 sat in drums.wav, bass.wav held only vocal bleed at 250-500 Hz - above
+    # the bass register, but loud enough that the generator's full-band gate called the bass "present", so the 808
+    # stayed in the drums (48% of the drums' sustained low energy moved; the render played an unpitched kick there).
+    d = _track(tmp_path, misrouted=True)
+    n = int(BARS * BAR * SRATE)
+    t = np.arange(n) / SRATE
+    bleed = np.where(t < 2 * BAR, 0.1 * np.sin(2 * np.pi * 400.0 * t), 0.0)
+    b, _ = sf.read(str(d / "bass.wav"))
+    sf.write(str(d / "bass.wav"), (b + bleed[:, None]).astype(np.float32), SRATE, subtype="FLOAT")
+    BR.measure(d / "bass.wav", d / ".pipeline" / "bass_f0.json")
+    env = G.bar_env_pattern(d / "bass.wav", BARS, BPM, floor=0.15)
+    assert all(v > 0.0 for bar in env[:2] for v in bar)            # the gate reads the bleed as a playing bass
+    s = _build(d)
+    assert s["moved_bars"] == [0, 1]
+
+
+def test_a_kick_body_ringing_over_a_playing_bass_stays_in_the_drums(tmp_path):
+    # Dumb Blond Bitches (2026-11-08): the rule "the drums' sustained low part is louder than the bass stem in the same
+    # band" moved 56 steps where the bass WAS playing, at ~0.44 of a ringing kick body; the body went into the bass
+    # view, the bass voice doubled the kick, sample-instrument fell 0.8721 / 0.8695 -> 0.8627 / 0.8566. A playing bass
+    # is not absent because something louder rings beside it.
+    d = _track(tmp_path, misrouted=True)
+    n = int(BARS * BAR * SRATE)
+    t = np.arange(n) / SRATE
+    body = 2 ** (3 / 12)                                          # a body tuned a minor third over the bass note
+    ring = np.where((t >= 4 * BAR) & (t < 6 * BAR), (0.5 / 0.44) * np.sin(2 * np.pi * G1 * body * t), 0.0)
+    y, _ = sf.read(str(d / "drums.wav"))
+    sf.write(str(d / "drums.wav"), (y + ring[:, None]).astype(np.float32), SRATE, subtype="FLOAT")
+    s = _build(d)
+    assert s["moved_bars"] == [0, 1]

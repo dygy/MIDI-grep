@@ -297,3 +297,28 @@ def test_attack_time_is_the_rise_not_the_backtracked_minimum(tmp_path):
     sf.write(str(tmp_path / "bass.wav"), y, sr)
     ev = BS.StemEvidence.load(tmp_path / "bass.wav")
     assert float(np.min(np.abs(ev.peak_attacks - 1.0))) < 0.02, ev.peak_attacks
+
+
+# ---- a written pitch the stem contradicts (2026-11-07) ----------------------------------------------------------
+# VEM CA (MC ZKW): Basic Pitch wrote the gliding 808's 3rd harmonic (D#3/E3 over G#1/A1); folded into the register it
+# became D#2/E2 - a fifth above every note the stem plays there. The stem's f0 AND its chroma both name A1.
+
+def test_a_written_pitch_contradicted_by_the_stems_f0_and_chroma_takes_the_stems_pitch(tmp_path):
+    bpm = 120.0                                    # step = 0.125 s, bar = 2 s
+    stem = _stem(tmp_path, [(0.0, 0.9, 55.0), (1.0, 1.9, 55.0), (2.0, 2.9, 82.41)], dur=3.0)   # A1, A1, then a real E2
+    reg = _register([(0.0, 0.9, 33), (1.0, 1.9, 33), (2.0, 2.9, 40)], dur=3.0)
+    ev = BS.StemEvidence.load(stem)
+    notes, info = BS.shape_bars(["e2 ~ ~ ~ ~ ~ ~ ~ e2 ~ ~ ~ ~ ~ ~ ~", "e2 ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~ ~"], bpm, ev, reg)
+    by_step = {n.step: n.pitch for n in notes}
+    assert by_step[0] == 33 and by_step[8] == 33, by_step     # the harmonic is replaced by the stem's note
+    assert by_step[16] == 40, by_step                         # the stem really plays E2 there: kept
+    assert info["repitched"] == 2
+
+
+def test_a_written_pitch_the_stem_supports_is_never_changed(tmp_path):
+    bpm = 120.0
+    stem = _stem(tmp_path, [(0.0, 0.9, 55.0), (1.0, 1.9, 82.41)])
+    reg = _register([(0.0, 0.9, 33), (1.0, 1.9, 40)])
+    ev = BS.StemEvidence.load(stem)
+    notes, info = BS.shape_bars(["a1 ~ ~ ~ ~ ~ ~ ~ e2 ~ ~ ~ ~ ~ ~ ~"], bpm, ev, reg)
+    assert [n.pitch for n in notes] == [33, 40] and info["repitched"] == 0

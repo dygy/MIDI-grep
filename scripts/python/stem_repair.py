@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Return the bass Demucs put in the drums stem to the bass stem, where the bass stem is silent.
+"""Return the bass Demucs put in the drums stem to the bass stem, where the bass stem does not carry it.
 
 Why: in a funk intro or break the 808 often plays without the kick pattern around it, and Demucs files the
 sustained sub tone under DRUMS. "Automotivo Novinho Depressivo": bars 4-6 / 17-19 / 33-35 have the bass stem at
@@ -8,9 +8,14 @@ reads its per-bar voice envelopes from the stems, so it muted the bass exactly t
 (the drums envelope carried the 808): sub_bass 1-19% of the render vs ~50% of the original in those windows.
 
 What moves: the HARMONIC (sustained over one beat, HPSS) part of the drums stem below twice the top of the bass
-register, in the generator's envelope steps where (a) the bass voice is silent by the generator's own gate
-(``generate_dynamic_strudel.bar_env_pattern``), (b) that harmonic part carries more power than the percussive part
-of the same band, and (c) it is loud enough that the same gate would call it present. Nothing else is touched;
+register, in the generator's envelope steps where (a) the bass stem does not carry the low end: the generator's gate
+(``generate_dynamic_strudel.bar_env_pattern``) plays it silent, OR in the same band the bass stem is below that gate's
+``silence`` fraction of the drums' sustained part, (b) that sustained part carries more power than the percussive part
+of the same band, and (c) it is loud enough that the same gate would call it present. The in-band half of (a): the gate
+reads the FULL band, so vocal bleed at 250-500 Hz in bass.wav (BibiBabydoll) read as a playing bass and kept the 808
+in the drums (48% of the drums' sustained low energy moved, now 84%). It is a fraction, not "quieter than the drums":
+where the bass plays under a kick's ringing body (Dumb Blond Bitches, bass at ~0.44 of it) moving the body into the
+bass doubled the kick and cost 0.009 / 0.013 of the sample-instrument score. Nothing else is touched;
 bass + drums sums to the same signal, so the instrumental (the scored reference) is unchanged.
 
 The repaired stems are a read-only VIEW for the generator and the bass-solo measurement
@@ -36,7 +41,7 @@ import numpy as np
 sys.path.insert(0, str(Path(__file__).parent))
 import bass_register as BR  # noqa: E402  (register window + the f0 frame geometry)
 
-VERSION = 1
+VERSION = 3
 VIEW_LINKS = ("melodic.wav", "instrumental.wav")   # read by the generator, never written through the view
 
 
@@ -70,18 +75,21 @@ def harmonic_low(x: np.ndarray, sr: int, bpm: float, window: tuple[int, int]) ->
     return (librosa.istft(Hs, hop_length=hop, length=len(d)), librosa.istft(Ps, hop_length=hop, length=len(d)), lo_sr)
 
 
-def misrouted_steps(bass: np.ndarray, harm: np.ndarray, perc: np.ndarray, lo_sr: int, bpm: float, nsub: int,
-                    steps: int, bass_env: list[list[float]] | None, silence: float) -> np.ndarray:
-    """Boolean mask over the ``nsub`` envelope steps: the generator plays the bass silent there (a 0.0 step of
-    ``bass_env``), the drums' low band is mostly sustained (harmonic power > percussive), and that sustained part is
-    at least ``silence`` x the bass stem's median active step (what the generator's gate calls present). ``bass``,
-    ``harm`` and ``perc`` are mono at ``lo_sr``."""
+def misrouted_steps(bass: np.ndarray, bass_low: np.ndarray, harm: np.ndarray, perc: np.ndarray, lo_sr: int,
+                    bpm: float, nsub: int, steps: int, bass_env: list[list[float]] | None,
+                    silence: float) -> np.ndarray:
+    """Boolean mask over the ``nsub`` envelope steps: the bass does not carry the low end (a 0.0 step of the
+    generator's ``bass_env``, or ``bass_low`` - bass.wav below twice the register top - under ``silence`` x the drums'
+    sustained low part), the drums' low band is mostly sustained (harmonic power > percussive), and that sustained
+    part is at least ``silence`` x the bass stem's median active step (what the generator's gate calls present).
+    All signals are mono at ``lo_sr``."""
     step = 60.0 / bpm * 4 / steps * lo_sr
-    eb, eh, ep = (_step_rms(v, step, nsub) for v in (bass, harm, perc))
+    eb, ebl, eh, ep = (_step_rms(v, step, nsub) for v in (bass, bass_low, harm, perc))
     active = eb[eb > eb.max() * 0.01] if eb.max() > 0 else eb   # bar_env_pattern's reference: the median active step
     ref = float(np.median(active)) if active.size else 0.0
-    silent = np.array([v == 0.0 for bar in bass_env for v in bar])[:nsub] if bass_env else np.ones(nsub, bool)
-    return silent & (eh > ep) & (eh >= silence * ref)
+    gated = np.array([v == 0.0 for bar in bass_env for v in bar])[:nsub] if bass_env else np.ones(nsub, bool)
+    absent = gated | (ebl < silence * eh)
+    return absent & (eh > ep) & (eh >= silence * ref)
 
 
 def _hash(paths: list[Path]) -> str:
@@ -117,10 +125,11 @@ def build(track: Path, out: Path, bpm: float, nbars: int, bass_f0: Path, steps: 
         raise ValueError(f"bass is {sr} Hz but drums is {sr2} Hz")
     n = min(len(b), len(dr))
     b, dr = b[:n], dr[:n]
-    env = G.bar_env_pattern(bass_p, nbars, bpm, floor=0.15, steps=steps)   # the generator's own call
     harm, perc, lo_sr = harmonic_low(dr.mean(1), sr, bpm, window)
+    bh, bp, _ = harmonic_low(b.mean(1), sr, bpm, window)            # the bass stem in the same band
     b_lo = librosa.resample(b.mean(1), orig_sr=sr, target_sr=lo_sr)
-    mask = misrouted_steps(b_lo, harm, perc, lo_sr, bpm, nbars * steps, steps, env, silence)
+    env = G.bar_env_pattern(bass_p, nbars, bpm, floor=0.15, steps=steps)   # the generator's own call
+    mask = misrouted_steps(b_lo, bh + bp, harm, perc, lo_sr, bpm, nbars * steps, steps, env, silence)
     moved = [int(i) for i in np.flatnonzero(mask)]
     summary = {"stamp": stamp, "moved_steps": moved, "moved_bars": sorted({i // steps for i in moved}),
                "window": list(window), "view": str(out) if moved else None}
