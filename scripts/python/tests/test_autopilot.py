@@ -142,3 +142,17 @@ def test_a_stale_lock_and_its_snapshot_are_cleaned_up(env, monkeypatch):
     monkeypatch.setattr(AP, "drop_snapshot", lambda w: dropped.append(w))
     assert AP.drop_stale_snapshots() == [stale] and dropped == [stale]
     AP.acquire_lock()                                                  # the stale lock does not block a new batch
+
+
+def test_the_report_names_systemic_problems_by_total_cost():
+    def tr(name, metrics):
+        return {"track": name, "decisions": [], "before": {"modes": {}},
+                "after": {"modes": {"sample-instrument": {"overall": 0.8, "red_metrics": [
+                    {"metric": m, "cost": c, "value": 0.5, "ref_min": 0.8} for m, c in metrics]}}}}
+    rep = {"started": "x", "references": [], "tracks": [
+        tr("A", [("mix.brightness_similarity", 0.02), ("mix.temporal.chroma_corr", 0.05)]),
+        tr("B", [("mix.brightness_similarity", 0.02)]), tr("C", [("mix.brightness_similarity", 0.02)])]}
+    s = AP.systemic(rep)
+    assert s[0]["metric"] == "mix.brightness_similarity" and len(s[0]["tracks"]) == 3   # 0.06 total beats one 0.05
+    md = AP.markdown(rep)
+    assert "Системные проблемы" in md and "mix.brightness_similarity | 0.060 | 3" in md

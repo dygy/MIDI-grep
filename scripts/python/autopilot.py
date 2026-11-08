@@ -34,6 +34,7 @@ The worktree is removed when the batch ends.
 
 Usage:
   autopilot.py queue                       what a batch would work on, worst first (no runs)
+  autopilot.py health                      every track's state + the systemic problems across them (no runs)
   autopilot.py run [--tracks T ...] [--no-refs] [--max-trials N] [--snapshot]
 """
 from __future__ import annotations
@@ -116,7 +117,9 @@ def status(track: Path) -> Status:
         st.tempo_red = st.tempo_red or red
         st.modes[mode] = {"version": v.name, "overall": d["overall"], "section_aware": d["section_aware"],
                           "floor": floor, "section_aware_floor": sa_floor, "red_count": d["red_count"],
-                          "flags": d["flags"][:5]}
+                          "flags": d["flags"][:5],
+                          "red_metrics": [{"metric": r["metric"], "cost": r["cost"], "value": r["value"],
+                                           "ref_min": r["ref_min"]} for r in d["red_metrics"]]}
     return st
 
 
@@ -385,21 +388,48 @@ def _run(only: list[str] | None, with_refs: bool, max_trials: int) -> dict:
     return report
 
 
+def systemic(rep: dict) -> list[dict]:
+    """RED metrics across the batch's tracks (state after the batch, else before), by total overall-score cost then by
+    how many tracks share them: what to fix next for everyone, not track by track."""
+    agg: dict[tuple[str, str], dict] = {}
+    for e in rep["tracks"]:
+        st = e.get("after") or e["before"]
+        for mode, v in st.get("modes", {}).items():
+            for r in v.get("red_metrics", []):
+                a = agg.setdefault((mode, r["metric"]), {"mode": mode, "metric": r["metric"], "cost": 0.0, "tracks": []})
+                a["cost"] += r["cost"]
+                a["tracks"].append(e["track"])
+    return sorted(agg.values(), key=lambda a: (-a["cost"], -len(a["tracks"])))
+
+
 def markdown(rep: dict) -> str:
-    lines = [f"# Autopilot batch {rep['started']}", "", "| track | before (mode: overall) | after | decisions |",
-             "|---|---|---|---|"]
+    """The batch report, in Russian (the owner reads this repo's reports in Russian)."""
+    yes, no = "ПРИНЯТО", "отклонено"
+    lines = [f"# Пачка автопилота {rep['started']}", "",
+             "| трек | до (режим: overall) | после | решения |", "|---|---|---|---|"]
     for e in rep["tracks"]:
         b = ", ".join(f"{m}: {v.get('overall', 0):.3f}" for m, v in e["before"]["modes"].items() if "overall" in v)
         a = ", ".join(f"{m}: {v.get('overall', 0):.3f}" for m, v in (e.get("after") or {}).get("modes", {}).items()
                       if "overall" in v)
-        d = "; ".join(f"{x['remedy']} {x.get('candidate', {}).get('label', '')}: "
-                      f"{'ADOPTED' if x.get('adopted') else 'rejected'}" if x.get("remedy") else x["why"]
-                      for x in e["decisions"]) or "-"
-        lines.append(f"| {e['track']} | {b} | {a} | {d} |")
+        d = "; ".join(f"{x['remedy']} {x.get('candidate', {}).get('label', '')}: {yes if x.get('adopted') else no}"
+                      + (f" ({x['trial_mean']:.3f} против {x['baseline_mean']:.3f})"
+                         if x.get("trial_mean") is not None and x.get("baseline_mean") is not None else "")
+                      if x.get("remedy") else x["why"] for x in e["decisions"])
+        if e.get("error"):
+            d = (d + "; " if d else "") + f"ОШИБКА: {e['error']}"
+        lines.append(f"| {e['track']} | {b} | {a or '-'} | {d or '-'} |")
+    sysm = systemic(rep)
+    if sysm:
+        lines += ["", "## Системные проблемы (красные метрики по всей пачке)", "",
+                  "| режим | метрика | суммарная цена | треков | треки |", "|---|---|---|---|---|"]
+        for a in sysm[:12]:
+            lines.append(f"| {a['mode']} | {a['metric']} | {a['cost']:.3f} | {len(a['tracks'])} | "
+                         f"{', '.join(t[:24] for t in a['tracks'])} |")
     if rep["references"]:
-        lines += ["", "| reference | before | now | regressions |", "|---|---|---|---|"]
+        lines += ["", "## Эталоны (регрессия)", "", "| эталон | было | стало | регрессии |", "|---|---|---|---|"]
         for r in rep["references"]:
-            lines.append(f"| {r['track']} | {r['before']} | {r['now']} | {r['regressions'] or '-'} |")
+            fmt = lambda d: ", ".join(f"{m}: {v:.4f}" for m, v in d.items() if isinstance(v, (int, float))) or "-"  # noqa: E731
+            lines.append(f"| {r['track']} | {fmt(r['before'])} | {fmt(r['now'])} | {r['regressions'] or 'нет'} |")
     return "\n".join(lines) + "\n"
 
 
@@ -496,6 +526,7 @@ def main(argv: list[str] | None = None) -> int:
     ap = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
     sub = ap.add_subparsers(dest="cmd", required=True)
     sub.add_parser("queue")
+    sub.add_parser("health")
     r = sub.add_parser("run")
     r.add_argument("--tracks", nargs="+")
     r.add_argument("--no-refs", action="store_true")
@@ -505,6 +536,14 @@ def main(argv: list[str] | None = None) -> int:
     a = ap.parse_args(raw)
     if a.cmd == "run" and a.snapshot:
         return run_in_snapshot([x for x in raw if x != "--snapshot"])
+    if a.cmd == "health":
+        sts = [status(t) for t in sorted(p for p in STEMS.iterdir() if (p / "metadata.json").is_file()
+                                          and TRIAL_TAG not in p.name)]
+        rep = {"started": time.strftime("%Y%m%d-%H%M%S"), "references": [],
+               "tracks": [{"track": st.track, "decisions": [], "before": asdict(st)} for st in sts]}
+        md = markdown(rep).replace("# Пачка автопилота", "# Здоровье треков")
+        print(md)
+        return 0
     if a.cmd == "queue":
         for s in queue():
             print(f"{s.deficit:+.4f} {'TEMPO ' if s.tempo_red else '      '}{s.track}  "
