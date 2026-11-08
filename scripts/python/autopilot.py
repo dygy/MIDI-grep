@@ -221,12 +221,9 @@ def order_candidates(remedy: str, cands: list[dict]) -> list[dict]:
 
 def acquire_lock() -> None:
     LOGS.mkdir(parents=True, exist_ok=True)
-    try:
-        pid = int(LOCK.read_text().split()[0])
-        os.kill(pid, 0)
+    pid = lock_holder()
+    if pid is not None and pid != os.getpid():
         raise SystemExit(f"another autopilot (pid {pid}) is running - {LOCK}")
-    except (OSError, ValueError, IndexError):
-        pass
     LOCK.write_text(str(os.getpid()))
 
 
@@ -446,13 +443,52 @@ def drop_snapshot(w: Path) -> None:
     subprocess.run(["git", "-C", str(ROOT), "worktree", "prune"], capture_output=True)
 
 
+def lock_holder() -> int | None:
+    """The live autopilot's pid, None when no autopilot runs (a dead pid in the lock is stale)."""
+    try:
+        pid = int(LOCK.read_text().split()[0])
+        os.kill(pid, 0)
+        return pid
+    except (OSError, ValueError, IndexError):
+        return None
+
+
+def drop_stale_snapshots() -> list[Path]:
+    """Snapshots a killed batch left behind (its finally never ran) - only when no autopilot is running."""
+    if lock_holder() is not None:
+        return []
+    gone = []
+    for w in ROOT.parent.glob(f"{ROOT.name}-autopilot-*"):
+        drop_snapshot(w)
+        gone.append(w)
+    return gone
+
+
 def run_in_snapshot(argv: list[str]) -> int:
+    import signal
+    for w in drop_stale_snapshots():
+        print(f"[autopilot] removed a stale snapshot {w}", file=sys.stderr)
     w = make_snapshot(time.strftime("%Y%m%d-%H%M%S"))
     print(f"[autopilot] frozen code in {w}", file=sys.stderr)
+    child = subprocess.Popen([str(w / "scripts" / "python" / ".venv" / "bin" / "python"),
+                              str(w / "scripts" / "python" / "autopilot.py"), *argv], start_new_session=True)
+
+    def stop(signum, _frame):   # TERM / INT: end the whole batch tree (pipelines, renders), then clean up
+        try:
+            os.killpg(child.pid, signal.SIGTERM)
+        except OSError:
+            pass
+    old = {sig: signal.signal(sig, stop) for sig in (signal.SIGTERM, signal.SIGINT, signal.SIGHUP)}
     try:
-        return subprocess.run([str(w / "scripts" / "python" / ".venv" / "bin" / "python"),
-                               str(w / "scripts" / "python" / "autopilot.py"), *argv]).returncode
+        try:
+            return child.wait()
+        except BaseException:
+            stop(None, None)
+            child.wait()
+            raise
     finally:
+        for sig, h in old.items():
+            signal.signal(sig, h)
         drop_snapshot(w)
 
 

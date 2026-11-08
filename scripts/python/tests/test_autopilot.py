@@ -126,6 +126,19 @@ def test_a_broken_environment_stops_the_batch_with_the_reason(env, monkeypatch):
 def test_a_second_autopilot_is_refused(env):
     import os
     AP.LOGS.mkdir(parents=True, exist_ok=True)
-    AP.LOCK.write_text(str(os.getpid()))
+    AP.LOCK.write_text(str(os.getppid()))                              # another live process
     with pytest.raises(SystemExit, match="another autopilot"):
         AP.acquire_lock()
+
+
+def test_a_stale_lock_and_its_snapshot_are_cleaned_up(env, monkeypatch):
+    AP.LOGS.mkdir(parents=True, exist_ok=True)
+    AP.LOCK.write_text("999999999")                                   # a killed batch's pid
+    assert AP.lock_holder() is None
+    dropped = []
+    monkeypatch.setattr(AP, "ROOT", env.parent / "MIDI-grep")
+    stale = env.parent / "MIDI-grep-autopilot-20260101-000000"
+    stale.mkdir()
+    monkeypatch.setattr(AP, "drop_snapshot", lambda w: dropped.append(w))
+    assert AP.drop_stale_snapshots() == [stale] and dropped == [stale]
+    AP.acquire_lock()                                                  # the stale lock does not block a new batch

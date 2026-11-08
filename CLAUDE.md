@@ -177,7 +177,11 @@ same band the bass stem is under that gate's `silence` fraction of the drums' su
 is a fraction, not "quieter than the drums": a playing bass under a ringing kick body (Dumb Blond Bitches, bass ~0.44 of it)
 must stay - moving the body doubled the kick (-0.009 / -0.013). `bass_shape.repitch_contradicted` also gives a written bass
 note the stem's f0 pitch when the f0 AND the chroma contradict it (VEM CÁ: Basic Pitch wrote the 808's 3rd harmonic, a fifth
-too high after octave folding; 21% of its notes, 1-2% on the references; sample-instrument 0.637 -> 0.790).
+too high after octave folding; 21% of its notes, 1-2% on the references; sample-instrument 0.637 -> 0.790). When 3c moved
+anything, the bass PART comes from the view too (2026-11-08): its `bass.wav` is transcribed into `.pipeline/stems/bass.mid`
+(the generator's `--bass-midi`, auto-calibrate picks it) and stage 5 cuts the bass instrument from it (retrained when its
+source changes, `models/<snd>_bass/.source`). Before, BibiBabydoll's bass voice played the notes of the bass stem's vocal
+bleed with grains of that bleed while the 808 sat in the view (render bass chroma vs the stem 0.008).
 
 **Self-diagnosis (2026-11-08, `scripts/python/diagnose.py`, editable-pipeline stage 12):** never report a run by its overall
 score alone (owner: BibiBabydoll was reported while `tempo_similarity` sat at 0.17). Every score component of the mix and of

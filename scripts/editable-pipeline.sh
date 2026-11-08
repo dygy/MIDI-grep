@@ -132,7 +132,7 @@ code_ok() {
 # inputs_key: what a calibration was made FROM - the bpm, the drum hits, the instruments manifest and the stage-3c view.
 # A best render made from other inputs (a trial bpm, a new drum detector, a rebuilt pack) is stale even when the code
 # is not: before 2026-11-08 stage 7 kept it and the new inputs never reached the piece.
-inputs_key() { "${PH[@]}" inputs-key "$BPM" "$PACK/drums_bands.json" "$PACK/instruments/samples.json" "$GEN_STEMS/repair.json"; }
+inputs_key() { "${PH[@]}" inputs-key "$BPM" "$PACK/drums_bands.json" "$PACK/instruments/samples.json" "$GEN_STEMS/repair.json" "$BASS_MIDI"; }
 inputs_ok() { [ "$(cat "$1/best.inputs" 2>/dev/null)" = "$(inputs_key)" ]; }
 stale_reason() {
   if [ -s "$1/best.params" ] && ! params_ok "$1/best.params"; then echo "best.params is in the old (CV) format"
@@ -310,6 +310,20 @@ log "stage 3b: bass f0 / register"
 log "stage 3c: bass in the drums stem"
 GEN_STEMS="$("$PY" "$SP/stem_repair.py" build --track "$TRACK" --out "$PW/stems" --bpm "$BPM" --bars "$BARS" \
   --bass-f0 "$PW/bass_f0.json")" || die "stage 3c stem_repair failed"
+# The bass PART comes from where the bass is: when 3c moved the 808 into the view, the view's bass.wav is transcribed
+# (its notes) and is what stage 5 cuts the bass instrument from. Before 2026-11-08 both came from the track's bass.wav:
+# BibiBabydoll's bass stem is vocal bleed, so the bass voice played the bleed's notes with grains of the bleed while the
+# 808 sat in the view (render bass chroma vs the stem: 0.008).
+BASS_DIR="$TRACK"; BASS_MIDI="$PACK/bass.mid"
+if [ "$GEN_STEMS" != "$TRACK" ]; then
+  BASS_DIR="$GEN_STEMS"; BASS_MIDI="$GEN_STEMS/bass.mid"
+  if [ -s "$BASS_MIDI" ] && [ "$BASS_MIDI" -nt "$GEN_STEMS/bass.wav" ]; then log "stage 3c: bass.mid of the view exists"
+  else
+    log "stage 3c: transcribe the view's bass (the 808 moved there)"
+    "$PY" "$SP/transcribe.py" "$GEN_STEMS/bass.wav" "$BASS_MIDI" >&2 || die "stage 3c: transcribe the view's bass failed"
+    [ -s "$BASS_MIDI" ] || die "stage 3c produced no $BASS_MIDI"
+  fi
+fi
 
 # ---------------------------------------------------------------- stage 4: sample pack
 # the pack is stamped with the code that cut it (pack.code): a builder change must reach the one-shots
@@ -334,24 +348,28 @@ INST_VER="$("$PY" "$SP/calibration_memory.py" code-version --stage instruments 2
 INST_MODELS=()   # the instruments this track has: a stem with no transcribed notes has no part to play
 for pair in "bass:bass.wav" "lead:melodic.wav"; do
   role="${pair%%:*}"; src="${pair##*:}"; mdir="$ROOT/models/${SND}_$role"
+  if [ "$role" = bass ]; then sdir="$BASS_DIR"; midi="$BASS_MIDI"; else sdir="$TRACK"; midi="$PACK/${src%.wav}.mid"; fi
+  # what the grains are cut from: retrain when it changes (the view appears / the 808 moves / the transcription changes)
+  srckey="$("${PH[@]}" inputs-key "-" "$sdir/$src" "$midi")"
   # A stem Basic Pitch found no notes in has no such part (Tatuagem No Pescoco 2026-11-07: the bass stem is Demucs
   # bleed at -63 dB, the low end is a tuned 808 KICK in the drums stem). The generator then writes no voice for it;
   # there is nothing to cut grains from. An unreadable MIDI prints nothing and is trained as before (and fails there).
-  if [ "$("${PH[@]}" midi-notes "$PACK/${src%.wav}.mid" 2>/dev/null)" = 0 ]; then
-    log "stage 5: no $role part (${src%.wav}.mid has no notes) - no ${SND}_$role instrument, the piece has no $role voice"
+  if [ "$("${PH[@]}" midi-notes "$midi" 2>/dev/null)" = 0 ]; then
+    log "stage 5: no $role part ($(basename "$midi") has no notes) - no ${SND}_$role instrument, the piece has no $role voice"
     continue
   fi
   INST_MODELS+=("$mdir")
   # a model trained before note-aligned grains (no grain_mode) or by other grain code is retrained
   if stage_done "$mdir/metadata.json" && [ "$(jget "$mdir/metadata.json" grain_mode)" = notes ] \
-     && [ -n "$INST_VER" ] && [ "$(cat "$mdir/.code" 2>/dev/null)" = "$INST_VER" ]; then
+     && [ -n "$INST_VER" ] && [ "$(cat "$mdir/.code" 2>/dev/null)" = "$INST_VER" ] \
+     && [ "$(cat "$mdir/.source" 2>/dev/null)" = "$srckey" ]; then
     log "stage 5 skip: models/${SND}_$role trained"; continue; fi
-  midi="$PACK/${src%.wav}.mid"   # the stem's transcribed notes (stage 2): one grain per note, length from the music
-  log "stage 5: train granular ${SND}_$role from $src (note-aligned, $midi)"
-  (cd "$ROOT" && ./bin/midi-grep generative train "$TRACK/$src" --name "${SND}_$role" --mode granular \
+  log "stage 5: train granular ${SND}_$role from $sdir/$src (note-aligned, $midi)"   # one grain per transcribed note
+  (cd "$ROOT" && ./bin/midi-grep generative train "$sdir/$src" --name "${SND}_$role" --mode granular \
       --midi "$midi" --output "$ROOT/models") >&2 \
     || die "stage 5 train ${SND}_$role failed"
   [ -z "$INST_VER" ] || echo "$INST_VER" > "$mdir/.code"
+  echo "$srckey" > "$mdir/.source"
 done
 # the manifest is rebuilt when its inputs (the drum kit from stage 4, the models trained above) are newer than it
 if stage_done "$PACK/instruments/samples.json" "$PACK/instruments/verification.json" && base_ok "$PACK/instruments/samples.json" "$INST_BASE" \

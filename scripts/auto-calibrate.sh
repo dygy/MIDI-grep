@@ -186,6 +186,10 @@ else
   DRUM_MODE="bank"
 fi
 PACK="$STEMS/sample_pack"
+# the bass notes: the --gen-stems view's own transcription when stage 3c moved the 808 there (editable-pipeline 3c),
+# else the track's (stage 2)
+BASS_MIDI="$PACK/bass.mid"
+[ "$GEN_STEMS" != "$STEMS" ] && [ -s "$GEN_STEMS/bass.mid" ] && BASS_MIDI="$GEN_STEMS/bass.mid"
 # --genre drives the sound palette + the chance-control lookup; --genre-ref (default: same) is the genre the REFERENCE
 # tables are consulted for (eval floors, gate margins, calibration-memory neighbours). The pipeline passes "unreferenced"
 # when the detector could not decide: the gate then uses its default floor and memory finds no same-genre neighbours.
@@ -266,7 +270,7 @@ gen_piece() {
   [ -n "$BASS_SOUND" ] && snd_arg+=(--bass-sound "$BASS_SOUND")
   [ -n "$LEAD_SOUND" ] && snd_arg+=(--lead-sound "$LEAD_SOUND")
   "$PY" "$GEN" --stems-dir "$GEN_STEMS" --pack-dir "$PACK" \
-    --bass-midi "$PACK/bass.mid" --lead-midi "$PACK/melodic.mid" \
+    --bass-midi "$BASS_MIDI" --lead-midi "$PACK/melodic.mid" \
     --drums-json "$PACK/drums_bands.json" --base-url "$BASE" ${inst_arg[@]+"${inst_arg[@]}"} ${snd_arg[@]+"${snd_arg[@]}"} \
     --mode "$MODE" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --num-bars "$BARS" \
     --drum-mode "$DRUM_MODE" \

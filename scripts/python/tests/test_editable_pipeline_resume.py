@@ -184,7 +184,8 @@ def _inputs_key(repo) -> str:
     pack = repo.track / "sample_pack"
     return subprocess.run([sys.executable, str(repo.root / "scripts" / "python" / "pipeline_helpers.py"), "inputs-key",
                            str(bpm), str(pack / "drums_bands.json"), str(pack / "instruments" / "samples.json"),
-                           str(repo.track / "repair.json")], capture_output=True, text=True, check=True).stdout.strip()
+                           str(repo.track / "repair.json"), str(pack / "bass.mid")],   # no stage-3c view: the track's bass notes
+                          capture_output=True, text=True, check=True).stdout.strip()
 
 
 def _seed_best(repo, mode: str, params: str, code: str | None = None, inputs: str | None = None) -> Path:
@@ -241,6 +242,29 @@ def test_best_from_other_inputs_reruns_the_stage(repo):
     r = run(repo, "--local", "--mode", "sample-instrument")
     assert any(c.startswith("auto-calibrate") for c in calls(repo)), r.stderr
     assert "made from other inputs" in r.stderr and not (w / "result.json").exists()
+
+
+def test_a_moved_808_gives_the_bass_its_notes_and_grains_from_the_view(repo):
+    """BibiBabydoll (2026-11-08): stage 3c moved the 808 into the view, but the bass notes (stage 2) and the bass
+    instrument (stage 5) still came from the track's bass.wav - vocal bleed. Both now come from the view."""
+    run(repo, "--local", "--mode", "sample-instrument")     # no view yet: both models record what they were cut from
+    (repo.calls).write_text("")
+    view = repo.pw / "stems"
+    view.mkdir(parents=True)
+    shutil.copy(repo.track / "bass.wav", view / "bass.wav")
+    sp = repo.root / "scripts" / "python"
+    (sp / "stem_repair.py").write_text(f'print({str(view)!r})\n')
+    (sp / "transcribe.py").write_text('import sys\nfrom pathlib import Path\nopen(sys.argv[2], "w").write("mid")\n'
+                                      'open(Path(__file__).parent / "calls.log", "a").write("transcribe " + sys.argv[1] + "\\n")\n')
+    r = run(repo, "--local", "--mode", "sample-instrument")
+    log = calls(repo)
+    assert f"transcribe {view / 'bass.wav'}" in log, r.stderr
+    assert (view / "bass.mid").is_file()
+    assert "train trk_bass" in log and "train trk_lead" not in log    # the bass model's source changed; the lead's did not
+    assert f"from {view}/bass.wav" in r.stderr
+    (repo.calls).write_text("")
+    r = run(repo, "--local", "--mode", "sample-instrument")             # nothing changed: neither is redone
+    assert not any(c.startswith(("transcribe", "train")) for c in calls(repo)), r.stderr
 
 
 # --- a best render calibrated by other code is rerun (a code change must reach the output) ----------------
