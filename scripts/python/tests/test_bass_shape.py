@@ -322,3 +322,11 @@ def test_a_written_pitch_the_stem_supports_is_never_changed(tmp_path):
     ev = BS.StemEvidence.load(stem)
     notes, info = BS.shape_bars(["a1 ~ ~ ~ ~ ~ ~ ~ e2 ~ ~ ~ ~ ~ ~ ~"], bpm, ev, reg)
     assert [n.pitch for n in notes] == [33, 40] and info["repitched"] == 0
+
+
+def test_uncovered_bar_hits_are_not_duck_evidence():
+    """A loud bar's full-band onsets (detect_drums_bands v2 `uncovered_bar`) are played, not counted as kicks
+    for the duck measurement (VAGABUNDO: they diluted a real 3.4 dB duck under the significance bound)."""
+    hits = [{"time": 1.0, "type": "bd"}, {"time": 2.0, "type": "bd", "uncovered_bar": True},
+            {"time": 2.5, "type": "sd"}, {"time": 3.0, "type": "bd", "uncovered_bar": False}, {"time": 1.0, "type": "bd"}]
+    assert BS.duck_kick_times(hits) == [1.0, 3.0]

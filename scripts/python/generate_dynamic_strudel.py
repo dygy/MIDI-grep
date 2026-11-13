@@ -981,8 +981,7 @@ def main() -> int:
     if args.bass_duck == "auto" and bass_bars and args.drums_json and args.drums_json.exists() \
             and args.drum_mode != "realstem":
         try:
-            kicks = sorted({h["time"] for h in json.loads(args.drums_json.read_text()).get("hits", [])
-                            if h.get("type") == "bd"})
+            kicks = BS.duck_kick_times(json.loads(args.drums_json.read_text()).get("hits", []))
             rms_f, hop_f = BS.stem_rms_fine(args.stems_dir / "bass.wav")
             bass_duck = BS.measure_duck(rms_f, hop_f, kicks, diag=duck_diag)
             if bass_duck and kicks and kicks[0] < BS.DUCK_MIN_T:
