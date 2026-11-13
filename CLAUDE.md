@@ -33,8 +33,15 @@ These rules govern *how* to work, independent of the audio domain.
 ### Improvement Loop (owner preference, 2026-10-19)
 Sound-quality work runs as a continuous self-testing loop on ONE `improve/<theme>` branch — measure → fix +
 regression test → static gate → render + score both reference tracks vs the previous best → commit if it improved,
-revert if not → next gap. No PR / `/code-review` / keep-drop question per change; one PR per batch (the owner merges).
+revert if not → next gap. No PR / `/code-review` / keep-drop question per change; one PR per batch.
 Details: `context/product/delivery-flow.md` §11.
+
+### Merge PRs yourself (owner rule, 2026-11-13)
+Every PR is merged by the session that opened it as soon as the static gate (Go / pytest / Node) is green and the
+review findings are fixed - no "merge now / leave open" question, no waiting for the owner ("у нас тут не ентерпрайз").
+Default `gh pr merge <n> --squash --delete-branch`; a stacked chain is merged bottom-up with `--merge` so the later
+branches stay ancestors. Then update `context/product/roadmap.md` Shipped. Still asked: product decisions and
+irreversible actions outside the repo (deleting data, publishing, external services).
 
 ### Clarifying Questions Budget
 Ask at most ONE round of clarifying questions before taking action. If the request is ambiguous, pick the most likely interpretation, state your assumption, and proceed. Do not use `AskUserQuestion` for routine git operations, stash decisions, or small implementation choices.
