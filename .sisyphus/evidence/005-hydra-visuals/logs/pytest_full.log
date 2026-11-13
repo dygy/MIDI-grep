@@ -1,0 +1,4 @@
+    y, sr_native = __audioread_load(path, offset, duration, dtype)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+950 passed, 101 skipped, 9 warnings in 582.61s (0:09:42)

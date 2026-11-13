@@ -214,6 +214,18 @@ approximation stands in for a failed render). `internal/codegen`'s tests fail wh
 not exist (the web UI used to call the deleted `ai_code_generator.py`). **Only a real-Strudel render (offline renderer by default, or the BlackHole recorder) may
 gate accept/reject decisions.**
 
+### Hydra Visuals (spec 005, `scripts/python/visuals/`)
+
+An optional stage after promotion, outside scoring: `python -m visuals <track dir>` measures the track's vision
+(metadata, CLAP scene/mood ranking of `instrumental.wav`, centroid, sections), asks the self-hosted Ollama model for a
+scene prompt + Hydra chain, paints the scene with a self-hosted diffusers model (default `stabilityai/sd-turbo`, MPS),
+and writes `vNNN/visuals.strudel` = `output.strudel` + a Hydra block whose controls are queried from the piece's own
+bar arrays at Strudel's clock. `scripts/node/src/check-hydra.ts` runs the file headless (pinned @strudel/web +
+hydra-synth 1.4.0) and gates the chain (scene recognizable at layout scale, controls move, motion follows the pulses); a chain that
+fails falls back to the rule-built one. `output.strudel`, renders and scores are untouched. The editable pipeline runs it as
+stage 11 on every promoted piece, after all renders (the Ollama and diffusion models never load beside the renderer on
+24 GB); a visuals failure is recorded in the run summary, not a run failure.
+
 ### Comparison & Eval Gate
 
 - **`scripts/python/compare_audio.py`** — rendered-vs-original similarity. Uses **MAE** on
@@ -298,7 +310,8 @@ driven by generated/edited `note()` bar arrays — the "dynamic Strudel" path in
 **Editable pipeline stage 10 (report).** `scripts/editable-pipeline.sh` ends every promoted `vNNN/` with
 `pipeline_helpers.py report` (`build_report`): charts (made in a temp dir — `compare_audio.py --chart`
 overwrites `comparison.json`), render stems (`solo_stems.py`: the renderer plays one voice group at a time, the others muted with a trailing `.gain(0)` so orbits and ducking survive; `--render-stems demucs` keeps Demucs on the render), `stem_comparison.json`, `iterations.json` from the
-calibration workdir (`was_best` only for a byte-identical render) and `report.html`. Report audio is 128k mp3
+calibration workdir (`was_best` only for a byte-identical render; when a finishing stage - bass-shape trial, lead fit,
+loudness or master-bus round - promoted its own render, that render is appended as the last iteration, e.g. `mix1 (loudness)`) and `report.html`. Report audio is 128k mp3
 twins (`render.mp3`, `embed/`, `iterations/`), reused only while newer than their source. The report is
 mandatory: a failed or missing `report.html` aborts the driver.
 

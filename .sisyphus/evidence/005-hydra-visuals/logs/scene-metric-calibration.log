@@ -1,0 +1,9 @@
+track          chain                           layout   pixel  motion  verdict @0.5 layout
+VAGABUNDO NÃO  fallback                         0.919   0.658    5.71  PASS 
+VAGABUNDO NÃO  llm (rejected)                   0.697   0.437    5.25  PASS 
+VAGABUNDO NÃO  washout: osc over 95%            0.026   0.034    1.54  FAIL scene not recognizable: mean luminance correlation 0.026 < 0
+VAGABUNDO NÃO  smear: feedback .9 + warp .3     0.278   0.183    1.30  FAIL scene not recognizable: mean luminance correlation 0.278 < 0
+Regime CLT (Dj fallback                         0.827   0.479    4.59  PASS 
+Regime CLT (Dj llm (rejected)                   0.525   0.275    3.97  PASS 
+Regime CLT (Dj washout: osc over 95%            0.015   0.025    1.93  FAIL scene not recognizable: mean luminance correlation 0.015 < 0
+Regime CLT (Dj smear: feedback .9 + warp .3     0.198   0.105    1.20  FAIL scene not recognizable: mean luminance correlation 0.198 < 0

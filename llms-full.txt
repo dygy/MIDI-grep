@@ -115,6 +115,7 @@ flagged `reference_floor: false` ("no measured floor for ..."); `record-floor` r
 | `thin_patterns.py` | Pattern-density control to match onset density |
 | `generate_report.py` | Self-contained HTML report (DAW player, isolated stem groups, shimmer loading) |
 | `audio_to_strudel_params.py` | AI effect-parameter suggestion from spectral/dynamic analysis |
+| `visuals/` (`python -m visuals`) | **Hydra visuals** (`scripts/python/visuals/`, spec 005; `cd scripts/python && .venv/bin/python -m visuals <track dir> [--version vNNN]`): a realistic scene painted by a self-hosted diffusion model (`--image-model`, default `stabilityai/sd-turbo` via diffusers on MPS) from a prompt the self-hosted Ollama model (`--ollama-model`, default `mistral-small`) writes from the measured track vision (metadata, CLAP scene/mood ranking of `instrumental.wav`, centroid, sections), animated by a Hydra chain whose controls (kick/snare/hat, bassHit/bassWave, leadHit/leadHue, chordDepth, energy) are queried live from the piece's own bar arrays at Strudel's clock. Writes `vNNN/visuals.strudel` (the piece + the Hydra block; `output.strudel` is untouched, no score changes), `visual.jpg`, `visuals.json`. `scripts/editable-pipeline.sh` runs it as stage 11 on every promoted piece, after all renders (`--no-visuals` skips; a failure is logged and recorded in the summary's `visuals`, it does not fail the run). The LLM chain must pass a whitelist and the headless check `scripts/node/dist/check-hydra.js` (scene luminance corr at layout scale >= 0.5 against the scene zoomed as the chain shows it, every wired control moves, strongest-pulse quarter of frames moves >= 1.2x the weakest), else the fallback chain is used. The prompt shows no example chain (mistral-small copied it), only the shape, the piece's live controls and each colour step's unchanged value; the whitelist also rejects scroll*/modulateScroll* (Hydra wraps them: a seam), controls outside arrow functions, bare `PI`, a SOURCE in a number slot, a speed on the photo and a control in any argument Hydra multiplies by `time` (osc speed, osc frequency unless its speed is 0, noise offset, gradient/rotate speed: each hit jumped the waves by time x change, further the longer the piece played), and bounds those speeds to one pattern period per bar of the piece, with one LLM repair round on the errors. The check runs Hydra at the piece's own time (seconds played at each frame), as the REPL does. The scene is read through `scene` (src with mirrored edges, `hydra_code.SCENE_SOURCE`) zoomed by 1 + 2*MAX_WARP. Ollama unloads after each answer (`keep_alive: 0`) so mistral-small (~14 GB) never sits beside the diffusion model. |
 | `rave/` | RAVE generative pipeline (cli, pipeline, trainer, repository, timbre_embeddings) |
 
 ## 5. Node/TypeScript renderers (`scripts/node/src/`)
@@ -125,6 +126,7 @@ flagged `reference_floor: false` ("no measured floor for ..."); `record-floor` r
   CodeMirror `cmView.view.dispatch` (not textContent); call `setSinkId()` on AudioContext AFTER
   clicking play; `--autoplay-policy=no-user-gesture-required`; default (not incognito) context;
   `headless:false`. Leading-silence fix: ffmpeg `silenceremove=start_periods=1:...`.
+- `check-hydra.ts` — headless check of a `visuals.strudel` (spec 005): pinned @strudel/web + `hydra-synth` 1.4.0, `initHydra` shimmed like `@strudel/hydra`, Strudel's clock set by hand AFTER `repl.evaluate` (evaluate re-points the time source), Hydra ticked at 30 fps over a window per section; writes `check.json` + one frame per section. The scene gate correlates luminance at LAYOUT scale (block means ~W/40): pixel correlation punished texture (Regime CLT: a plainly recognizable street at pixel 0.36) and is only reported. A sample-instrument piece's `samples("url")` is rewritten to single quotes and stubbed (nothing plays; the pack host must not matter). Calibration 2026-10-30: fallback 0.83-0.92, LLM chains 0.53-0.70, deliberately wrecked chains 0.02-0.28. No `--use-angle=swiftshader` (no WebGL on macOS headless).
 - `render-strudel-node.ts` — REMOVED (Jun 2026; an emulation, unlike the offline renderer which IS Strudel).
   Build: `cd scripts/node && npm install && npm run build` (puppeteer + tsc are required).
 - Recorder capture (Oct 2026): RAW device stream + one uniform speed correction from the samples/
@@ -172,7 +174,8 @@ Keyed by URL or file hash. Stems: melodic/drums/bass/vocals.wav + `.version`. Pe
 comparison.json, charts, ai_params.json, synth_config.json, report.html (the `extract` path).
 Editable pipeline: the track dir also holds `original.wav`, `instrumental.wav`, `sample_pack/`, `.pipeline/<mode>/`
 (calibration workdirs: `best.*`, `iters.tsv`, `gate.txt`, `result.json`); promoted `vNNN/` = `output.strudel`, `render.wav`,
-`comparison.json`, `metadata.json`, `env_correction.json` + the stage-10 report files.
+`comparison.json`, `metadata.json`, `env_correction.json` + the stage-10 report files + the stage-11 visuals
+(`visuals.strudel`, `visual.jpg`, `visuals.json`, `visuals_check/`).
 
 ## 8. ClickHouse learning
 

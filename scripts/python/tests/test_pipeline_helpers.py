@@ -5,6 +5,7 @@
 from __future__ import annotations
 
 import json
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -13,6 +14,7 @@ import pytest
 
 SCRIPTS = Path(__file__).resolve().parent.parent
 sys.path.insert(0, str(SCRIPTS))
+sys.path.insert(0, str(SCRIPTS.parent.parent))  # eval.gate: the file alone failed with "No module named 'eval'"
 
 from pipeline_helpers import RunMeta, next_version_dir, num_bars, promote_run, slug_from_title  # noqa: E402
 
@@ -28,9 +30,17 @@ def test_slug_folds_accents_and_kebabs(title: str, slug: str) -> None:
     assert slug_from_title(title) == slug
 
 
-def test_slug_with_no_ascii_is_an_error() -> None:
+def test_slug_with_no_letters_is_an_error() -> None:
     with pytest.raises(ValueError):
         slug_from_title("!!!")
+
+
+def test_a_title_in_a_non_latin_script_gets_a_stable_ascii_slug() -> None:
+    # 2026-11-02: "אסף אמדורסקי - רכבת לצפון" folded to nothing and the pipeline died at stage 1 ("cannot derive a slug")
+    slug = slug_from_title("אסף אמדורסקי - רכבת לצפון")
+    assert re.fullmatch(r"track-[0-9a-f]{10}", slug)
+    assert slug_from_title(" אסף אמדורסקי - רכבת לצפון ") == slug        # stable: same title, same slug
+    assert slug_from_title("אסף אמדורסקי - שיר אחר") != slug
 
 
 @pytest.mark.parametrize("dur,bpm,bars", [(137.76, 136, 78), (151.0, 130, 81), (1.0, 120, 0), (240.0, 120, 120)])
