@@ -2,7 +2,8 @@
 
 _This roadmap outlines our strategic direction based on customer needs and business goals. It focuses on the "what" and "why," not the technical "how."_
 
-> **Status (2026-10-29):** the current work is **Phase 11** (editable pipeline, honest scoring, generalization).
+> **Status (2026-11-13):** the current work is **Phase 11** (editable pipeline, honest scoring, generalization).
+> Merged through PR #38; PRs #39–#41 await merge; branch `improve/bass-fidelity` carries the orchestrator work (no PR yet).
 > Phases 1–10 describe the original `midi-grep extract` path (LLM codegen, `--iterate`); their similarity numbers are
 > on the pre-2026-10-18 time-averaged scale, many measured on BlackHole renders that were later found pitch-shifted.
 
@@ -536,16 +537,44 @@ measured runs: `eval/thresholds.yaml` `modes:` and `eval/datasets/reference_trac
   sample cache; reference renders re-made
 - [x] **Parallel renders per calibration iteration; cached reference side in `compare_audio`** (PR #27):
   `render_jobs.py`, `compare_cache.py`
+- [x] **Docs refreshed to the current pipeline** (PR #28, #31: README + Architecture section)
+- [x] **Calibration memory keeps step order across separate writes** (PR #29)
+- [x] **Hang watchdog no longer counts a spinning page's CPU as progress** (PR #30)
+- [x] **Genre: owner labels first, kNN over labelled tracks, honest CLAP, no foreign-genre floors** (PR #32); a label
+  added after the first run reaches the track, five Dj Brunin XM tracks labelled (PR #35)
+- [x] **Bass samples: silent grains never ship, loopable grains preferred, sample-layer lpf over sounding energy** (PR #33)
+- [x] **yt-dlp carries a signed-in session past the bot check** (PR #34)
+- [x] **Eight reference versions rebuilt on main; floors by the same rule** (PR #36: 0.85 / 0.84 sample-instrument,
+  0.79 / 0.77 synth)
+- [x] **Stage 3c stem repair: the 808 Demucs filed under drums plays as bass** (PR #37)
+- [x] **Web UI codegen + `extract --render` on the real Strudel renderer; dead scripts removed** (PR #38)
+
+### Awaiting merge
+
+- [ ] **Hydra visuals over a painted scene, wired to the piece's patterns** (PR #39, spec 005; stage 11)
+- [ ] **Automatic genre labels: audio and published metadata must agree, no owner hints** (PR #40)
+- [ ] **A stem with no transcribed notes gets no instrument instead of stopping the run** (PR #41)
+
+### On `improve/bass-fidelity` (no PR yet; stacked on #39–#41)
+
+- [ ] **Sound fixes:** bass notes the stem's f0 and chroma contradict get re-pitched, the 808 behind vocal bleed moves to
+  the bass view (stage 3c rule v3), a loud bar never ends with no drum hit; the bass part and instrument come from the
+  view when stage 3c moved anything
+- [ ] **Orchestrator:** self-diagnosis (`diagnose.py`, stage 12, RED flags vs the references), autopilot (`autopilot.py`:
+  queue of failing tracks, remedies tried on throw-away copies, references once per batch, report in Russian),
+  environment doctor, disk budget (`cache_budget.py`, stage 13), RAM guard for Ollama
+- [ ] **Calibration:** a warm start keeps its short budget only while cal1 reproduces its source's score
+- [ ] **Diagnosis judges per-stem metrics against the stage-3c view**; trials skip visuals and record what they moved
 
 ### Open
 
 - [ ] **Per-voice grid phase for the lead.** The drums already quantise on their measured beat phase; the lead needs the
   same, which first needs the onset detector's latency calibrated.
-- [ ] **Genre detection mislabels a retro wave / Polish electro track as brazilian_funk.** "Enter - Nigdy Więcej Wojny"
+- [x] **Genre detection mislabels a retro wave / Polish electro track as brazilian_funk.** Fixed in PR #32 (+ #35). "Enter - Nigdy Więcej Wojny"
   was stamped brazilian_funk (CLAP score 0.484 vs lofi 0.431; on raw similarity it ranked third), so it was gated against
   brazilian_funk floors and a brazilian_funk control - its sample-instrument 0.834 "FAIL" is not a valid verdict. Fix in
   progress (`fix/genre-detection`): audio evidence first, a margin rule for uncertain picks, no foreign-genre floors.
-- [ ] **Bass on a constant-level stem** (found on that track): notes end on a 0.3 dB wobble, loops sit in the grain's
+- [x] **Bass on a constant-level stem** (found on that track; fixed in PR #33): notes end on a 0.3 dB wobble, loops sit in the grain's
   fade-out, the bass lpf comes from the median over rests; silent / loopless bass samples enter the pack. Fix in progress
   (`improve/bass-sustain`).
 - [ ] **Mix brightness on "Enter - Nigdy Więcej Wojny"** (centroid 974 Hz vs 1706 Hz in the instrumental).
@@ -648,3 +677,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.67 | 2026-02-24 | **Genre-Aware Sound RAG:** `retrieve_genre_context()` injects ~15 genre-appropriate sounds into LLM prompts (800→40 tokens), reducing hallucinated sound names. Injected into `ollama_codegen.py` and `ollama_agent.py`. |
 | 1.68 | 2026-06-22 | **Phase 10 batch (4 items):** (1) Concrete gain multipliers in LLM feedback (`_build_band_advice` → "multiply bassFx.gain() by X"); (2) Genre-specific synthesis profiles (`synth_profiles.py`, `analyze_synth_params.py --genre`, plumbed from Go) read by the `dist/` renderer; (3) Sub-bass via profile sub_octave_gain + master.hpf 20Hz + octave-1 prompt bias; (4) Sidechain ducking in generated Strudel (bass `.orbit(2)`, kick `.duckorbit(2).duckdepth().duckattack()`), per-genre depth. |
 | 1.69 | 2026-10-29 | **Phase 11 added:** editable pipeline, rescaled score + different-song gate, offline deterministic renderer, four reference tracks (PRs #15–#27); BlackHole "100%" section marked superseded; open items listed |
+| 1.70 | 2026-11-13 | Phase 11 caught up: PRs #28–#38 shipped, #39–#41 awaiting merge, `improve/bass-fidelity` orchestrator work listed; genre-mislabel and constant-level-bass items closed |
