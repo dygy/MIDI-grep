@@ -13,9 +13,9 @@ any track/genre because it only ever reacts to that render's own measured gap.
 Levers (all multiply the *current* value, sqrt-damped + clamped to avoid oscillation):
   sub-gain   <- sub_bass band   (raise to fill 20-60 Hz, lower if booming; no absolute cap - each step is the
                                  damped correction that closes the observed band ratio)
-  sub-up     <- sub_bass band   (0/1: the sine layer an octave above the bass note. Tried ONCE as its own step
-                                 when the render's sub_bass share exceeds the original's;
-                                 the loop's tie/revert rule keeps whichever scores better)
+  sub-up f   <- sub_bass:bass split (fraction 0..1 of the sine layer's energy played an octave above the bass note:
+                                 moves share between sub_bass and bass without changing the layer's total; set from the
+                                 measured split imbalance by sub_split_step(), its own step: gains hold while it moves)
   bass-mult  <- bass band       (60-250 Hz body of the pitched bass sample)
   cal-lead   <- low_mid+mid     (lead/melodic body; the usual deficit)
   lead-lpf   <- high+high_mid   (excess brightness -> lower the cutoff)
@@ -68,6 +68,63 @@ VOICE_STEP_LO, VOICE_STEP_HI = 0.5, 2.0
 
 def clamp(x: float, lo: float, hi: float) -> float:
     return max(lo, min(hi, x))
+
+
+def sub_split_step(ob: dict, rb: dict, f: float, f_max: float = 1.0, parent: dict | None = None,
+                   eps: float = 1e-4) -> float | None:
+    """Next octave-up fraction ``f`` of the sine layer from the measured sub_bass:bass SPLIT, or None (no move).
+
+    The layer is two sines from the same notes, energy (1-f) at the note (feeds sub_bass) and f an octave up (feeds
+    bass), so f moves energy between the two bands and leaves the layer's total alone. With E = the layer's total
+    share of the mix::
+
+        render sub_bass = S_other + E (1-f)        render bass = B_other + E f
+
+    Target: the render splits the sub_bass+bass pair the way the original does (the pair's total is the gain levers'
+    business): sub_bass should hold ``T So/(So+Bo)`` with T = Sr+Br. The share to move from sub_bass to bass is
+    ``D = Sr - T So/(So+Bo)`` (D < 0: back), and the fraction of the layer that carries it is ``D / E``.
+
+    E is not measured per layer (one render, mix shares only), so:
+      * with a parent render whose only difference was f (same sub-gain and bass-mult: ``parent`` = its band shares
+        and knobs), E is MEASURED: (Sr_parent - Sr)/(f - f_parent) and (Br - Br_parent)/(f - f_parent) both equal E, and
+        the mean is used (the secant step);
+      * otherwise E is bounded above by the donor band's own share: the layer's energy in the donor band cannot
+        exceed that band's share, E (1-f) <= Sr (moving up) or E f <= Br (moving back). An upper bound on E gives a step
+        that undershoots the target and never passes it; the next step then has a measurement. The measured E is also
+        capped by that bound.
+    No tuned constant. A split inside ``SHARE_DEAD_BAND`` (the share-ratio wobble demucs bleed alone causes) does not
+    move f, and f stays within [0, f_max] (f_max = 0 when the generator refused the up sine).
+    """
+    so, bo = ob.get("sub_bass", 0.0), ob.get("bass", 0.0)
+    sr, br = rb.get("sub_bass", 0.0), rb.get("bass", 0.0)
+    split = ((so + eps) / (sr + eps)) / ((bo + eps) / (br + eps))      # orig/rend sub per bass; 1 = the same split
+    if 1 / SHARE_DEAD_BAND <= split <= SHARE_DEAD_BAND:
+        return None
+    pair, o_pair = sr + br, so + bo
+    if pair <= 0 or o_pair <= 0:
+        return None
+    move = sr - pair * so / o_pair                                      # share to carry sub_bass -> bass
+    if move > 0 and f < 1.0:
+        e_max = sr / (1.0 - f)
+    elif move < 0 and f > 0.0:
+        e_max = br / f
+    else:
+        return None                                                     # nothing left to move that way
+    e = e_max
+    if parent is not None and abs(f - parent["f"]) > 1e-6:
+        df = f - parent["f"]
+        e_meas = 0.5 * ((parent["rb"].get("sub_bass", 0.0) - sr) / df + (br - parent["rb"].get("bass", 0.0)) / df)
+        if math.isfinite(e_meas) and e_meas > 0:
+            e = min(e_meas, e_max)
+    if e <= 0:
+        return None
+    return clamp(f + move / e, 0.0, max(0.0, min(1.0, f_max)))
+
+
+def fmt_fraction(f: float) -> str:
+    """0 / 1 as the integers the binary lever printed (old --start strings and tsv rows stay byte-identical)."""
+    f = round(float(f), 3)
+    return str(int(f)) if f in (0.0, 1.0) else f"{f:.3f}".rstrip("0")
 
 
 def measured_exponent(r_now: float, r_parent: float | None, f: float, sign: float) -> float:
@@ -184,11 +241,14 @@ def main() -> int:
     # generator's own defaults so the calibrator is usable from a cold start.
     ap.add_argument("--bass-mult", type=float, default=0.40)
     ap.add_argument("--sub-gain", type=float, default=0.7)
-    ap.add_argument("--sub-up", type=int, choices=[0, 1], default=0,
-                    help="EFFECTIVE sub-sine octave of the last render (generator summary 'sub_up'): 1 = an octave above "
-                         "the written bass note")
-    ap.add_argument("--sub-up-locked", type=int, choices=[0, 1], default=0,
-                    help="1 = the octave-up step was already tried in this run and lost: do not propose it again")
+    ap.add_argument("--sub-up", type=float, default=0.0,
+                    help="EFFECTIVE fraction (0..1) of the sub-sine layer's energy an octave above the written bass note, "
+                         "of the last render (generator summary 'sub_up'; the old 0/1 values read as f = 0 / 1)")
+    ap.add_argument("--sub-up-max", type=float, default=1.0,
+                    help="the most the generator can play up (summary 'sub_up_max'; 0 = it refused the up sine)")
+    ap.add_argument("--parent-knobs", default="",
+                    help="the knobs 'BM SG CL LLPF HG MG BL LH SU' of the render this one was stepped from (with "
+                         "--parent-comparison): when only the octave fraction differs, the split step is a measured secant")
     ap.add_argument("--cal-lead", type=float, default=1.0)
     ap.add_argument("--lead-lpf", type=int, default=5000)
     ap.add_argument("--hat-gain", type=float, default=0.0)
@@ -250,7 +310,7 @@ def main() -> int:
     cur = {
         "bass_mult": args.bass_mult,
         "sub_gain": args.sub_gain,
-        "sub_up": int(args.sub_up),
+        "sub_up": min(1.0, max(0.0, float(args.sub_up))),
         "cal_lead": args.cal_lead,
         "lead_lpf": float(args.lead_lpf),
         "hat_gain": args.hat_gain,
@@ -345,27 +405,50 @@ def main() -> int:
     # lever blind. The step is the damped correction that closes the OBSERVED ratio (sqrt = amplitude from an
     # energy share ratio, further damped by damp() and limited to damp()'s per-step bounds); positive by construction.
     #
-    # Octave: when the render's sub_bass share is OVER the original's, more gain cannot help; moving the sine an
-    # octave up shifts its energy from sub_bass into bass. That is a different hypothesis, so it is its own step (gain
-    # unchanged) and is scored by the loop like any other (revert / tie rules, then locked for the run). It is NOT
-    # behind the share dead band: that band guards levers that act silently on noise, this one is a trial the loop
-    # scores - and Regime CLT sample (render sub 49.7% vs original 40.4%, ratio 0.81, inside the band) gained
-    # +0.042 overall (0.7510 -> 0.7933) from exactly this step, which the dead band had kept shut.
-    sub_over = r_sub < 1.0
-    nxt["sub_up"] = int(args.sub_up)
-    flipping = sub_over and not args.sub_up and not args.sub_up_locked
-    # WHICH BAND EACH LAYER FEEDS depends on the octave. Octave 0: the sine sits at the bass fundamental, inside
-    # sub_bass (20-60 Hz), and the main layer carries the bass band. Octave up: the sine (note +12, low-pass x2) lands in
-    # the bass band, and the sub_bass share is left to the main layer. So the two gains swap their driving ratios:
-    # sub-gain follows `bass` and bass-mult follows `sub_bass`. Driving sub-gain by sub_bass with the octave up (what
-    # this did) raises a layer that no longer feeds that band: Regime CLT synth cal2->cal3 raised it 0.70 -> 0.95 while
-    # render bass was already 55% vs the original's 41% -> bass 79%, overall 0.7446 -> 0.6566, and the loop's patience
-    # (2 strikes: that step and its shortened retry) ended the run with sub_bass still 18 points off.
-    if flipping:
-        nxt["sub_up"] = 1
+    # Octave: when the sub_bass:bass SPLIT is off, more gain cannot help: moving sine energy an octave up shifts it
+    # from sub_bass into bass (or back). The dead band is the split ratio's (SHARE_DEAD_BAND): Regime CLT sample (render
+    # sub 41.1% vs the original's 34.4%, bass 31.1% vs 36.4%, split ratio 0.72) gained +0.042 overall (0.7510 -> 0.7933)
+    # from the former full flip, and it is outside the band; the stored VAGABUNDO renders (0.81-0.88) are inside it.
+    #
+    # f is CONTINUOUS (sub_split_step: the sine layer is two sines, energy 1-f at the note and f an octave up). It is its
+    # own step - the gains hold while it moves, as the binary flip held them - and is scored by the loop like any other
+    # (revert / tie rules). The binary lever moved ~30 points of share in one go and overshot (Sem Aliança: sub 45.2 ->
+    # 64.4 -> reverted, locked; Tatuagem / BibiBabydoll kept the flip and sat 15 / 9 points under), so there is no lock
+    # any more: a split inside the dead band simply does not move f, and a step is the share the split is off by
+    # divided by the share the layer can carry (sub_split_step).
+    parent_bands = None
+    if args.parent_comparison and args.parent_comparison.exists():
+        try:
+            pd = json.loads(args.parent_comparison.read_text())
+            parent_bands = (pd["original"]["bands"], pd["rendered"]["bands"])
+        except (OSError, ValueError, KeyError):
+            parent_bands = None
+
+    f_cur = float(cur["sub_up"])
+    parent_split = None
+    if parent_bands is not None and args.parent_knobs.split():
+        try:
+            pk = [float(x) for x in args.parent_knobs.split()]
+            # a measurement only when the parent differed in f alone: the level levers were held on that step
+            if len(pk) >= 9 and abs(pk[0] - cur["bass_mult"]) < 5e-4 and abs(pk[1] - cur["sub_gain"]) < 5e-4:
+                parent_split = {"f": pk[8], "rb": parent_bands[1]}
+        except ValueError:
+            parent_split = None
+    f_next = sub_split_step(ob, rb, f_cur, args.sub_up_max, parent_split)
+    splitting = f_next is not None and round(f_next, 3) != round(f_cur, 3)
+    nxt["sub_up"] = round(f_next, 3) if splitting else f_cur
+    # WHICH BAND EACH LAYER FEEDS depends on where the sine's energy sits. Mostly at the note (f < 0.5): it is inside
+    # sub_bass (20-60 Hz) and the main layer carries the bass band. Mostly an octave up: the sine (note +12, low-pass x2)
+    # lands in the bass band and the sub_bass share is left to the main layer. So the two gains swap their driving
+    # ratios: sub-gain follows `bass` and bass-mult follows `sub_bass`. (At f = 0 / 1 this is exactly the binary
+    # lever's rule.) Driving sub-gain by sub_bass with the octave up raises a layer that no longer feeds that band:
+    # Regime CLT synth cal2->cal3 raised it 0.70 -> 0.95 while render bass was already 55% vs the original's 41% ->
+    # bass 79%, overall 0.7446 -> 0.6566.
+    sine_up = f_cur >= 0.5
+    if splitting:
         nxt["sub_gain"] = round(cur["sub_gain"], 3)
     else:
-        nxt["sub_gain"] = round(cur["sub_gain"] * damp(r_bass if args.sub_up else r_sub, strength=strength("sub_gain")), 3)
+        nxt["sub_gain"] = round(cur["sub_gain"] * damp(r_bass if sine_up else r_sub, strength=strength("sub_gain")), 3)
     synth = args.mode == "synth"
     r_lm_bass = float("nan")
     cur_blpf, cur_lhpf = int(cur["bass_lpf"]), int(cur["lead_hpf"])
@@ -377,14 +460,6 @@ def main() -> int:
         except (OSError, ValueError):
             sc_stems = {}
     nxt["bass_lpf"], nxt["lead_hpf"] = cur_blpf, cur_lhpf
-
-    parent_bands = None
-    if args.parent_comparison and args.parent_comparison.exists():
-        try:
-            pd = json.loads(args.parent_comparison.read_text())
-            parent_bands = (pd["original"]["bands"], pd["rendered"]["bands"])
-        except (OSError, ValueError, KeyError):
-            parent_bands = None
 
     def parent_share_ratio(num: str, den: str) -> float | None:
         if parent_bands is None:
@@ -435,12 +510,16 @@ def main() -> int:
     # --- bass (60-250 Hz): body of the pitched bass sample --------------------------------
     # One lever per step: while the cutoff moves, bass-mult may fall but not rise (a rise would
     # re-inflate the very harmonics the cutoff is removing; cal2->cal3 did exactly that: +3%).
-    bass_corr = sample_layer_step("sub_bass" if args.sub_up else "bass", "bass_mult")     # see the layer/band assignment at the sub-gain step
-    if flipping:
-        bass_corr = 1.0       # the octave flip IS this step's bass/sub rebalance (it moved ~30 points of share in one go)
+    bass_corr = sample_layer_step("sub_bass" if sine_up else "bass", "bass_mult")     # see the layer/band assignment at the sub-gain step
+    if splitting:
+        bass_corr = 1.0       # the split move IS this step's bass/sub rebalance: a level move too would count the same share twice
     if bass_lpf_moved:
         bass_corr = min(bass_corr, 1.0)
-    nxt["bass_mult"] = round(clamp(cur["bass_mult"] * bass_corr, 0.2, 1.3), 3)
+    # No absolute ceiling (a fixed 0.2-1.3 was pegged at 1.3 on every synth track, the references included, so the
+    # bass band had no lever up - the same blindness sub-gain lost its 0.2-1.6 range for). The step is bounded like
+    # sub-gain's: the voice's own measured step (VOICE_STEP_LO..HI, power ratio -> amplitude) or damp()'s per-step
+    # bounds, and positive by construction.
+    nxt["bass_mult"] = round(cur["bass_mult"] * bass_corr, 3)
     # --- lead/melodic body: raise gain when low_mid+mid is deficient -----------------------
     lead_corr = (damp(r_body_voice, strength=0.5, lo=VOICE_STEP_LO, hi=VOICE_STEP_HI) if r_body_voice is not None
                  else damp(r_body, strength=strength("cal_lead"), hi=1.6))
@@ -539,7 +618,7 @@ def main() -> int:
         arrow = "->" if a != b else "=="
         print(f"   {k:12s} {a} {arrow} {b}", file=sys.stderr)
 
-    cli = (f"--bass-mult {nxt['bass_mult']} --sub-gain {nxt['sub_gain']} --sub-up {nxt['sub_up']} "
+    cli = (f"--bass-mult {nxt['bass_mult']} --sub-gain {nxt['sub_gain']} --sub-up {fmt_fraction(nxt['sub_up'])} "
            f"--cal-lead {nxt['cal_lead']} --lead-lpf {nxt['lead_lpf']} "
            f"--hat-gain {nxt['hat_gain']} --master-gain {nxt['master_gain']}")
     if cur_blpf > 0 and nxt["bass_lpf"] != cur_blpf:

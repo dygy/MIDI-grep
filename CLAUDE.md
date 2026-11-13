@@ -171,6 +171,14 @@ raise a steady TR808 hat layer (`--hat-gain`), which lifted brightness 70%→91%
 89.8%→92.6% in one step (the extracted lead sample is inherently darker than the original).
 Synth mode adds spectral-placement fixes (bug #11): at generation `partial_register.py` measures where the original stem's strongest partial sits relative to the transcribed fundamentals and transposes a fundamental-dominant palette voice (reference = a track-independent chromatic sweep of the sound, `probe_sound_register.py`; the shift is bounded by floor(original) so the shifted fundamental never exceeds the original's dominant partial) so its energy leaves low_mid; the calibrator adds synth-only `lead-hpf`/`bass-lpf` levers (one per step, bounded by the note material and `compare_audio.FREQ_BANDS`), a vocal-gain hold, a hat overshoot back-off, and `auto-calibrate.sh` selects BEST by margin to the gate floors.
 
+**Sub/bass split as a fraction (2026-11-13, `calibrate_dynamic.sub_split_step`, `generate_dynamic_strudel.py --sub-up f`):** the sine
+layer under the bass is two sines from the same notes - at the note (energy 1-f, feeds sub_bass) and an octave up with the low-pass
+x2 (energy f, feeds bass); f in [0,1] replaces the binary octave (f = 0 / 1 emit the old single-sine rows byte for byte; old
+0/1 params, tsv rows and calibration-memory rows read as f = 0 / 1). The calibrator sets f from the measured sub_bass:bass split of
+the mix (share to move over the share the layer can carry: bounded by the donor band's share cold, a measured secant once the
+parent render differed in f alone); the gains hold while f moves; no lock, no ceiling on `bass_mult` (per-step bounds only);
+the generator reports `sub_up_max` = 0 when it refused the up sine. ClickHouse `sub_up` is Float64 (migration 7).
+
 **Loudness stage (2026-10-20, `scripts/python/mix_dynamics.py`, run by `auto-calibrate.sh` after BEST):** the score is
 level-invariant (`compare_audio.rms_normalize`), so renders sat 6-13 dB under the mastered instrumental with crest
 17-18 dB vs ~10 and nobody saw it. One measured lever moves it: `--master-gain` onto the instrumental's RMS (up to 3

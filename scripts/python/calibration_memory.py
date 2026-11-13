@@ -163,7 +163,7 @@ def format_knobs(k: dict[str, float]) -> str:
     out = []
     for name in KNOBS:
         x = float(k.get(name, 0))
-        out.append(str(int(round(x))) if name in ("lead_lpf", "bass_lpf", "lead_hpf", "sub_up") else f"{x:.4g}")
+        out.append(str(int(round(x))) if name in ("lead_lpf", "bass_lpf", "lead_hpf") else f"{x:.4g}")
     return " ".join(out)
 
 
@@ -187,7 +187,7 @@ def make_row(*, kind: str, run_id: str, tag: str, track_key: str, mode: str, kno
         "code_version": ctx.get("code_version") or cv, "git_commit": commit, "run_id": run_id, "tag": tag,
         "parent_tag": parent if parent not in ("-", None) else "", "alpha": _f(alpha, 1.0),
         "warm_source": ctx.get("warm_source", ""),
-        **{k: _f(knobs.get(k)) for k in KNOBS[:-1]}, "sub_up": int(_f(knobs.get("sub_up"))),
+        **{k: _f(knobs.get(k)) for k in KNOBS[:-1]}, "sub_up": _f(knobs.get("sub_up")),   # fraction 0..1 (old rows: 0/1)
         "bass_shape": bass_shape if bass_shape in SHAPES else DEFAULT_SHAPE,
         "lead_fit": lead_fit,
         "env_json": json.dumps(env, separators=(",", ":")) if env else "",
@@ -410,8 +410,9 @@ def _ratio(row: dict, bands: tuple[str, ...]) -> float | None:
     return (sum(o.get(b, 0.0) for b in bands) + EPS) / (sum(r.get(b, 0.0) for b in bands) + EPS)
 
 
-def _driving_bands(knob: str, su: int) -> tuple[str, ...]:
-    # mirrors calibrate_dynamic.py: with the octave up the two gains swap their driving bands
+def _driving_bands(knob: str, su: float) -> tuple[str, ...]:
+    # mirrors calibrate_dynamic.py: with the sine mostly an octave up (f >= 0.5) the two gains swap their driving bands
+    su = su >= 0.5
     return {"sub_gain": ("bass",) if su else ("sub_bass",), "bass_mult": ("sub_bass",) if su else ("bass",),
             "cal_lead": ("low_mid", "mid")}[knob]
 
@@ -428,7 +429,7 @@ def learn_responses(rows: list[dict]) -> tuple[dict[str, float], dict[str, int]]
             if p[knob] <= 0 or c[knob] <= 0:
                 continue
             lf = math.log(c[knob] / p[knob])
-            bands = _driving_bands(knob, int(c["sub_up"]))
+            bands = _driving_bands(knob, float(c["sub_up"]))
             rp, rc = _ratio(p, bands), _ratio(c, bands)
             if abs(lf) < MIN_LOG_STEP or rp is None or rc is None:
                 continue

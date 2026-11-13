@@ -39,6 +39,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import sys
 from pathlib import Path
@@ -758,10 +759,13 @@ def main() -> int:
                          "polyphonic pile-up. Pair with a long, flat bass sample.")
     ap.add_argument("--sub-octave", type=int, default=0,
                     help="octaves to drop the sub-sine so its fundamental lands in sub_bass (1 = -12 semis)")
-    ap.add_argument("--sub-up", type=int, choices=[0, 1], default=0,
-                    help="1 = play the sub-sine an octave ABOVE the written bass note (a calibrator lever: it moves the "
-                         "layer's energy from the sub_bass band into the bass band; its low-pass moves up an octave too). "
-                         "Refused (0, warning) when the median written note an octave up would leave the bass band")
+    ap.add_argument("--sub-up", type=float, default=0.0,
+                    help="fraction f in [0,1] of the sub-sine layer's ENERGY played an octave ABOVE the written bass note "
+                         "(a calibrator lever: it moves that share of the layer from the sub_bass band into the bass band). "
+                         "The layer is two sines from the same notes: at the note with amplitude sqrt(1-f) x the sub gain, "
+                         "an octave up (low-pass x2) with sqrt(f) x the sub gain; 0 and 1 are the single-sine layers of "
+                         "the earlier binary lever. Refused (0, warning) when the median written note an octave up would "
+                         "leave the bass band")
     ap.add_argument("--dj-flow", action="store_true", default=True,
                     help="emit mutable per-voice $: channels + a section/arrangement map (normal "
                          "live-play DJ layout: comment a channel to mute, solo by soloing, slice to a drop)")
@@ -1093,20 +1097,27 @@ def main() -> int:
         if sub_octave != args.sub_octave:
             print(f"WARNING --sub-octave {args.sub_octave} would put the sub layer under {BR.SUB_FLOOR_HZ:g} Hz "
                   f"(lowest written MIDI {lowest}); using {sub_octave}", file=sys.stderr)
-    # sub-up: the whole sine layer (note AND its low-pass) moves one octave up, so it is the same layer shifted into
-    # the bass band. Refused only when the median written note an octave up would leave the bass band (its top edge,
-    # BR.BASS_CEIL_HZ = compare_audio.FREQ_BANDS bass 250 Hz): then there is no band left for it to land in.
-    sub_up = args.sub_up
+    # sub-up f: the sine layer is split in ENERGY between the note itself (feeds sub_bass) and the note an octave up with
+    # its low-pass x2 (feeds the bass band): amplitudes sqrt(1-f) and sqrt(f) x the sub gain, so the layer's total
+    # energy is the same for every f and f only moves it between the two bands. f = 0 / f = 1 are the single sine of the
+    # former binary lever, byte for byte. The up sine is refused (f = 0, and `sub_up_max` = 0 in the summary so the
+    # calibrator does not ask again) only when the median written note an octave up would leave the bass band (its top
+    # edge, BR.BASS_CEIL_HZ = compare_audio.FREQ_BANDS bass 250 Hz): then there is no band left for it to land in.
+    if not 0.0 <= args.sub_up <= 1.0:
+        raise SystemExit(f"--sub-up must be a fraction in [0, 1] (got {args.sub_up})")
+    sub_up = float(args.sub_up)
+    sub_up_max = 1
     if sub_up and bass_bars:
         med = float(np.median(_bars_pitches(bass_bars)))
         up_hz = 440.0 * 2 ** ((med + 12 - sub_octave * 12 - 69) / 12.0)
         if up_hz > BR.BASS_CEIL_HZ:
             print(f"WARNING --sub-up refused: the median bass note an octave up ({up_hz:.0f} Hz) is above the bass band "
                   f"({BR.BASS_CEIL_HZ:g} Hz)", file=sys.stderr)
-            sub_up = 0
-    sub_lpf = SUB_LPF_HZ * 2 ** sub_up
-    sub_shift = 12 * sub_up - 12 * sub_octave
-    sub_transpose = f".add(note({sub_shift}))" if sub_shift else ""
+            sub_up, sub_up_max = 0.0, 0
+    # (transpose in semitones, low-pass Hz, amplitude weight) per sine of the layer; a weight of 0 emits no voice
+    sub_sines = [(shift, lpf, w) for shift, lpf, w in
+                 ((-12 * sub_octave, SUB_LPF_HZ, math.sqrt(1.0 - sub_up)),
+                  (12 - 12 * sub_octave, SUB_LPF_HZ * 2, math.sqrt(sub_up))) if w > 0.0]
     # --- Arrangement dynamics: bake each original stem's per-bar loudness envelope into
     # its render voice so the render follows the original's drops/breakdowns (SHAPE metric).
     # floor keeps voices musically present; drums get floor 0 so they truly drop out in
@@ -1214,8 +1225,11 @@ def main() -> int:
                 main_row = f'stack(note(cat(...bass)), bassLegatoEntry(note(cat(...bassLegato)))).s("{bass_sound}")'
             main_row = f'withLoop({main_row})'
         sub_notes = "stack(note(cat(...bass)), note(cat(...bassLegato)))" if bass_legato_bars else "note(cat(...bass))"
-        rows = [f'  {main_row}{fx_no_gain(bass_fx)}{bass_cut}{glide}{orbit}{gain_pattern(bass_env, bass_fx["gain"] * M)}',
-                f'  {sub_notes}{sub_transpose}.s("sine").lpf({sub_lpf}){glide}{orbit}{gain_pattern(bass_env, sub_g * M)}']
+        rows = [f'  {main_row}{fx_no_gain(bass_fx)}{bass_cut}{glide}{orbit}{gain_pattern(bass_env, bass_fx["gain"] * M)}']
+        # one voice per sine of the sub layer (editable on its own): the note, and the note an octave up
+        for sub_shift, sub_lpf, sub_w in sub_sines:
+            sub_transpose = f".add(note({sub_shift}))" if sub_shift else ""
+            rows.append(f'  {sub_notes}{sub_transpose}.s("sine").lpf({sub_lpf}){glide}{orbit}{gain_pattern(bass_env, sub_g * sub_w * M)}')
         if bass_duck:
             # the duck target orbit must exist before the first kick of the piece (superdough creates an orbit when the
             # first hap plays on it, and bass gain can be 0 for the opening bars): a silent keeper voice at cycle 0.
@@ -1442,7 +1456,9 @@ def main() -> int:
                       # effective bass low-pass + its bounds, fed back to calibrate_dynamic.py
                       "bass_lpf": int(bass_fx.get("lpf") or 0), "bass_lpf_analysis": bass_lpf_analysis,
                       "bass_note_max_hz": bars_max_hz(bass_bars),
-                      "sub_up": int(sub_up),
+                      # the effective share of the sub layer played an octave up (an int at 0/1, as the binary lever
+                      # reported it) and the most the calibrator may ask for (0 = the up sine was refused)
+                      "sub_up": int(sub_up) if sub_up in (0.0, 1.0) else round(sub_up, 4), "sub_up_max": sub_up_max,
                       "harmony": harmony_info, "lead_dynamics": dyn_info, "chord_bars": len(chord_bars or []),
                       "lead_octave": lead_oct, "lead_octave_decision": lead_dec,
                       "lead_partial_log2": lead_partial,

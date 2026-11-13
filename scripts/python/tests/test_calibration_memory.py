@@ -295,3 +295,17 @@ def test_a_promoted_row_carries_the_final_master_gain_its_score_was_measured_at(
     for note, want in (("final --master-gain 1.1", 1.1), ("final --master-gain = the 6th knob", 0.6)):
         (v / "metadata.json").write_text(json.dumps({"generation_mode": "synth", "generator": gen % note}))
         assert db.promoted_row(t, "v001")["master_gain"] == pytest.approx(want), note
+
+
+def test_sub_up_column_upgrades_from_the_binary_octave_to_a_fraction(db, monkeypatch):
+    """Migration 7: sub_up was UInt8 (0/1). Rows written before it read back as f = 0 / 1; after it a fraction is stored
+    as such (UInt8 would have truncated 0.357 to 0)."""
+    import clickhouse_store as CS
+    full = CS.MIGRATIONS
+    monkeypatch.setattr(CS, "MIGRATIONS", full[:-1])
+    assert db.write_rows([row(db, tag="old", knobs="0.5 0.6 0.9 5000 0 0.78 400 450 1")]) == 1
+    monkeypatch.setattr(CS, "MIGRATIONS", full)
+    monkeypatch.setattr(CS, "_clickhouse_initialized", False)
+    assert db.write_rows([row(db, tag="new", knobs="0.5 0.6 0.9 5000 0 0.78 400 450 0.357")]) == 1
+    got = {r["tag"]: r["sub_up"] for r in db.history("other", "synth")}
+    assert got == {"old": 1.0, "new": pytest.approx(0.357)}

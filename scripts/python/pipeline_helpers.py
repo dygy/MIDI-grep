@@ -994,10 +994,10 @@ def params_valid(text: str) -> bool:
     except ValueError:
         return False
     if len(vals) == 9:
-        # The 9th field is SU (0/1) after BL/LH. The removed pre-branch layout also had 9 fields, with the cal-vocal
+        # The 9th field is SU (the octave-up fraction 0..1; 0/1 in the binary-lever format) after BL/LH. The removed pre-branch layout also had 9 fields, with the cal-vocal
         # CV (~1) in 7th place where a cutoff must be 0 or >= 20 Hz - that is how the two are told apart.
         bl, lh, su = vals[6], vals[7], vals[8]
-        if su not in (0.0, 1.0) or any(v != 0 and v < 20 for v in (bl, lh)):
+        if not 0.0 <= su <= 1.0 or any(v != 0 and v < 20 for v in (bl, lh)):
             return False
     return True
 

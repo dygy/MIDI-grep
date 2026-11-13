@@ -98,19 +98,20 @@ def test_hat_stays_off_when_lead_below_high_mid_edge():
     assert float(got["--hat-gain"]) == 0.0
 
 
-# golden next-knob fragments from the calibrator BEFORE bug #11 (same inputs: KNOBS). Since the sub-octave lever
-# (2026-10-20) each stored render has its sine layer over the original's (orig/rend sub_bass 0.96 / 0.90 / 0.84), so the
-# step is the octave-up TRIAL: --sub-up 1 with sub-gain AND bass-mult unchanged (0.8 / 0.5: the flip is that step's
-# bass/sub rebalance); the lead / hat / master knobs are the pre-bug-#11 values.
+# golden next-knob fragments from the calibrator BEFORE bug #11 (same inputs: KNOBS). Since the continuous split lever
+# (2026-11-13) the octave is a fraction: Regime CLT's split (sub_bass/bass orig-per-render 0.72) is outside the dead band,
+# so the step moves f = 0.146 (the share to carry 0.060 over the layer's bound 0.411) with sub-gain AND bass-mult
+# unchanged (0.8 / 0.5); the two VAGABUNDO renders' splits (0.81 / 0.88) are inside it, so f stays 0 and the gain
+# levers step (the binary lever had flipped them whole); the lead / hat / master knobs are the pre-bug-#11 values.
 GOLDEN = {
     "vagabundo_sample_v004.json":
-        "--bass-mult 0.5 --sub-gain 0.8 --sub-up 1 --cal-lead 1.082 --lead-lpf 6300 --hat-gain 0.1 "
+        "--bass-mult 0.521 --sub-gain 0.784 --sub-up 0 --cal-lead 1.082 --lead-lpf 6300 --hat-gain 0.1 "
         "--master-gain 0.728",
     "vagabundo_sample_v002.json":
-        "--bass-mult 0.5 --sub-gain 0.8 --sub-up 1 --cal-lead 1.142 --lead-lpf 6255 --hat-gain 0.1 "
+        "--bass-mult 0.526 --sub-gain 0.759 --sub-up 0 --cal-lead 1.142 --lead-lpf 6255 --hat-gain 0.1 "
         "--master-gain 0.728",
     "regime_sample_v026.json":
-        "--bass-mult 0.5 --sub-gain 0.8 --sub-up 1 --cal-lead 1.46 --lead-lpf 6652 --hat-gain 0.1 "
+        "--bass-mult 0.5 --sub-gain 0.8 --sub-up 0.146 --cal-lead 1.46 --lead-lpf 6652 --hat-gain 0.1 "
         "--master-gain 0.728",
 }
 

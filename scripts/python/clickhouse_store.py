@@ -177,6 +177,11 @@ MIGRATIONS = [
     (6, "Calibration memory write clock column", [
         "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS write_ns UInt64 DEFAULT 0",
     ]),
+    # sub_up was the sub-sine octave (UInt8 0/1); it is now the FRACTION of the sine layer's energy an octave up (0..1).
+    # Old rows keep their 0 / 1 (= f 0 / 1).
+    (7, "Calibration memory sub-sine fraction column", [
+        "ALTER TABLE midi_grep.calibration_steps MODIFY COLUMN sub_up Float64",
+    ]),
 ]
 
 
