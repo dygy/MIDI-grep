@@ -1,5 +1,5 @@
 ---
-description: Fixes one MIDI-grep bug end-to-end — reproduces it (a description, a GitHub issue, or a failing comparison.json), finds the root cause, applies a scoped fix with a RED-proven regression test, re-verifies the touched criteria (re-rendering through BlackHole when Strudel output is involved), amends the owning spec on divergence, reviews locally, and opens the PR on dygy/MIDI-grep.
+description: Fixes one MIDI-grep bug end-to-end — reproduces it (a description, a GitHub issue, or a failing comparison.json), finds the root cause, applies a scoped fix with a RED-proven regression test, re-verifies the touched criteria (re-rendering through BlackHole when Strudel output is involved), amends the owning spec on divergence, reviews locally, opens the PR on dygy/MIDI-grep and merges it.
 argument-hint: '[bug — GitHub issue # or URL, a description, or a path to a failing comparison.json]'
 ---
 
@@ -10,7 +10,7 @@ Takes one bug — a plain description, a GitHub issue on `dygy/MIDI-grep`, or a 
 This command is self-contained and derived from `context/product/delivery-flow.md`, the decision record. **Do not read that file during a run.** There is no `/awos:flow` to regenerate this command: to change a decision, edit the record and then this file directly, and log the change in the record's Generation Log.
 
 
-> **Sound-quality work uses the Improvement Loop** (`context/product/delivery-flow.md` §11): one `improve/<theme>` branch, a local commit per measured improvement, no per-change review / PR / CI / merge steps — run Steps up to the render verification, commit, and continue with the next gap; land a batch with one PR when the owner asks.
+> **Sound-quality work uses the Improvement Loop** (`context/product/delivery-flow.md` §11): one `improve/<theme>` branch, a local commit per measured improvement, no per-change review / PR / CI / merge steps — run Steps up to the render verification, commit, and continue with the next gap; land a batch with one PR when it is coherent or the owner asks, and merge it.
 ## Arguments
 
 `$ARGUMENTS` — a GitHub issue number or URL, a free-text description, or a path to a `comparison.json` (typically `.cache/stems/<key>/vNNN/comparison.json`) whose gate failed. If empty, ask.
@@ -26,7 +26,7 @@ This command is self-contained and derived from `context/product/delivery-flow.m
 - Briefs say: read `.awos/subagents/<name>.md` first; tools work, no exploratory calls; terse reports **quoting command output**. Reports are claims — re-read named lines, re-run named tests.
 - The orchestrator does not edit product code itself. Never launch `claude -p`.
 
-**Questions.** At most **one round** of clarifying questions (CLAUDE.md); otherwise state the assumption and proceed. Fixed choices go through `AskUserQuestion` with the default marked. Unanswered → safe default once, said aloud; never re-ask in a loop; silence is never consent to merge or to amend a spec.
+**Questions.** At most **one round** of clarifying questions (CLAUDE.md); otherwise state the assumption and proceed. Fixed choices go through `AskUserQuestion` with the default marked. Unanswered → safe default once, said aloud; never re-ask in a loop; silence is never consent to amend a spec.
 
 **No pre-existing issues; zero hardcoding.** Anything broken that the fix trips over is fixed in this run. The fix never pins a gain, filter or threshold to the failing track — if the root cause is a bad parameter, the fix is in how it is *derived* (analysis, calibrator, prompt), and a threshold in `eval/thresholds.yaml` is never lowered to make a gate pass.
 
@@ -173,7 +173,7 @@ Before opening: `git fetch origin main && git merge-tree --write-tree origin/mai
 
 Re-check mergeability (`gh pr view <n> --json mergeable,mergeStateStatus` + the `merge-tree` check); if `main` moved, **merge `origin/main` in** (never rebase an open PR), re-run the static gate, push.
 
-**A human merges.** Show: static gate green, the fail→pass evidence, the render verdict or its "n/a" reason, the review file closed out, and that the owner has looked at the PR. Then **one** `AskUserQuestion`: merge now (`gh pr merge <n> --repo dygy/MIDI-grep --squash --delete-branch`) / leave open for the owner. Unanswered = do not merge; "work autonomously" is never merge approval. No post-merge CI exists.
+**Merge it yourself** (owner rule 2026-11-13, `delivery-flow.md` §5): with the static gate green, the fail→pass evidence in hand, the render verdict passing (or its "n/a" reason) and the review file closed out, run `gh pr merge <n> --repo dygy/MIDI-grep --squash --delete-branch` — no question. A red gate or an open finding blocks the merge and is fixed. Then update `context/product/roadmap.md`. No post-merge CI exists.
 
 <!-- /awos:flow:stage -->
 
@@ -191,7 +191,7 @@ Nothing deploys — the fix is delivered by the merge into `main`; whoever pulls
 
 A GitHub issue closes via `Closes #N` on merge; for a description or `comparison.json` source the report is the close.
 
-Report: PR link and merge commit (or "open, awaiting owner"); classification verdict and, on divergence, the amended criteria and Change Log entry; the regression evidence (what was set aside, the failure output, the restored pass); the render re-verification numbers and paths, or why not applicable; review **verdict**, **finding counts by severity**, **review file path** (`review/fix-<slug>.md`, git-ignored) and that a keep/drop gate ran; the flow-log location (scratchpad unless an amendment moved it into `context/` — say so, it does not survive the session otherwise); unreachable sources from Step 1; **agents dispatched this run (count)**; flow defects found. Leave a clean tree — no closing flow-log entry; surface any uncommitted flow artifact. After a merge: `git switch main && git pull && git branch -d BRANCH`; offer `git worktree remove` for a `wt` worktree.
+Report: PR link and merge commit; classification verdict and, on divergence, the amended criteria and Change Log entry; the regression evidence (what was set aside, the failure output, the restored pass); the render re-verification numbers and paths, or why not applicable; review **verdict**, **finding counts by severity**, **review file path** (`review/fix-<slug>.md`, git-ignored) and that a keep/drop gate ran; the flow-log location (scratchpad unless an amendment moved it into `context/` — say so, it does not survive the session otherwise); unreachable sources from Step 1; **agents dispatched this run (count)**; flow defects found. Leave a clean tree — no closing flow-log entry; surface any uncommitted flow artifact. After a merge: `git switch main && git pull && git branch -d BRANCH`; offer `git worktree remove` for a `wt` worktree.
 
 <!-- /awos:flow:stage -->
 

@@ -1,5 +1,5 @@
 ---
-description: Implements one MIDI-grep feature end-to-end — reads it from a prompt, a file or a GitHub issue, runs the AWOS chain (spec → tech → tasks → implement → verify), renders the result through BlackHole against the eval gate, reviews locally, and opens the PR on dygy/MIDI-grep for the owner to merge.
+description: Implements one MIDI-grep feature end-to-end — reads it from a prompt, a file or a GitHub issue, runs the AWOS chain (spec → tech → tasks → implement → verify), renders the result through BlackHole against the eval gate, reviews locally, opens the PR on dygy/MIDI-grep and merges it.
 argument-hint: '[feature — GitHub issue # or URL, a file path, or the feature text]'
 ---
 
@@ -10,7 +10,7 @@ Takes one feature — from prompt text, a local file, or a GitHub issue on `dygy
 This command is self-contained and derived from `context/product/delivery-flow.md`, the decision record. **Do not read that file during a run.** There is no `/awos:flow` to regenerate this command: to change a decision, edit the record and then this file directly, and log the change in the record's Generation Log.
 
 
-> **Sound-quality work uses the Improvement Loop** (`context/product/delivery-flow.md` §11): one `improve/<theme>` branch, a local commit per measured improvement, no per-change review / PR / CI / merge steps — run Steps up to the render verification, commit, and continue with the next gap; land a batch with one PR when the owner asks.
+> **Sound-quality work uses the Improvement Loop** (`context/product/delivery-flow.md` §11): one `improve/<theme>` branch, a local commit per measured improvement, no per-change review / PR / CI / merge steps — run Steps up to the render verification, commit, and continue with the next gap; land a batch with one PR when it is coherent or the owner asks, and merge it.
 ## Arguments
 
 `$ARGUMENTS` — a GitHub issue number (`42`, `#42`) or URL on `dygy/MIDI-grep`, a path to a local file describing the feature, or the feature text itself. A pre-written spec dir under `context/spec/` is also accepted. If empty, take the first unchecked `- [ ]` item in `context/product/roadmap.md`; if the roadmap is missing or fully checked, ask the user.
@@ -26,7 +26,7 @@ This command is self-contained and derived from `context/product/delivery-flow.m
 - Every brief says: read `.awos/subagents/<name>.md` (or `.claude/agents/<name>.md`) first; tools are functional — no exploratory calls; report tersely (paths, verdicts, counts) and **quote command output as evidence**. A report is a claim — re-read the named lines or re-run the named test before acting on it.
 - Never launch `claude -p` from this command.
 
-**Questions.** At most **one round** of clarifying questions before acting (CLAUDE.md); otherwise state the assumption and proceed. Every fixed-choice question goes through `AskUserQuestion` with the default marked. An unanswered prompt takes the safe default once and says so — never re-ask in a loop — and **never** authorizes an irreversible step: the merge confirmation treats silence as no.
+**Questions.** At most **one round** of clarifying questions before acting (CLAUDE.md); otherwise state the assumption and proceed. Every fixed-choice question goes through `AskUserQuestion` with the default marked. An unanswered prompt takes the safe default once and says so — never re-ask in a loop.
 
 **No pre-existing issues.** A failing test, a broken script or a wrong similarity metric met along the way is fixed in this run, not worked around (CLAUDE.md). **Zero hardcoding:** no gain, filter, effect or threshold is hand-tuned to the test track — it comes from analysis, the calibrator, or the LLM.
 
@@ -164,7 +164,7 @@ Before opening: `git fetch origin main && git merge-tree --write-tree origin/mai
 
 Re-check mergeability (`gh pr view <n> --json mergeable,mergeStateStatus` plus the `merge-tree` check). If `main` moved and the branch no longer merges cleanly, **merge `origin/main` in** (never rebase an open PR), re-run the static gate, push, and update the PR.
 
-**A human merges.** Before asking, show: the static gate green, the render gate verdict with its numbers (or "n/a" with the reason), the review file closed out (every finding kept or dropped, accepted ones fixed and pushed), and that the owner has looked at the PR. Then **one** `AskUserQuestion`: merge now (`gh pr merge <n> --repo dygy/MIDI-grep --squash --delete-branch`) / leave open for the owner to merge on GitHub. Unanswered = do not merge. An earlier "run it end to end" or "work autonomously" covers the work up to here — **it is never merge approval**. No post-merge CI exists.
+**Merge it yourself** (owner rule 2026-11-13, `delivery-flow.md` §5): once the static gate is green, the render gate verdict passes (or is "n/a" with the reason) and the review file is closed out (every finding kept or dropped, accepted ones fixed and pushed), run `gh pr merge <n> --repo dygy/MIDI-grep --squash --delete-branch` — no question. A stacked chain merges bottom-up with `--merge`. A red gate or an open finding blocks the merge and is fixed. Then move the item to Shipped in `context/product/roadmap.md`. No post-merge CI exists.
 
 <!-- /awos:flow:stage -->
 
@@ -180,9 +180,9 @@ Nothing deploys — MIDI-grep is a local CLI. Delivery is the merge into `main`;
 
 ### Step 13: Close the Loop
 
-Definition of Done: PR merged (or ready-to-merge, stated as such) **and** `functional-spec.md` + `technical-considerations.md` carry `Status: Completed` from `/awos:verify` **and** the context docs are updated where required **and** every similarity number in the spec, PR and docs traces to a real `comparison.json`. When `TICKET_ID` is a GitHub issue: on merge GitHub closes it through the PR body's `Closes #N`; if the PR is left open for the owner, comment the PR URL and the DoD status on the issue (`gh issue comment N --body …`) so the tracker shows where the work stands. Otherwise the report is the close.
+Definition of Done: PR merged **and** `functional-spec.md` + `technical-considerations.md` carry `Status: Completed` from `/awos:verify` **and** the context docs are updated where required **and** every similarity number in the spec, PR and docs traces to a real `comparison.json`. When `TICKET_ID` is a GitHub issue: on merge GitHub closes it through the PR body's `Closes #N`; otherwise the report is the close.
 
-Report to the user: PR link and merge commit (or "open, awaiting owner"); the render gate evidence (genre, overall / section-aware %, `comparison.json` path) or why it was not applicable; the review **verdict**, **finding counts by severity**, the **review file path** (`review/<slug>.md`, git-ignored — gone with a worktree teardown) and that a keep/drop gate ran; the unreachable sources from Step 1, read from the flow log; **agents dispatched this run (count)**; any flow defects found. Leave a clean tree: no closing flow-log entry (the log is frozen); surface any uncommitted flow artifact rather than leaving it. After a merge, `git switch main && git pull && git branch -d BRANCH`; offer `git worktree remove` for a `wt` worktree.
+Report to the user: PR link and merge commit; the render gate evidence (genre, overall / section-aware %, `comparison.json` path) or why it was not applicable; the review **verdict**, **finding counts by severity**, the **review file path** (`review/<slug>.md`, git-ignored — gone with a worktree teardown) and that a keep/drop gate ran; the unreachable sources from Step 1, read from the flow log; **agents dispatched this run (count)**; any flow defects found. Leave a clean tree: no closing flow-log entry (the log is frozen); surface any uncommitted flow artifact rather than leaving it. After a merge, `git switch main && git pull && git branch -d BRANCH`; offer `git worktree remove` for a `wt` worktree.
 
 <!-- /awos:flow:stage -->
 
