@@ -315,6 +315,12 @@ loudness or master-bus round - promoted its own render, that render is appended 
 twins (`render.mp3`, `embed/`, `iterations/`), reused only while newer than their source. The report is
 mandatory: a failed or missing `report.html` aborts the driver.
 
+**Editable pipeline stage 9b (listening EQ profile).** `report_stage` first runs `scripts/python/eq_profile.py <track> <vNNN>`:
+the 10-band (31...16000 Hz, octave) gain that raises the render to the original `instrumental.wav`'s long-term spectrum, loudness-matched and
+clamped to the owner's Strudel player range, plus measured low/high cuts and a genre preset id. It writes one `// @eq-profile {json}` line into
+the PROMOTED `vNNN/output.strudel` (after the header comment block; idempotent; calibration `best.code` untouched, so no stage reruns)
+and `vNNN/eq_profile.json`. A failure is logged, never fatal. The player reads the line; the contract shape is fixed (`eq_profile.py` docstring).
+
 **Build-stage freshness and preflight.** Stage 4 (sample pack) and stage 5 (instrument models) are stamped with
 `calibration_memory.py code-version --stage pack|instruments` (`pack.code`, per-model `.code`: hash of the builders and
 their local imports) and rebuilt when the stamp differs; the calibrate hash includes those builders, so a changed
