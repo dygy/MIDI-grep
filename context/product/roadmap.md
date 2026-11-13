@@ -3,7 +3,7 @@
 _This roadmap outlines our strategic direction based on customer needs and business goals. It focuses on the "what" and "why," not the technical "how."_
 
 > **Status (2026-11-13):** the current work is **Phase 11** (editable pipeline, honest scoring, generalization).
-> Merged through PR #41; branch `improve/bass-fidelity` (orchestrator, sound fixes) is the next merge.
+> Merged through PR #42; no open PRs.
 > Phases 1–10 describe the original `midi-grep extract` path (LLM codegen, `--iterate`); their similarity numbers are
 > on the pre-2026-10-18 time-averaged scale, many measured on BlackHole renders that were later found pitch-shifted.
 
@@ -551,17 +551,14 @@ measured runs: `eval/thresholds.yaml` `modes:` and `eval/datasets/reference_trac
 - [x] **Hydra visuals over a painted scene, wired to the piece's patterns** (PR #39, spec 005; stage 11)
 - [x] **Automatic genre labels: audio and published metadata must agree, no owner hints** (PR #40)
 - [x] **A stem with no transcribed notes gets no instrument instead of stopping the run** (PR #41)
-
-### In review: `improve/bass-fidelity`
-
-- [ ] **Sound fixes:** bass notes the stem's f0 and chroma contradict get re-pitched, the 808 behind vocal bleed moves to
+- [x] **(PR #42) Sound fixes:** bass notes the stem's f0 and chroma contradict get re-pitched, the 808 behind vocal bleed moves to
   the bass view (stage 3c rule v3), a loud bar never ends with no drum hit; the bass part and instrument come from the
   view when stage 3c moved anything
-- [ ] **Orchestrator:** self-diagnosis (`diagnose.py`, stage 12, RED flags vs the references), autopilot (`autopilot.py`:
+- [x] **(PR #42) Orchestrator:** self-diagnosis (`diagnose.py`, stage 12, RED flags vs the references), autopilot (`autopilot.py`:
   queue of failing tracks, remedies tried on throw-away copies, references once per batch, report in Russian),
   environment doctor, disk budget (`cache_budget.py`, stage 13), RAM guard for Ollama
-- [ ] **Calibration:** a warm start keeps its short budget only while cal1 reproduces its source's score
-- [ ] **Diagnosis judges per-stem metrics against the stage-3c view**; trials skip visuals and record what they moved
+- [x] **(PR #42) Calibration:** a warm start keeps its short budget only while cal1 reproduces its source's score
+- [x] **(PR #42) Diagnosis judges per-stem metrics against the stage-3c view**; trials skip visuals and record what they moved
 
 ### Open
 
@@ -674,4 +671,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.67 | 2026-02-24 | **Genre-Aware Sound RAG:** `retrieve_genre_context()` injects ~15 genre-appropriate sounds into LLM prompts (800→40 tokens), reducing hallucinated sound names. Injected into `ollama_codegen.py` and `ollama_agent.py`. |
 | 1.68 | 2026-06-22 | **Phase 10 batch (4 items):** (1) Concrete gain multipliers in LLM feedback (`_build_band_advice` → "multiply bassFx.gain() by X"); (2) Genre-specific synthesis profiles (`synth_profiles.py`, `analyze_synth_params.py --genre`, plumbed from Go) read by the `dist/` renderer; (3) Sub-bass via profile sub_octave_gain + master.hpf 20Hz + octave-1 prompt bias; (4) Sidechain ducking in generated Strudel (bass `.orbit(2)`, kick `.duckorbit(2).duckdepth().duckattack()`), per-genre depth. |
 | 1.69 | 2026-10-29 | **Phase 11 added:** editable pipeline, rescaled score + different-song gate, offline deterministic renderer, four reference tracks (PRs #15–#27); BlackHole "100%" section marked superseded; open items listed |
-| 1.70 | 2026-11-13 | Phase 11 caught up: PRs #28–#41 shipped, `improve/bass-fidelity` orchestrator work listed; genre-mislabel and constant-level-bass items closed |
+| 1.70 | 2026-11-13 | Phase 11 caught up: PRs #28–#42 shipped (incl. orchestrator: diagnosis, autopilot, doctor, disk/RAM guards); genre-mislabel and constant-level-bass items closed |
