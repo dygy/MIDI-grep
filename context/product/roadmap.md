@@ -3,7 +3,7 @@
 _This roadmap outlines our strategic direction based on customer needs and business goals. It focuses on the "what" and "why," not the technical "how."_
 
 > **Status (2026-11-13):** the current work is **Phase 11** (editable pipeline, honest scoring, generalization).
-> Merged through PR #38; PRs #39–#41 await merge; branch `improve/bass-fidelity` carries the orchestrator work (no PR yet).
+> Merged through PR #41; branch `improve/bass-fidelity` (orchestrator, sound fixes) is the next merge.
 > Phases 1–10 describe the original `midi-grep extract` path (LLM codegen, `--iterate`); their similarity numbers are
 > on the pre-2026-10-18 time-averaged scale, many measured on BlackHole renders that were later found pitch-shifted.
 
@@ -548,14 +548,11 @@ measured runs: `eval/thresholds.yaml` `modes:` and `eval/datasets/reference_trac
   0.79 / 0.77 synth)
 - [x] **Stage 3c stem repair: the 808 Demucs filed under drums plays as bass** (PR #37)
 - [x] **Web UI codegen + `extract --render` on the real Strudel renderer; dead scripts removed** (PR #38)
+- [x] **Hydra visuals over a painted scene, wired to the piece's patterns** (PR #39, spec 005; stage 11)
+- [x] **Automatic genre labels: audio and published metadata must agree, no owner hints** (PR #40)
+- [x] **A stem with no transcribed notes gets no instrument instead of stopping the run** (PR #41)
 
-### Awaiting merge
-
-- [ ] **Hydra visuals over a painted scene, wired to the piece's patterns** (PR #39, spec 005; stage 11)
-- [ ] **Automatic genre labels: audio and published metadata must agree, no owner hints** (PR #40)
-- [ ] **A stem with no transcribed notes gets no instrument instead of stopping the run** (PR #41)
-
-### On `improve/bass-fidelity` (no PR yet; stacked on #39–#41)
+### In review: `improve/bass-fidelity`
 
 - [ ] **Sound fixes:** bass notes the stem's f0 and chroma contradict get re-pitched, the 808 behind vocal bleed moves to
   the bass view (stage 3c rule v3), a loud bar never ends with no drum hit; the bass part and instrument come from the
@@ -677,4 +674,4 @@ _Ideas for future consideration, not yet prioritized._
 | 1.67 | 2026-02-24 | **Genre-Aware Sound RAG:** `retrieve_genre_context()` injects ~15 genre-appropriate sounds into LLM prompts (800→40 tokens), reducing hallucinated sound names. Injected into `ollama_codegen.py` and `ollama_agent.py`. |
 | 1.68 | 2026-06-22 | **Phase 10 batch (4 items):** (1) Concrete gain multipliers in LLM feedback (`_build_band_advice` → "multiply bassFx.gain() by X"); (2) Genre-specific synthesis profiles (`synth_profiles.py`, `analyze_synth_params.py --genre`, plumbed from Go) read by the `dist/` renderer; (3) Sub-bass via profile sub_octave_gain + master.hpf 20Hz + octave-1 prompt bias; (4) Sidechain ducking in generated Strudel (bass `.orbit(2)`, kick `.duckorbit(2).duckdepth().duckattack()`), per-genre depth. |
 | 1.69 | 2026-10-29 | **Phase 11 added:** editable pipeline, rescaled score + different-song gate, offline deterministic renderer, four reference tracks (PRs #15–#27); BlackHole "100%" section marked superseded; open items listed |
-| 1.70 | 2026-11-13 | Phase 11 caught up: PRs #28–#38 shipped, #39–#41 awaiting merge, `improve/bass-fidelity` orchestrator work listed; genre-mislabel and constant-level-bass items closed |
+| 1.70 | 2026-11-13 | Phase 11 caught up: PRs #28–#41 shipped, `improve/bass-fidelity` orchestrator work listed; genre-mislabel and constant-level-bass items closed |
