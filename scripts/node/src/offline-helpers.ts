@@ -279,8 +279,16 @@ export function watched<T>(fn: () => Promise<T>, o: { label: string; limitS: num
   const now = o.now ?? Date.now, pollMs = o.pollMs ?? Math.max(50, Math.min(1000, o.limitS * 250));
   return new Promise<T>((resolve, reject) => {
     let done = false;
+    // Time the watchdog itself did not run is not the page's silence. Its own timer firing late (the system slept - lid
+    // closed on battery -, or the process was not scheduled) is measured as the delay past its period, and that delay is
+    // not counted since the last progress. Sem Aliança synth 2026-11-13: the Mac slept 348 s in clamshell mode, the
+    // 'density' step woke up "silent for 346.7 s" against an 18 s limit and the render was killed.
+    let lastTick = now(), absentMs = 0, progressSeen = o.lastProgress();
     const timer = setInterval(() => {
-      const silent = (now() - o.lastProgress()) / 1000;
+      const t = now(), lp = o.lastProgress();
+      if (lp !== progressSeen) { progressSeen = lp; absentMs = 0; }
+      absentMs += Math.max(0, t - lastTick - pollMs); lastTick = t;
+      const silent = (t - lp - absentMs) / 1000;
       if (silent <= o.limitS || done) return;
       done = true; clearInterval(timer);
       try { o.onStall?.(); } catch { /* the watchdog's job is the rejection */ }

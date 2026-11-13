@@ -201,3 +201,19 @@ test('a page spinning in a busy loop (browser CPU busy, main thread dead) is det
   assert.equal(r.status, 0, r.log);
   assert.ok(r.wall < 120_000, `took ${r.wall} ms`);
 });
+test('system sleep is not silence: a clock jump between watchdog ticks is not counted (regression 2026-11-13)', async () => {
+  // Sem Aliança synth: the Mac slept 348 s (lid closed on battery) during the 'density' step; the watchdog woke up, read
+  // 346.7 s of silence against an 18 s limit and killed the render. The jump is time the watchdog did not run.
+  let offset = 0; const now = () => Date.now() + offset;
+  const last = now();
+  setTimeout(() => { offset += 348000; }, 100);                       // the sleep, seen as one jump of the clock
+  assert.equal(await watched(() => new Promise(r => setTimeout(() => r('done'), 300)),
+    { label: 'density', limitS: 0.5, pollMs: 50, lastProgress: () => last, now }), 'done');
+  // a page that is really silent after the wake is still killed, on the real silence alone
+  offset = 0; const last2 = now(); let killed = 0;
+  setTimeout(() => { offset += 348000; }, 100);
+  const t0 = Date.now();
+  await assert.rejects(watched(never, { label: 'density', limitS: 0.5, pollMs: 50, lastProgress: () => last2, now, onStall: () => killed++ }),
+    e => e instanceof StallError);
+  assert.ok(Date.now() - t0 >= 500, 'killed only after the real silence passed the limit'); assert.equal(killed, 1);
+});

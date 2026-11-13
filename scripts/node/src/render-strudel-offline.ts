@@ -361,7 +361,14 @@ async function main() {
     const total = Math.floor((cycles / cps) * sampleRate);
     console.log(`samples("url") rewritten to single quotes: ${init.rewrites}`);
     console.log(`cps ${cps} (${(cps * 240).toFixed(2)} BPM @4/4), ${cycles.toFixed(2)} cycles`);
-    const expectedOnsets: number = await wd('count', 0, () => page.evaluate((cy) => (window as any).__count(cy), cycles));
+    // every page call is an attempt: a stall or a dead page on these whole-pattern queries is retried on a fresh, initialised page
+    // like any later step (2026-11-13: a 'density' stall failed the render outright - no [CRASH] retry)
+    const reopened = async () => { await quickClose(page); page = await openPage(); await wd('init', 0, () => page.evaluate((c, site) => (window as any).__init(c, site), code, SITE)); };
+    let countTry = 0;
+    const expectedOnsets: number = await attempt('count', 'whole pattern', async () => {
+      if (countTry++ > 0) await reopened();
+      return wd('count', 0, () => page.evaluate((cy) => (window as any).__count(cy), cycles));
+    });
     const logs: string[] = []; const errs: string[] = [];
     let onsets = 0, chunks = 0, tailEndPeak = 0, tailEndChunk = 0, wav: Buffer;
     if (!(chunkSeconds > 0)) {
@@ -373,13 +380,17 @@ async function main() {
       // them keyed without regard to context, so a second OfflineAudioContext in the same page
       // reuses nodes of the first ("cannot connect to an AudioNode belonging to a different audio
       // context"); a new page also frees all decoded buffers/graphs (page memory grew ~1.1 GB for 150 s).
-      const density: number[] = await wd('density', 0, () => page.evaluate((cy) => (window as any).__density(cy), cycles));
+      let densityTry = 0;
+      const density: number[] = await attempt('density', 'whole pattern', async () => {
+        if (densityTry++ > 0) await reopened();
+        return wd('density', 0, () => page.evaluate((cy) => (window as any).__density(cy), cycles));
+      });
       // ring estimate + orbit usage in ONE pass over the pattern. A failure of the estimate (a sample that cannot be fetched, any exception)
       // leaves a voice at its hap length and would truncate a long one-shot: it is retried like any render step (a network outage is waited
       // out) and then fails the render, unless --allow-failed-samples, which only warns.
       let ringTry = 0; // a failed sample fetch stays cached in its page, so a retry needs a fresh one
       const est: { rings: number[][]; used: number[][]; errors: string[] } = await attempt('ring estimate', 'whole pattern', async () => {
-        if (ringTry++ > 0) { await quickClose(page); page = await openPage(); await wd('init', 0, () => page.evaluate((c, site) => (window as any).__init(c, site), code, SITE)); }
+        if (ringTry++ > 0) await reopened();
         const x = await wd('ring estimate', duration, () => page.evaluate((cy) => (window as any).__rings(cy), cycles));
         if (x.errors.length && !allowFailures) throw new Error(`ring estimate failed for ${x.errors.length} sound(s), their one-shot would be cut at the hap length: ${x.errors.slice(0, 3).join(' | ')}`);
         return x;
