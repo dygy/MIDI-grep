@@ -515,6 +515,15 @@ def main() -> int:
         bass_corr = 1.0       # the split move IS this step's bass/sub rebalance: a level move too would count the same share twice
     if bass_lpf_moved:
         bass_corr = min(bass_corr, 1.0)
+    # Synth: the bass layer moves only the way the MIX's low end (sub_bass + bass) asks, outside the share dead band. The voice
+    # measured alone reads 6-15x (power) under its stem on synth pieces whose mix low end matches the original within a point,
+    # and following it lost on every track it moved (2026-11-13, bass-mult 1.3 -> 2.6 from cal1: Regime CLT 0.909 -> 0.834,
+    # VAGABUNDO 0.846 -> 0.802, Tatuagem 0.760 -> 0.736, Creagina 0.799 -> 0.793, Sem Aliança 0.737 -> 0.732). Until
+    # 2026-11-13 a 1.3 ceiling hid it (bass-mult pegged there on every synth track). The share split is f's job (above).
+    if synth:
+        r_low = ratio(["sub_bass", "bass"])
+        if 1 / SHARE_DEAD_BAND <= r_low <= SHARE_DEAD_BAND or (bass_corr - 1.0) * (r_low - 1.0) < 0:
+            bass_corr = 1.0
     # No absolute ceiling (a fixed 0.2-1.3 was pegged at 1.3 on every synth track, the references included, so the
     # bass band had no lever up - the same blindness sub-gain lost its 0.2-1.6 range for). The step is bounded like
     # sub-gain's: the voice's own measured step (VOICE_STEP_LO..HI, power ratio -> amplitude) or damp()'s per-step

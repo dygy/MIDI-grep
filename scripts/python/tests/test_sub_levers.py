@@ -343,3 +343,23 @@ def test_the_loop_holds_the_master_gain(tmp_path):
     limiter pulled it 9.4 dB down on the first step. The level is the loudness stage's lever; the loop holds it."""
     got = _cal(tmp_path, 0.10, 0.10, "--master-gain", "2.299")
     assert float(got["--master-gain"]) == pytest.approx(2.299)
+
+
+def _solo(tmp_path: Path, r: float) -> Path:
+    p = tmp_path / "bass_solo.json"
+    p.write_text(json.dumps({"ratio": {"sub_bass": r, "bass": r}}))
+    return p
+
+
+def test_synth_bass_layer_follows_the_mix_low_end_not_the_solo_voice(tmp_path):
+    """Regression (2026-11-13): on synth pieces the bass voice alone read 6-15x under its stem while the mix low end matched
+    within a point; bass-mult 1.3 -> 2.6 lost on every track (Regime CLT 0.909 -> 0.834). In synth the layer moves only the
+    way the mix low end (sub_bass + bass) asks, outside the share dead band."""
+    solo = str(_solo(tmp_path, 15.0))
+    base = ("--bass-mult", "1.3", "--sub-up-max", "0", "--bass-solo", solo)
+    held = _cal(tmp_path, 0.40, 0.40, "--mode", "synth", *base)          # mix low end matched: hold
+    assert float(held["--bass-mult"]) == pytest.approx(1.3)
+    control = _cal(tmp_path, 0.40, 0.40, "--mode", "sample-instrument", *base)   # sample-instrument keeps the voice-solo step
+    assert float(control["--bass-mult"]) > 1.3
+    short = _cal(tmp_path, 0.60, 0.20, "--mode", "synth", *base)         # mix low end short beyond the dead band: raise
+    assert float(short["--bass-mult"]) > 1.3

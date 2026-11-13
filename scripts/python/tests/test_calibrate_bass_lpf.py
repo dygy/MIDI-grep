@@ -304,8 +304,11 @@ def test_bass_mult_not_raised_while_cutoff_moves():
     got = run_cal(CAL2, *CAL2_KNOBS, *SYNTH, *BASS)
     assert int(got["--bass-lpf"]) < 422
     assert float(got["--bass-mult"]) <= 0.474
-    free = run_cal(CAL2, *CAL2_KNOBS, *SYNTH)                            # no cutoff move -> old behaviour
-    assert float(free["--bass-mult"]) == pytest.approx(0.488)
+    # no cutoff move: the mix-band step asked 0.488, but since 2026-11-13 a synth bass layer moves only the way the mix LOW END
+    # (sub_bass + bass) asks outside the share dead band - here 0.590 / 0.519 = 1.14, inside it - so it holds
+    # (test_sub_levers.py::test_synth_bass_layer_follows_the_mix_low_end_not_the_solo_voice)
+    free = run_cal(CAL2, *CAL2_KNOBS, *SYNTH)
+    assert float(free["--bass-mult"]) == pytest.approx(0.474)
 
 
 def test_hats_via_drums_hold_lead_lpf_on_cal1():
