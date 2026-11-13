@@ -1009,6 +1009,8 @@ def main(argv: list[str] | None = None) -> int:
     ins = sub.add_parser("instrumental", help="write <track>/instrumental.wav (bass+drums+melodic) and print its path")
     ins.add_argument("track_dir", type=Path)
     ins.add_argument("--force", action="store_true")
+    mn = sub.add_parser("midi-notes", help="number of pitched notes in a .mid (0 = the stem has no such part)")
+    mn.add_argument("midi", type=Path)
     rf = sub.add_parser("record-floor")
     rf.add_argument("--thresholds", required=True, type=Path)
     rf.add_argument("--mode", required=True)
@@ -1077,6 +1079,9 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "params-valid":
             ok = args.file.is_file() and params_valid(args.file.read_text())
             print("ok" if ok else "stale")
+        elif args.cmd == "midi-notes":
+            from pitched_grains import read_midi_notes
+            print(len(read_midi_notes(args.midi)))
         elif args.cmd == "label-stale":
             print("stale" if label_stale(args.track_dir, args.labels) else "fresh")
         elif args.cmd == "newer":

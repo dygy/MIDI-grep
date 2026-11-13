@@ -271,3 +271,15 @@ def test_instrument_model_from_other_grain_code_is_retrained(repo):
     r = run(repo, "--local", "--mode", "synth")
     assert f"train {SLUG}_bass" in calls(repo) and f"train {SLUG}_lead" in calls(repo), r.stderr
     assert any(c.startswith("auto-calibrate") for c in calls(repo)), "a best render on the old instruments was kept"
+
+
+# --- a stem with no transcribed notes has no part: no instrument, no crash (Tatuagem No Pescoco 2026-11-07) -------
+def test_a_bass_stem_without_notes_gets_no_instrument_and_does_not_stop_the_run(repo):
+    import pretty_midi
+    pretty_midi.PrettyMIDI().write(str(repo.pack / "bass.mid"))        # Basic Pitch found nothing: a valid, empty MIDI
+    shutil.rmtree(repo.root / "models" / f"{SLUG}_bass")
+    r = run(repo, "--local", "--mode", "synth")
+    assert f"train {SLUG}_bass" not in calls(repo), r.stderr
+    assert f"train {SLUG}_lead" in calls(repo) and "instruments" in calls(repo), r.stderr
+    assert "no bass part (bass.mid has no notes)" in r.stderr
+    assert any(c.startswith("auto-calibrate") for c in calls(repo)), r.stderr   # the run reached stage 7
