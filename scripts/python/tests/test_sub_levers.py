@@ -306,3 +306,40 @@ def test_generator_endpoints_equal_the_binary_levers_output(tmp_path, f):
     row = [ln for ln in text.splitlines() if '.s("sine")' in ln and "lpf(" in ln]
     want = (SCRIPTS / "tests" / "fixtures" / "calibrate" / f"sub_sine_row_f{f}.txt").read_text().splitlines()
     assert row == want
+
+
+def _comparison_dark(tmp_path: Path, orig_sub: float, rend_sub: float) -> Path:
+    """_comparison with the render twice too dark (centroid 1000 vs 2000): the hat lever wants to move."""
+    p = _comparison(tmp_path, orig_sub, rend_sub)
+    d = json.loads(p.read_text())
+    d["original"]["spectral"]["centroid_mean"] = 2000.0
+    p.write_text(json.dumps(d))
+    return p
+
+
+def _cal_dark(tmp_path, orig_sub, rend_sub, *extra):
+    out = subprocess.run([sys.executable, str(CAL), "--comparison", str(_comparison_dark(tmp_path, orig_sub, rend_sub)), *extra],
+                         capture_output=True, text=True, check=True).stdout.split()
+    return {out[i]: out[i + 1] for i in range(0, len(out), 2)}
+
+
+KNOBS_DARK = ("--sub-gain", "0.9", "--lead-lpf", "8000", "--hat-gain", "0.1", "--cal-lead", "1.0")
+
+
+def test_the_split_step_moves_no_other_lever(tmp_path):
+    """Regression (Sem Aliança synth 2026-11-13): cal2 moved f together with the hats, lead-hpf and cal-lead and the split
+    was judged on that mix (0.737 -> 0.707); the same f alone scored 0.747 / 0.765. While f moves, nothing else does."""
+    control = _cal_dark(tmp_path, 0.10, 0.10, *KNOBS_DARK)          # split in balance: the dark mix moves the hats
+    assert float(control["--hat-gain"]) > 0.1
+    got = _cal_dark(tmp_path, 0.10, 0.20, *KNOBS_DARK)              # split off: f moves, the hats and the lead hold
+    assert 0.0 < float(got["--sub-up"]) < 1.0
+    assert float(got["--hat-gain"]) == pytest.approx(0.1)
+    assert float(got["--lead-lpf"]) == pytest.approx(8000)
+    assert float(got["--cal-lead"]) == pytest.approx(1.0)
+
+
+def test_the_loop_holds_the_master_gain(tmp_path):
+    """Regression (2026-11-13): a warm start carries the loudness stage's gain (2.299); a 0.78 cap left from the BlackHole
+    limiter pulled it 9.4 dB down on the first step. The level is the loudness stage's lever; the loop holds it."""
+    got = _cal(tmp_path, 0.10, 0.10, "--master-gain", "2.299")
+    assert float(got["--master-gain"]) == pytest.approx(2.299)

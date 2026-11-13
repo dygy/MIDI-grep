@@ -588,12 +588,25 @@ def main() -> int:
     else:
         nxt["hat_gain"] = round(cur["hat_gain"], 3)
 
-    # --- master gain: gentle nudge toward energy parity, capped to keep the recorder's -----
-    # 0 dBFS limiter out of it (clipping destroys the band balance we just fixed). -----------
+    # --- master gain: held. The level is the loudness stage's lever (mix_dynamics.py, after BEST: RMS, crest and clipping
+    # measured against the instrumental); the score is level-invariant, so the loop cannot see it. The former nudge was
+    # capped at 0.78 for the BlackHole recorder's 0 dBFS limiter: a warm start carries the loudness stage's final gain
+    # (Sem Aliança synth 2.299), and the cap pulled it 9.4 dB down on the first step, in the same render as the lever
+    # being tried. Measured alone on that piece the drop is neutral (0.7369 -> 0.7390), so holding costs nothing.
     rms_ratio = comp.get("raw_rms_ratio", 1.0)
-    if rms_ratio > 0:
-        m_corr = clamp((1.0 / rms_ratio) ** 0.2, 0.92, 1.12)
-        nxt["master_gain"] = round(clamp(cur["master_gain"] * m_corr, 0.4, 0.78), 3)
+    nxt["master_gain"] = cur["master_gain"]
+
+    # --- one lever per step while the split moves ----------------------------------------------------------------
+    # The split step is scored like any other, so nothing else may move in its render. Sem Aliança synth (2026-11-13):
+    # cal1 -> cal2 moved f 0 -> 0.295 together with hats (high share 1.0 -> 3.6 % vs the original's 0.6 %), lead-hpf,
+    # cal-lead and the master gain, scored 0.737 -> 0.707, and the loop backed off the split. The same f alone, from the
+    # same knobs: f 0.3 -> 0.747, f 0.6 -> 0.765 (frequency balance 0.773 -> 0.928). It also makes the next step's
+    # parent a measurement of f alone (the secant in sub_split_step).
+    if splitting:
+        for k in ("cal_lead", "hat_gain"):
+            nxt[k] = cur[k]
+        nxt["lead_lpf"] = int(round(cur["lead_lpf"]))
+        nxt["bass_lpf"], nxt["lead_hpf"] = cur_blpf, cur_lhpf
 
     # -------- report ----------------------------------------------------------------------
     def pct(x):
