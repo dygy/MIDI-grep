@@ -74,8 +74,8 @@ def run_driver(tmp_path, scores, *args, mem_db: Path | None = None, extra_env=No
     return r, [float(x.split("=")[1]) for x in log.read_text().split()] if log.exists() else []
 
 
-def improving(n=12):
-    return [(0.60 + 0.02 * i, 0.60 + 0.02 * i) for i in range(n)]
+def improving(n=12, start=0.60):
+    return [(start + 0.02 * i, start + 0.02 * i) for i in range(n)]
 
 
 def test_a_migration_number_taken_by_another_branch_does_not_skip_this_migration(db):
@@ -146,11 +146,35 @@ def test_warm_start_uses_the_recorded_best_of_this_track_and_caps_at_three(db, t
     db.write_rows([row(db, track="stems", tag="cal1", overall=0.70, margin=0.0, knobs="0.40 0.7 1.0 5000 0 0.6 0 0 0"),
                    row(db, track="stems", tag="cal2", overall=0.80, margin=0.10, knobs="0.77 0.66 0.88 4100 0.1 0.7 300 410 1"),
                    row(db, track="stems", tag="cal3", overall=0.75, margin=0.05, knobs="0.50 0.50 0.50 4000 0 0.6 0 0 0")])
-    r, bms = run_driver(tmp_path, improving())
+    r, bms = run_driver(tmp_path, improving(start=0.80))   # cal1 reproduces the recorded best (0.80): short budget holds
     assert r.returncode == 0, r.stdout + r.stderr
     assert "warm start: track" in r.stdout and "iteration cap: 3" in r.stdout
     assert bms[0] == pytest.approx(0.77), bms          # cal1 renders the recorded best, not the cold default 0.40
     assert len(bms) == 3, bms                           # still improving, stopped by the warm budget
+
+
+def test_a_warm_start_that_misses_its_promise_gets_the_full_budget(db, tmp_path):
+    # BibiBabydoll synth (2026-11-08): a neighbour's knobs promised 0.762, cal1 scored 0.687, and the 3-render warm
+    # budget stopped the loop with sub_bass/bass still +14.6 / -15.3 points off (synth frequency balance RED on 12 pieces).
+    db.write_rows([row(db, track="near", tag="cal4", overall=0.80, knobs="0.61 0.62 0.63 4200 0 0.7 300 400 1")])
+    r, bms = run_driver(tmp_path, improving(start=0.60))
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "warm start: neighbour" in r.stdout and "iteration cap: 3" in r.stdout
+    assert "missed its promise" in r.stdout + r.stderr
+    assert len(bms) == CL.MAX_ITERS, bms
+    # --iters N always wins over the promise rule
+    other = tmp_path / "iters2"
+    other.mkdir()
+    r, bms = run_driver(other, improving(start=0.60), "--iters", "2", mem_db=tmp_path / "chdb")
+    assert len(bms) == 2, bms
+
+
+def test_effective_cap_rule():
+    rows = lambda o: [CL.Row(f"cal1\t{o}\t0.0\t-0.1 FAIL\t1 1 1 1 0 1 0 0 0")]   # noqa: E731
+    assert CL.effective_cap(rows(0.687), 3, 0.762, 0.005) == CL.MAX_ITERS
+    assert CL.effective_cap(rows(0.760), 3, 0.762, 0.005) == 3                     # inside the noise: promise kept
+    assert CL.effective_cap(rows(0.687), 3, None, 0.005) == 3                      # no promise (seed / cold)
+    assert CL.effective_cap([], 3, 0.762, 0.005) == 3
 
 
 def test_cold_start_without_history_runs_the_full_budget(db, tmp_path):
@@ -164,7 +188,7 @@ def test_new_track_is_seeded_from_the_nearest_same_genre_track(db, tmp_path):
     db.write_rows([row(db, track="near", tag="cal4", knobs="0.61 0.62 0.63 4200 0 0.7 300 400 1", bpm=129.0, key="C# minor"),
                    row(db, track="far", tag="cal4", knobs="0.99 0.98 0.97 3900 0 0.7 0 0 0", bpm=95.0, key="F major", bands=far),
                    row(db, track="jazzy", tag="cal4", knobs="0.11 0.12 0.13 3800 0 0.7 0 0 0", genre="jazz", bpm=130.0)])
-    r, bms = run_driver(tmp_path, improving())
+    r, bms = run_driver(tmp_path, improving(start=0.80))
     assert "warm start: neighbour" in r.stdout and "'near'" in r.stdout, r.stdout
     assert bms[0] == pytest.approx(0.61) and len(bms) == 3
     # note-bound knobs (bass low-pass, lead high-pass) and the octave hypothesis are not copied from another track

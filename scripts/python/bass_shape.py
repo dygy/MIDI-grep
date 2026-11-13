@@ -349,6 +349,33 @@ def _fold(p: int, lo: int, hi: int) -> int | None:
     return p if lo <= p <= hi else None
 
 
+def repitch_contradicted(trigs: list[Trigger], ev: StemEvidence, register, step_dur: float) -> int:
+    """A written pitch that the stem contradicts takes the stem's pitch (``stem_pitch_after``). Contradicted = over
+    the note's first two steps the stem is voiced, its chroma's strong class (Otsu split) holds the f0's pitch class
+    and NOT the written one. Basic Pitch writes a loud 808's harmonics (3rd = octave + fifth); octave-folded into the
+    register they become a fifth above the note the stem plays (VEM CA: E2 over A1). A written pitch the chroma
+    supports is never touched - the transcription's real pitch changes stay. Returns the number re-pitched."""
+    try:
+        lo, hi = register.window()
+    except ValueError:
+        return 0
+    n = 0
+    for tr in trigs:
+        f = register.local(tr.t, tr.t + step_dur)
+        v = ev.chroma_over(tr.t + 0.03, tr.t + 2 * step_dur, lo, hi)
+        if f is None or v is None:
+            continue
+        thr = otsu(v)
+        fpc = int(round(f)) % 12
+        if thr is None or fpc == tr.pitch % 12 or v[fpc] < thr or v[tr.pitch % 12] >= thr:
+            continue
+        p = stem_pitch_after(ev, register, tr.t, step_dur, lo, hi, tr.pitch)
+        if p is not None and p != tr.pitch:
+            tr.pitch = p
+            n += 1
+    return n
+
+
 def add_missed_attacks(trigs: list[Trigger], ev: StemEvidence, register, step_dur: float, total_steps: int) -> int:
     """The transcription misses some of the stem's strong attacks (no Basic Pitch note within a step). Where the
     stem re-attacks and no trigger is within half a step, write an attack on the step nearest to it, its pitch
@@ -391,13 +418,14 @@ def shape_bars(bars: list[str], bpm: float, ev: StemEvidence, register, quantize
     trigs = [Trigger(step=s, t=t, pitch=p, end=ev.end_after(t, bar_dur), attack=a)
              for s, t, p, a in zip(steps, times, pitches, flags)]
     total = len(bars) * quantize
+    repitched = repitch_contradicted(trigs, ev, register, step_dur) if register is not None else 0
     added = add_missed_attacks(trigs, ev, register, step_dur, total) if register is not None else 0
     notes = plan_notes(trigs, step_dur, quantize, total)
     n_gl = measure_glides(notes, register.midi, register.times, register.active, step_dur) if register is not None else 0
     lens = [n.length * step_dur for n in notes]
     info = {"triggers_in": len(trigs), "notes": len(notes), "median_len_s": float(np.median(lens)) if lens else 0.0,
             "median_len_steps": float(np.median([n.length for n in notes])) if notes else 0.0,
-            "merged": len(trigs) - len(notes), "attacks_added": added, "glides": n_gl, "glide_s_median": float(np.median([n.glide for n in notes if n.glide])) if n_gl else 0.0}
+            "merged": len(trigs) - len(notes), "attacks_added": added, "repitched": repitched, "glides": n_gl, "glide_s_median": float(np.median([n.glide for n in notes if n.glide])) if n_gl else 0.0}
     return notes, info
 
 

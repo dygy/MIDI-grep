@@ -499,3 +499,29 @@ def test_demucs_opt_in_still_separates(track: tuple[Path, Path, Path]) -> None:
 def test_cli_render_stems_flag_defaults_to_solo() -> None:
     import pipeline_helpers
     assert pipeline_helpers.DEFAULT_RENDER_STEMS == "solo"
+
+
+def test_render_stems_are_compared_with_the_stage_3c_view(track: tuple[Path, Path, Path]) -> None:
+    # BibiBabydoll (2026-11-08): the view holds the 808 the bass voice plays; the track's bass.wav is vocal bleed.
+    # Comparing the render's bass with the bleed gave 13 false RED bass flags (chroma 0.000, envelope 0.000).
+    t, v, w = track
+    view = t / ".pipeline" / "stems"
+    view.mkdir(parents=True)
+    _sine(view / "bass.wav", 50)
+    _sine(view / "drums.wav", 95)
+    run = FakeRunner()
+    build_report(t, v, seconds=1.0, calib_workdir=w, run=run, stems_view=view)
+    stems_call = next(c for c in run.calls if "--stems" in c)
+    assert stems_call[stems_call.index("--original-bass") + 1] == str(view / "bass.wav")
+    assert stems_call[stems_call.index("--original-drums") + 1] == str(view / "drums.wav")
+    assert stems_call[stems_call.index("--original-melodic") + 1] == str(t / "melodic.wav")
+    rec = json.loads((v / "stem_sources.json").read_text())
+    assert rec["bass"] == ".pipeline/stems/bass.wav" and rec["melodic"] == "melodic.wav"   # track-relative
+    # unchanged sources: the comparison is reused; without the view (nothing moved any more) it is redone
+    run2 = FakeRunner()
+    build_report(t, v, seconds=1.0, calib_workdir=w, run=run2, stems_view=view)
+    assert not any("--stems" in c for c in run2.calls)
+    run3 = FakeRunner()
+    build_report(t, v, seconds=1.0, calib_workdir=w, run=run3, stems_view=t)
+    assert any("--stems" in c for c in run3.calls)
+    assert json.loads((v / "stem_sources.json").read_text())["bass"] == "bass.wav"

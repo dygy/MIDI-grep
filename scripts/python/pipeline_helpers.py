@@ -27,6 +27,7 @@ import filecmp
 import hashlib
 import json
 import math
+import os
 import re
 import shutil
 import subprocess
@@ -210,6 +211,36 @@ def _refine_track_bpm(track_dir: Path, meta: dict, *, coarse: float) -> None:
     meta["bpm_confidence"] = round(float(r["confidence"]), 4)
 
 
+def inputs_key(bpm: str, paths: list[Path]) -> str:
+    """What a calibration was made FROM (editable-pipeline.sh stage 7 ``best.inputs``): the bpm + a digest of the input
+    files that exist (drum hits, instruments manifest, stage-3c repair record). A best render from other inputs is
+    stale even when the code is not."""
+    import hashlib
+    h = hashlib.sha256()
+    for p in paths:
+        p = Path(p)
+        h.update(p.name.encode())
+        if p.is_file():
+            h.update(p.read_bytes())
+    return f"{bpm}|{h.hexdigest()[:16]}"
+
+
+def set_decided_bpm(track_dir: Path, coarse: float, *, by: str, evidence: dict | None = None) -> dict:
+    """Stamp a DECIDED tempo: refine around ``coarse`` and record ``bpm_decided`` so every later stamp starts from it
+    instead of the extraction's tempogram estimate. The autopilot writes it when a trial at this tempo scored better
+    than the stamped one (BibiBabydoll 2026-11-08: the extractor locked onto a dotted subdivision, 112.5 BPM at
+    phase-coherence 0.045); ``editable-pipeline.sh --bpm`` writes it for a trial run."""
+    track_dir = Path(track_dir)
+    meta_path = track_dir / "metadata.json"
+    meta = json.loads(meta_path.read_text())
+    meta["bpm_decided"] = {"bpm_coarse": float(coarse), "by": by, "evidence": evidence or {}}
+    _refine_track_bpm(track_dir, meta, coarse=float(coarse))
+    tmp = meta_path.with_suffix(".json.tmp")
+    tmp.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
+    tmp.replace(meta_path)
+    return meta
+
+
 UNREFERENCED = "unreferenced"   # genre key meaning "no trusted genre": the gate uses its default floor, memory finds no neighbours
 
 
@@ -260,6 +291,8 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
             if src in vmeta and vmeta[src] not in (None, ""):
                 meta[dst] = vmeta[src]
         coarse = float(vmeta["bpm"])
+        if isinstance(meta.get("bpm_decided"), dict):     # a decided tempo (set_decided_bpm) outranks the extraction's
+            coarse = float(meta["bpm_decided"]["bpm_coarse"])
     elif keep_tempo:
         coarse = None
     elif meta.get("bpm") not in (None, ""):
@@ -508,6 +541,22 @@ def _finishing_render(workdir: Path, render: Path, after: int) -> _Cal | None:
     return None
 
 
+STEM_SOURCES = "stem_sources.json"   # vNNN/: the original stem each render stem was compared with (track-relative)
+
+
+def _rel_to(p: Path, base: Path) -> str:
+    """``p`` relative to ``base`` when inside it (a snapshot/moved checkout keeps working), else absolute."""
+    rp, rb = Path(os.path.abspath(p)), Path(os.path.abspath(base))
+    try:
+        return str(rp.relative_to(rb))
+    except ValueError:
+        return str(rp)
+
+
+def _default_sources(track_dir: Path) -> dict[str, str]:
+    return {s: _rel_to(p, track_dir) for s in RENDER_STEMS if (p := _find_audio(track_dir, s)) is not None}
+
+
 def _find_audio(directory: Path, stem: str) -> Path | None:
     # "melodic" falls back to the legacy "piano" stem exactly like generate_report.py's find_stem
     for name in (stem, "piano") if stem == "melodic" else (stem,):
@@ -697,7 +746,8 @@ def solo_render_stems(vdir: Path, render: Path, *, run: Runner) -> None:
 def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_workdir: Path | None = None,
                  iteration_stems: bool = True, force: bool = False, config: Path | None = None,
                  gate: GateVerdict | None = None, run: Runner = subprocess_runner,
-                 python: str = sys.executable, render_stems: str = DEFAULT_RENDER_STEMS) -> ReportResult:
+                 python: str = sys.executable, render_stems: str = DEFAULT_RENDER_STEMS,
+                 stems_view: Path | None = None) -> ReportResult:
     """Stage 10: make a promoted ``vNNN`` complete and write ``vNNN/report.html``. Idempotent.
 
     1. charts: ``compare_audio.py --chart`` into a temp dir; only ``comparison.png`` + ``chart_*.png`` are copied
@@ -705,7 +755,10 @@ def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_wo
     2. render stems -> ``render_{melodic,drums,bass,vocals}``: ``render_stems="solo"`` (default) renders
        ``output.strudel`` once per voice group with the other groups' ``$:`` channels commented out (see
        ``solo_stems.py``) and writes silence for vocals; ``"demucs"`` runs ``separate.py render.wav --prefix render``;
-    3. per-stem comparison: ``compare_audio.py --stems`` -> ``stem_comparison.json`` + ``chart_stem_*.png``;
+    3. per-stem comparison: ``compare_audio.py --stems`` -> ``stem_comparison.json`` + ``chart_stem_*.png``; a stem the
+       stage-3c view (``stems_view``) holds is compared with the view's (BibiBabydoll 2026-11-08: the render's bass, the
+       808 the view moved, was scored against the track's bass.wav = vocal bleed - 13 false RED bass flags). The
+       originals used are written to ``stem_sources.json`` (relative to the track) and a change of them redoes step 3;
     4. iteration history from ``calib_workdir`` (``iterations.json`` + ``iterations/``); untouched when None;
     5. ``generate_report.py`` -> ``report.html``.
 
@@ -726,6 +779,11 @@ def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_wo
     missing = [s for s, p in orig_stems.items() if p is None]
     if missing:
         raise FileNotFoundError(f"report: original stems missing in {track_dir}: {', '.join(missing)}")
+    if stems_view is not None and Path(stems_view).resolve() != track_dir.resolve():
+        orig_stems.update({s: p for s in RENDER_STEMS if (p := _find_audio(Path(stems_view), s)) is not None})
+    sources = {s: _rel_to(p, track_dir) for s, p in orig_stems.items()}
+    sources_json = vdir / STEM_SOURCES
+    old_sources = json.loads(sources_json.read_text()) if sources_json.is_file() else None
     cfg = ["--config", config] if config is not None else []
     rebuilt = force
     external_calls: list[int] = []
@@ -755,12 +813,14 @@ def build_report(track_dir: Path, version_dir: Path, *, seconds: float, calib_wo
 
     rendered = {s_: _need_stem(vdir, f"render_{s_}") for s_ in RENDER_STEMS}   # compare_audio reads mp3 or wav
     stem_json = vdir / "stem_comparison.json"
-    if force or not stem_json.is_file() or not (vdir / "chart_stem_overview.png").is_file():
+    if force or not stem_json.is_file() or not (vdir / "chart_stem_overview.png").is_file() \
+            or (old_sources if old_sources is not None else _default_sources(track_dir)) != sources:
         rebuilt = True
         pairs = [a for s_ in RENDER_STEMS
                  for a in (f"--original-{s_}", orig_stems[s_], f"--rendered-{s_}", rendered[s_])]
         run([python, SCRIPTS_DIR / "compare_audio.py", "--stems", "--output-dir", vdir, *pairs, "-d", seconds, *cfg])
         _need(stem_json, "stem_comparison.json")
+        sources_json.write_text(json.dumps(sources, indent=1) + "\n", encoding="utf-8")
 
     # Size + freshness: the report base64-embeds audio, so it gets 128k mp3 twins (never decoded from a lossy
     # intermediate: encoded from the Demucs file / original wav). A twin is reused only if not older than its source.
@@ -1019,6 +1079,13 @@ def main(argv: list[str] | None = None) -> int:
     rf.add_argument("--run", required=True)
     rf.add_argument("--margin", type=float, default=0.02)
     rf.add_argument("--labels", type=Path, default=None, help="genre label registry (default eval/datasets/genre_labels.yaml)")
+    ik = sub.add_parser("inputs-key", help="the stage-7 input key: bpm + digest of the input files")
+    ik.add_argument("bpm")
+    ik.add_argument("paths", type=Path, nargs="*")
+    sb = sub.add_parser("set-bpm", help="stamp a decided tempo (refined around BPM) that later stamps keep")
+    sb.add_argument("track_dir", type=Path)
+    sb.add_argument("bpm", type=float)
+    sb.add_argument("--by", default="editable-pipeline.sh --bpm")
     st = sub.add_parser("stamp")
     st.add_argument("track_dir", type=Path)
     st.add_argument("--genre", default=None, help="explicit genre override (logged in metadata)")
@@ -1048,6 +1115,8 @@ def main(argv: list[str] | None = None) -> int:
                     help="how render_{melodic,drums,bass,vocals} are made: solo = the renderer, one voice group "
                          "sounding per render (vocals = silence); demucs = separate.py on render.wav (only when "
                          "working on the separation stage)")
+    rp.add_argument("--stems-view", type=Path, default=None,
+                    help="stage-3c view dir: its stems are the originals the render stems are compared with")
     rp.add_argument("--gate-verdict", choices=("PASS", "FAIL"), default=None)
     rp.add_argument("--gate-message", default="")
     args = ap.parse_args(argv)
@@ -1058,7 +1127,7 @@ def main(argv: list[str] | None = None) -> int:
             res = build_report(args.track_dir, args.track_dir / vname, seconds=args.seconds,
                                calib_workdir=args.calib_workdir, iteration_stems=not args.no_iteration_stems,
                                force=args.force, config=args.config, gate=gate,
-                               render_stems=args.render_stems)
+                               render_stems=args.render_stems, stems_view=args.stems_view)
             print(res.report)
         elif args.cmd == "slug":
             print(slug_from_title(args.title))
@@ -1070,6 +1139,11 @@ def main(argv: list[str] | None = None) -> int:
             res = record_mode_floor(args.thresholds, mode=args.mode, genre=args.genre, comparison_path=args.comparison,
                                     run=args.run, margin=args.margin, labels_path=args.labels)
             print(json.dumps({"recorded": res is not None, "measured": res}))
+        elif args.cmd == "inputs-key":
+            print(inputs_key(args.bpm, args.paths))
+        elif args.cmd == "set-bpm":
+            m = set_decided_bpm(args.track_dir, args.bpm, by=args.by)
+            print(json.dumps({k: m.get(k) for k in ("bpm", "bpm_coarse", "bpm_method", "bpm_confidence", "bpm_decided")}))
         elif args.cmd == "stamp":
             m = stamp_track_metadata(args.track_dir, genre_override=args.genre, detector_json=args.detector_json,
                                      keep_tempo=args.keep_tempo, text_json=args.text_json)

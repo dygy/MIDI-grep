@@ -2,7 +2,11 @@
 # Do not use 3.12-only syntax (e.g. the `type X = ...` statement).
 # Stem separation (separate.py)
 demucs>=4.0.1
-torch>=2.5.0          # also imported directly (detect_genre_dl.py); acids-rave pins 2.5.x
+# torch trio pinned together (2026-11-08): an unpinned install resolved torch 2.15 with no matching torchvision, and
+# laion-clap imports torchvision - the venv rebuilt from this file could not run stage 1b. acids-rave pins 2.5.x.
+torch==2.5.1          # also imported directly (detect_genre_dl.py)
+torchvision==0.20.1   # laion_clap.clap_module.utils
+torchaudio==2.5.1     # demucs audio I/O
 basic-pitch>=0.3.0
 librosa>=0.10.0
 pretty_midi>=0.2.10
@@ -16,7 +20,8 @@ scikit-learn>=0.17,<=1.5.1
 keras>=2.15.0,<3.0.0
 
 # Deep learning genre detection (CLAP)
-transformers>=4.30.0
+transformers==5.0.0   # with huggingface_hub 1.3.7: the versions diffusers 0.39 was pinned against
+huggingface_hub==1.3.7
 laion-clap>=1.1.4
 
 # Hydra visuals (scripts/python/visuals, spec 005): self-hosted text-to-image. Pinned against this venv's
@@ -29,6 +34,7 @@ openl3>=0.4.1
 
 # Verification loop MCP server (mcp_servers/loop) + eval gate (eval/gate.py)
 fastmcp>=2.0.0
+pytest>=8.0      # the test suite (CLAUDE.md Testing)
 pydantic>=2.0   # pipeline_helpers.py / build_instruments.py models (not only via fastmcp)
 pyyaml>=6.0
 

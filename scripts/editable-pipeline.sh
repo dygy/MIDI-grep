@@ -49,6 +49,8 @@
 #              when working on the separation stage itself)
 #   --no-visuals  skip stage 11
 #   --force    redo every stage even if its output exists
+#   --bpm B    decide the tempo: refine around B and stamp it as bpm_decided (kept by every later stamp; the autopilot
+#              uses it for tempo trials on a copy of the track)
 #
 # Requires (checked per stage, not up front): the renderer built (scripts/node/dist; BlackHole + Multi-Output only for
 # MIDIGREP_RENDERER=blackhole), wrangler OAuth login for --r2. stdout carries ONLY the final JSON summary;
@@ -76,7 +78,7 @@ else
   RENDER_NOTE="record-strudel-blackhole.js RAW capture + uniform speed correction (ffmpeg wallclock restamp)"
 fi
 
-URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="" SYNTH_ITERS="" DUR="" HOSTING="r2" FORCE="" ITER_STEMS_ARG=() RENDER_STEMS_ARG=() VISUALS="1"
+TRIAL_BPM="" URL="" TITLE="" PREFIX="" GENRE_OVERRIDE="" MODE="both" ITERS="" SYNTH_ITERS="" DUR="" HOSTING="r2" FORCE="" ITER_STEMS_ARG=() RENDER_STEMS_ARG=() VISUALS="1"
 
 usage() { sed -n '2,/^set -uo/p' "${BASH_SOURCE[0]}" | sed '$d' | sed 's/^# \{0,1\}//'; }
 log() { echo "[editable-pipeline] $*" >&2; }
@@ -97,6 +99,7 @@ while [ $# -gt 0 ]; do case "$1" in
   --render-stems) RENDER_STEMS_ARG=(--render-stems "${2:?--render-stems needs solo|demucs}"); shift 2;;
   --no-visuals) VISUALS=""; shift;;
   --force) FORCE="1"; shift;;
+  --bpm) TRIAL_BPM="${2:?--bpm needs a value}"; shift 2;;
   -h|--help) usage; exit 0;;
   *) echo "unknown arg: $1 (see --help)" >&2; exit 64;;
 esac; done
@@ -126,9 +129,15 @@ code_ok() {
   [ -n "$CODE_VER" ] || CODE_VER="$("$PY" "$SP/calibration_memory.py" code-version 2>/dev/null)"
   [ -n "$CODE_VER" ] && [ "$(cat "$1/best.code" 2>/dev/null)" = "$CODE_VER" ]
 }
+# inputs_key: what a calibration was made FROM - the bpm, the drum hits, the instruments manifest and the stage-3c view.
+# A best render made from other inputs (a trial bpm, a new drum detector, a rebuilt pack) is stale even when the code
+# is not: before 2026-11-08 stage 7 kept it and the new inputs never reached the piece.
+inputs_key() { "${PH[@]}" inputs-key "$BPM" "$PACK/drums_bands.json" "$PACK/instruments/samples.json" "$GEN_STEMS/repair.json" "$BASS_MIDI"; }
+inputs_ok() { [ "$(cat "$1/best.inputs" 2>/dev/null)" = "$(inputs_key)" ]; }
 stale_reason() {
   if [ -s "$1/best.params" ] && ! params_ok "$1/best.params"; then echo "best.params is in the old (CV) format"
-  elif [ -s "$1/best.params" ]; then echo "best render is from other code (stamp '$(cat "$1/best.code" 2>/dev/null)', now '$CODE_VER')"; fi
+  elif [ -s "$1/best.params" ] && ! code_ok "$1"; then echo "best render is from other code (stamp '$(cat "$1/best.code" 2>/dev/null)', now '$CODE_VER')"
+  elif [ -s "$1/best.params" ]; then echo "best render was made from other inputs (bpm / drum hits / instruments / stage-3c view)"; fi
 }
 # base_ok <samples.json> <expected-base>: the baked _base matches the hosting we are about to use
 base_ok() { [ -s "$1" ] && [ "$("$PY" -c "import json,sys;print(json.load(open(sys.argv[1])).get('_base',''))" "$1")" = "$2" ]; }
@@ -158,6 +167,15 @@ PYF
 }
 
 stems_complete() { local d="$1" f; for f in original.wav bass.wav drums.wav melodic.wav vocals.wav metadata.json; do [ -s "$d/$f" ] || return 1; done; }
+
+# ---------------------------------------------------------------- disk budget (scripts/python/cache_budget.py)
+# Prune what is regenerable (iteration renders, superseded pieces, caches) down to MIDIGREP_CACHE_BUDGET_GB, and refuse a
+# run when the free disk cannot hold the largest growth a run has shown plus swap headroom (exit 4 = refuse).
+cb() { "$PY" "$SP/cache_budget.py" --root "$ROOT" "$@"; }
+cb preflight >&2; CB_RC=$?
+[ "$CB_RC" -eq 4 ] && die "disk preflight: not enough free disk for a run (see above)"
+[ "$CB_RC" -ne 0 ] && log "WARNING: cache_budget.py preflight exited $CB_RC (see above) - continuing"
+CACHE_BEFORE="$(cb cache-bytes)" || CACHE_BEFORE=""
 
 TRACK="$(find_track_dir)"
 if [ -n "$TRACK" ] && stems_complete "$TRACK" && [ -z "$FORCE" ]; then
@@ -217,6 +235,10 @@ if [ -z "$(jget "$META" bpm)" ] || [ -z "$(jget "$META" bpm_method)" ] || [ -n "
     for m in $(modes); do rm -f "$TRACK/.pipeline/$m/best.code"; done
   fi
 fi
+if [ -n "$TRIAL_BPM" ]; then   # a decided tempo (autopilot trial / owner): refined around it, kept by every later stamp
+  log "stage 1b: tempo decided at $TRIAL_BPM BPM (--bpm), refining around it"
+  "${PH[@]}" set-bpm "$TRACK" "$TRIAL_BPM" >&2 || die "stage 1b: set-bpm $TRIAL_BPM failed"
+fi
 BPM="$(jget "$META" bpm)"; KEY="$(jget "$META" key)"; GENRE="$(jget "$META" genre)"
 DURATION="$(jget "$META" duration)"; TRACK_TITLE="$(jget "$META" title)"
 [ -n "$BPM" ] && [ -n "$DURATION" ] || die "metadata.json lacks bpm/duration: $META"
@@ -251,6 +273,7 @@ COMPARE_SECONDS="$SONG_SECONDS"
 log "track='$TRACK' slug=$SLUG bpm=$BPM key='$KEY' genre=$GENRE duration=${DURATION}s bars=$BARS render=${DUR}s compare=${COMPARE_SECONDS}s mode=$MODE host=$HOSTING"
 
 PACK="$TRACK/sample_pack"; PW="$TRACK/.pipeline"; mkdir -p "$PACK" "$PW"
+echo "$$" > "$PW/running.pid"; trap 'rm -f "$PW/running.pid"' EXIT   # cache_budget.py never prunes a track a run holds
 if [ "$HOSTING" = r2 ]; then HOST_BASE="$R2_PUBLIC/midi-grep"; else HOST_BASE="http://localhost:$LOCAL_PORT"; fi
 BASE="$HOST_BASE/$SLUG"; INST_BASE="$BASE/instruments/"
 
@@ -264,12 +287,13 @@ for pair in "bass.wav:bass.mid" "melodic.wav:melodic.mid"; do
 done
 
 # ---------------------------------------------------------------- stage 3: drum onsets
-if stage_done "$PACK/drums_bands.json" && built_at "$PW/drums_bands.bpm"; then log "stage 3 skip: drums_bands.json exists (built at bpm $BPM)"; else
+DRUMS_VER="$("$PY" "$SP/detect_drums_bands.py" --version)" || die "detect_drums_bands.py --version failed"
+if stage_done "$PACK/drums_bands.json" && [ "$(cat "$PW/drums_bands.bpm" 2>/dev/null)" = "$BPM v$DRUMS_VER" ]; then log "stage 3 skip: drums_bands.json exists (built at bpm $BPM, detector v$DRUMS_VER)"; else
   log "stage 3: drum band onsets (bpm $BPM)"
   rm -f "$PW/drums_bands.bpm"
   "$PY" "$SP/detect_drums_bands.py" "$TRACK/drums.wav" --bpm "$BPM" --out "$PACK/drums_bands.json" >&2 \
     || die "stage 3 detect_drums_bands failed"
-  echo "$BPM" > "$PW/drums_bands.bpm"
+  echo "$BPM v$DRUMS_VER" > "$PW/drums_bands.bpm"
 fi
 
 # ---------------------------------------------------------------- stage 3b: bass register (f0 of the bass stem)
@@ -286,6 +310,20 @@ log "stage 3b: bass f0 / register"
 log "stage 3c: bass in the drums stem"
 GEN_STEMS="$("$PY" "$SP/stem_repair.py" build --track "$TRACK" --out "$PW/stems" --bpm "$BPM" --bars "$BARS" \
   --bass-f0 "$PW/bass_f0.json")" || die "stage 3c stem_repair failed"
+# The bass PART comes from where the bass is: when 3c moved the 808 into the view, the view's bass.wav is transcribed
+# (its notes) and is what stage 5 cuts the bass instrument from. Before 2026-11-08 both came from the track's bass.wav:
+# BibiBabydoll's bass stem is vocal bleed, so the bass voice played the bleed's notes with grains of the bleed while the
+# 808 sat in the view (render bass chroma vs the stem: 0.008).
+BASS_DIR="$TRACK"; BASS_MIDI="$PACK/bass.mid"
+if [ "$GEN_STEMS" != "$TRACK" ]; then
+  BASS_DIR="$GEN_STEMS"; BASS_MIDI="$GEN_STEMS/bass.mid"
+  if [ -s "$BASS_MIDI" ] && [ "$BASS_MIDI" -nt "$GEN_STEMS/bass.wav" ]; then log "stage 3c: bass.mid of the view exists"
+  else
+    log "stage 3c: transcribe the view's bass (the 808 moved there)"
+    "$PY" "$SP/transcribe.py" "$GEN_STEMS/bass.wav" "$BASS_MIDI" >&2 || die "stage 3c: transcribe the view's bass failed"
+    [ -s "$BASS_MIDI" ] || die "stage 3c produced no $BASS_MIDI"
+  fi
+fi
 
 # ---------------------------------------------------------------- stage 4: sample pack
 # the pack is stamped with the code that cut it (pack.code): a builder change must reach the one-shots
@@ -310,24 +348,28 @@ INST_VER="$("$PY" "$SP/calibration_memory.py" code-version --stage instruments 2
 INST_MODELS=()   # the instruments this track has: a stem with no transcribed notes has no part to play
 for pair in "bass:bass.wav" "lead:melodic.wav"; do
   role="${pair%%:*}"; src="${pair##*:}"; mdir="$ROOT/models/${SND}_$role"
+  if [ "$role" = bass ]; then sdir="$BASS_DIR"; midi="$BASS_MIDI"; else sdir="$TRACK"; midi="$PACK/${src%.wav}.mid"; fi
+  # what the grains are cut from: retrain when it changes (the view appears / the 808 moves / the transcription changes)
+  srckey="$("${PH[@]}" inputs-key "-" "$sdir/$src" "$midi")"
   # A stem Basic Pitch found no notes in has no such part (Tatuagem No Pescoco 2026-11-07: the bass stem is Demucs
   # bleed at -63 dB, the low end is a tuned 808 KICK in the drums stem). The generator then writes no voice for it;
   # there is nothing to cut grains from. An unreadable MIDI prints nothing and is trained as before (and fails there).
-  if [ "$("${PH[@]}" midi-notes "$PACK/${src%.wav}.mid" 2>/dev/null)" = 0 ]; then
-    log "stage 5: no $role part (${src%.wav}.mid has no notes) - no ${SND}_$role instrument, the piece has no $role voice"
+  if [ "$("${PH[@]}" midi-notes "$midi" 2>/dev/null)" = 0 ]; then
+    log "stage 5: no $role part ($(basename "$midi") has no notes) - no ${SND}_$role instrument, the piece has no $role voice"
     continue
   fi
   INST_MODELS+=("$mdir")
   # a model trained before note-aligned grains (no grain_mode) or by other grain code is retrained
   if stage_done "$mdir/metadata.json" && [ "$(jget "$mdir/metadata.json" grain_mode)" = notes ] \
-     && [ -n "$INST_VER" ] && [ "$(cat "$mdir/.code" 2>/dev/null)" = "$INST_VER" ]; then
+     && [ -n "$INST_VER" ] && [ "$(cat "$mdir/.code" 2>/dev/null)" = "$INST_VER" ] \
+     && [ "$(cat "$mdir/.source" 2>/dev/null)" = "$srckey" ]; then
     log "stage 5 skip: models/${SND}_$role trained"; continue; fi
-  midi="$PACK/${src%.wav}.mid"   # the stem's transcribed notes (stage 2): one grain per note, length from the music
-  log "stage 5: train granular ${SND}_$role from $src (note-aligned, $midi)"
-  (cd "$ROOT" && ./bin/midi-grep generative train "$TRACK/$src" --name "${SND}_$role" --mode granular \
+  log "stage 5: train granular ${SND}_$role from $sdir/$src (note-aligned, $midi)"   # one grain per transcribed note
+  (cd "$ROOT" && ./bin/midi-grep generative train "$sdir/$src" --name "${SND}_$role" --mode granular \
       --midi "$midi" --output "$ROOT/models") >&2 \
     || die "stage 5 train ${SND}_$role failed"
   [ -z "$INST_VER" ] || echo "$INST_VER" > "$mdir/.code"
+  echo "$srckey" > "$mdir/.source"
 done
 # the manifest is rebuilt when its inputs (the drum kit from stage 4, the models trained above) are newer than it
 if stage_done "$PACK/instruments/samples.json" "$PACK/instruments/verification.json" && base_ok "$PACK/instruments/samples.json" "$INST_BASE" \
@@ -343,7 +385,7 @@ fi
 
 # ---------------------------------------------------------------- stage 6: host
 SRV_PID=""
-cleanup() { [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; [ -n "${SERVE_ROOT:-}" ] && rm -rf "$SERVE_ROOT"; }
+cleanup() { [ -n "$SRV_PID" ] && kill "$SRV_PID" 2>/dev/null; [ -n "${SERVE_ROOT:-}" ] && rm -rf "$SERVE_ROOT"; rm -f "$PW/running.pid"; }
 trap cleanup EXIT
 if [ "$HOSTING" = r2 ]; then
   # upload_r2.py is incremental: it hashes only what Strudel fetches (the manifests + the files they reference; analysis
@@ -408,7 +450,7 @@ preflight_render() {
 # ---------------------------------------------------------------- stage 7: generate + calibrate
 run_sample_instrument() {
   local W="$PW/sample-instrument"; mkdir -p "$W"
-  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params" && code_ok "$W"; then
+  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params" && code_ok "$W" && inputs_ok "$W"; then
     log "stage 7 skip (sample-instrument): best render exists in $W"; return 0; fi
   local why; why="$(stale_reason "$W")"; [ -z "$why" ] || log "stage 7 (sample-instrument): $why - stale, rerunning"
   rm -f "$W/result.json"   # a rerun invalidates what stages 8-9 derived from the old best render
@@ -423,6 +465,7 @@ run_sample_instrument() {
   [ "$cal_rc" -eq 0 ] || die "sample-instrument auto-calibrate exited $cal_rc (see $W/calibrate.log)"
   local best; best="$(grep '^BEST:' "$W/calibrate.log" | tail -1)"
   [ -n "$best" ] && [ -s "$W/best.wav" ] || die "auto-calibrate produced no BEST render (see $W/calibrate.log)"
+  inputs_key > "$W/best.inputs"
   # "BEST: calN overall=X  params: BM SG CL LLPF HG MG BL LH SU stem|off" (BL = bass-lpf, LH = lead high-pass Hz; 0 = generator default;
   # SU = sub octave up; the last token = the calibrator-chosen --bass-shape, carried into the stage-9 generator note below)
   echo "${best##*params: }" > "$W/best.params"
@@ -432,7 +475,7 @@ run_sample_instrument() {
 
 run_synth() {
   local W="$PW/synth"; mkdir -p "$W"
-  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params" && code_ok "$W"; then
+  if stage_done "$W/best.strudel" "$W/best.wav" "$W/best.cmp.json" "$W/best.params" && params_ok "$W/best.params" && code_ok "$W" && inputs_ok "$W"; then
     log "stage 7 skip (synth): best render exists in $W"; return 0; fi
   local why; why="$(stale_reason "$W")"; [ -z "$why" ] || log "stage 7 (synth): $why - stale, rerunning"
   rm -f "$W/result.json"
@@ -460,6 +503,7 @@ run_synth() {
   [ "$cal_rc" -eq 0 ] || die "synth auto-calibrate exited $cal_rc (see $W/calibrate.log)"
   local best; best="$(grep '^BEST:' "$W/calibrate.log" | tail -1)"
   [ -n "$best" ] && [ -s "$W/best.wav" ] || die "synth auto-calibrate produced no BEST render (see $W/calibrate.log)"
+  inputs_key > "$W/best.inputs"
   # "BEST: calN overall=X  params: BM SG CL LLPF HG MG BL LH SU stem|off" (the chosen bass shape is the last token)
   echo "${best##*params: }" > "$W/best.params"
   code_ok "$W" || echo "$CODE_VER" > "$W/best.code"
@@ -477,7 +521,7 @@ report_stage() {
     --gate-message "$(tr '\n' ' ' < "$W/gate.txt")")
   log "stage 10: report $mode -> $vdir"
   "${PH[@]}" report --track-dir "$TRACK" --version "$(basename "$vdir")" --seconds "$COMPARE_SECONDS" \
-    --calib-workdir "$W" ${ITER_STEMS_ARG[@]+"${ITER_STEMS_ARG[@]}"} ${RENDER_STEMS_ARG[@]+"${RENDER_STEMS_ARG[@]}"} ${FORCE:+--force} ${gate_arg[@]+"${gate_arg[@]}"} >&2 \
+    --calib-workdir "$W" --stems-view "$GEN_STEMS" ${ITER_STEMS_ARG[@]+"${ITER_STEMS_ARG[@]}"} ${RENDER_STEMS_ARG[@]+"${RENDER_STEMS_ARG[@]}"} ${FORCE:+--force} ${gate_arg[@]+"${gate_arg[@]}"} >&2 \
     || die "stage 10 report failed for $mode ($vdir)"
   [ -s "$vdir/report.html" ] || die "stage 10 produced no $vdir/report.html"
 }
@@ -570,6 +614,25 @@ visuals_stage() {
 }
 for m in $(modes); do visuals_stage "$m"; done
 
+# ---------------------------------------------------------------- stage 12: self-diagnosis
+# scripts/python/diagnose.py: every score component of the mix and of each stem against the reference tracks' range, the
+# tempo stamp against the measured tempi, the worst sections. No audio is loaded. The flags ride in the summary (a run is
+# never reported by its overall score alone); a diagnosis failure is logged, it does not fail the run.
+for m in $(modes); do
+  vdir="$TRACK/$(basename "$(jget "$PW/$m/result.json" version_dir)")"
+  if "$PY" "$SP/diagnose.py" run "$vdir" --track "$TRACK" >"$PW/$m/diagnosis.txt" 2>"$PW/$m/diagnosis.err"; then
+    sed 's/^/[editable-pipeline] stage 12: /' "$PW/$m/diagnosis.txt" >&2
+  else
+    log "stage 12: WARNING - diagnosis FAILED for $m: $(tail -3 "$PW/$m/diagnosis.err" | tr '\n' ' ')"
+  fi
+done
+
+# ---------------------------------------------------------------- stage 13: disk budget
+# Record how much this run grew the cache (the next preflight's need), release the track, prune to the budget.
+if [ -n "$CACHE_BEFORE" ] && CACHE_PEAK="$(cb cache-bytes)"; then cb record-growth "$CACHE_BEFORE" "$CACHE_PEAK"; fi
+rm -f "$PW/running.pid"
+cb prune >&2 || log "stage 13: WARNING - the cache is over budget after pruning everything regenerable (see above)"
+
 # ---------------------------------------------------------------- final JSON summary (stdout)
 RESULTS=(); for m in $(modes); do RESULTS+=("$PW/$m/result.json"); done
 "$PY" - "$TRACK" "$SLUG" "$BPM" "$KEY" "$GENRE" "$BARS" "$BASE" "$HOSTING" ${RESULTS[@]+"${RESULTS[@]}"} <<'PYS'
@@ -584,10 +647,18 @@ for p, r in zip(results, runs):  # stage 11: visuals.status beside result.json; 
         v = json.load(open(vj))
         r["visuals_chain"] = v.get("chain_source")
         r["visuals_check"] = (v.get("check") or {}).get("verdict")
+    dj = os.path.join(track, os.path.basename(r["version_dir"]), "diagnosis.json")   # stage 12
+    if os.path.exists(dj):
+        d = json.load(open(dj))
+        r["diagnosis"] = {"red_count": d["red_count"], "flags": d["flags"], "worst_sections": d["worst_sections"],
+                          "tempo": d["tempo"]}
+    else:
+        r["diagnosis"] = {"red_count": None, "flags": ["diagnosis did not run (see .pipeline/<mode>/diagnosis.err)"]}
 print(json.dumps({
     "track_dir": track, "slug": slug, "bpm": float(bpm), "key": key, "genre": genre, "num_bars": int(bars),
     "hosting": hosting, "samples_base": base, "runs": runs,
     "all_gates_passed": all(r["gate_verdict"] == "PASS" for r in runs),
     "all_editable": all(r["editability"] == "pass" for r in runs),
+    "red_flags": sum((r["diagnosis"].get("red_count") or 0) for r in runs),
 }, indent=2))
 PYS

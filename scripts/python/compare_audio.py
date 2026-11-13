@@ -318,6 +318,21 @@ def compute_frequency_bands(y, sr=22050):
 # "is this THE song, in time": after aligning the two signals it compares frame-by-frame chroma,
 # log-mel and RMS, plus onset-matching F1 (MIREX convention: greedy one-to-one, +/-50 ms).
 TEMPORAL_HOP = 512
+
+# The score's composition, module level so diagnose.py ranks a component's cost with the same numbers instead of
+# retyping them: overall = STATIC_SHARE x static + (1 - STATIC_SHARE) x temporal; static = sum(STATIC_WEIGHTS x
+# component); temporal = mean of TEMPORAL_COMPONENTS. FREQUENCY BALANCE is #1: previous weights hid real problems
+# (89% when sub_bass was -41% off).
+STATIC_WEIGHTS = {
+    'frequency_balance_similarity': 0.40,  # Most important - frequency bands must match
+    'mfcc_similarity': 0.20,               # Timbre/texture
+    'energy_similarity': 0.15,             # Loudness/dynamics
+    'brightness_similarity': 0.15,         # Spectral balance
+    'tempo_similarity': 0.05,              # Tempo (usually matches)
+    'chroma_similarity': 0.05,             # Pitch/harmony (often inflated)
+}
+TEMPORAL_COMPONENTS = ('chroma_corr', 'mel_corr', 'onset_f1', 'envelope_corr')
+STATIC_SHARE = 0.5
 TEMPORAL_ONSET_TOL_S = 0.05   # MIREX onset-evaluation tolerance window (+/-50 ms)
 TEMPORAL_N_MELS = 64
 
@@ -606,7 +621,7 @@ def temporal_components(fr, t0=None, t1=None):
         on_o = fr['on_o'][(fr['on_o'] >= t0) & (fr['on_o'] < t1)]
         on_r = fr['on_r'][(fr['on_r'] >= t0) & (fr['on_r'] < t1)]
     sl = slice(f0, f1)
-    comps = {
+    comps = {   # keys = TEMPORAL_COMPONENTS
         'chroma_corr': _mean_active(fr['chroma_c'][sl], fr['chroma_act'][sl]),
         'mel_corr': _mean_active(fr['mel_c'][sl], fr['mel_act'][sl]),
         'onset_f1': onset_f_measure(on_o, on_r),
@@ -906,14 +921,7 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
     # Overall similarity (weighted average)
     # FREQUENCY BALANCE is #1 priority - if bands are off, the audio sounds wrong
     # Previous weights hid real problems (89% when sub_bass was -41% off!)
-    weights = {
-        'frequency_balance_similarity': 0.40,  # Most important - frequency bands must match
-        'mfcc_similarity': 0.20,               # Timbre/texture
-        'energy_similarity': 0.15,             # Loudness/dynamics
-        'brightness_similarity': 0.15,         # Spectral balance
-        'tempo_similarity': 0.05,              # Tempo (usually matches)
-        'chroma_similarity': 0.05              # Pitch/harmony (often inflated)
-    }
+    weights = STATIC_WEIGHTS
 
     overall = sum(results['comparison'][k] * w for k, w in weights.items())
     if np.isnan(overall):
@@ -973,7 +981,7 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
         results['comparison']['temporal_failed'] = True
         overall = static_overall
     else:
-        overall = 0.5 * static_overall + 0.5 * temporal['temporal_similarity']
+        overall = STATIC_SHARE * static_overall + (1 - STATIC_SHARE) * temporal['temporal_similarity']
     if np.isnan(overall):
         overall = 0.0
     results['comparison']['overall_similarity'] = float(overall)
@@ -1032,7 +1040,7 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
                 else:
                     _tw = {'chroma_corr': 0.0, 'mel_corr': 0.0, 'onset_f1': 0.0,
                            'envelope_corr': 0.0, 'temporal_similarity': 0.0}
-                _win_sim = _static_win if temporal_failed else 0.5 * _static_win + 0.5 * _tw['temporal_similarity']
+                _win_sim = _static_win if temporal_failed else STATIC_SHARE * _static_win + (1 - STATIC_SHARE) * _tw['temporal_similarity']
                 _win_sims.append(float(_win_sim))
                 _win_records.append({
                     't0': float(_ws / 22050), 't1': float(_we / 22050),

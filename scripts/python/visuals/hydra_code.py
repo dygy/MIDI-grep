@@ -396,6 +396,8 @@ def ask_ollama(vision: dict, wiring: dict, model: str, seed: int, url: str | Non
 
 def _chat(url: str, model: str, messages: list[dict], seed: int) -> dict:
     import requests
+    import mem_guard
+    mem_guard.guard_ollama(model, url)   # the diffusion model is unloaded by now; wait for the LLM's memory or skip
     r = requests.post(f"{url}/api/chat", json={
         "model": model,
         "messages": messages,

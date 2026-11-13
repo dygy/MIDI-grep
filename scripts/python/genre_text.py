@@ -192,7 +192,9 @@ def ground(answer: dict, info: dict, choices: dict[str, str]) -> dict:
 
 def ask_ollama(prompt: str, model: str, url: str | None = None) -> dict:
     import requests
+    import mem_guard
     url = url or os.environ.get("OLLAMA_URL", "http://localhost:11434")
+    mem_guard.guard_ollama(model, url)   # never load a 14 GB model into ~6 GB free: that is what filled swap
     r = requests.post(f"{url}/api/chat", json={
         "model": model,
         "messages": [{"role": "user", "content": prompt}],

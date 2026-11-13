@@ -309,7 +309,8 @@ def _profile(rows: list[dict]) -> dict:
 
 def warm_start(track_key: str, mode: str, genre: str, bpm: float, key: str, bars: int, *, orig_bands: dict | None = None,
                stems: Path | None = None, current_code: str | None = None) -> dict:
-    """{'source': track|neighbour|cold, 'knobs': 'BM ...'|'', 'env': dict|None, 'detail': str}."""
+    """{'source': track|neighbour|cold, 'knobs': 'BM ...'|'', 'env': dict|None, 'detail': str, 'promise': the overall
+    the source's best scored (a warm start keeps its short budget only while cal1 reproduces it, calibrate_loop)}."""
     cur = current_code or code_version()[0]
     own = history(track_key, mode)
     if own:
@@ -320,7 +321,7 @@ def warm_start(track_key: str, mode: str, genre: str, bpm: float, key: str, bars
         env = json.loads(best["env_json"]) if best["env_json"] else None
         if env and int(env.get("bars", 0)) != bars:
             env = None
-        return {"source": "track", "knobs": format_knobs(best), "env": env,
+        return {"source": "track", "knobs": format_knobs(best), "env": env, "promise": float(best["overall"]),
                 "bass_shape": best.get("bass_shape") or DEFAULT_SHAPE, "shape_tested": shape_tested,
                 "detail": f"{track_key}/{mode} best {best['kind']} {best['tag']} code {best['code_version']} "
                           f"overall {best['overall']:.4f} margin {best['margin']} ({len(own)} recorded rows)"}
@@ -336,7 +337,7 @@ def warm_start(track_key: str, mode: str, genre: str, bpm: float, key: str, bars
         best = rank_best(pick_version_group(by_track[near], cur))
         knobs = parse_knobs(format_knobs(best))
         knobs["bass_lpf"] = knobs["lead_hpf"] = knobs["sub_up"] = 0   # note-bound / hypothesis knobs: re-derived, not copied
-        return {"source": "neighbour", "knobs": format_knobs(knobs), "env": None,
+        return {"source": "neighbour", "knobs": format_knobs(knobs), "env": None, "promise": float(best["overall"]),
                 "bass_shape": DEFAULT_SHAPE, "shape_tested": False,   # a per-piece decision: re-measured, never copied
                 "detail": f"nearest {genre}/{mode} track '{near}' (distance {distance(me, _profile(by_track[near])):.3f}) "
                           f"best {best['tag']} overall {best['overall']:.4f}"}
@@ -669,7 +670,8 @@ def _main() -> int:
         if w["env"] and a.env_out:
             Path(a.env_out).write_text(json.dumps(w["env"], indent=2) + "\n"); env_path = a.env_out
         emit("\t".join([w["source"], str(CL.iteration_cap(w["source"])), w["knobs"] or "-", env_path, w["detail"],
-                         w.get("bass_shape", DEFAULT_SHAPE), "1" if w.get("shape_tested") else "0"]))
+                         w.get("bass_shape", DEFAULT_SHAPE), "1" if w.get("shape_tested") else "0",
+                         f"{w['promise']:.4f}" if w.get("promise") is not None else "-"]))
         return 0
     if a.cmd == "lead-warm":
         try:

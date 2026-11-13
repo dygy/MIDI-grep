@@ -19,6 +19,7 @@ LLM codegen via Ollama/Claude) → render to audio → compare to original → i
 - **Brazilian Funk** (`--brazilian-funk`, auto-detected) — tamborzão + 808 template.
 - **Generative** (`generative` cmd) — trains RAVE/granular neural synths for full note() control.
 - **Editable** (`scripts/editable-pipeline.sh`, the product path) — `sample-instrument` and `synth` pieces; see below.
+- **Autopilot** (`scripts/python/autopilot.py run`) — improvement batches: environment doctor, failing tracks first, diagnosis (`diagnose.py`), remedies tried on copies and kept only on a score gain, references once as the regression check; disk budget (`cache_budget.py`) and RAM guard (`mem_guard.py`).
 - **Sample-pack** (`scripts/sample-pipeline.sh`, predecessor) — slice the REAL extracted stems into a Strudel
   sample pack (per-bar loops + drum one-shots + pitched samples), host it (localhost or Cloudflare
   R2), and play via `await samples(...)`. Its `loops` mode is replay (forbidden as a deliverable,
