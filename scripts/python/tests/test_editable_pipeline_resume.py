@@ -107,7 +107,8 @@ def repo(tmp_path: Path):
 
 def set_bpm(track: Path, bpm: float) -> None:
     (track / "metadata.json").write_text(json.dumps(
-        {"title": TITLE, "bpm": bpm, "bpm_method": "phase", "key": "C minor", "genre": "g", "duration": 100.0}))
+        {"title": TITLE, "bpm": bpm, "bpm_method": "phase", "key": "C minor", "genre": "g", "duration": 100.0,
+         "genre_text": {"status": "ok", "genre": "unknown"}}))   # stamped by the current code: stage 1b has nothing to redo
 
 
 def run(repo, *args: str) -> subprocess.CompletedProcess:
