@@ -18,6 +18,8 @@
 #                      (start = the sample-instrument BEST knobs when present; own env correction)
 #   8 score + gate     compare_audio.py -d <whole-bar seconds> --strudel ; eval/gate.py ; editability_check.py
 #   9 promote          pipeline_helpers.py promote -> vNNN/{output.strudel,render.wav,comparison.json,metadata.json}
+#  9b eq profile       eq_profile.py <track> <vNNN> -> one `// @eq-profile {json}` line in the promoted output.strudel + vNNN/eq_profile.json
+#                      (the owner's Strudel player EQ; failure logged, never fatal)
 #  10 report           pipeline_helpers.py report -> vNNN/{report.html,comparison.png,chart_*.png,render_*.wav,
 #                      stem_comparison.json,iterations.json,iterations/}; render stems = the renderer with one voice
 #                      group sounding (default; --render-stems demucs = Demucs on the render) + Demucs on each
@@ -519,6 +521,11 @@ report_stage() {
   [ -n "$vdir" ] && [ -d "$vdir" ] || die "stage 10 ($mode): promoted version dir missing: '$vdir'"
   [ -s "$W/gate.txt" ] && gate_arg=(--gate-verdict "$(jget "$W/result.json" gate_verdict)" \
     --gate-message "$(tr '\n' ' ' < "$W/gate.txt")")
+  # stage 9b: the listening EQ profile (one `// @eq-profile` line in the PROMOTED output.strudel + eq_profile.json) before the
+  # report and visuals read the piece. Never touches $W/best.strudel / best.code; a failure is logged, never fatal.
+  "$PY" "$SP/eq_profile.py" "$TRACK" "$(basename "$vdir")" >/dev/null 2>"$W/eq_profile.log" \
+    && log "stage 9b: eq profile $mode -> $(basename "$vdir")/eq_profile.json" \
+    || log "stage 9b: WARNING - eq profile failed for $mode (see $W/eq_profile.log)"
   log "stage 10: report $mode -> $vdir"
   "${PH[@]}" report --track-dir "$TRACK" --version "$(basename "$vdir")" --seconds "$COMPARE_SECONDS" \
     --calib-workdir "$W" --stems-view "$GEN_STEMS" ${ITER_STEMS_ARG[@]+"${ITER_STEMS_ARG[@]}"} ${RENDER_STEMS_ARG[@]+"${RENDER_STEMS_ARG[@]}"} ${FORCE:+--force} ${gate_arg[@]+"${gate_arg[@]}"} >&2 \

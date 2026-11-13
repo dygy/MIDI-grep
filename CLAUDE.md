@@ -222,6 +222,11 @@ original each render stem was compared with: when stage 3c made a view, stage 10
 VIEW's stems (`report --stems-view`, recorded in `vNNN/stem_sources.json`, track-relative) - before, BibiBabydoll's render
 bass (the moved 808) was scored against the track's bass.wav (vocal bleed) and showed 13 false RED bass flags.
 
+**Listening EQ profile (2026-11-13, `scripts/python/eq_profile.py`, editable-pipeline stage 9b):** every promoted `vNNN/output.strudel`
+carries one `// @eq-profile {json}` line (and `vNNN/eq_profile.json`) for the owner's Strudel player's 10-band EQ: per octave band, original
+`instrumental.wav` dB minus render dB (rms-normalised, Welch, `compare_audio.load_audio`), loudness-matched, clamped to +-24 dB; cuts only on a
+measured cliff; `preset` from `metadata.json` genre (null when uncertain). Inserted into the promoted copy only; a failure never fails the run.
+
 **Disk budget (2026-11-08, `scripts/python/cache_budget.py`, editable-pipeline preflight + stage 13):** `.cache` once reached
 42 GB and swap filled the rest; the owner deleted ~70 GB by hand. Before a run: prune to `MIDIGREP_CACHE_BUDGET_GB` (default
 25) and refuse (exit) when free disk < the largest growth a run has shown (`.cache/runlogs/disk_growth.json`) + RAM size (swap
