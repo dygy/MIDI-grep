@@ -20,6 +20,17 @@ overwriting is correct; never hand-edit `.awos/`. Layout:
 - `.claude/hooks/` + `.claude/settings.json` — `branch-current.sh` (blocking: no PR/branch from a
   stale base), `docs-freshness.sh` (advisory), SessionStart pointer to `/session-init`.
 - `.mcp.json` — `loop` (render/compare/eval gate), `playwright`, `awos-recruitment`.
+- **Strudel MCP (2026-11-13, owner's own, `strudel-client` spec 018)** — use it, don't guess Strudel names:
+  - `strudel-local` (stdio, local-scope `claude mcp add`, NOT in `.mcp.json`: it points at
+    `~/WebstormProjects/strudel-client/packages/mcp-local/dist/cli.mjs`; `strudel_mcp_js` is not on npm yet).
+    `check_code` of ANY size (parse only; a 62 KB `output.strudel` in ~50 ms) and `summarize_pattern` / `run_pattern`
+    (QuickJS sandbox, core/mini/tonal only, `samples()` skipped; sounds, events per cycle, note range in ~2.5 s, no audio).
+    Run both on a generated piece before spending a render on it.
+  - claude.ai connector `strudel` (`strudel.dygy.app/mcp`, the owner's Strudel library): `lookup_function` /
+    `search_functions` / `list_sounds` for names; `check_code` capped at 512 bytes; `create_folder` / `create_track` /
+    `update_track` (read first, `expectedVersion`) to deliver pieces into the library - after a batch the best
+    piece per track and mode goes to folder `MIDI-grep`. `play`/`update_code` sound on the owner's speakers - only when
+    asked. Never delete there without asking. Neither server is reachable from the Python pipeline - session-side only.
 - `context/product/` — product-definition, values, architecture, delivery-flow, hired-agents;
   `context/spec/NNN-<slug>/` — functional-spec, technical-considerations, tasks (+ flow-log).
 
