@@ -169,12 +169,30 @@ def test_a_warm_start_that_misses_its_promise_gets_the_full_budget(db, tmp_path)
     assert len(bms) == 2, bms
 
 
+def test_a_failing_warm_start_that_still_improves_gets_the_full_budget(db, tmp_path):
+    # Sem Aliança synth (2026-11-14): cal1 kept its promise, cal2 beat it by 0.020, the 3-render warm budget stopped the
+    # loop with the calibrator's next sub/bass step pending, and the track below its floor. A warm start that finds an
+    # improvement while failing is a search, not a verification: patience ends it, not the short cap.
+    db.write_rows([row(db, track="stems", tag="cal2", overall=0.30, margin=-0.2, knobs="0.61 0.62 0.63 4200 0 0.7 300 400 1")])
+    r, bms = run_driver(tmp_path, improving(start=0.30))     # stub gate floor 0.5: every render fails, every step improves
+    assert r.returncode == 0, r.stdout + r.stderr
+    assert "warm start: track" in r.stdout and "iteration cap: 3" in r.stdout
+    assert "improved beyond noise while the best still fails" in r.stdout + r.stderr
+    assert len(bms) == CL.MAX_ITERS, bms
+
+
 def test_effective_cap_rule():
     rows = lambda o: [CL.Row(f"cal1\t{o}\t0.0\t-0.1 FAIL\t1 1 1 1 0 1 0 0 0")]   # noqa: E731
     assert CL.effective_cap(rows(0.687), 3, 0.762, 0.005) == CL.MAX_ITERS
     assert CL.effective_cap(rows(0.760), 3, 0.762, 0.005) == 3                     # inside the noise: promise kept
     assert CL.effective_cap(rows(0.687), 3, None, 0.005) == 3                      # no promise (seed / cold)
     assert CL.effective_cap([], 3, 0.762, 0.005) == 3
+    row = lambda t, o, g: CL.Row(f"{t}\t{o}\t{o - 0.79:.4f}\t{o - 0.79:.4f} {g}\t1 1 1 1 0 1 0 0 0")   # noqa: E731
+    failing = [row("cal1", 0.737, "FAIL"), row("cal2", 0.757, "FAIL"), row("cal3", 0.732, "FAIL")]
+    assert CL.effective_cap(failing, 3, 0.737, 0.005) == CL.MAX_ITERS               # failing + improved: a search
+    assert CL.effective_cap(failing[:1] + failing[2:], 3, 0.737, 0.005) == 3        # failing, nothing improved
+    passing = [row("cal1", 0.90, "PASS"), row("cal2", 0.92, "PASS")]
+    assert CL.effective_cap(passing, 3, 0.90, 0.005) == 3                           # passing: the short budget stays
 
 
 def test_cold_start_without_history_runs_the_full_budget(db, tmp_path):
