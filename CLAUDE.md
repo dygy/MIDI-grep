@@ -171,6 +171,20 @@ raise a steady TR808 hat layer (`--hat-gain`), which lifted brightness 70%→91%
 89.8%→92.6% in one step (the extracted lead sample is inherently darker than the original).
 Synth mode adds spectral-placement fixes (bug #11): at generation `partial_register.py` measures where the original stem's strongest partial sits relative to the transcribed fundamentals and transposes a fundamental-dominant palette voice (reference = a track-independent chromatic sweep of the sound, `probe_sound_register.py`; the shift is bounded by floor(original) so the shifted fundamental never exceeds the original's dominant partial) so its energy leaves low_mid; the calibrator adds synth-only `lead-hpf`/`bass-lpf` levers (one per step, bounded by the note material and `compare_audio.FREQ_BANDS`), a vocal-gain hold, a hat overshoot back-off, and `auto-calibrate.sh` selects BEST by margin to the gate floors.
 
+**Sub/bass split as a fraction (2026-11-13, `calibrate_dynamic.sub_split_step`, `generate_dynamic_strudel.py --sub-up f`):** the sine
+layer under the bass is two sines from the same notes - at the note (energy 1-f, feeds sub_bass) and an octave up with the low-pass
+x2 (energy f, feeds bass); f in [0,1] replaces the binary octave (f = 0 / 1 emit the old single-sine rows byte for byte; old
+0/1 params, tsv rows and calibration-memory rows read as f = 0 / 1). The calibrator sets f from the measured sub_bass:bass split of
+the mix (share to move over the share the layer can carry: bounded by the donor band's share cold, a measured secant once the
+parent render differed in f alone); the gains hold while f moves; no lock, no ceiling on `bass_mult` (per-step bounds only);
+the generator reports `sub_up_max` = 0 when it refused the up sine. ClickHouse `sub_up` is Float64 (migration 7).
+A step that moves f moves no other lever (cal-lead, hats, lead-lpf, bass-lpf, lead-hpf held): in the first version f moved with
+the hats (high share 1.0 -> 3.6 % vs 0.6 %) and the score fell although f alone gained (Sem Aliança A/B: f 0.6 alone 0.737 ->
+0.765). The loop never moves `master_gain` (the score is level-invariant; loudness is `mix_dynamics.py`'s job): its old nudge
+clamped to [0.4, 0.78] and pulled a warm-started 2.3 down. In synth, the bass layer (`bass_mult`) moves only when the MIX low end
+(sub_bass+bass share ratio) is outside the share dead band AND agrees in direction with the bass-solo step - the solo ratio of a
+synth bass read 6-15x under while the mix low end matched within a point, and doubling bass_mult cost Regime 0.909 -> 0.834.
+
 **Loudness stage (2026-10-20, `scripts/python/mix_dynamics.py`, run by `auto-calibrate.sh` after BEST):** the score is
 level-invariant (`compare_audio.rms_normalize`), so renders sat 6-13 dB under the mastered instrumental with crest
 17-18 dB vs ~10 and nobody saw it. One measured lever moves it: `--master-gain` onto the instrumental's RMS (up to 3
@@ -460,8 +474,14 @@ script the Go code names exists. (The `loop` MCP server no longer has a `recorde
   renames; fresh for `MIDIGREP_RENDER_SAMPLE_CACHE_TTL_S` = 600 s, then a conditional GET (ETag/Last-Modified) renews or replaces
   it; an unreachable upstream serves the cached copy, a never-fetched URL still waits out the outage; `MIDIGREP_RENDER_SAMPLE_CACHE=0`
   bypasses). A hang watchdog replaces the 15-minute protocolTimeout as the detector: a page call with no log line, no sample
-  bytes and no browser CPU for 3x the time its audio length / the observed render speed predicts (floor 10 s,
+  bytes and no page progress for 3x the time its audio length / the observed render speed predicts (floor 10 s,
   `MIDIGREP_RENDER_STALL_S` overrides) is killed and retried through the crash path (`[STALL]` / `[CRASH] ... page stalled`).
+  Progress (2026-11-14) is the page's own counter `window.__progress` (each hap triggered, each orbit created, each byte slice,
+  each second an OfflineAudioContext renders - a suspend/resume per second, samples unchanged), read by a 1 s probe that the page's
+  main thread must answer; browser CPU (> 2 % of a core) counts only before the page's `__init` finished (loading) and in the
+  bundle's own single pass. An idle hung browser + the probe sat at 1.3-2.8 % on this Mac, so the CPU rule alone found a hang
+  after 13..925 s; now ~the limit. System sleep is not silence: the wall-vs-monotonic clock difference since the last progress
+  is not counted (a 348 s clamshell sleep killed a render 2026-11-13).
 - Selected everywhere by `MIDIGREP_RENDERER` (default `offline`; `blackhole` = the recorder below) —
   `scripts/python/renderer.py`, the shell drivers, the `loop` MCP server.
 

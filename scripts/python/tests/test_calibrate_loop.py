@@ -166,26 +166,27 @@ def test_lead_hpf_step_uses_measured_response(tmp_path):
     assert abs(measured - 428) < abs(plain - 428), (plain, measured)
 
 
-# a calibrator that proposes the sub-octave flip whenever it is allowed to (like a render with the sub_bass share over)
-STUB_CAL_FLIP = r'''
+# a calibrator that proposes a FRACTION of the sine layer an octave up (the continuous split lever) and logs what the
+# loop told it: the generator-reported ceiling and the parent's knobs
+STUB_CAL_SPLIT = r'''
 import sys
 a = sys.argv[1:]
 bm = float(a[a.index("--bass-mult") + 1])
-su, locked = a[a.index("--sub-up") + 1], a[a.index("--sub-up-locked") + 1]
-open(__import__("os").environ["AC_LOG"] + ".cal", "a").write(locked + "\n")
-flip = su == "0" and locked == "0"
-print(f"--bass-mult {bm if flip else bm + 0.1:.4f} --sub-gain 0.8 --cal-lead 1.1 --lead-lpf 6000 --hat-gain 0.1 "
-      f"--master-gain 0.65 --sub-up {1 if flip else 0}")
+parent = a[a.index("--parent-knobs") + 1] if "--parent-knobs" in a else "-"
+open(__import__("os").environ["AC_LOG"] + ".cal", "a").write(a[a.index("--sub-up-max") + 1] + "|" + parent + "\n")
+print(f"--bass-mult {bm + 0.1:.4f} --sub-gain 0.8 --cal-lead 1.1 --lead-lpf 6000 --hat-gain 0.1 "
+      f"--master-gain 0.65 --sub-up 0.4")
 '''
 
 
-def test_an_octave_flip_the_generator_refuses_is_locked_not_proposed_again(tmp_path):
-    """The stub generator never reports sub_up=1 (it refused the flip). The calibrator must then be told the lever is
-    locked; before, SULOCK was set only when a LOST step changed the octave, so the flip was re-proposed every step
-    and each proposal froze sub-gain/bass-mult."""
-    r, _ = drive(tmp_path, [(0.60 + 0.02 * i, 0.60 + 0.02 * i) for i in range(10)], "--iters", "4", cal=STUB_CAL_FLIP)
+def test_a_fractional_octave_up_reaches_the_generator_and_the_calibrator_gets_the_parent(tmp_path):
+    """The loop carries a fraction f (not a 0/1 octave): the proposed 0.4 is what the next generator is asked for, the
+    generator's ceiling (absent from the stub summary = 1) is passed to the calibrator, and from the second step on the
+    calibrator is handed the parent's nine knobs (the split step is a measured secant only when f alone differed)."""
+    r, _ = drive(tmp_path, [(0.60 + 0.02 * i, 0.60 + 0.02 * i) for i in range(10)], "--iters", "4", cal=STUB_CAL_SPLIT)
     assert r.returncode == 0, r.stderr
-    locked = (tmp_path / "gen.log.cal").read_text().split()
-    assert locked == ["0", "1", "1", "1"], locked
+    log = (tmp_path / "gen.log.cal").read_text().splitlines()
+    assert [x.split("|")[0] for x in log] == ["1"] * 4
+    assert log[0].endswith("|-") and all(len(x.split("|")[1].split()) == 9 for x in log[1:])
     asked = [(tmp_path / "work" / f"cal{i}.strudel.args").read_text().split() for i in range(1, 5)]
-    assert [a[a.index("--sub-up") + 1] for a in asked] == ["0", "1", "0", "0"]
+    assert [a[a.index("--sub-up") + 1] for a in asked] == ["0", "0.4", "0.4", "0.4"]

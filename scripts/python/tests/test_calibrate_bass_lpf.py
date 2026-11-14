@@ -34,7 +34,10 @@ BLPF = ["--mode", "synth", "--bass-lpf", "603", "--bass-lpf-max", "603", "--bass
 
 
 def run_cal(cmp_path: Path, *extra: str) -> dict[str, str]:
-    out = subprocess.run([sys.executable, str(CAL), "--comparison", str(cmp_path), *extra],
+    """One calibrator step with the sub/bass split pinned (--sub-up-max 0): a split step moves no other lever
+    (2026-11-13), and these tests are about the cutoff / hat levers, not the split (tests/test_sub_levers.py)."""
+    pin = [] if "--sub-up-max" in extra else ["--sub-up-max", "0"]
+    out = subprocess.run([sys.executable, str(CAL), "--comparison", str(cmp_path), *pin, *extra],
                          capture_output=True, text=True, check=True).stdout.split()
     return {out[i]: out[i + 1] for i in range(0, len(out), 2)}
 
@@ -98,20 +101,23 @@ def test_hat_stays_off_when_lead_below_high_mid_edge():
     assert float(got["--hat-gain"]) == 0.0
 
 
-# golden next-knob fragments from the calibrator BEFORE bug #11 (same inputs: KNOBS). Since the sub-octave lever
-# (2026-10-20) each stored render has its sine layer over the original's (orig/rend sub_bass 0.96 / 0.90 / 0.84), so the
-# step is the octave-up TRIAL: --sub-up 1 with sub-gain AND bass-mult unchanged (0.8 / 0.5: the flip is that step's
-# bass/sub rebalance); the lead / hat / master knobs are the pre-bug-#11 values.
+# golden next-knob fragments from the calibrator BEFORE bug #11 (same inputs: KNOBS). Since the continuous split lever
+# (2026-11-13) the octave is a fraction: Regime CLT's split (sub_bass/bass orig-per-render 0.72) is outside the dead band,
+# so the step moves f = 0.146 (the share to carry 0.060 over the layer's bound 0.411) with sub-gain AND bass-mult
+# unchanged (0.8 / 0.5); the two VAGABUNDO renders' splits (0.81 / 0.88) are inside it, so f stays 0 and the gain
+# levers step (the binary lever had flipped them whole); the lead / hat knobs are the pre-bug-#11 values. Since
+# 2026-11-13 the split step moves no other lever (Regime: cal-lead / lead-lpf held at the inputs, 1.1 / 6000) and the
+# loop holds the master gain (0.65 in, 0.65 out; the loudness stage owns the level).
 GOLDEN = {
     "vagabundo_sample_v004.json":
-        "--bass-mult 0.5 --sub-gain 0.8 --sub-up 1 --cal-lead 1.082 --lead-lpf 6300 --hat-gain 0.1 "
-        "--master-gain 0.728",
+        "--bass-mult 0.521 --sub-gain 0.784 --sub-up 0 --cal-lead 1.082 --lead-lpf 6300 --hat-gain 0.1 "
+        "--master-gain 0.65",
     "vagabundo_sample_v002.json":
-        "--bass-mult 0.5 --sub-gain 0.8 --sub-up 1 --cal-lead 1.142 --lead-lpf 6255 --hat-gain 0.1 "
-        "--master-gain 0.728",
+        "--bass-mult 0.526 --sub-gain 0.759 --sub-up 0 --cal-lead 1.142 --lead-lpf 6255 --hat-gain 0.1 "
+        "--master-gain 0.65",
     "regime_sample_v026.json":
-        "--bass-mult 0.5 --sub-gain 0.8 --sub-up 1 --cal-lead 1.46 --lead-lpf 6652 --hat-gain 0.1 "
-        "--master-gain 0.728",
+        "--bass-mult 0.5 --sub-gain 0.8 --sub-up 0.146 --cal-lead 1.1 --lead-lpf 6000 --hat-gain 0.1 "
+        "--master-gain 0.65",
 }
 
 
@@ -298,8 +304,11 @@ def test_bass_mult_not_raised_while_cutoff_moves():
     got = run_cal(CAL2, *CAL2_KNOBS, *SYNTH, *BASS)
     assert int(got["--bass-lpf"]) < 422
     assert float(got["--bass-mult"]) <= 0.474
-    free = run_cal(CAL2, *CAL2_KNOBS, *SYNTH)                            # no cutoff move -> old behaviour
-    assert float(free["--bass-mult"]) == pytest.approx(0.488)
+    # no cutoff move: the mix-band step asked 0.488, but since 2026-11-13 a synth bass layer moves only the way the mix LOW END
+    # (sub_bass + bass) asks outside the share dead band - here 0.590 / 0.519 = 1.14, inside it - so it holds
+    # (test_sub_levers.py::test_synth_bass_layer_follows_the_mix_low_end_not_the_solo_voice)
+    free = run_cal(CAL2, *CAL2_KNOBS, *SYNTH)
+    assert float(free["--bass-mult"]) == pytest.approx(0.474)
 
 
 def test_hats_via_drums_hold_lead_lpf_on_cal1():

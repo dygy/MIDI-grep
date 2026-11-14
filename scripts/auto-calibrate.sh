@@ -162,12 +162,12 @@ while [ $# -gt 0 ]; do case "$1" in
   --no-lead-fit) LEAD_FIT=0; shift;;
   --lead-fit-evals) LEAD_EVALS="$2"; shift 2;;
   --seed) SEED="$2"; shift 2;;     # fallback knobs ("BM SG CL LLPF HG MG [BL [LH]]"): used only when the memory has neither this track nor a neighbour
-  --start) START_GIVEN=1; BL=0; LH=0; SU=0; read -r BM SG CL LLPF HG MG BL LH SU SHP EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH [SU [stem|off]]]]" (6 to 10 fields; SU = sub-sine octave up 0/1; the 10th = bass shape)
+  --start) START_GIVEN=1; BL=0; LH=0; SU=0; read -r BM SG CL LLPF HG MG BL LH SU SHP EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH [SU [stem|off]]]]" (6 to 10 fields; SU = fraction 0..1 of the sub-sine layer played an octave up (0/1 = the old binary octave); the 10th = bass shape)
     # The pre-"no vocals" format had a CV field after MG ("... MG CV [BL [LH]]"). A 9-field start is that old format;
     # 7/8 fields would silently shift CV into BL, but a real bass/lead cutoff is 0 or >= 20 Hz, a cal-vocal is ~1.
     [ -z "${EXTRA:-}" ] || { echo "--start: more than 10 fields - the old CV (cal-vocal) field was removed; drop the 7th value" >&2; exit 64; }
     if [ -n "${SHP:-}" ]; then case "$SHP" in stem|off) [ "$SHAPE_PIN" = 1 ] || BSHAPE="$SHP";; *) echo "--start: the 10th field is the bass shape stem|off (got $SHP)" >&2; exit 64;; esac; fi
-    case "$SU" in 0|1) ;; *) echo "--start: SU (9th field) must be 0 or 1 (got $SU) - old format with the removed CV field?" >&2; exit 64;; esac
+    awk -v v="$SU" 'BEGIN{exit !(v ~ /^[0-9]*\.?[0-9]+$/ && v>=0 && v<=1)}' || { echo "--start: SU (9th field) must be a fraction in [0, 1] (got $SU) - old format with the removed CV field?" >&2; exit 64; }
     for _v in "$BL" "$LH"; do awk -v v="$_v" 'BEGIN{exit !(v==0 || v>=20)}' || { echo "--start: BL/LH must be 0 or >= 20 Hz (got $_v) - old format with the removed CV field? drop the 7th value" >&2; exit 64; }; done
     shift 2;;
   --env-start) ENV_START="$2"; shift 2;;                        # per-bar env-correction JSON to apply from iteration 1
@@ -309,7 +309,6 @@ solo_job() {
   return 0
 }
 
-SULOCK=0   # 1 once an octave-up step lost to its parent: the calibrator must not propose it again in this run
 best=-1; best_params=""; best_tag=""; best_gate="n/a"; : >"$WORK/iters.tsv"
 rm -f "$WORK/best.env.json" "$WORK/best.master" "$WORK/best.leadsynth.json"   # never report a stale env / level from a previous run
 PREV_ENV="${ENV_START:-}"   # env-correction JSON measured from the previous iteration (fed to the next generation); --env-start seeds it
@@ -325,15 +324,12 @@ while [ "$i" -lt "$LOOP_BOUND" ]; do
     || { echo "[$TAG] GEN FAILED"; RC=70; break; }
   # the generator reports the EFFECTIVE bass cutoff + its bounds (analysis value, top bass note);
   # the calibrator needs them to move the cutoff by measurement (0 = unreported -> lever off)
-  if ! read -r EBL EBLMAX EBHZ ELH ELHZ ESU < <("$PY" -c "import json;d=json.load(open('$WORK/$TAG.gen.json'));print(d['bass_lpf'],d['bass_lpf_analysis'],d['bass_note_max_hz'],d['lead_hpf'],d['lead_note_min_hz'],d.get('sub_up',0))" 2>/dev/null); then
+  if ! read -r EBL EBLMAX EBHZ ELH ELHZ ESU ESUMAX < <("$PY" -c "import json;d=json.load(open('$WORK/$TAG.gen.json'));print(d['bass_lpf'],d['bass_lpf_analysis'],d['bass_note_max_hz'],d['lead_hpf'],d['lead_note_min_hz'],d.get('sub_up',0),d.get('sub_up_max',1))" 2>/dev/null); then
     echo "[$TAG] WARNING: cannot parse the generator summary $WORK/$TAG.gen.json - bass-lpf/lead-hpf levers are OFF this step"
-    EBL=0 EBLMAX=0 EBHZ=0 ELH=0 ELHZ=0 ESU=0
-  elif [ "$ESU" != "$SU" ]; then
-    # the generator refused the requested octave (a flip it would filter away): that hypothesis is answered too. Without the
-    # lock the calibrator proposes it again every step, and each proposal holds sub-gain/bass-mult.
-    SULOCK=1
+    EBL=0 EBLMAX=0 EBHZ=0 ELH=0 ELHZ=0 ESU=0 ESUMAX=0
   fi
-  echo "$ESU" >"$WORK/$TAG.su"   # the octave the generator ACTUALLY used (it refuses an octave-up its low-pass would filter away)
+  # ESU = the octave-up fraction the generator ACTUALLY used; ESUMAX = 0 when it refused the up sine (the note an octave
+  # up would leave the bass band), so the calibrator does not propose a split move it cannot make (each would hold the gains)
 
   # Never pkill -9 the capture right before a render: on 2026-10-09 that left BlackHole/avfoundation
   # wedged (every following capture produced no file). Wait for any live recorder to finish instead.
@@ -421,8 +417,10 @@ while [ "$i" -lt "$LOOP_BOUND" ]; do
   envin_arg=(); [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ] && envin_arg=(--env-correction-in "$PREV_ENV")
   parent_arg=(); if [ -n "$PARENT" ] && [ -f "$WORK/$PARENT.cmp.json" ]; then
     read -r PEBL PELH <"$WORK/$PARENT.eff"; parent_arg=(--parent-comparison "$WORK/$PARENT.cmp.json" --parent-bass-lpf "$PEBL" --parent-lead-hpf "$PELH"); fi
-  CLI=$("$PY" "$CAL" --comparison "$CJ" ${BSOLO_ARG[@]+"${BSOLO_ARG[@]}"} ${MSOLO_ARG[@]+"${MSOLO_ARG[@]}"} ${parent_arg[@]+"${parent_arg[@]}"} ${RESP_ARG[@]+"${RESP_ARG[@]}"} --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
-    --bass-mult "$BM" --sub-gain "$SG" --sub-up "$ESU" --sub-up-locked "$SULOCK" --cal-lead "$CL" --lead-lpf "$LLPF" \
+  parent_knobs_arg=(); if [ -n "$PARENT" ]; then
+    parent_knobs_arg=(--parent-knobs "$(awk -F'\t' -v t="$PARENT" '$1==t{print $5}' "$WORK/iters.tsv")"); fi
+  CLI=$("$PY" "$CAL" --comparison "$CJ" ${parent_knobs_arg[@]+"${parent_knobs_arg[@]}"} ${BSOLO_ARG[@]+"${BSOLO_ARG[@]}"} ${MSOLO_ARG[@]+"${MSOLO_ARG[@]}"} ${parent_arg[@]+"${parent_arg[@]}"} ${RESP_ARG[@]+"${RESP_ARG[@]}"} --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
+    --bass-mult "$BM" --sub-gain "$SG" --sub-up "$ESU" --sub-up-max "$ESUMAX" --cal-lead "$CL" --lead-lpf "$LLPF" \
     --hat-gain "$HG" --master-gain "$MG" \
     --mode "$MODE" --bass-lpf "$EBL" --bass-lpf-max "$EBLMAX" --bass-note-max-hz "$EBHZ" \
     --lead-hpf "$ELH" --lead-note-min-hz "$ELHZ" 2>"$WORK/$TAG.cal.log")
@@ -440,8 +438,6 @@ while [ "$i" -lt "$LOOP_BOUND" ]; do
   if [ "$DECISION" != "CONTINUE" ]; then echo "[$TAG] stop: ${NEXT#STOP }"; break; fi
   if [ "$NPARENT" != "$TAG" ]; then
     echo "[$TAG] regressed vs best $NPARENT beyond noise - next step restarts from $NPARENT at ${NALPHA} of its proposed step"
-    # the lost step flipped the sub octave -> that hypothesis is answered (rejected): do not propose it again
-    [ "$(cat "$WORK/$TAG.su")" != "$(cat "$WORK/$NPARENT.su")" ] && SULOCK=1
   fi
   PARENT="$NPARENT"; ALPHA="$NALPHA"
   prow=$(awk -F'\t' -v t="$PARENT" '$1==t{print $5"\t"$6}' "$WORK/iters.tsv")

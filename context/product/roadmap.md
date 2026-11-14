@@ -559,6 +559,9 @@ measured runs: `eval/thresholds.yaml` `modes:` and `eval/datasets/reference_trac
   environment doctor, disk budget (`cache_budget.py`, stage 13), RAM guard for Ollama
 - [x] **(PR #42) Calibration:** a warm start keeps its short budget only while cal1 reproduces its source's score
 - [x] **(PR #42) Diagnosis judges per-stem metrics against the stage-3c view**; trials skip visuals and record what they moved
+- [x] **(PR #47) Synth frequency balance:** sub/bass split as a continuous octave-up fraction, the split step isolated, master
+  gain held by the loop, the synth bass layer follows the mix low end (Sem Aliança 0.732 -> 0.757, Creagina 0.793 -> 0.804 PASS,
+  Tatuagem 0.750 -> 0.762, references held); renderer: system sleep is not a stall, the hang watchdog reads a page progress counter
 
 ### Open
 

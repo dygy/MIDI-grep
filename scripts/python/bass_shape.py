@@ -507,6 +507,15 @@ def _curve_stats(env_db: np.ndarray, fs: float, times: np.ndarray, pre: int, pos
     return np.array(rows)
 
 
+def duck_kick_times(hits) -> list[float]:
+    """The kicks that are EVIDENCE of ducking: band-detected ``bd`` hits only. A loud bar with no band hit gets its
+    full-band onsets as hits (``uncovered_bar``, detect_drums_bands v2) so the bar is not silent - but those are the
+    riff/808 Demucs filed under drums, not kicks, and a duck measured on them is diluted: VAGABUNDO's 10 such "bd"
+    hits (81-82 s, 137-138 s) took the measured dip from 3.41 dB / 1.96 sigma (139 kicks) to 3.06 dB / 1.54 sigma
+    (149), under DUCK_SIGMA, and the bass lost its sidechain. They are still PLAYED; they only do not testify here."""
+    return sorted({h["time"] for h in hits if h.get("type") == "bd" and not h.get("uncovered_bar")})
+
+
 def measure_duck(rms: np.ndarray, hop_s: float, kick_times, *, window_s: float | None = None,
                  seed: int = 0, diag: dict | None = None) -> Duck | None:
     """Kick-triggered dip of the bass stem's level.

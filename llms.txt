@@ -57,7 +57,7 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
 - **Offline renderer** (`scripts/node/src/render-strudel-offline.ts`) — DEFAULT since 2026-10-19; Strudel's own
   `renderPatternAudio` into an OfflineAudioContext (real superdough engine, headless Chromium): sample-exact timing
   and pitch, no audio device. Deterministic (`determinism.ts`; two renders differ by ≤ 1 LSB), local sample cache
-  (`sample-cache.ts`, `.cache/render-samples/`), hang watchdog. `MIDIGREP_RENDERER=offline|blackhole` (`scripts/python/renderer.py`).
+  (`sample-cache.ts`, `.cache/render-samples/`), hang watchdog (page progress counter `window.__progress`; system sleep not counted). `MIDIGREP_RENDERER=offline|blackhole` (`scripts/python/renderer.py`).
 - **BlackHole recorder** (`scripts/node/src/record-strudel-blackhole.ts`) — cross-check only; KNOWN DEFECT: ~12%
   sample loss + rate relabel → every pitch ~2.3–2.7 semitones flat.
 - **Node.js synth** — REMOVED (Jun 2026). `render-strudel-node.ts` no longer exists.
@@ -94,7 +94,8 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   `strudel_validation.validate_code` on its own output.
 - **`scripts/python/calibrate_dynamic.py`** — data-driven mix calibrator: reads a render's
   `comparison.json` and emits the NEXT `generate_dynamic_strudel.py` knobs (sub-gain, bass-mult,
-  cal-lead, lead-lpf, hat-gain, master-gain). Each knob is a damped proportional correction of a
+  cal-lead, lead-lpf, hat-gain, sub-up fraction f; master-gain is held - loudness is `mix_dynamics.py`). A step that
+  moves f (sub_bass:bass split) moves no other lever; in synth bass-mult follows the mix low end. Each knob is a damped proportional correction of a
   measured band/centroid ratio — no hardcoded per-track values. Brightness lever uses the spectral
   CENTROID (the 1%-magnitude high bands are too noisy in bass-heavy genres); when lead-lpf maxes
   out and the mix is still dark, it raises a TR808 hat layer (`--hat-gain`) — the hats carry the
