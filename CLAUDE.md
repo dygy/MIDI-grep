@@ -190,6 +190,20 @@ clamped to [0.4, 0.78] and pulled a warm-started 2.3 down. In synth, the bass la
 (sub_bass+bass share ratio) is outside the share dead band AND agrees in direction with the bass-solo step - the solo ratio of a
 synth bass read 6-15x under while the mix low end matched within a point, and doubling bass_mult cost Regime 0.909 -> 0.834.
 
+**Kick boom (2026-11-14, `scripts/python/kick_boom.py`, synth only):** a tuned 808 kick whose tone rings through the beat is
+filed under drums by Demucs; the synth palette's drum-machine bd is short and higher (Sem Aliança: stem tone 45 Hz at 0.74 of
+its peak power at the beat's end vs the TR808 bd at 54 Hz / 0.13; render sub_bass 36 % vs 64 % in the boom bars). Per bar, in
+stage 3c's band (one-beat HPSS below twice the bass register top), a bar where the sustained part beats the percussive one
+and the bass gate would call it present gets its pitch (strongest bin above the analysis floor, fractional MIDI) and level
+(over the bass stem's median active level). Its pitch stays put while the bass moves, so it is not a bass (3c leaves it;
+when 3c moved a part, the view's drums no longer hold it). The generator plays channel `KICK_BOOM` (drums group): a sine on
+the detected kicks held to the next hit, level x the sub sine's base gain x `--kick-boom-scale` (KB). KB is the 10th
+calibration knob (`--start "... SU [KB] [stem|off]"`, ClickHouse `kick_boom`, migration 8; 0 = no boom = old pieces byte for
+byte): the calibrator sets it to sqrt(render / original power over sub_bass + bass) of the bass voice alone (`bass_solo.py`,
+the fraction of its stem the bass sines render at; f-invariant), held on a split step. Sem: measured 0.35, hand sweep
+peaked at 0.3; synth 0.757 -> 0.794 / 0.714 -> 0.770 (gate PASS). Hats are never raised while the mix `high` share is
+already above `SHARE_DEAD_BAND` x the original's (the >= 7000 lead-lpf path had no such guard; it cost Sem 0.770 -> 0.714).
+
 **Loudness stage (2026-10-20, `scripts/python/mix_dynamics.py`, run by `auto-calibrate.sh` after BEST):** the score is
 level-invariant (`compare_audio.rms_normalize`), so renders sat 6-13 dB under the mastered instrumental with crest
 17-18 dB vs ~10 and nobody saw it. One measured lever moves it: `--master-gain` onto the instrumental's RMS (up to 3
@@ -282,7 +296,8 @@ or drum detector never reached a calibrated piece.
 **Warm-start budget is conditional (2026-11-08, `calibrate_loop.effective_cap`):** a warm start (this track's recorded best
 or the nearest track's) earns the short `WARM_ITERS` budget only while cal1 reproduces what its source scored (the
 `promise`, `calibration_memory.py warm-start` 8th field) within `calibration_noise`; otherwise it is a new search and gets
-`MAX_ITERS` (`--iters N` still wins). BibiBabydoll synth: a neighbour promised 0.762, cal1 scored 0.687, and 3 renders
+`MAX_ITERS` (`--iters N` still wins). Also (2026-11-14): a step that beats cal1 beyond noise while the best still FAILS the
+gate lifts the cap to `MAX_ITERS` (Sem Aliança synth: the cap stopped a moving search below the floor; 0.757 -> 0.7795). BibiBabydoll synth: a neighbour promised 0.762, cal1 scored 0.687, and 3 renders
 ended with sub_bass/bass +14.6 / -15.3 points off - most failing tracks start from a neighbour.
 
 **RAM guard (2026-11-08, `scripts/python/mem_guard.py`):** mistral-small (~14 GB) was loaded with ~6 GB available - 16.8
