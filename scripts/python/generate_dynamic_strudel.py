@@ -778,7 +778,7 @@ def main() -> int:
                     help="synth mode: play the drums stem's sustained low tone (a tuned 808 kick) as a sine on the kick hits, "
                          "pitch and level measured per bar (kick_boom.py); off = the drum machine kick alone")
     ap.add_argument("--kick-boom-scale", type=float, default=0.0,
-                    help="kick-boom level: the fraction of its stem the bass voice's sines render at (calibrate_dynamic.py, "
+                    help="kick-boom level: the fraction of its stem (x master gain) the bass voice renders at (calibrate_dynamic.py, "
                          "measured from the bass voice alone); 0 = no boom (no measurement yet)")
     ap.add_argument("--hat-gain", type=float, default=0.0,
                     help="steady TR808 hh*8 layer inside the drum bus (smooths envelope for shape + lifts centroid)")
@@ -1387,12 +1387,18 @@ def main() -> int:
                 boom_bars = KB.bar_strings(boom, detected.grid[KB.KICK], detected.quantize)
                 boom_info = {"bars": sum(1 for b in boom if b.pitch is not None),
                              "pitches": sorted({b.pitch for b in boom if b.pitch is not None})}
-                if boom_info["bars"]:
+                unit = KB.sine_unit()
+                if boom_info["bars"] and unit is None:
+                    print(f"WARNING kick boom: no engine sine unit ({KB.UNIT_PATH}); run: kick_boom.py probe - boom not played",
+                          file=sys.stderr)
+                if boom_info["bars"] and unit:
                     L += ["// boom: the drums stem's sustained low tone (a tuned 808 kick) per bar, on the kick hits and held to",
                           "// the next one - MIDI pitch as measured (fractional = the stem's own tuning). `~` = no boom in that bar.",
                           js_array("boom", boom_bars), ""]
+                    # absolute: the stem's fundamental RMS x master gain x the bass voice's measured render fraction (KB),
+                    # over what the engine renders a sine at gain 1 at
                     boom_code = (f'note(cat(...boom)){H.late_suffix(detected.late)}.s("sine")'
-                                 f'{gain_pattern([[b.level] for b in boom], sub_g * M * args.kick_boom_scale)}')
+                                 f'{gain_pattern([[b.level] for b in boom], M * args.kick_boom_scale / unit)}')
                     channels.append(("KICK_BOOM", "the 808 tone under the kick (pitch per bar) — edit `boom`", boom_code))
 
     # Each `$:` is a channel; a (label, comment, code, marker) tuple → one top-level pattern.

@@ -15,9 +15,14 @@ Per bar, in the band stage 3c uses (``stem_repair.harmonic_low``: below twice th
     stem's median active level (what the generator's gate calls present - ``bar_env_pattern``'s rule);
   * pitch: the strongest bin of the sustained part between the analysis floor (``bass_register.SUB_FLOOR_HZ``) and that
     band's top (MIDI, fractional - the stem's own tuning);
-  * level: its RMS over the bass stem's median active RMS in the same band. The generator multiplies it by the sub sine
-    layer's base gain, which stands for the bass stem at that median level, so the calibrator's sub-gain lever moves the
-    boom together with the bass sub (both are sines standing for a stem's low band).
+  * level: the RMS of the sustained part's FUNDAMENTAL (+-1 semitone around the pitch), absolute. A sine carries only the
+    fundamental; a saturated 808's harmonics belong to the bass band (Sem Aliança bars 12-24: the fundamental holds 31 % of
+    the sustained power, the whole band read 1.7x the level that scored best).
+The generator plays gain = level x master gain x KB / SINE_UNIT: KB (calibrate_dynamic.py) is the fraction of its stem
+the bass voice renders at, measured from the bass voice alone (render amplitude / (stem amplitude x master gain)), and
+SINE_UNIT the RMS the engine renders a sine at gain 1 (``kick_boom.py probe`` -> data/kick_boom_unit.json). Before, the
+level was relative to the bass stem's median and rode the sub sine's gain: a weak bass stem (Tatuagem's stage-3c view)
+read the boom at 12-18x, and KB 0.40 put the render's sub_bass at 91.5 % vs 47 % (0.762 -> 0.548).
 The notes sit on the kick hits of the detected drum grid and hold to the next hit (the tone rings through the beat).
 """
 from __future__ import annotations
@@ -26,6 +31,7 @@ import sys
 from dataclasses import dataclass
 from pathlib import Path
 
+import json
 import numpy as np
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
@@ -33,12 +39,22 @@ import bass_register as BR  # noqa: E402
 import stem_repair as SR  # noqa: E402
 
 KICK = "bd"
+UNIT_PATH = Path(__file__).resolve().parent / "data" / "kick_boom_unit.json"
+PROBE_NOTE = 33                 # A1 55 Hz: inside the boom's range (the measured booms sit at 26-61 Hz)
+
+
+def sine_unit(path: Path = UNIT_PATH) -> float | None:
+    """RMS of a sustained engine sine at gain 1 (``probe``), or None when it was never measured."""
+    try:
+        return float(json.loads(path.read_text())["rms"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
 
 
 @dataclass
 class BoomBar:
     pitch: float | None          # MIDI (fractional); None = no boom in this bar
-    level: float                 # sustained-part RMS / the bass stem's median active RMS in the same band
+    level: float                 # RMS of the sustained part's fundamental (+-1 semitone), absolute (stem full scale)
 
 
 def _bar_rms(x: np.ndarray, bar: float, nbars: int) -> np.ndarray:
@@ -77,7 +93,10 @@ def measure(drums: Path, bass: Path, bass_f0: Path, bpm: float, nbars: int, sile
             out.append(BoomBar(None, 0.0))
             continue
         hz = float(f[band][int(np.argmax(spec[band]))])
-        out.append(BoomBar(round(69.0 + 12.0 * np.log2(hz / 440.0), 2), round(float(eh[k] / ref), 4)))
+        semi = 2.0 ** (1.0 / 12.0)
+        power = spec ** 2
+        fund = float(power[(f >= hz / semi) & (f <= hz * semi)].sum() / power[band].sum())
+        out.append(BoomBar(round(69.0 + 12.0 * np.log2(hz / 440.0), 2), round(float(eh[k] * np.sqrt(fund)), 5)))
     return out
 
 
@@ -95,3 +114,33 @@ def bar_strings(boom: list[BoomBar], kick_steps: set[int], quantize: int) -> lis
             toks.append(f"{bb.pitch:g}" + (f"@{n}" if n > 1 else ""))
         bars.append(" ".join(toks))
     return bars
+
+
+def probe(out: Path = UNIT_PATH) -> float:
+    """Render a sustained sine at gain 1 through the selected renderer and record its RMS (the steady part)."""
+    import subprocess
+    import tempfile
+
+    import soundfile as sf
+    import renderer as RND
+
+    seconds, settle = 8, 2
+    with tempfile.TemporaryDirectory() as t:
+        code, wav = Path(t) / "unit.strudel", Path(t) / "unit.wav"
+        code.write_text(f'setcps(0.5)\n$: note("{PROBE_NOTE}").s("sine").gain(1)\n')
+        subprocess.run(["node", str(RND.renderer_script()), str(code), "-o", str(wav), "-d", str(seconds)], check=True,
+                       capture_output=True)
+        y, sr = sf.read(str(wav), always_2d=True)
+        seg = y[settle * sr:(seconds - settle) * sr].mean(1)
+        rms = float(np.sqrt(np.mean(seg ** 2)))
+    out.parent.mkdir(parents=True, exist_ok=True)
+    out.write_text(json.dumps({"rms": round(rms, 6), "note": PROBE_NOTE, "renderer": RND.renderer_name(),
+                               "code": f'note("{PROBE_NOTE}").s("sine").gain(1)'}, indent=1) + "\n")
+    return rms
+
+
+if __name__ == "__main__":
+    if sys.argv[1:] == ["probe"]:
+        print(f"sine unit rms {probe():.6f} -> {UNIT_PATH}")
+    else:
+        sys.exit("usage: kick_boom.py probe")

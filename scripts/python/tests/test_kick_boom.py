@@ -116,3 +116,25 @@ def test_the_boom_channel_is_a_drums_voice_for_the_solo_stems():
     lines = ['$: note(cat(...bass)).s("sine")  // BASS — low end',
              '$: note(cat(...boom)).s("sine").gain(0.5)  // KICK_BOOM — the 808 tone under the kick — edit `boom`']
     assert [(c.label, c.group) for c in SS.find_channels(lines)] == [("BASS", "bass"), ("KICK_BOOM", "drums")]
+
+
+def test_the_level_is_the_fundamental_alone_absolute(stems, tmp_path):
+    # the same boom with a strong 2nd harmonic (a saturated 808): the level stays the fundamental's, not the band's
+    import soundfile as sf
+    d, _ = sf.read(str(stems / "drums.wav"), always_2d=True)
+    n, beat = d.shape[0], 60.0 / BPM
+    extra = np.zeros(n)
+    for b in range(4, 12):
+        i, m = int(b * beat * SR), np.arange(int(beat * SR))
+        extra[i:i + m.size] += 0.5 * np.exp(-m / (2.0 * SR)) * np.sin(2 * np.pi * 90.0 * m / SR)
+    _write(tmp_path / "drums.wav", d[:, 0] + extra)
+    pure = KB.measure(stems / "drums.wav", stems / "bass.wav", stems / "bass_f0.json", BPM, 4, silence=0.1)
+    rich = KB.measure(tmp_path / "drums.wav", stems / "bass.wav", stems / "bass_f0.json", BPM, 4, silence=0.1)
+    for p, r in zip(pure[1:3], rich[1:3]):
+        assert r.level == pytest.approx(p.level, rel=0.15)
+        assert p.level == pytest.approx(0.5 / np.sqrt(2), rel=0.25)     # the tone's own RMS (decay ~10 % over a beat)
+
+
+def test_the_engine_sine_unit_is_recorded():
+    u = KB.sine_unit()
+    assert u is not None and 0.0 < u < 1.0, "run: kick_boom.py probe"

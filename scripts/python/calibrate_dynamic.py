@@ -364,11 +364,10 @@ def main() -> int:
             solo = json.loads(args.bass_solo.read_text())
             solo_ratio = solo.get("ratio") or {}
             voice = {b: float(v) for b, v in solo_ratio.items() if b in ("sub_bass", "bass") and v}
-            # The kick boom (kick_boom.py) is a sine standing for the drums stem's low tone at the level the bass sub
-            # sine stands for the bass stem; the bass voice's sines actually render at this measured fraction of their
-            # stem (amplitude, master gain included), so the boom takes the same fraction. Over sub_bass + bass, since
-            # the octave-up fraction f only moves the voice's energy between those two bands. Sem Aliança synth: 0.35
-            # measured; the hand sweep of the scale peaked at 0.3 (0.15: 0.779, 0.3: 0.787, 0.5: 0.781).
+            # The kick boom (kick_boom.py) plays the drums stem's 808 fundamental at the fraction of its stem the bass
+            # voice renders at: render amplitude / (stem amplitude x master gain) of the bass voice alone, over sub_bass +
+            # bass (the octave-up fraction f only moves the voice's energy between those two bands). Sem Aliança synth:
+            # 0.35; Tatuagem 0.06-0.40 as its bass knobs moved.
             lo_o = sum(float((solo.get("level_orig") or {}).get(b) or 0.0) for b in ("sub_bass", "bass"))
             lo_r = sum(float((solo.get("level_render") or {}).get(b) or 0.0) for b in ("sub_bass", "bass"))
             if lo_o > 0.0 and lo_r > 0.0:
