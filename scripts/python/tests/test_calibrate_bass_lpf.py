@@ -366,6 +366,24 @@ def test_hat_drums_path_shut_when_full_mix_high_already_above_original(tmp_path)
                          "--hat-gain", "0.0")["--hat-gain"]) > 0.0
 
 
+def test_hats_never_raised_while_the_mix_high_band_is_already_above_the_original():
+    # Sem Aliança synth cal3 (2026-11-14): the centroid read dark (r_cent > 1.15) and lead-lpf crossed 7000 on the same
+    # step, so the >= 7000 path raised the hats 0 -> 0.054 although the full-mix `high` share was already 2.5x the
+    # original's (1.5 % vs 0.6 %). The hh layer adds only `high`; alone it cost 0.770 -> 0.714 (single-lever A/B).
+    knobs = ("--mode", "synth", "--lead-lpf", "6638", "--hat-gain", "0", "--cal-lead", "0.535", "--sub-gain", "0.838",
+             "--bass-mult", "1.3", "--master-gain", "2.299")
+    out = run_cal(FIX / "sem_alianca_synth_cal3.json", *knobs)
+    assert int(out["--lead-lpf"]) >= 7000                     # the lead lever still opens (the dark centroid stands)
+    assert float(out["--hat-gain"]) == 0.0
+    # control: the same file with the original's `high` share -> the >= 7000 path may raise the hats
+    d = json.loads((FIX / "sem_alianca_synth_cal3.json").read_text())
+    d["rendered"]["bands"]["high"] = d["original"]["bands"]["high"]
+    import tempfile
+    with tempfile.TemporaryDirectory() as t:
+        p = Path(t) / "c.json"; p.write_text(json.dumps(d))
+        assert float(run_cal(p, *knobs)["--hat-gain"]) > 0.0
+
+
 def _synth_floors() -> tuple[float, float]:
     """Live synth floors from thresholds.yaml (never retyped, so a floor change cannot silently invert these cases)."""
     sys.path.insert(0, str(REPO))

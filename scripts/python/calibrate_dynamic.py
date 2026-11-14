@@ -589,7 +589,11 @@ def main() -> int:
     hat_overshoot = over_raw and (from_stem or not lead_lpf_moved)
     if hat_overshoot and cur["hat_gain"] > 0:
         nxt["hat_gain"] = round(cur["hat_gain"] * damp(r_dhigh, lo=0.5, hi=1.0), 3)
-    elif r_cent > 1.15 and (nxt["lead_lpf"] >= LEAD_LPF_WIDE or hat_via_drums) and not hat_overshoot:
+    # The hh layer adds only `high`: a render whose `high` share already sits above SHARE_DEAD_BAND x the original's cannot
+    # be missing hats, whatever the lead-lpf did this step (Sem Aliança synth cal3: high 1.5 % vs 0.6 %, the >= 7000 path
+    # raised the hats as lead-lpf crossed 7000 and the step cost 0.770 -> 0.714 alone). The drums path had this rule already.
+    elif (r_cent > 1.15 and (nxt["lead_lpf"] >= LEAD_LPF_WIDE or hat_via_drums) and not hat_overshoot
+          and r_high >= 1 / SHARE_DEAD_BAND):
         bump = clamp((r_cent - 1.0) * 0.35, 0.04, 0.18)   # darker mix -> bigger hat bump
         nxt["hat_gain"] = round(clamp(cur["hat_gain"] + bump, 0.0, 0.7), 3)
     elif r_cent < 0.9:                                     # overshot bright -> back hats off
