@@ -145,7 +145,9 @@ lose ~12% of the captured samples; its rate relabel restored duration but lowere
 so every BlackHole-scored number since Oct 2026 was on pitch-shifted audio. It stays as a cross-check of live
 playback (`MIDIGREP_RENDERER=blackhole`). Scores are computed against `instrumental.wav` (bass+drums+melodic) —
 vocals are never generated. The offline renderer also serves every network fetch from a local cache
-(`sample-cache.ts`, `.cache/render-samples/`) and runs a hang watchdog that kills and retries a stalled page call.
+(`sample-cache.ts`, `.cache/render-samples/`) and runs a hang watchdog that kills and retries a stalled page call (progress = the page's own `window.__progress` counter -
+haps triggered, seconds rendered via OfflineAudioContext suspend/resume -, browser CPU only while a page is still loading; wall-vs-monotonic
+clock gaps from system sleep are not counted).
 The rest of this section documents the BlackHole recorder as it stands.
 
 There are **two** render paths, both the real Strudel engine (the former Node.js synthesizer, an emulation, was
@@ -260,8 +262,9 @@ stage 11 on every promoted piece, after all renders (the Ollama and diffusion mo
     breaking the run.
 - **Data-driven mix calibration** — `scripts/python/calibrate_dynamic.py` maps a render's measured
   `comparison.json` to the next knobs of `generate_dynamic_strudel.py` (sub-gain, bass-mult,
-  cal-lead, lead-lpf, hat-gain, master-gain), each a damped (sqrt) clamped proportional correction of
-  an observed band/centroid ratio. `scripts/auto-calibrate.sh` closes the generate → render
+  cal-lead, lead-lpf, hat-gain, the sub-up fraction f), each a damped (sqrt) clamped proportional correction of
+  an observed band/centroid ratio. The loop holds master-gain (loudness is the `mix_dynamics.py` stage); a step that moves f
+  moves no other lever; a synth bass layer moves only when the mix low end asks, in the bass solo's direction. `scripts/auto-calibrate.sh` closes the generate → render
   (offline renderer) → compare → calibrate loop and keeps the best render. No hardcoded per-track values.
   The score is level-invariant (`compare_audio.rms_normalize`), so a final loudness stage
   (`scripts/python/mix_dynamics.py`, in `auto-calibrate.sh`) moves `--master-gain` onto the reference
