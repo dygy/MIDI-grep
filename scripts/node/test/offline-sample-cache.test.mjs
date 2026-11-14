@@ -94,7 +94,7 @@ test('a call that never returns is detected within the derived bound; one that k
 });
 
 // ---- end to end ----------------------------------------------------------------------------------------------------
-const RENDERER = fileURLToPath(new URL('../dist/render-strudel-offline.js', import.meta.url));
+const RENDERER = process.env.MIDIGREP_TEST_RENDERER || fileURLToPath(new URL('../dist/render-strudel-offline.js', import.meta.url));
 let haveChromium = false;
 try { const p = (await import('puppeteer')).default; haveChromium = !!p.executablePath() && fs.existsSync(p.executablePath()); } catch { /* no puppeteer */ }
 const skip = !fs.existsSync(RENDERER) || !haveChromium ? 'renderer build or Chromium missing' : false;
@@ -171,20 +171,26 @@ test('an outdated entry is revalidated (304) and an unreachable upstream serves 
 
 test('a hung page is detected within the derived bound, the browser is replaced and the chunk is retried', { skip }, async () => {
   const code = `setcps(0.5)\n$: note("c3 ~ ~ ~").s("sine").gain(0.2)`;
-  const r = await render(code, 8, CHUNKED, { MIDIGREP_RENDER_TEST_HANG: 'chunk:2', MIDIGREP_RENDER_STALL_S: '4', MIDIGREP_RENDER_SAMPLE_CACHE_DIR: tmp() });
+  // Regression 2026-11-14: an idle hung page sat beside a browser using 1.3-2.8 % of a core (idle + the probe), which the CPU rule
+  // (> 2 %) credited as progress on random crossings - the hang was found after 13..925 s. The page now reports its own progress
+  // (window.__progress) and only that counter counts once it has started; detection takes the limit, the whole render ~25 s.
+  // The limit is the renderer's own floor (the shortest limit it ever derives): a forced 4 s also killed a legitimate cold page
+  // open on a loaded machine (the bundle parse holds the main thread, the probe gets no answer) - 'open failed 3x'.
+  const r = await render(code, 8, CHUNKED, { MIDIGREP_RENDER_TEST_HANG: 'chunk:2', MIDIGREP_RENDER_STALL_S: String(STALL_FLOOR_S), MIDIGREP_RENDER_SAMPLE_CACHE_DIR: tmp() }, 90_000);
+  assert.doesNotMatch(r.log, /\[TEST\] killed/, `no stall detected within 90 s (limit ${STALL_FLOOR_S} s):\n${r.log.slice(-600)}`);
   assert.match(r.log, /\[STALL\] chunk 2\//);
-  assert.match(r.log, /\[CRASH\] chunk 2\/\d+ .*attempt 1\/3: page stalled: chunk 2\/\d+ made no progress for [\d.]+ s \(limit 4\.0 s/);
+  assert.match(r.log, /\[CRASH\] chunk 2\/\d+ .*attempt 1\/3: page stalled: chunk 2\/\d+ made no progress for [\d.]+ s \(limit (?:[\d.]+) s/);
   assert.equal(r.status, 0, r.log);
-  assert.ok(r.wall < 120_000, `took ${r.wall} ms`);
+  assert.ok(r.wall < 60_000, `took ${r.wall} ms`);
 });
 
 test('a frozen browser (page AND every CDP call hang) is detected at the derived limit, not at protocolTimeout', { skip }, async () => {
   const code = `setcps(0.5)\n$: note("c3 ~ ~ ~").s("sine").gain(0.2)`;
-  const r = await render(code, 8, CHUNKED, { MIDIGREP_RENDER_TEST_HANG: 'chunk:2:freeze', MIDIGREP_RENDER_STALL_S: '4', MIDIGREP_RENDER_SAMPLE_CACHE_DIR: tmp() });
+  const r = await render(code, 8, CHUNKED, { MIDIGREP_RENDER_TEST_HANG: 'chunk:2:freeze', MIDIGREP_RENDER_STALL_S: String(STALL_FLOOR_S), MIDIGREP_RENDER_SAMPLE_CACHE_DIR: tmp() });
   assert.match(r.log, /\[STALL\] chunk 2\//);
-  const m = /\[CRASH\] chunk 2\/\d+ .*attempt 1\/3: page stalled: chunk 2\/\d+ made no progress for ([\d.]+) s \(limit 4\.0 s/.exec(r.log);
+  const m = /\[CRASH\] chunk 2\/\d+ .*attempt 1\/3: page stalled: chunk 2\/\d+ made no progress for ([\d.]+) s \(limit (?:[\d.]+) s/.exec(r.log);
   assert.ok(m, r.log);
-  assert.ok(Number(m[1]) < 4 + 5, `stall noticed after ${m[1]} s, limit 4 s`);
+  assert.ok(Number(m[1]) < STALL_FLOOR_S + 5, `stall noticed after ${m[1]} s, limit ${STALL_FLOOR_S} s`);
   assert.equal(r.status, 0, r.log);
   assert.ok(r.wall < 120_000, `took ${r.wall} ms`);
 });
@@ -192,12 +198,12 @@ test('a frozen browser (page AND every CDP call hang) is detected at the derived
 test('a page spinning in a busy loop (browser CPU busy, main thread dead) is detected at the derived limit, not at protocolTimeout', { skip, timeout: 240_000 }, async () => {
   const code = `setcps(0.5)\n$: note("c3 ~ ~ ~").s("sine").gain(0.2)`;
   // killAfterMs: on the unfixed watchdog this render sits for protocolTimeout (900 s); the test must not wait for it
-  const r = await render(code, 8, CHUNKED, { MIDIGREP_RENDER_TEST_HANG: 'chunk:2:spin', MIDIGREP_RENDER_STALL_S: '4', MIDIGREP_RENDER_SAMPLE_CACHE_DIR: tmp() }, 90_000);
-  assert.doesNotMatch(r.log, /\[TEST\] killed/, `no stall detected within 90 s (limit 4 s):\n${r.log.slice(-600)}`);
+  const r = await render(code, 8, CHUNKED, { MIDIGREP_RENDER_TEST_HANG: 'chunk:2:spin', MIDIGREP_RENDER_STALL_S: String(STALL_FLOOR_S), MIDIGREP_RENDER_SAMPLE_CACHE_DIR: tmp() }, 90_000);
+  assert.doesNotMatch(r.log, /\[TEST\] killed/, `no stall detected within 90 s (limit ${STALL_FLOOR_S} s):\n${r.log.slice(-600)}`);
   assert.match(r.log, /\[STALL\] chunk 2\//);
-  const m = /page stalled: chunk 2\/\d+ made no progress for ([\d.]+) s \(limit 4\.0 s/.exec(r.log);
+  const m = /page stalled: chunk 2\/\d+ made no progress for ([\d.]+) s \(limit (?:[\d.]+) s/.exec(r.log);
   assert.ok(m, r.log);
-  assert.ok(Number(m[1]) < 4 + 5, `stall noticed after ${m[1]} s, limit 4 s`);
+  assert.ok(Number(m[1]) < STALL_FLOOR_S + 5, `stall noticed after ${m[1]} s, limit ${STALL_FLOOR_S} s`);
   assert.equal(r.status, 0, r.log);
   assert.ok(r.wall < 120_000, `took ${r.wall} ms`);
 });

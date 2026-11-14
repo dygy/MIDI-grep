@@ -37,10 +37,24 @@ window.__fontsP = import("/fontloader.mjs").then(m => m.registerSoundfonts);
 
 window.__logs = [];
 ${PAGE_DETERMINISM_JS}
+// Page-side progress for the hang watchdog: a counter that moves whenever the page does work the watchdog cannot see as a
+// log line or sample bytes - every hap triggered, every orbit created, and every second of audio an OfflineAudioContext
+// renders (a suspend at each second boundary bumps it and resumes; suspend/resume only pauses the graph between render
+// quanta, the samples are unchanged). The watchdog's probe reads it; a page whose counter stands still is not progressing,
+// however much CPU its browser burns or idles away.
+window.__progress = 0;
+{
+  const sr = OfflineAudioContext.prototype.startRendering;
+  OfflineAudioContext.prototype.startRendering = function () {
+    for (let k = 1; k < this.length / this.sampleRate; k++) this.suspend(k).then(() => { window.__progress++; return this.resume(); }, () => { /* this quantum is already suspended by its owner, who resumes it */ });
+    return sr.apply(this, arguments);
+  };
+}
 document.addEventListener('strudel.log', e => window.__logs.push(String(e.detail && e.detail.message)));
 for (const k of ['error', 'warn']) { const o = console[k].bind(console); console[k] = (...a) => { window.__logs.push(k + ': ' + a.map(String).join(' ')); o(...a); }; }
 window.addEventListener('unhandledrejection', e => window.__logs.push('error: unhandledrejection ' + (e.reason && e.reason.message || e.reason)));
 window.__getSlice = (i, n) => {
+  window.__progress++;
   const u = window.__bytes.subarray(i, i + n); let s = '';
   for (let k = 0; k < u.length; k += 0x8000) s += String.fromCharCode.apply(null, u.subarray(k, k + 0x8000));
   return btoa(s);
@@ -60,6 +74,7 @@ window.__rings = async (cycles) => {
   const S = strudel, cps = window.__cps, out = [], dur = {}, errors = [];
   for (const h of window.__pattern.queryArc(0, cycles, { _cps: cps })) {
     if (!h.hasOnset()) continue;
+    window.__progress++;
     h.ensureObjectValue(); const v = h.value;
     const onset = h.whole.begin.valueOf() / cps, hapDur = h.duration / cps;
     let len = hapDur + (v.release ?? 0), cut = null;
@@ -116,6 +131,7 @@ window.__init = async (code, site) => {
   const pattern = await repl.evaluate(code, false);
   if (!pattern) throw new Error('evaluate returned no pattern (eval error): ' + window.__logs.join(' | '));
   window.__pattern = pattern; window.__cps = repl.scheduler.cps;
+  window.__progress++; // the page is ready: from here on it reports its own progress (see window.__progress)
   return { cps: window.__cps, rewrites, countOnsets: undefined };
 };
 // 2a) single pass (reference): the bundle's own renderPatternAudio, download intercepted -> WAV bytes
@@ -155,13 +171,14 @@ window.__chunk = async (b, e, sampleRate, startFrame, len, poly, preFrames, preC
   // A silent '-' hap goes through superdough's own orbit creation (it returns right after it). An orbit that NO earlier hap
   // used is still missing, as in continuous playback, and still fails loudly.
   // usedOrbits: the orbits of all earlier onsets, from the single whole-pattern pass of __rings (no re-query of [0, b) per chunk)
-  for (const orbit of usedOrbits) await S.superdough({ s: '-', orbit }, 0, 0, cps, 0);
+  for (const orbit of usedOrbits) { await S.superdough({ s: '-', orbit }, 0, 0, cps, 0); window.__progress++; }
   let onsets = 0; const errs = [];
   for (const hap of pre.concat(haps)) {
     if (!hap.hasOnset()) continue;
     const isMain = hap.whole.begin.valueOf() >= b;
     if (isMain) onsets++;
     const a = window.__triggerArgs(hap.whole.begin.valueOf(), cps, ctxStartSec);
+    window.__progress++;
     try { await S.superdough(hap2value(hap), a.t, hap.duration / cps, cps, a.cycle); }
     catch (err) { const m = 'error: ' + (err && err.message || err) + ' hap=' + JSON.stringify(hap.value).slice(0, 160); window.__logs.push(m); if (errs.length < 2) errs.push(m); }
   }
@@ -271,18 +288,36 @@ async function main() {
     let s = cpuSessions.get(b); if (!s) { s = await b.target().createCDPSession(); cpuSessions.set(b, s); }
     return ((await s.send('SystemInfo.getProcessInfo')).processInfo as any[]).reduce((a, p) => a + p.cpuTime, 0);
   };
+  // Browser CPU is credited only while no page reports its own progress yet (a page opening, loading scripts and samples).
+  // Once a page's window.__progress has left 0 (its __init finished), only that counter moving is progress: an idle or hung browser plus this probe
+  // measured 1.3-2.8 % of a core on this Mac, so the CPU rule ticked on random crossings and a hung chunk was found after
+  // 13 s..925 s instead of the derived limit.
   const CPU_BUSY = 0.02; // a browser using more than 2 % of one core is doing something; an idle/hung one is below (idle measured ~0.3 %)
   /** Run one page call under the watchdog; `audioS` = seconds of audio it renders (0 for a call with no audio). Stats feed later limits. */
-  const wd = async <T>(label: string, audioS: number, fn: () => Promise<T>): Promise<T> => {
+  /** `counted` = false for a step whose work the page cannot count (the bundle's own renderPatternAudio triggers its haps itself): CPU stays credited. */
+  const wd = async <T>(label: string, audioS: number, fn: () => Promise<T>, counted = true): Promise<T> => {
     const t = Date.now(); tick();
-    let lastCpu = -1, lastAt = t, polling = false, probing = false, lastAnswer = t;
+    let lastCpu = -1, lastAt = t, polling = false, probing = false, lastAnswer = t, paced = false, lastCount = -1;
     // CPU use alone is not progress: a page spinning in a busy loop burns a core for ever (a render that hung this way was only
     // noticed by protocolTimeout, 900 s). So the page's main thread must also ANSWER a trivial evaluate; the answer is not progress
     // by itself (an idle page waiting for ever must still stall), it only stops CPU from being credited. The probe is never
     // awaited by the watchdog: a probe that hangs (page or browser frozen) just stays pending, and the timer below fires on its own.
     const poll = setInterval(() => {
-      if (!probing) { probing = true; Promise.resolve().then(async () => { for (const pg of await browser.pages()) await pg.evaluate(() => 1); lastAnswer = Date.now(); probing = false; }).catch(() => { probing = false; }); }
-      if (polling) return; polling = true;
+      if (!probing) {
+        probing = true;
+        Promise.resolve().then(async () => {
+          let count = 0;
+          for (const pg of await browser.pages()) { const c = await pg.evaluate(() => (window as any).__progress); if (typeof c === 'number') count += c; }
+          lastAnswer = Date.now();
+          // paced once a live page has started reporting (its counter left 0 when __init finished); before that - a page still
+          // loading its scripts and samples - the browser's CPU is the only sign of life it gives
+          paced = counted && count > 0;
+          if (paced && count !== lastCount && lastCount >= 0) tick();
+          lastCount = count;
+          probing = false;
+        }).catch(() => { probing = false; });
+      }
+      if (polling || paced) return; polling = true;
       browserCpuS(browser).then(c => { const n = Date.now(); if (lastCpu >= 0 && (c - lastCpu) > CPU_BUSY * ((n - lastAt) / 1000)) tick(); lastCpu = c; lastAt = n; }).catch(() => { /* browser gone: the call fails by itself */ }).finally(() => { polling = false; });
     }, 1000);
     try {
@@ -373,7 +408,7 @@ async function main() {
     let onsets = 0, chunks = 0, tailEndPeak = 0, tailEndChunk = 0, wav: Buffer;
     if (!(chunkSeconds > 0)) {
       console.log(`Rendering ${duration} s offline at ${sampleRate} Hz (single pass) ...`);
-      const r: any = await wd('single pass', duration, () => page.evaluate((cy, sr, po) => (window as any).__single(cy, sr, po), cycles, sampleRate, maxPolyphony));
+      const r: any = await wd('single pass', duration, () => page.evaluate((cy, sr, po) => (window as any).__single(cy, sr, po), cycles, sampleRate, maxPolyphony), false);
       wav = await fetchBytes(page, r.bytes); onsets = r.onsets; logs.push(...r.logs); chunks = 1;
     } else {
       // Chunked: one FRESH PAGE per chunk. superdough pools audio nodes at module level and returns
