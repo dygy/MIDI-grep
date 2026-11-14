@@ -203,7 +203,7 @@ test('a page spinning in a busy loop (browser CPU busy, main thread dead) is det
 });
 test('system sleep is not silence: a clock jump between watchdog ticks is not counted (regression 2026-11-13)', async () => {
   // Sem Aliança synth: the Mac slept 348 s (lid closed on battery) during the 'density' step; the watchdog woke up, read
-  // 346.7 s of silence against an 18 s limit and killed the render. The jump is time the watchdog did not run.
+  // 346.7 s of silence against an 18 s limit and killed the render. A sleep moves the wall clock and not the monotonic one.
   let offset = 0; const now = () => Date.now() + offset;
   const last = now();
   setTimeout(() => { offset += 348000; }, 100);                       // the sleep, seen as one jump of the clock

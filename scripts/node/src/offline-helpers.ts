@@ -275,19 +275,20 @@ export class StallError extends Error {
  * Await `fn()`; reject with StallError (after calling onStall, which should kill the page/browser) when `lastProgress()`
  * (epoch ms, bumped by whatever signals life) is older than limitS. The pending fn() is abandoned (its rejection is swallowed).
  */
-export function watched<T>(fn: () => Promise<T>, o: { label: string; limitS: number; pollMs?: number; lastProgress: () => number; onStall?: () => void; now?: () => number }): Promise<T> {
-  const now = o.now ?? Date.now, pollMs = o.pollMs ?? Math.max(50, Math.min(1000, o.limitS * 250));
+export function watched<T>(fn: () => Promise<T>, o: { label: string; limitS: number; pollMs?: number; lastProgress: () => number; onStall?: () => void; now?: () => number; mono?: () => number }): Promise<T> {
+  const now = o.now ?? Date.now, mono = o.mono ?? (() => performance.now()), pollMs = o.pollMs ?? Math.max(50, Math.min(1000, o.limitS * 250));
   return new Promise<T>((resolve, reject) => {
     let done = false;
-    // Time the watchdog itself did not run is not the page's silence. Its own timer firing late (the system slept - lid
-    // closed on battery -, or the process was not scheduled) is measured as the delay past its period, and that delay is
-    // not counted since the last progress. Sem Aliança synth 2026-11-13: the Mac slept 348 s in clamshell mode, the
-    // 'density' step woke up "silent for 346.7 s" against an 18 s limit and the render was killed.
-    let lastTick = now(), absentMs = 0, progressSeen = o.lastProgress();
+    // Time the system slept is not the page's silence. The wall clock (Date.now, what lastProgress is stamped in) runs on through
+    // a sleep; the monotonic clock (performance.now: mach_absolute_time on macOS, CLOCK_MONOTONIC on Linux) stops. Their
+    // difference since the last progress is not counted. Sem Aliança synth 2026-11-13: the Mac slept 348 s in clamshell mode,
+    // the 'density' step woke up "silent for 346.7 s" against an 18 s limit and the render was killed. (A LATE timer is not
+    // the signal: macOS defers a background process's timers - App Nap - and a busy process runs them late.)
+    let lastWall = now(), lastMono = mono(), absentMs = 0, progressSeen = o.lastProgress();
     const timer = setInterval(() => {
-      const t = now(), lp = o.lastProgress();
+      const t = now(), m = mono(), lp = o.lastProgress();
       if (lp !== progressSeen) { progressSeen = lp; absentMs = 0; }
-      absentMs += Math.max(0, t - lastTick - pollMs); lastTick = t;
+      absentMs += Math.max(0, (t - lastWall) - (m - lastMono)); lastWall = t; lastMono = m;
       const silent = (t - lp - absentMs) / 1000;
       if (silent <= o.limitS || done) return;
       done = true; clearInterval(timer);
