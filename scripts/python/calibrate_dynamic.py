@@ -250,6 +250,8 @@ def main() -> int:
                     help="the knobs 'BM SG CL LLPF HG MG BL LH SU' of the render this one was stepped from (with "
                          "--parent-comparison): when only the octave fraction differs, the split step is a measured secant")
     ap.add_argument("--cal-lead", type=float, default=1.0)
+    ap.add_argument("--kick-boom-scale", type=float, default=0.0,
+                    help="kick-boom level scale of the last render (generator --kick-boom-scale; 0 = no boom played)")
     ap.add_argument("--lead-lpf", type=int, default=5000)
     ap.add_argument("--hat-gain", type=float, default=0.0)
     ap.add_argument("--master-gain", type=float, default=0.6)
@@ -317,6 +319,7 @@ def main() -> int:
         "master_gain": args.master_gain,
         "bass_lpf": float(args.bass_lpf),
         "lead_hpf": float(args.lead_hpf),
+        "kick_boom": max(0.0, float(args.kick_boom_scale)),
     }
     if args.state and args.state.exists():
         prev = json.loads(args.state.read_text())
@@ -355,10 +358,21 @@ def main() -> int:
     # The sine layer (sub-gain) stays on the mix shares: both layers feed the 60-250 Hz band, so driving both from the
     # same band overshoots (measured on VAGABUNDO: bass-band ratio 3.15 -> 0.90 in one step with both raised).
     voice: dict[str, float] = {}
+    boom_scale = None
     if args.bass_solo is not None:
         try:
-            solo_ratio = json.loads(args.bass_solo.read_text()).get("ratio") or {}
+            solo = json.loads(args.bass_solo.read_text())
+            solo_ratio = solo.get("ratio") or {}
             voice = {b: float(v) for b, v in solo_ratio.items() if b in ("sub_bass", "bass") and v}
+            # The kick boom (kick_boom.py) is a sine standing for the drums stem's low tone at the level the bass sub
+            # sine stands for the bass stem; the bass voice's sines actually render at this measured fraction of their
+            # stem (amplitude, master gain included), so the boom takes the same fraction. Over sub_bass + bass, since
+            # the octave-up fraction f only moves the voice's energy between those two bands. Sem Aliança synth: 0.35
+            # measured; the hand sweep of the scale peaked at 0.3 (0.15: 0.779, 0.3: 0.787, 0.5: 0.781).
+            lo_o = sum(float((solo.get("level_orig") or {}).get(b) or 0.0) for b in ("sub_bass", "bass"))
+            lo_r = sum(float((solo.get("level_render") or {}).get(b) or 0.0) for b in ("sub_bass", "bass"))
+            if lo_o > 0.0 and lo_r > 0.0:
+                boom_scale = round(math.sqrt(lo_r / lo_o), 4)
         except (OSError, ValueError, AttributeError, TypeError) as e:
             print(f"WARNING: --bass-solo {args.bass_solo} unreadable ({e}); bass layers follow the mix band shares",
                   file=sys.stderr)
@@ -430,7 +444,8 @@ def main() -> int:
         try:
             pk = [float(x) for x in args.parent_knobs.split()]
             # a measurement only when the parent differed in f alone: the level levers were held on that step
-            if len(pk) >= 9 and abs(pk[0] - cur["bass_mult"]) < 5e-4 and abs(pk[1] - cur["sub_gain"]) < 5e-4:
+            same_boom = len(pk) < 10 or abs(pk[9] - cur["kick_boom"]) < 5e-4    # the boom feeds sub_bass too
+            if len(pk) >= 9 and abs(pk[0] - cur["bass_mult"]) < 5e-4 and abs(pk[1] - cur["sub_gain"]) < 5e-4 and same_boom:
                 parent_split = {"f": pk[8], "rb": parent_bands[1]}
         except ValueError:
             parent_split = None
@@ -615,6 +630,9 @@ def main() -> int:
     # cal-lead and the master gain, scored 0.737 -> 0.707, and the loop backed off the split. The same f alone, from the
     # same knobs: f 0.3 -> 0.747, f 0.6 -> 0.765 (frequency balance 0.773 -> 0.928). It also makes the next step's
     # parent a measurement of f alone (the secant in sub_split_step).
+    # the boom scale is a measurement of the bass voice, taken whenever the voice was measured; it is held on a split
+    # step (the split's render must differ in f alone, the next step's secant reads it)
+    nxt["kick_boom"] = boom_scale if (boom_scale is not None and not splitting) else cur["kick_boom"]
     if splitting:
         for k in ("cal_lead", "hat_gain"):
             nxt[k] = cur[k]
@@ -639,7 +657,7 @@ def main() -> int:
     print(f"   low_mid/bass share ratio {r_lm_bass:.2f}, low_mid/mid {r_lm_mid:.2f} "
           f"(orig/rend; nan = lever off)", file=sys.stderr)
     for k in ["sub_gain", "sub_up", "bass_mult", "cal_lead", "lead_lpf", "hat_gain", "master_gain",
-              "bass_lpf", "lead_hpf"]:
+              "bass_lpf", "lead_hpf", "kick_boom"]:
         a, b = cur[k], nxt[k]
         arrow = "->" if a != b else "=="
         print(f"   {k:12s} {a} {arrow} {b}", file=sys.stderr)
@@ -647,6 +665,8 @@ def main() -> int:
     cli = (f"--bass-mult {nxt['bass_mult']} --sub-gain {nxt['sub_gain']} --sub-up {fmt_fraction(nxt['sub_up'])} "
            f"--cal-lead {nxt['cal_lead']} --lead-lpf {nxt['lead_lpf']} "
            f"--hat-gain {nxt['hat_gain']} --master-gain {nxt['master_gain']}")
+    if nxt["kick_boom"] != cur["kick_boom"] or nxt["kick_boom"] > 0:      # 0 and unmeasured: nothing to say (sample mode)
+        cli += f" --kick-boom-scale {nxt['kick_boom']:g}"
     if cur_blpf > 0 and nxt["bass_lpf"] != cur_blpf:
         cli += f" --bass-lpf {nxt['bass_lpf']}"
     if cur_lhpf > 0 and nxt["lead_hpf"] != cur_lhpf:

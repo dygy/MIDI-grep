@@ -38,6 +38,7 @@ Both write ``// generation_mode: <mode>`` so the detector/report never guess.
 from __future__ import annotations
 
 import argparse
+import inspect
 import json
 import math
 import re
@@ -51,6 +52,7 @@ import pretty_midi
 sys.path.insert(0, str(Path(__file__).parent))
 import generate_hybrid_strudel as H  # noqa: E402
 import partial_register as PR  # noqa: E402
+import kick_boom as KB  # noqa: E402
 import bass_register as BR  # noqa: E402  (stem-measured register + octave snap)
 import bass_shape as BS  # noqa: E402  (bass note shape from the stem: hold, glide, sample loop, kick duck)
 import melodic_shape as MS  # noqa: E402  (lead/chords: retrigger only on stem attacks, hold between)
@@ -772,6 +774,12 @@ def main() -> int:
     ap.add_argument("--no-dj-flow", dest="dj_flow", action="store_false")
     ap.add_argument("--drum-floor", type=float, default=0.2,
                     help="drum envelope floor (0=deepest dynamics→best shape corr; higher=louder average)")
+    ap.add_argument("--kick-boom", choices=("auto", "off"), default="auto",
+                    help="synth mode: play the drums stem's sustained low tone (a tuned 808 kick) as a sine on the kick hits, "
+                         "pitch and level measured per bar (kick_boom.py); off = the drum machine kick alone")
+    ap.add_argument("--kick-boom-scale", type=float, default=0.0,
+                    help="kick-boom level: the fraction of its stem the bass voice's sines render at (calibrate_dynamic.py, "
+                         "measured from the bass voice alone); 0 = no boom (no measurement yet)")
     ap.add_argument("--hat-gain", type=float, default=0.0,
                     help="steady TR808 hh*8 layer inside the drum bus (smooths envelope for shape + lifts centroid)")
     ap.add_argument("--bass-f0", type=Path, default=None, metavar="PATH",
@@ -1329,6 +1337,7 @@ def main() -> int:
                       f'{gain_pattern(lead_env, chord_g * lead_synth_gain * M)}')
         channels.append(("CHORDS", "harmony under the lead — edit chords in `chords`", chord_code))
 
+    boom_info = None
     if drum_realstem:
         # The real drum stem, played gaplessly via Strudel slice playback → rendered drums are
         # the ORIGINAL drums (identical sound & spectrogram). Carries its own dynamics (no env).
@@ -1368,6 +1377,23 @@ def main() -> int:
                          + f'\n){H.late_suffix(detected.late)}{bank_suffix}{drum_lpf}{fx_no_gain(drums_fx, drop_lpf=True)}'
                          + f'{gain_pattern(drum_env, drums_fx["gain"] * M)}')
             channels.append(("DRUMS", label, drum_code))
+            # the drum machine kick is short and fixed in pitch; a tuned 808 whose tone rings through the beat (filed
+            # under drums by Demucs) is played as a sine on the kick hits at the stem's own pitch (kick_boom.py)
+            if (synth and args.kick_boom == "auto" and args.kick_boom_scale > 0 and bass_reg is not None and detected.grid
+                    and KB.KICK in detected.grid):
+                silence = inspect.signature(bar_env_pattern).parameters["silence"].default
+                boom = KB.measure(args.stems_dir / "drums.wav", args.stems_dir / "bass.wav", bass_f0_path, args.bpm,
+                                  nbars, silence)
+                boom_bars = KB.bar_strings(boom, detected.grid[KB.KICK], detected.quantize)
+                boom_info = {"bars": sum(1 for b in boom if b.pitch is not None),
+                             "pitches": sorted({b.pitch for b in boom if b.pitch is not None})}
+                if boom_info["bars"]:
+                    L += ["// boom: the drums stem's sustained low tone (a tuned 808 kick) per bar, on the kick hits and held to",
+                          "// the next one - MIDI pitch as measured (fractional = the stem's own tuning). `~` = no boom in that bar.",
+                          js_array("boom", boom_bars), ""]
+                    boom_code = (f'note(cat(...boom)){H.late_suffix(detected.late)}.s("sine")'
+                                 f'{gain_pattern([[b.level] for b in boom], sub_g * M * args.kick_boom_scale)}')
+                    channels.append(("KICK_BOOM", "the 808 tone under the kick (pitch per bar) — edit `boom`", boom_code))
 
     # Each `$:` is a channel; a (label, comment, code, marker) tuple → one top-level pattern.
     # `marker` is a comment token the detector reads (only `// texture` today).
@@ -1458,6 +1484,7 @@ def main() -> int:
                       # the effective share of the sub layer played an octave up (an int at 0/1, as the binary lever
                       # reported it) and the most the calibrator may ask for (0 = the up sine was refused)
                       "sub_up": int(sub_up) if sub_up in (0.0, 1.0) else round(sub_up, 4), "sub_up_max": sub_up_max,
+                      "kick_boom": boom_info,
                       "harmony": harmony_info, "lead_dynamics": dyn_info, "chord_bars": len(chord_bars or []),
                       "lead_octave": lead_oct, "lead_octave_decision": lead_dec,
                       "lead_partial_log2": lead_partial,

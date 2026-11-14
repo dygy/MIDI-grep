@@ -18,8 +18,8 @@ Subcommands (stdout is machine-read by auto-calibrate.sh):
   max-iters | patience | cap <track|neighbour|seed|cold>   (cap: the budget a warm start earns, WARM_ITERS)
   select <iters.tsv>                      -> best tag
   next   <iters.tsv> --cap N              -> "STOP <reason>" | "CONTINUE <parent-tag> <alpha>"
-  blend  --parent "<9 knobs>" --prop "<9 knobs>" --eff "<bass_lpf lead_hpf>" --alpha A -> 9 knobs
-         (BM SG CL LLPF HG MG BL LH SU; SU = fraction 0..1 of the sub-sine layer an octave up, interpolated)
+  blend  --parent "<9|10 knobs>" --prop "<9|10 knobs>" --eff "<bass_lpf lead_hpf>" --alpha A -> the same count
+         (BM SG CL LLPF HG MG BL LH SU [KB]; SU = fraction 0..1 of the sub-sine layer an octave up, KB = kick-boom scale)
   blend-env --used <json|-> --new <json> --alpha A --out <json>
   leadfit <palette.tsv> <trial.tsv> -> "keep|palette <tag>": the synth lead-fit trial (fitted oscillator lead vs the
          palette lead of the BEST render); kept only if overall > palette + noise and section-aware >= palette - 0.005.
@@ -172,9 +172,11 @@ def choose_lead_fit(palette: Row, trial: Row, n: float) -> Row:
 
 def blend_knobs(parent: list[str], prop: list[str], eff: list[float], alpha: float) -> list[str]:
     out = []
+    n = max(len(parent), len(prop))             # a 9-knob row (before KB) reads KB = 0
+    parent, prop = list(parent) + ["0"] * (n - len(parent)), list(prop) + ["0"] * (n - len(prop))
     for i, (p, q) in enumerate(zip(parent, prop)):
         pf, qf = float(p), float(q)
-        if i == 8:                              # SU, the sub-sine octave-up FRACTION f (0..1): a magnitude, blended like the others
+        if i in (8, 9):                         # SU (octave-up fraction 0..1) / KB (kick-boom scale): magnitudes, blended like the others
             out.append(f"{pf + alpha * (qf - pf):.4g}")   # (0 and 1 print as before; no eff[] fallback: 0 is a real value)
             continue
         if i >= 6 and qf == pf:                 # BL / LH override untouched by the calibrator: keep (0 = default)
