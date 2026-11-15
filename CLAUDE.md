@@ -204,6 +204,21 @@ the fraction of its stem the bass sines render at; f-invariant), held on a split
 peaked at 0.3; synth 0.757 -> 0.794 / 0.714 -> 0.770 (gate PASS). Hats are never raised while the mix `high` share is
 already above `SHARE_DEAD_BAND` x the original's (the >= 7000 lead-lpf path had no such guard; it cost Sem 0.770 -> 0.714).
 
+**Synth drums: tuned kick + drum low-pass (2026-11-15, `drum_pitch.py`, `calibrate_dynamic.py --drum-lpf`):** Tatuagem No
+Pescoço: Demucs filed the whole low end under drums (bass stem 0.003 of the drums' low band) - a tuned 808 KICK, tail
+35.2 Hz, played by the RolandTR808 bd at 47.3 Hz; 80 % of the mix chroma energy is below 130 Hz (chroma_corr 0.43).
+(1) The per-hit `.speed()` that `drum_pitch.hit_ratios` wrote against an extracted one-shot now also runs in bank mode,
+against the palette bank's kick as the ENGINE renders it (`drum_pitch.py probe <bank>` -> `data/drum_shots/<bank>_bd.wav`,
+committed; a bank never probed warns and plays untuned). For a library one-shot the unread hits take the class's common
+reading (`fill`): "as it is" would be a pitch the stem never sounds; extracted kits are unchanged. One step from the best
+knobs: Tatuagem 0.7711 -> 0.7851, references within noise. (2) The drum machine's hats/snares lit `high` at 1.6 % vs
+0.26 % with the lead low-pass at its floor: DL, the 11th calibration knob (`--start "... SU KB DL [stem|off]"`, ClickHouse
+`drum_lpf`, migration 9; 0 = open), is a low-pass on the synth drum stack. It closes by a damped sqrt step of the mix `high`
+share ratio (at most an octave, floor = bottom of high_mid, open = top of the scored range) when `high` is above
+`SHARE_DEAD_BAND` x the original's, no hat layer is up and lead-lpf stood still; it opens again when `high` reads dark;
+hats are never raised under a closed DL; held on a split step; a neighbour's DL is never copied. By hand at 3 kHz: 0.770
+-> 0.792. References' `high` sits inside the dead band (Regime too dark), so the lever stays shut there.
+
 **Loudness stage (2026-10-20, `scripts/python/mix_dynamics.py`, run by `auto-calibrate.sh` after BEST):** the score is
 level-invariant (`compare_audio.rms_normalize`), so renders sat 6-13 dB under the mastered instrumental with crest
 17-18 dB vs ~10 and nobody saw it. One measured lever moves it: `--master-gain` onto the instrumental's RMS (up to 3

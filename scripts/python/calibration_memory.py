@@ -45,7 +45,7 @@ import clickhouse_store as CS  # noqa: E402
 
 TABLE = "midi_grep.calibration_steps"
 KNOBS = ("bass_mult", "sub_gain", "cal_lead", "lead_lpf", "hat_gain", "master_gain", "bass_lpf", "lead_hpf", "sub_up",
-         "kick_boom")
+         "kick_boom", "drum_lpf")
 SHAPES = CL.SHAPES              # generate_dynamic_strudel.py --bass-shape; the first is the generator default (wins ties)
 DEFAULT_SHAPE = SHAPES[0]
 AUX_KINDS = ("shape", "leadfit")   # extra trial renders: they answer a question, they never seed a knob start
@@ -144,7 +144,7 @@ def _f(x, default: float = 0.0) -> float:
 
 
 def parse_knobs(text: str) -> dict[str, float]:
-    """'BM SG CL LLPF HG MG [BL [LH [SU [KB]]]]' -> knob dict (missing tail = 0)."""
+    """'BM SG CL LLPF HG MG [BL [LH [SU [KB [DL]]]]]' -> knob dict (missing tail = 0)."""
     v = text.split()
     if len(v) < 6:
         raise ValueError(f"need >= 6 knob fields, got {text!r}")
@@ -164,7 +164,7 @@ def format_knobs(k: dict[str, float]) -> str:
     out = []
     for name in KNOBS:
         x = float(k.get(name, 0))
-        out.append(str(int(round(x))) if name in ("lead_lpf", "bass_lpf", "lead_hpf") else f"{x:.4g}")
+        out.append(str(int(round(x))) if name in ("lead_lpf", "bass_lpf", "lead_hpf", "drum_lpf") else f"{x:.4g}")
     return " ".join(out)
 
 
@@ -188,7 +188,7 @@ def make_row(*, kind: str, run_id: str, tag: str, track_key: str, mode: str, kno
         "code_version": ctx.get("code_version") or cv, "git_commit": commit, "run_id": run_id, "tag": tag,
         "parent_tag": parent if parent not in ("-", None) else "", "alpha": _f(alpha, 1.0),
         "warm_source": ctx.get("warm_source", ""),
-        **{k: _f(knobs.get(k)) for k in KNOBS},   # sub_up: fraction 0..1 (old rows 0/1); kick_boom: old rows 0
+        **{k: _f(knobs.get(k)) for k in KNOBS},   # sub_up: fraction 0..1 (old rows 0/1); kick_boom, drum_lpf: old rows 0
         "bass_shape": bass_shape if bass_shape in SHAPES else DEFAULT_SHAPE,
         "lead_fit": lead_fit,
         "env_json": json.dumps(env, separators=(",", ":")) if env else "",
@@ -339,6 +339,7 @@ def warm_start(track_key: str, mode: str, genre: str, bpm: float, key: str, bars
         knobs = parse_knobs(format_knobs(best))
         knobs["bass_lpf"] = knobs["lead_hpf"] = knobs["sub_up"] = 0   # note-bound / hypothesis knobs: re-derived, not copied
         knobs["kick_boom"] = 0            # a measurement of THIS track's bass voice: re-measured on the first step
+        knobs["drum_lpf"] = 0             # how bright THIS track's drums stem is: re-derived from open
         return {"source": "neighbour", "knobs": format_knobs(knobs), "env": None, "promise": float(best["overall"]),
                 "bass_shape": DEFAULT_SHAPE, "shape_tested": False,   # a per-piece decision: re-measured, never copied
                 "detail": f"nearest {genre}/{mode} track '{near}' (distance {distance(me, _profile(by_track[near])):.3f}) "

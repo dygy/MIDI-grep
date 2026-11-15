@@ -19,6 +19,7 @@ median + 3 MAD of the stem's own half-to-half disagreement.
 
 from __future__ import annotations
 
+from pathlib import Path
 from typing import Optional
 
 import numpy as np
@@ -93,12 +94,19 @@ def hit_pitches(y: np.ndarray, sr: int, hits: list[dict], cls: str, shot_len_s: 
     return out
 
 
-def hit_ratios(y: np.ndarray, sr: int, hits: list[dict], cls: str, shot: np.ndarray) -> dict[float, float]:
+def hit_ratios(y: np.ndarray, sr: int, hits: list[dict], cls: str, shot: np.ndarray,
+               fill: bool = False) -> dict[float, float]:
     """{hit time -> playback-rate ratio (stem tail pitch / one-shot tail pitch)} for the readable hits of *cls*.
 
     Readable = a clear tonal peak (prominence >= 3x the band median and not an outlier below the stem's own median prominence)
     whose two half-window reads agree to within median + 3 robust-sigma of the stem's own disagreement (a quarter-tone at least). Empty when the one-shot
-    has no readable tail of its own (nothing to compare against)."""
+    has no readable tail of its own (nothing to compare against).
+
+    ``fill``: every other *cls* hit is written at the class's most common reading too. For a LIBRARY one-shot (synth mode's
+    drum machine) "as it is" is a pitch the stem never sounds - the reason a hit is left at ratio 1 holds only for a
+    one-shot cut from this stem. The unread hits are the same kick: Tatuagem No Pescoço synth, 122 of 236 hits read (all
+    at 35.2 Hz vs the RolandTR808 bd's 47.3 Hz); the other 114 left at the bd's own pitch scored 0.7794, every hit at the
+    common reading 0.7859 (the untuned kick 0.772)."""
     ref = oneshot_pitch(shot, sr)
     if ref is None:
         return {}
@@ -128,4 +136,70 @@ def hit_ratios(y: np.ndarray, sr: int, hits: list[dict], cls: str, shot: np.ndar
     med = float(np.median(v))
     noise = 3 * 1.4826 * float(np.median(np.abs(v - med)))
     centre = 0.0 if abs(med) <= noise else med
-    return {t: float(2 ** ((centre if abs(s - med) <= noise else s) / 12)) for t, s in st.items()}
+    out = {t: float(2 ** ((centre if abs(s - med) <= noise else s) / 12)) for t, s in st.items()}
+    if fill:
+        for h in hits:
+            if h["type"] == cls:
+                out.setdefault(h["time"], float(2 ** (centre / 12)))
+    return out
+
+
+# --- a drum machine's own one-shot, as the engine plays it (synth mode: the palette bank, not an extracted kit) ------
+# The synth palette's kick is a library sample (`s("bd").bank(B)`); its tail pitch is measured from what the selected
+# renderer actually outputs for one hit alone, recorded once per bank (``drum_pitch.py probe <bank>...``), so that the
+# stem's tuned kick can be written as a per-hit `.speed()` against it exactly as against an extracted one-shot.
+# Tatuagem No Pescoço synth (2026-11-15): the drums stem's 808 kick tail at 35.2 Hz on most hits (the bass stem holds
+# nothing there - Demucs filed the whole low end under drums), the RolandTR808 bd's at 47.3 Hz; 80 % of the mix's chroma
+# energy sits below 130 Hz.
+SHOTS_DIR = Path(__file__).resolve().parent / "data" / "drum_shots"
+
+
+def bank_shot_path(bank: str, cls: str = "bd") -> Path:
+    return SHOTS_DIR / f"{bank}_{cls}.wav"
+
+
+def bank_shot(bank: str, cls: str = "bd") -> Optional[tuple[np.ndarray, int]]:
+    """(mono samples, rate) of the recorded one-shot of ``cls`` on drum machine ``bank``, or None if never probed."""
+    p = bank_shot_path(bank, cls)
+    if not p.is_file():
+        return None
+    import soundfile as sf
+    x, sr = sf.read(str(p), always_2d=True)
+    return x.mean(1), sr
+
+
+def probe(bank: str, cls: str = "bd") -> Path:
+    """Render one ``cls`` hit of ``bank`` alone through the selected renderer and record it, trimmed to the samples
+    the engine output (no effects: past the sample's end the render is exact zeros)."""
+    import subprocess
+    import tempfile
+
+    import soundfile as sf
+    import renderer as RND
+
+    cycle_s = 8.0                                   # one hit per cycle; the render ends before the next one
+    with tempfile.TemporaryDirectory() as t:
+        code, wav = Path(t) / "shot.strudel", Path(t) / "shot.wav"
+        code.write_text(f'setcps({1.0 / cycle_s})\n$: s("{cls}").bank("{bank}").gain(1)\n')
+        subprocess.run(["node", str(RND.renderer_script()), str(code), "-o", str(wav), "-d", str(cycle_s - 1)],
+                       check=True, capture_output=True)
+        y, sr = sf.read(str(wav), always_2d=True)
+    y = y.mean(1)
+    nz = np.flatnonzero(y != 0.0)
+    if nz.size == 0:
+        raise RuntimeError(f"{bank} {cls}: the render is silent")
+    out = bank_shot_path(bank, cls)
+    out.parent.mkdir(parents=True, exist_ok=True)
+    sf.write(str(out), y[nz[0]:nz[-1] + 1].astype(np.float32), sr, subtype="FLOAT")
+    return out
+
+
+if __name__ == "__main__":
+    import sys
+    if len(sys.argv) >= 3 and sys.argv[1] == "probe":
+        for b in sys.argv[2:]:
+            p = probe(b)
+            x, sr = bank_shot(b)
+            print(f"{b}: {len(x) / sr:.3f} s, tail pitch {oneshot_pitch(x, sr)} Hz -> {p}")
+    else:
+        sys.exit("usage: drum_pitch.py probe <bank>...")

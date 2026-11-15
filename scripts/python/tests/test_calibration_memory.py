@@ -211,7 +211,7 @@ def test_new_track_is_seeded_from_the_nearest_same_genre_track(db, tmp_path):
     assert bms[0] == pytest.approx(0.61) and len(bms) == 3
     # note-bound knobs (bass low-pass, lead high-pass) and the octave hypothesis are not copied from another track
     w = db.warm_start("new", "synth", GENRE, 130.0, "C# minor", 81, orig_bands=BANDS, current_code="x")
-    assert w["source"] == "neighbour" and w["knobs"].split()[6:] == ["0", "0", "0", "0"]   # BL LH SU KB: re-derived / re-measured
+    assert w["source"] == "neighbour" and w["knobs"].split()[6:] == ["0", "0", "0", "0", "0"]   # BL LH SU KB DL: re-derived / re-measured
 
 
 def test_genre_without_history_is_cold(db):
@@ -322,7 +322,8 @@ def test_sub_up_column_upgrades_from_the_binary_octave_to_a_fraction(db, monkeyp
     full = CS.MIGRATIONS
     monkeypatch.setattr(CS, "MIGRATIONS", [m for m in full if m[0] < 7])
     old = row(db, tag="old", knobs="0.5 0.6 0.9 5000 0 0.78 400 450 1")
-    old.pop("kick_boom")                        # written before migration 8 too: no such column yet
+    old.pop("kick_boom")                        # written before migrations 8 / 9 too: no such columns yet
+    old.pop("drum_lpf")
     assert db.write_rows([old]) == 1
     monkeypatch.setattr(CS, "MIGRATIONS", full)
     monkeypatch.setattr(CS, "_clickhouse_initialized", False)

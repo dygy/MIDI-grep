@@ -266,7 +266,9 @@ stage 11 on every promoted piece, after all renders (the Ollama and diffusion mo
   an observed band/centroid ratio. The loop holds master-gain (loudness is the `mix_dynamics.py` stage); a step that moves f
   moves no other lever; a synth bass layer moves only when the mix low end asks, in the bass solo's direction. Synth adds a
   kick-boom voice (`kick_boom.py`: the drums stem's sustained 808 tone, pitch/level per bar, on the kick hits) whose scale KB
-  (10th knob) is the bass voice's measured render/stem level fraction. `scripts/auto-calibrate.sh` closes the generate → render
+  (10th knob) is the bass voice's measured render/stem level fraction; its drum machine kick is tuned per hit to the stem's
+  808 (`drum_pitch.py`, against the bank kick as the engine renders it) and DL (11th knob) low-passes the drum machine when
+  the mix `high` band is brighter than the original's. `scripts/auto-calibrate.sh` closes the generate → render
   (offline renderer) → compare → calibrate loop and keeps the best render. No hardcoded per-track values.
   The score is level-invariant (`compare_audio.rms_normalize`), so a final loudness stage
   (`scripts/python/mix_dynamics.py`, in `auto-calibrate.sh`) moves `--master-gain` onto the reference

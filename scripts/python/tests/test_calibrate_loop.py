@@ -182,11 +182,11 @@ print(f"--bass-mult {bm + 0.1:.4f} --sub-gain 0.8 --cal-lead 1.1 --lead-lpf 6000
 def test_a_fractional_octave_up_reaches_the_generator_and_the_calibrator_gets_the_parent(tmp_path):
     """The loop carries a fraction f (not a 0/1 octave): the proposed 0.4 is what the next generator is asked for, the
     generator's ceiling (absent from the stub summary = 1) is passed to the calibrator, and from the second step on the
-    calibrator is handed the parent's nine knobs (the split step is a measured secant only when f alone differed)."""
+    calibrator is handed the parent's knobs (the split step is a measured secant only when f alone differed)."""
     r, _ = drive(tmp_path, [(0.60 + 0.02 * i, 0.60 + 0.02 * i) for i in range(10)], "--iters", "4", cal=STUB_CAL_SPLIT)
     assert r.returncode == 0, r.stderr
     log = (tmp_path / "gen.log.cal").read_text().splitlines()
     assert [x.split("|")[0] for x in log] == ["1"] * 4
-    assert log[0].endswith("|-") and all(len(x.split("|")[1].split()) == 10 for x in log[1:])
+    assert log[0].endswith("|-") and all(len(x.split("|")[1].split()) == 11 for x in log[1:])   # 11 knobs (DL last)
     asked = [(tmp_path / "work" / f"cal{i}.strudel.args").read_text().split() for i in range(1, 5)]
     assert [a[a.index("--sub-up") + 1] for a in asked] == ["0", "0.4", "0.4", "0.4"]

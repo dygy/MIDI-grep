@@ -186,6 +186,10 @@ MIGRATIONS = [
     (8, "Calibration memory kick-boom scale column", [
         "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS kick_boom Float64 DEFAULT 0",
     ]),
+    # drum_lpf: the synth drum low-pass (calibrate_dynamic.py, generator --drum-lpf), 2026-11-15. Old rows read 0 = open.
+    (9, "Calibration memory drum low-pass column", [
+        "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS drum_lpf Float64 DEFAULT 0",
+    ]),
 ]
 
 
