@@ -631,28 +631,42 @@ def section_map(mix_path: Path, nbars: int, bpm: float):
 
 
 def measured_drum_pitch(args) -> dict | None:
-    """{class: {hit time: rate ratio}} for the kick, measured on the drums stem against the extracted one-shot the
-    pattern plays (the kit entry of the pack's instruments/samples.json, else drums/bd.wav); None when either is missing."""
+    """{class: {hit time: rate ratio}} for the kick, measured on the drums stem against the one-shot the pattern plays:
+    extracted kit = the kit entry of the pack's instruments/samples.json, else drums/bd.wav; bank = the palette drum
+    machine's bd as the engine renders it (``drum_pitch.bank_shot``, recorded by ``drum_pitch.py probe``). None when
+    the stem, the hits or the one-shot is missing."""
     import soundfile as sf
     stem = args.stems_dir / "drums.wav"
-    shot = None
-    sj = args.pack_dir / "instruments" / "samples.json"
-    if sj.exists():
-        ent = json.loads(sj.read_text()).get("bd")
-        if ent:
-            shot = args.pack_dir / "instruments" / (ent[0] if isinstance(ent, list) else ent)
-    if shot is None or not shot.exists():
-        shot = args.pack_dir / "drums" / "bd.wav"
-    if not stem.exists() or not shot.exists() or not args.drums_json.exists():
+    if not stem.exists() or not args.drums_json.exists():
         return None
+    if args.drum_mode == "extracted":
+        shot = None
+        sj = args.pack_dir / "instruments" / "samples.json"
+        if sj.exists():
+            ent = json.loads(sj.read_text()).get("bd")
+            if ent:
+                shot = args.pack_dir / "instruments" / (ent[0] if isinstance(ent, list) else ent)
+        if shot is None or not shot.exists():
+            shot = args.pack_dir / "drums" / "bd.wav"
+        if not shot.exists():
+            return None
+        x, sr2 = sf.read(str(shot), always_2d=True)
+        x = x.mean(1)
+    else:
+        bank = pick_palette_sound(args.genre, "drums")
+        rec = DP.bank_shot(bank)
+        if rec is None:
+            print(f"WARNING drum pitch: no recorded {bank} kick ({DP.bank_shot_path(bank)}); run: drum_pitch.py probe "
+                  f"{bank} - the kick plays untuned", file=sys.stderr)
+            return None
+        x, sr2 = rec
     y, sr = sf.read(str(stem), always_2d=True)
-    x, sr2 = sf.read(str(shot), always_2d=True)
-    y, x = y.mean(1), x.mean(1)
+    y = y.mean(1)
     if sr2 != sr:
         import scipy.signal as sps
         x = sps.resample_poly(x, sr, sr2)
     hits = json.loads(args.drums_json.read_text()).get("hits", [])
-    ratios = DP.hit_ratios(y, sr, hits, "bd", x)
+    ratios = DP.hit_ratios(y, sr, hits, "bd", x, fill=args.drum_mode == "bank")   # a library kick: see hit_ratios
     return {"bd": ratios} if ratios else None
 
 
@@ -702,7 +716,8 @@ def main() -> int:
                          "drum stem (not a generator — identical audio but un-editable)")
     ap.add_argument("--drum-pitch", choices=["off", "auto"], default="auto",
                     help="auto: a tuned kick (808) is written with the pitch each stem hit sounds, as a per-hit .speed() "
-                         "pattern relative to the extracted one-shot (drum_pitch.py); hits whose pitch cannot be read play it as is")
+                         "pattern relative to the one-shot the pattern plays - the extracted kit's, or the bank's as the engine renders it "
+                         "(drum_pitch.py; drum_pitch.py probe <bank>); hits whose pitch cannot be read play it as is")
     ap.add_argument("--drum-velocity", choices=["off", "bar", "global"], default="bar",
                     help="per-hit drum velocity measured from the drums stem (detect_drums_bands 'strength'): "
                          "bar=hit strength / its class median in the same bar, global=/ the piece median, off=none")
@@ -1338,6 +1353,7 @@ def main() -> int:
         channels.append(("CHORDS", "harmony under the lead — edit chords in `chords`", chord_code))
 
     boom_info = None
+    drum_pitch_info = None
     if drum_realstem:
         # The real drum stem, played gaplessly via Strudel slice playback → rendered drums are
         # the ORIGINAL drums (identical sound & spectrogram). Carries its own dynamics (no env).
@@ -1346,7 +1362,9 @@ def main() -> int:
         channels.append(("DRUMS", "REAL drum stem (your track's drums, 100% — via Strudel samples)", drum_code))
         detected = True  # for the summary flag
     else:
-        pitch = measured_drum_pitch(args) if args.drums_json and args.drum_mode == "extracted" and args.drum_pitch == "auto" else None
+        pitch = measured_drum_pitch(args) if args.drums_json and args.drum_mode in ("extracted", "bank") and args.drum_pitch == "auto" else None
+        drum_pitch_info = ({"written": len(pitch["bd"]), "retuned": sum(1 for r in pitch["bd"].values() if abs(r - 1.0) > 1e-9)}
+                           if pitch else None)
         detected = H.build_detected_drums(args.drums_json, args.bpm, nbars, velocity=None if args.drum_velocity == "off" else args.drum_velocity, pitch=pitch) if args.drums_json else None
         if detected:
             drum_lpf = f'.lpf({args.drum_lpf})' if args.drum_lpf else ''
@@ -1491,6 +1509,7 @@ def main() -> int:
                       # reported it) and the most the calibrator may ask for (0 = the up sine was refused)
                       "sub_up": int(sub_up) if sub_up in (0.0, 1.0) else round(sub_up, 4), "sub_up_max": sub_up_max,
                       "kick_boom": boom_info,
+                      "drum_pitch": drum_pitch_info,
                       "harmony": harmony_info, "lead_dynamics": dyn_info, "chord_bars": len(chord_bars or []),
                       "lead_octave": lead_oct, "lead_octave_decision": lead_dec,
                       "lead_partial_log2": lead_partial,
