@@ -77,3 +77,6 @@ docs/screenshots/
 # Automatic genre labels: runtime data stage 1b writes (eval/datasets/genre_labels_auto.yaml); the owner's registry is
 # genre_labels.yaml
 eval/datasets/genre_labels_auto.yaml
+
+# recorded engine one-shots of the palette drum machines (drum_pitch.py probe) - test and generator data, committed
+!scripts/python/data/drum_shots/*.wav
