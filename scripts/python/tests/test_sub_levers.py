@@ -255,7 +255,7 @@ def test_calibration_memory_reads_old_rows_as_fractions():
     knobs = CM.parse_knobs("0.4 0.7 1.0 5000 0.1 0.6 0 0 1")
     assert knobs["sub_up"] == 1.0
     assert CM.format_knobs({**knobs, "sub_up": 0.357}).split()[8] == "0.357"
-    assert CM.format_knobs(knobs).split()[8:] == ["1", "0"]       # SU 1, KB 0 (a 9-field row: no boom)
+    assert CM.format_knobs(knobs).split()[8:] == ["1", "0", "0"]  # SU 1, KB 0, DL 0 (a 9-field row: no boom, drums open)
     assert CM._driving_bands("sub_gain", 1) == ("bass",) and CM._driving_bands("sub_gain", 0.2) == ("sub_bass",)
     assert CM._driving_bands("sub_gain", 0.7) == ("bass",)      # mostly up: the sine feeds the bass band
 

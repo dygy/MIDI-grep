@@ -154,6 +154,10 @@ LOW_MID_TOP_HZ = FREQ_BANDS["low_mid"][1]     # lead high-pass ceiling: above it
 # 4.5, the sample-instrument fixtures 0.6-0.9, so 2.0 separates "missing source" from "level wobble".
 SHARE_DEAD_BAND = 1.33
 HAT_HI_DEAD_BAND = 2.0
+# The drum low-pass (synth): 0 = open. A cutoff at the top of the scored range changes nothing the score sees (open); the
+# floor is the bottom of high_mid, so the lever owns the two high bands and never reaches a kick, snare body or bass.
+DRUM_LPF_OPEN_HZ = FREQ_BANDS["high"][1]
+DRUM_LPF_FLOOR_HZ = FREQ_BANDS["high_mid"][0]
 
 
 ENV_VOICES = {          # voice -> band keys whose orig/rend share ratio drives it
@@ -252,6 +256,8 @@ def main() -> int:
     ap.add_argument("--cal-lead", type=float, default=1.0)
     ap.add_argument("--kick-boom-scale", type=float, default=0.0,
                     help="kick-boom level scale of the last render (generator --kick-boom-scale; 0 = no boom played)")
+    ap.add_argument("--drum-lpf", type=float, default=0.0,
+                    help="drum low-pass of the last render in Hz (generator --drum-lpf; 0 = open)")
     ap.add_argument("--lead-lpf", type=int, default=5000)
     ap.add_argument("--hat-gain", type=float, default=0.0)
     ap.add_argument("--master-gain", type=float, default=0.6)
@@ -320,6 +326,7 @@ def main() -> int:
         "bass_lpf": float(args.bass_lpf),
         "lead_hpf": float(args.lead_hpf),
         "kick_boom": max(0.0, float(args.kick_boom_scale)),
+        "drum_lpf": max(0.0, float(args.drum_lpf)),
     }
     if args.state and args.state.exists():
         prev = json.loads(args.state.read_text())
@@ -606,14 +613,32 @@ def main() -> int:
     # The hh layer adds only `high`: a render whose `high` share already sits above SHARE_DEAD_BAND x the original's cannot
     # be missing hats, whatever the lead-lpf did this step (Sem Aliança synth cal3: high 1.5 % vs 0.6 %, the >= 7000 path
     # raised the hats as lead-lpf crossed 7000 and the step cost 0.770 -> 0.714 alone). The drums path had this rule already.
+    # (and never under a closed drum low-pass, which filters the hat layer too: that lever opens first, below)
     elif (r_cent > 1.15 and (nxt["lead_lpf"] >= LEAD_LPF_WIDE or hat_via_drums) and not hat_overshoot
-          and r_high >= 1 / SHARE_DEAD_BAND):
+          and r_high >= 1 / SHARE_DEAD_BAND and cur["drum_lpf"] <= 0):
         bump = clamp((r_cent - 1.0) * 0.35, 0.04, 0.18)   # darker mix -> bigger hat bump
         nxt["hat_gain"] = round(clamp(cur["hat_gain"] + bump, 0.0, 0.7), 3)
     elif r_cent < 0.9:                                     # overshot bright -> back hats off
         nxt["hat_gain"] = round(clamp(cur["hat_gain"] - 0.06, 0.0, 0.7), 3)
     else:
         nxt["hat_gain"] = round(cur["hat_gain"], 3)
+    # --- drums: the third brightness source (synth) ------------------------------------------------------------------
+    # The synth drums are a library drum machine: its hats / snares / claps are brighter than a dark funk drums stem and no
+    # other lever owns them (the hat layer only adds, the lead low-pass filters the lead). Tatuagem No Pescoço synth
+    # (2026-11-15): render `high` 1.6 % vs 0.26 %, 89 % of it from the drums, lead-lpf already at its 3500 floor; one drum
+    # low-pass at 3 kHz by hand: brightness 0.74 -> 0.98, overall 0.770 -> 0.792 (6 kHz: 0.777). A render whose `high`
+    # share is above SHARE_DEAD_BAND x the original's, with no hat layer to back off first and the lead low-pass standing
+    # still this step (one brightness lever per step), closes the drum low-pass by a damped (sqrt) step of that ratio, at
+    # most an octave per step; a render darker than the dead band opens it again (at the top of the range = open, 0).
+    nxt["drum_lpf"] = cur["drum_lpf"]
+    if args.mode == "synth":
+        fc = cur["drum_lpf"] or DRUM_LPF_OPEN_HZ
+        if (r_high < 1 / SHARE_DEAD_BAND and cur["hat_gain"] <= 0 and nxt["hat_gain"] <= 0
+                and int(nxt["lead_lpf"]) == int(cur["lead_lpf"])):
+            fc = clamp(fc * clamp(math.sqrt(r_high), 0.5, 1.0), DRUM_LPF_FLOOR_HZ, DRUM_LPF_OPEN_HZ)
+        elif r_high > SHARE_DEAD_BAND and cur["drum_lpf"] > 0:
+            fc = fc * clamp(math.sqrt(r_high), 1.0, 2.0)
+        nxt["drum_lpf"] = 0 if fc >= DRUM_LPF_OPEN_HZ else int(round(fc))
 
     # --- master gain: held. The level is the loudness stage's lever (mix_dynamics.py, after BEST: RMS, crest and clipping
     # measured against the instrumental); the score is level-invariant, so the loop cannot see it. The former nudge was
@@ -633,7 +658,7 @@ def main() -> int:
     # step (the split's render must differ in f alone, the next step's secant reads it)
     nxt["kick_boom"] = boom_scale if (boom_scale is not None and not splitting) else cur["kick_boom"]
     if splitting:
-        for k in ("cal_lead", "hat_gain"):
+        for k in ("cal_lead", "hat_gain", "drum_lpf"):
             nxt[k] = cur[k]
         nxt["lead_lpf"] = int(round(cur["lead_lpf"]))
         nxt["bass_lpf"], nxt["lead_hpf"] = cur_blpf, cur_lhpf
@@ -656,7 +681,7 @@ def main() -> int:
     print(f"   low_mid/bass share ratio {r_lm_bass:.2f}, low_mid/mid {r_lm_mid:.2f} "
           f"(orig/rend; nan = lever off)", file=sys.stderr)
     for k in ["sub_gain", "sub_up", "bass_mult", "cal_lead", "lead_lpf", "hat_gain", "master_gain",
-              "bass_lpf", "lead_hpf", "kick_boom"]:
+              "bass_lpf", "lead_hpf", "kick_boom", "drum_lpf"]:
         a, b = cur[k], nxt[k]
         arrow = "->" if a != b else "=="
         print(f"   {k:12s} {a} {arrow} {b}", file=sys.stderr)
@@ -666,6 +691,8 @@ def main() -> int:
            f"--hat-gain {nxt['hat_gain']} --master-gain {nxt['master_gain']}")
     if nxt["kick_boom"] != cur["kick_boom"] or nxt["kick_boom"] > 0:      # 0 and unmeasured: nothing to say (sample mode)
         cli += f" --kick-boom-scale {nxt['kick_boom']:g}"
+    if nxt["drum_lpf"] != cur["drum_lpf"] or nxt["drum_lpf"] > 0:        # 0 and untouched: nothing to say
+        cli += f" --drum-lpf {nxt['drum_lpf']:g}"
     if cur_blpf > 0 and nxt["bass_lpf"] != cur_blpf:
         cli += f" --bass-lpf {nxt['bass_lpf']}"
     if cur_lhpf > 0 and nxt["lead_hpf"] != cur_lhpf:

@@ -172,12 +172,22 @@ def choose_lead_fit(palette: Row, trial: Row, n: float) -> Row:
 
 def blend_knobs(parent: list[str], prop: list[str], eff: list[float], alpha: float) -> list[str]:
     out = []
-    n = max(len(parent), len(prop))             # a 9-knob row (before KB) reads KB = 0
+    n = max(len(parent), len(prop))             # a shorter row (before KB / DL) reads them as 0
     parent, prop = list(parent) + ["0"] * (n - len(parent)), list(prop) + ["0"] * (n - len(prop))
     for i, (p, q) in enumerate(zip(parent, prop)):
         pf, qf = float(p), float(q)
         if i in (8, 9):                         # SU (octave-up fraction 0..1) / KB (kick-boom scale): magnitudes, blended like the others
             out.append(f"{pf + alpha * (qf - pf):.4g}")   # (0 and 1 print as before; no eff[] fallback: 0 is a real value)
+            continue
+        if i == 10:                             # DL (drum low-pass Hz, 0 = open): a cutoff, blended in octaves; open = the top
+            if pf == qf:                        # of the scored range (calibrate_dynamic.DRUM_LPF_OPEN_HZ), and back to 0 there
+                out.append(p)
+                continue
+            from compare_audio import FREQ_BANDS   # lazy: only a blended DL step needs it
+            top = float(FREQ_BANDS["high"][1])
+            a, b = (pf if pf > 0 else top), (qf if qf > 0 else top)
+            v = math.exp(math.log(a) + alpha * (math.log(b) - math.log(a)))
+            out.append("0" if v >= top else str(int(round(v))))
             continue
         if i >= 6 and qf == pf:                 # BL / LH override untouched by the calibrator: keep (0 = default)
             out.append(p)

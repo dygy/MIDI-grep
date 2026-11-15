@@ -141,7 +141,7 @@ def test_auto_calibrate_syntax_and_10_field_contract():
     src = AUTO.read_text()
     assert 'read -r BM SG CL LLPF HG MG BL LH' in src                       # 6, 7 or 8 fields, BL/LH default 0
     assert '--bass-lpf "$BL"' in src and '--bass-lpf) BL="$2"' in src and '--lead-hpf) LH="$2"' in src
-    assert '"$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU $KB"' in src and "iters.tsv" in src  # 10 fields per iteration (KB last)
+    assert '"$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU $KB $DL"' in src and "iters.tsv" in src  # 11 fields per iteration (DL last)
     assert '--cal-vocal "$CV"' not in src and '--vocal-mode "$VOCAL_MODE"' not in src      # the vocal knob is gone
 
 
@@ -236,8 +236,9 @@ def test_driver_runs_under_set_u_with_stubs(tmp_path, extra):
     assert r.returncode == 0, r.stderr
     best = [ln for ln in r.stdout.splitlines() if ln.startswith("BEST:")][0]
     params = best.split("params:")[1].split()
-    assert len(params) == 11 and params[-1] in ("stem", "off"), best   # 10 knobs + the bass shape the best render used
-    assert params[-5:-1] == ["0", "0", "0", "0"]   # BL, LH (the overrides that went INTO the best render), SU, KB (no boom)
+    assert len(params) == 12 and params[-1] in ("stem", "off"), best   # 11 knobs + the bass shape the best render used
+    assert params[-6:-1] == ["0", "0", "0", "0", "0"]   # BL, LH (the overrides that went INTO the best render), SU, KB (no
+    # boom), DL (drums open)
 
 
 def test_driver_failure_exit_code_and_best_line(tmp_path):
