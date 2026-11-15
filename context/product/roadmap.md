@@ -562,6 +562,10 @@ measured runs: `eval/thresholds.yaml` `modes:` and `eval/datasets/reference_trac
 - [x] **(PR #47) Synth frequency balance:** sub/bass split as a continuous octave-up fraction, the split step isolated, master
   gain held by the loop, the synth bass layer follows the mix low end (Sem Aliança 0.732 -> 0.757, Creagina 0.793 -> 0.804 PASS,
   Tatuagem 0.750 -> 0.762, references held); renderer: system sleep is not a stall, the hang watchdog reads a page progress counter
+- [x] **(PR #49) Sem Aliança synth to the floor:** kick-boom voice (the drums stem's sustained 808 fundamental as a sine on the
+  kicks, scaled by the bass voice's measured level, 10th knob KB), a failing warm start that still improves gets the full
+  budget, hats never raised over an already-bright high band (Sem 0.757 / 0.714 FAIL -> 0.811 / 0.776 PASS, VAGABUNDO
+  0.846 -> 0.851, Regime 0.908 held)
 
 ### Open
 
