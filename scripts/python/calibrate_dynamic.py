@@ -46,6 +46,7 @@ from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parent))
 from compare_audio import FREQ_BANDS  # noqa: E402  (single source for the band edges)
+from melodic_shape import LEAD_CLIP_DEFAULT  # noqa: E402  (the generator's clip when --lead-clip is 0)
 
 
 def damp(ratio: float, *, strength: float = 0.5, lo: float = 0.7, hi: float = 1.4) -> float:
@@ -256,6 +257,8 @@ def main() -> int:
     ap.add_argument("--cal-lead", type=float, default=1.0)
     ap.add_argument("--kick-boom-scale", type=float, default=0.0,
                     help="kick-boom level scale of the last render (generator --kick-boom-scale; 0 = no boom played)")
+    ap.add_argument("--lead-clip", type=float, default=0.0,
+                    help="lead / chord note clip of the last render (generator --lead-clip; 0 = LEAD_CLIP_DEFAULT)")
     ap.add_argument("--drum-lpf", type=float, default=0.0,
                     help="drum low-pass of the last render in Hz (generator --drum-lpf; 0 = open)")
     ap.add_argument("--lead-lpf", type=int, default=5000)
@@ -327,6 +330,7 @@ def main() -> int:
         "lead_hpf": float(args.lead_hpf),
         "kick_boom": max(0.0, float(args.kick_boom_scale)),
         "drum_lpf": max(0.0, float(args.drum_lpf)),
+        "lead_clip": max(0.0, float(args.lead_clip)),
     }
     if args.state and args.state.exists():
         prev = json.loads(args.state.read_text())
@@ -393,16 +397,20 @@ def main() -> int:
     # against the melodic stem, not a share of a mix the bass, kick and hats also fill. One linear voice group, so the
     # full measured step (power ratio -> amplitude = sqrt) with the bass-solo bounds; brightness is the voices' own
     # centroid ratio (> 1 = too dark), which replaces the mix centroid for the lead low-pass only.
-    r_body_voice, r_cent_voice = None, None
+    r_body_voice, r_cent_voice, r_artic = None, None, None
     if args.melodic_solo is not None:
         try:
             msolo = json.loads(args.melodic_solo.read_text())
-            lo_o, lo_r = (sum(float(msolo[k][b]) for b in ("low_mid", "mid")) for k in ("level_orig", "level_render"))
-            if all(msolo["ratio"].get(b) for b in ("low_mid", "mid")) and lo_r > 0:
-                r_body_voice = lo_o / lo_r
-            c_o, c_r = msolo["centroid"]["orig"], msolo["centroid"]["render"]
-            if c_o and c_r:
-                r_cent_voice = float(c_o) / float(c_r)
+            art = msolo.get("articulation") or {}
+            if art.get("orig") and art.get("render"):
+                r_artic = float(art["orig"]) / float(art["render"])     # < 1 = the render's notes sound too long
+            if args.mode != "synth":       # synth reads only the articulation: its lead level / brightness follow the mix
+                lo_o, lo_r = (sum(float(msolo[k][b]) for b in ("low_mid", "mid")) for k in ("level_orig", "level_render"))
+                if all(msolo["ratio"].get(b) for b in ("low_mid", "mid")) and lo_r > 0:
+                    r_body_voice = lo_o / lo_r
+                c_o, c_r = msolo["centroid"]["orig"], msolo["centroid"]["render"]
+                if c_o and c_r:
+                    r_cent_voice = float(c_o) / float(c_r)
         except (OSError, ValueError, AttributeError, TypeError, KeyError) as e:
             print(f"WARNING: --melodic-solo {args.melodic_solo} unreadable ({e}); lead level/brightness follow the mix",
                   file=sys.stderr)
@@ -639,6 +647,16 @@ def main() -> int:
         elif r_high > SHARE_DEAD_BAND and cur["drum_lpf"] > 0:
             fc = fc * clamp(math.sqrt(r_high), 1.0, 2.0)
         nxt["drum_lpf"] = 0 if fc >= DRUM_LPF_OPEN_HZ else int(round(fc))
+    # --- lead articulation (synth): how much of each note the lead / chords sound ----------------------------------------
+    # melodic_solo.articulation: the energy-equivalent duration of the voices' body envelope per stem note window, stem
+    # over the voices rendered alone (< 1 = the render's notes ring too long). BibiBabydoll "Melhor Sobrar" (150 BPM):
+    # stem 0.16 vs 0.33 at the generator's clip 1.3; clip 0.5 by hand 0.787 -> 0.804, while on the references the same
+    # clip cost 0.007-0.026 (Regime: stem 0.31 vs render 0.31). Outside SHARE_DEAD_BAND the clip takes the measured
+    # ratio as its step (the note length is linear in the clip below the sound's own decay), at most 2x per step.
+    nxt["lead_clip"] = cur["lead_clip"]
+    if args.mode == "synth" and r_artic is not None and not (1 / SHARE_DEAD_BAND <= r_artic <= SHARE_DEAD_BAND):
+        eff = cur["lead_clip"] or LEAD_CLIP_DEFAULT
+        nxt["lead_clip"] = round(eff * clamp(r_artic, 0.5, 2.0), 3)
 
     # --- master gain: held. The level is the loudness stage's lever (mix_dynamics.py, after BEST: RMS, crest and clipping
     # measured against the instrumental); the score is level-invariant, so the loop cannot see it. The former nudge was
@@ -658,7 +676,7 @@ def main() -> int:
     # step (the split's render must differ in f alone, the next step's secant reads it)
     nxt["kick_boom"] = boom_scale if (boom_scale is not None and not splitting) else cur["kick_boom"]
     if splitting:
-        for k in ("cal_lead", "hat_gain", "drum_lpf"):
+        for k in ("cal_lead", "hat_gain", "drum_lpf", "lead_clip"):
             nxt[k] = cur[k]
         nxt["lead_lpf"] = int(round(cur["lead_lpf"]))
         nxt["bass_lpf"], nxt["lead_hpf"] = cur_blpf, cur_lhpf
@@ -681,7 +699,7 @@ def main() -> int:
     print(f"   low_mid/bass share ratio {r_lm_bass:.2f}, low_mid/mid {r_lm_mid:.2f} "
           f"(orig/rend; nan = lever off)", file=sys.stderr)
     for k in ["sub_gain", "sub_up", "bass_mult", "cal_lead", "lead_lpf", "hat_gain", "master_gain",
-              "bass_lpf", "lead_hpf", "kick_boom", "drum_lpf"]:
+              "bass_lpf", "lead_hpf", "kick_boom", "drum_lpf", "lead_clip"]:
         a, b = cur[k], nxt[k]
         arrow = "->" if a != b else "=="
         print(f"   {k:12s} {a} {arrow} {b}", file=sys.stderr)
@@ -693,6 +711,8 @@ def main() -> int:
         cli += f" --kick-boom-scale {nxt['kick_boom']:g}"
     if nxt["drum_lpf"] != cur["drum_lpf"] or nxt["drum_lpf"] > 0:        # 0 and untouched: nothing to say
         cli += f" --drum-lpf {nxt['drum_lpf']:g}"
+    if nxt["lead_clip"] != cur["lead_clip"] or nxt["lead_clip"] > 0:      # 0 = the generator default, untouched
+        cli += f" --lead-clip {nxt['lead_clip']:g}"
     if cur_blpf > 0 and nxt["bass_lpf"] != cur_blpf:
         cli += f" --bass-lpf {nxt['bass_lpf']}"
     if cur_lhpf > 0 and nxt["lead_hpf"] != cur_lhpf:

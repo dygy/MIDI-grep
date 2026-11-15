@@ -190,6 +190,11 @@ MIGRATIONS = [
     (9, "Calibration memory drum low-pass column", [
         "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS drum_lpf Float64 DEFAULT 0",
     ]),
+    # lead_clip: the lead / chord note clip (calibrate_dynamic.py, generator --lead-clip), 2026-11-15. Old rows read 0 =
+    # the generator default (melodic_shape.LEAD_CLIP_DEFAULT).
+    (10, "Calibration memory lead note clip column", [
+        "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS lead_clip Float64 DEFAULT 0",
+    ]),
 ]
 
 

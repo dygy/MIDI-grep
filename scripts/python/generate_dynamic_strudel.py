@@ -726,6 +726,9 @@ def main() -> int:
                          "stem's level over that note relative to what its grain plays (note_dynamics.py); off = every note at the voice gain")
     ap.add_argument("--drum-stem-gain", type=float, default=1.0,
                     help="gain for the realstem drum channel (balances the real drums in the mix)")
+    ap.add_argument("--lead-clip", type=float, default=0.0,
+                    help="fraction of its written length each lead / chord note plays (Strudel .clip); 0 = "
+                         "melodic_shape.LEAD_CLIP_DEFAULT. Set by the calibrator from the voices' measured articulation")
     ap.add_argument("--drum-lpf", type=int, default=0,
                     help="low-pass the drum bus toward the original drum stem brightness (0=off)")
     # per-voice gain calibration (multiplies the voice's base gain) — set from a render's
@@ -1329,15 +1332,15 @@ def main() -> int:
                         ("chordsLegato", "chordsLegatoVel")):
             if nm in dyn:
                 L += [js_array(arr, dyn[nm]), ""]
+    lead_clip = args.lead_clip if args.lead_clip > 0 else MS.LEAD_CLIP_DEFAULT
     if lead_bars:
         L += [js_array("lead", lead_bars), ""]
         if lead_legato:
             L += [js_array("leadLegato", lead_legato), ""]
-        # lpf tames high-mid top while keeping mid body; hpf clears low bleed.
-        # clip(1.3) sustains notes slightly past their step so the monophonic lead's envelope
-        # is smoother (closer to the original melodic's sustained contour, lifting shape corr).
+        # lpf tames high-mid top while keeping mid body; hpf clears low bleed. clip: the fraction of each written note
+        # that sounds - the calibrator's measured articulation (--lead-clip), else melodic_shape.LEAD_CLIP_DEFAULT.
         lead_code = (f'{lead_row}{lead_voice}'
-                     f'.hpf({args.lead_hpf}).clip(1.3).room({lead_fx["room"]})'
+                     f'.hpf({args.lead_hpf}).clip({lead_clip:g}).room({lead_fx["room"]})'
                      f'{gain_pattern(lead_env, lead_g * lead_synth_gain * M)}')
         channels.append(("LEAD", "melody/harmony — edit notes in `lead`", lead_code))
     if chord_bars:
@@ -1348,7 +1351,7 @@ def main() -> int:
         # transcribed harmony-vs-melody amplitude ratio (harmony_notes), then the calibrator's cal-chord lever.
         chord_g = round(lead_g * harmony_info["gain_ratio"] * args.cal_chord, 4)
         chord_code = (f'{chord_row}{lead_voice}'
-                      f'.hpf({args.lead_hpf}).clip(1.3).room({lead_fx["room"]})'
+                      f'.hpf({args.lead_hpf}).clip({lead_clip:g}).room({lead_fx["room"]})'
                       f'{gain_pattern(lead_env, chord_g * lead_synth_gain * M)}')
         channels.append(("CHORDS", "harmony under the lead — edit chords in `chords`", chord_code))
 
@@ -1510,6 +1513,7 @@ def main() -> int:
                       "sub_up": int(sub_up) if sub_up in (0.0, 1.0) else round(sub_up, 4), "sub_up_max": sub_up_max,
                       "kick_boom": boom_info,
                       "drum_pitch": drum_pitch_info,
+                      "lead_clip": lead_clip,
                       "harmony": harmony_info, "lead_dynamics": dyn_info, "chord_bars": len(chord_bars or []),
                       "lead_octave": lead_oct, "lead_octave_decision": lead_dec,
                       "lead_partial_log2": lead_partial,

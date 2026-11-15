@@ -10,7 +10,8 @@ the mix, but it can be rendered alone (seconds), exactly like the bass (``bass_s
 ``solo``     strudel -> strudel with only the LEAD and CHORDS channels (header and shared definitions kept)
 ``measure``  per project band, the power of the original melodic stem (scaled by the master gain every voice is played
              at) over the power of the voice group rendered alone: ratio > 1 = the voices are too quiet. Plus the
-             spectral centroid of both (level-independent brightness: > 1 = the render is too dark).
+             spectral centroid of both (level-independent brightness: > 1 = the render is too dark), and the
+             ARTICULATION of both (``articulation``): how much of each note window the voices sound.
              Per-band powers are kept in the JSON so the calibrator picks the bands that define the voice's body.
 """
 from __future__ import annotations
@@ -48,6 +49,40 @@ def centroid(y: np.ndarray, sr: int = SR) -> float:
     return float(np.mean(librosa.feature.spectral_centroid(y=y, sr=sr)))
 
 
+def articulation(yo: np.ndarray, ys: np.ndarray, sr: int = SR) -> dict:
+    """How long the notes sound, stem vs render: per note window (consecutive onsets OF THE STEM, so both signals are cut
+    at the same times and no written note is needed), the energy-equivalent duration of the band envelope over the
+    window, as a fraction of it: sum(((e - trough) / (peak - trough))^2) / frames. A note held at its peak until the next
+    one reads near 1, one that falls evenly across the window 1/3, a stab that dies at once near 0; no threshold. The band is the voices' body (from the bottom of low_mid up):
+    the melodic stem's bass bleed and pads below it would hold every window up.
+
+    BibiBabydoll "Melhor Sobrar" synth (2026-11-15, 150 BPM): stem 0.185, the lead at the generator's clip 1.3 0.33
+    (clip 0.5: 0.27, 0.2: 0.19); Regime CLT stem 0.313, render 0.307. Shorter notes on the first: 0.787 -> 0.804; on
+    the references the same clip 0.5 cost 0.007-0.026 - so it is measured per track, never a constant."""
+    import librosa
+    from compare_audio import FREQ_BANDS
+    hop, n_fft = 128, 512
+    n = min(len(yo), len(ys))
+    f = librosa.fft_frequencies(sr=sr, n_fft=n_fft)
+    band = f >= FREQ_BANDS["low_mid"][0]
+    eo, er = (np.sqrt((np.abs(librosa.stft(y[:n], n_fft=n_fft, hop_length=hop)) ** 2)[band].sum(0)) for y in (yo, ys))
+    on = librosa.onset.onset_detect(onset_envelope=librosa.onset.onset_strength(
+        S=librosa.amplitude_to_db(eo[None, :] + EPS), sr=sr, hop_length=hop), sr=sr, hop_length=hop)
+
+    def ed(e: np.ndarray) -> float | None:
+        v = []
+        for a, b in zip(on[:-1], on[1:]):
+            if b - a < 3:
+                continue
+            seg = e[a:b]
+            pk, tr = float(seg.max()), float(seg.min())
+            if pk > tr:
+                v.append(float(np.sum(((seg - tr) / (pk - tr)) ** 2)) / (b - a))
+        return float(np.median(v)) if v else None
+
+    return {"orig": ed(eo), "render": ed(er) if np.any(ys) else None, "windows": int(max(len(on) - 1, 0))}
+
+
 def measure(orig_melodic: Path, solo_render: Path, master_gain: float = 1.0, seconds: float | None = None) -> dict:
     """{"level_orig": {band: P(stem) * master_gain^2}, "level_render": {band: P(solo)}, "ratio": {band: orig/render},
     "centroid": {"orig": Hz, "render": Hz}}. A band the original stem barely occupies gives ratio None (no evidence)."""
@@ -61,6 +96,7 @@ def measure(orig_melodic: Path, solo_render: Path, master_gain: float = 1.0, sec
         out["level_orig"][band], out["level_render"][band] = lo, lr
         usable = po[band] > BAND_MIN_FRAC * total_o     # a band the stem itself barely occupies carries no evidence
         out["ratio"][band] = (lo / max(lr, EPS)) if usable else None
+    out["articulation"] = articulation(yo, ys)
     return out
 
 

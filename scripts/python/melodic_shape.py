@@ -33,6 +33,12 @@ import numpy as np
 
 from bass_shape import StemEvidence, otsu
 
+# The lead / chord lines play each written note for this fraction of its written length (Strudel ``.clip``) unless the
+# calibrator measured the voices' articulation (``--lead-clip``, calibrate_dynamic.py / melodic_solo.py). It is the
+# pre-2026-11-15 constant ("a little past the step, a smoother contour"), kept as the start so every earlier piece
+# renders byte for byte.
+LEAD_CLIP_DEFAULT = 1.3
+
 
 @dataclass
 class Event:
