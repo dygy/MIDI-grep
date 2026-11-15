@@ -18,8 +18,8 @@ Subcommands (stdout is machine-read by auto-calibrate.sh):
   max-iters | patience | cap <track|neighbour|seed|cold>   (cap: the budget a warm start earns, WARM_ITERS)
   select <iters.tsv>                      -> best tag
   next   <iters.tsv> --cap N              -> "STOP <reason>" | "CONTINUE <parent-tag> <alpha>"
-  blend  --parent "<9 knobs>" --prop "<9 knobs>" --eff "<bass_lpf lead_hpf>" --alpha A -> 9 knobs
-         (BM SG CL LLPF HG MG BL LH SU; SU = fraction 0..1 of the sub-sine layer an octave up, interpolated)
+  blend  --parent "<9|10 knobs>" --prop "<9|10 knobs>" --eff "<bass_lpf lead_hpf>" --alpha A -> the same count
+         (BM SG CL LLPF HG MG BL LH SU [KB]; SU = fraction 0..1 of the sub-sine layer an octave up, KB = kick-boom scale)
   blend-env --used <json|-> --new <json> --alpha A --out <json>
   leadfit <palette.tsv> <trial.tsv> -> "keep|palette <tag>": the synth lead-fit trial (fitted oscillator lead vs the
          palette lead of the BEST render); kept only if overall > palette + noise and section-aware >= palette - 0.005.
@@ -120,7 +120,16 @@ def effective_cap(rows: list[Row], cap: int, promise: float | None, n: float) ->
     +14.6 / -15.3 points off - the same split that is RED on 12 synth pieces)."""
     if promise is None or not rows or cap >= MAX_ITERS:
         return cap
-    return MAX_ITERS if rows[0].overall < promise - n else cap
+    if rows[0].overall < promise - n:
+        return MAX_ITERS
+    # The short budget also assumes the source was at its optimum. A step that beats cal1 beyond noise while the best still
+    # FAILS the gate shows it was not: the search is moving and only PATIENCE should end it (Sem Aliança synth 2026-11-14:
+    # cal2 +0.020 over cal1, cal3 overshot, the cap stopped the loop at 3 renders while the calibrator's next step - the
+    # secant of the two measured splits - was pending; the hand A/B at that split scored +0.008 over the kept best).
+    best = select(rows, n)
+    if best.passed is False and any(improves(r, rows[0], n) for r in rows[1:]):
+        return MAX_ITERS
+    return cap
 
 
 def next_step(rows: list[Row], cap: int, patience: int, n: float, promise: float | None = None) -> tuple:
@@ -163,9 +172,11 @@ def choose_lead_fit(palette: Row, trial: Row, n: float) -> Row:
 
 def blend_knobs(parent: list[str], prop: list[str], eff: list[float], alpha: float) -> list[str]:
     out = []
+    n = max(len(parent), len(prop))             # a 9-knob row (before KB) reads KB = 0
+    parent, prop = list(parent) + ["0"] * (n - len(parent)), list(prop) + ["0"] * (n - len(prop))
     for i, (p, q) in enumerate(zip(parent, prop)):
         pf, qf = float(p), float(q)
-        if i == 8:                              # SU, the sub-sine octave-up FRACTION f (0..1): a magnitude, blended like the others
+        if i in (8, 9):                         # SU (octave-up fraction 0..1) / KB (kick-boom scale): magnitudes, blended like the others
             out.append(f"{pf + alpha * (qf - pf):.4g}")   # (0 and 1 print as before; no eff[] fallback: 0 is a real value)
             continue
         if i >= 6 and qf == pf:                 # BL / LH override untouched by the calibrator: keep (0 = default)
@@ -224,6 +235,9 @@ def main() -> int:
         if eff != a.cap and len(rows) == 1:
             print(f"warm start missed its promise: cal1 {rows[0].overall:.4f} < {a.promise:.4f} - noise -> "
                   f"iteration cap {a.cap} -> {eff}", file=sys.stderr)
+        elif eff != a.cap and effective_cap(rows[:-1], a.cap, a.promise, noise()) == a.cap:
+            print(f"warm start improved beyond noise while the best still fails the gate -> iteration cap {a.cap} -> {eff}",
+                  file=sys.stderr)
         print(*next_step(rows, a.cap, pat, noise(), a.promise))
     elif a.cmd == "blend":
         print(*blend_knobs(a.parent.split(), a.prop.split(), [float(v) for v in a.eff.split()], a.alpha))

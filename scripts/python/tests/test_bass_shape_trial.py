@@ -154,7 +154,9 @@ def test_other_code_version_means_untested(db):
 
 @pytest.mark.parametrize("text,ok", [
     ("0.4 0.7 1 5000 0 0.6 0 0 0 stem", True), ("0.4 0.7 1 5000 0 0.6 300 450 1 off", True), ("0.4 0.7 1 5000 0 0.6 0 0 0", True),
-    ("0.4 0.7 1 5000 0 0.6 0 0 0 maybe", False), ("0.4 0.7 1 5000 0 0.6 0 0 stem", False), ("0.4 0.7 1 5000 0 0.6 0 0 1 1", False)])
+    ("0.4 0.7 1 5000 0 0.6 0 0 0 maybe", False), ("0.4 0.7 1 5000 0 0.6 0 0 stem", False),
+    ("0.4 0.7 1 5000 0 0.6 0 0 1 0.35", True), ("0.4 0.7 1 5000 0 0.6 0 0 1 0.35 stem", True),     # 10th = KB (kick boom)
+    ("0.4 0.7 1 5000 0 0.6 0 0 1 -0.1", False), ("0.4 0.7 1 5000 0 0.6 0 0 1 1 1", False)])
 def test_params_valid_takes_the_bass_shape_token(text, ok):
     assert PH.params_valid(text) is ok
 

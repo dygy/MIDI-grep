@@ -95,7 +95,9 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
 - **`scripts/python/calibrate_dynamic.py`** — data-driven mix calibrator: reads a render's
   `comparison.json` and emits the NEXT `generate_dynamic_strudel.py` knobs (sub-gain, bass-mult,
   cal-lead, lead-lpf, hat-gain, sub-up fraction f; master-gain is held - loudness is `mix_dynamics.py`). A step that
-  moves f (sub_bass:bass split) moves no other lever; in synth bass-mult follows the mix low end. Each knob is a damped proportional correction of a
+  moves f (sub_bass:bass split) moves no other lever; in synth bass-mult follows the mix low end; synth KB = kick-boom
+  scale (`kick_boom.py`: the drums stem's sustained 808 tone as a sine on the kicks, scaled by the bass voice's measured level).
+  Each knob is a damped proportional correction of a
   measured band/centroid ratio — no hardcoded per-track values. Brightness lever uses the spectral
   CENTROID (the 1%-magnitude high bands are too noisy in bass-heavy genres); when lead-lpf maxes
   out and the mix is still dark, it raises a TR808 hat layer (`--hat-gain`) — the hats carry the

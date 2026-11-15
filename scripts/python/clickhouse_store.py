@@ -182,6 +182,10 @@ MIGRATIONS = [
     (7, "Calibration memory sub-sine fraction column", [
         "ALTER TABLE midi_grep.calibration_steps MODIFY COLUMN sub_up Float64",
     ]),
+    # kick_boom: the synth kick-boom level scale (kick_boom.py, calibrate_dynamic.py), 2026-11-14. Old rows read 0 = no boom.
+    (8, "Calibration memory kick-boom scale column", [
+        "ALTER TABLE midi_grep.calibration_steps ADD COLUMN IF NOT EXISTS kick_boom Float64 DEFAULT 0",
+    ]),
 ]
 
 

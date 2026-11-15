@@ -1,0 +1,6 @@
+{
+ "rms": 0.129214,
+ "note": 33,
+ "renderer": "offline",
+ "code": "note(\"33\").s(\"sine\").gain(1)"
+}

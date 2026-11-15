@@ -180,6 +180,8 @@ class DetectedDrums(list):
     """The drum voice lines of `build_detected_drums`, with the ``.late()`` (cycles) that puts their slots back on the
     stem's times: the phase they were slotted with, not a second estimate."""
     late: float = 0.0
+    grid: dict | None = None     # {drum type -> set of ON steps}: the slots each line plays (the kick boom reads the kicks)
+    quantize: int = 16
 
 
 def drums_late(drums_json: Path, bpm: float, quantize: int = 16) -> float:
@@ -293,6 +295,7 @@ def build_detected_drums(drums_json: Path, bpm: float, nbars: int, quantize: int
     order = ["bd", "sd", "cp", "hh", "oh"]
     voices = DetectedDrums()
     voices.late = phase / bar_dur
+    voices.grid, voices.quantize = grid, quantize
     for t in [x for x in order if x in grid] + [x for x in grid if x not in order]:
         on = grid[t]
         bars = []

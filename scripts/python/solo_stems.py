@@ -17,7 +17,8 @@ import soundfile as sf
 from pydantic import BaseModel
 
 GROUPS: tuple[str, ...] = ("melodic", "drums", "bass")
-LABEL_GROUP: dict[str, str] = {"BASS": "bass", "DRUMS": "drums"}   # every other pitched label is melodic
+# every other pitched label is melodic; KICK_BOOM (kick_boom.py) is the drums stem's 808 tone, played as a sine
+LABEL_GROUP: dict[str, str] = {"BASS": "bass", "DRUMS": "drums", "KICK_BOOM": "drums"}
 _LABEL_RE = re.compile(r"^[A-Z][A-Z0-9_]*$")
 _CHANNEL_RE = re.compile(r"^\$:")
 

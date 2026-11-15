@@ -136,12 +136,12 @@ def test_sample_instrument_never_emits_bass_lpf_or_new_hat(name):
     assert "--bass-lpf" not in got                      # inside the dead band on stored comparisons
 
 
-def test_auto_calibrate_syntax_and_9_field_contract():
+def test_auto_calibrate_syntax_and_10_field_contract():
     subprocess.run(["bash", "-n", str(AUTO)], check=True)
     src = AUTO.read_text()
     assert 'read -r BM SG CL LLPF HG MG BL LH' in src                       # 6, 7 or 8 fields, BL/LH default 0
     assert '--bass-lpf "$BL"' in src and '--bass-lpf) BL="$2"' in src and '--lead-hpf) LH="$2"' in src
-    assert '"$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU"' in src and "iters.tsv" in src     # 9 fields recorded per iteration (SU last)
+    assert '"$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU $KB"' in src and "iters.tsv" in src  # 10 fields per iteration (KB last)
     assert '--cal-vocal "$CV"' not in src and '--vocal-mode "$VOCAL_MODE"' not in src      # the vocal knob is gone
 
 
@@ -236,8 +236,8 @@ def test_driver_runs_under_set_u_with_stubs(tmp_path, extra):
     assert r.returncode == 0, r.stderr
     best = [ln for ln in r.stdout.splitlines() if ln.startswith("BEST:")][0]
     params = best.split("params:")[1].split()
-    assert len(params) == 10 and params[-1] in ("stem", "off"), best   # 9 knobs + the bass shape the best render used
-    assert params[-4:-1] == ["0", "0", "0"]   # BL, LH (the overrides that went INTO the best render), SU (sub octave up)
+    assert len(params) == 11 and params[-1] in ("stem", "off"), best   # 10 knobs + the bass shape the best render used
+    assert params[-5:-1] == ["0", "0", "0", "0"]   # BL, LH (the overrides that went INTO the best render), SU, KB (no boom)
 
 
 def test_driver_failure_exit_code_and_best_line(tmp_path):
@@ -364,6 +364,24 @@ def test_hat_drums_path_shut_when_full_mix_high_already_above_original(tmp_path)
     # control: same file with the original `high` -> the drums path engages (test_hat_engages_... above)
     assert float(run_cal(FIX / "vagabundo_synth_v003.json", "--mode", "synth", "--lead-lpf", "5199",
                          "--hat-gain", "0.0")["--hat-gain"]) > 0.0
+
+
+def test_hats_never_raised_while_the_mix_high_band_is_already_above_the_original():
+    # Sem Aliança synth cal3 (2026-11-14): the centroid read dark (r_cent > 1.15) and lead-lpf crossed 7000 on the same
+    # step, so the >= 7000 path raised the hats 0 -> 0.054 although the full-mix `high` share was already 2.5x the
+    # original's (1.5 % vs 0.6 %). The hh layer adds only `high`; alone it cost 0.770 -> 0.714 (single-lever A/B).
+    knobs = ("--mode", "synth", "--lead-lpf", "6638", "--hat-gain", "0", "--cal-lead", "0.535", "--sub-gain", "0.838",
+             "--bass-mult", "1.3", "--master-gain", "2.299")
+    out = run_cal(FIX / "sem_alianca_synth_cal3.json", *knobs)
+    assert int(out["--lead-lpf"]) >= 7000                     # the lead lever still opens (the dark centroid stands)
+    assert float(out["--hat-gain"]) == 0.0
+    # control: the same file with the original's `high` share -> the >= 7000 path may raise the hats
+    d = json.loads((FIX / "sem_alianca_synth_cal3.json").read_text())
+    d["rendered"]["bands"]["high"] = d["original"]["bands"]["high"]
+    import tempfile
+    with tempfile.TemporaryDirectory() as t:
+        p = Path(t) / "c.json"; p.write_text(json.dumps(d))
+        assert float(run_cal(p, *knobs)["--hat-gain"]) > 0.0
 
 
 def _synth_floors() -> tuple[float, float]:

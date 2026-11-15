@@ -145,7 +145,7 @@ BSHAPE="stem"; SHAPE_PIN=0; SHAPE_TESTED=0; SHAPE_TRIAL="${AC_SHAPE_TRIAL:-1}"  
 MIXDYN=1; ENV_START=""; ITERS=""; START_GIVEN=0; SEED=""; WARM_SOURCE="cold" DUR="" BASS_SOUND="" LEAD_SOUND="" MODE="sample-instrument"
 WORK="${TMPDIR:-/tmp}/auto-calibrate.$$"
 # starting knobs (generator defaults are sane cold-start values)
-BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" BL="0" LH="0" SU="0"   # BL = bass low-pass override Hz, LH = lead high-pass Hz; 0 = generator/analysis default
+BM="0.40" SG="0.7" CL="1.0" LLPF="5000" HG="0.0" MG="0.6" BL="0" LH="0" SU="0" KB="0"   # KB = kick-boom scale (0 = no boom: no bass-voice measurement yet)   # BL = bass low-pass override Hz, LH = lead high-pass Hz; 0 = generator/analysis default
 
 while [ $# -gt 0 ]; do case "$1" in
   --stems) STEMS="$2"; shift 2;; --base) BASE="$2"; shift 2;; --inst) INST="$2"; shift 2;;
@@ -162,10 +162,12 @@ while [ $# -gt 0 ]; do case "$1" in
   --no-lead-fit) LEAD_FIT=0; shift;;
   --lead-fit-evals) LEAD_EVALS="$2"; shift 2;;
   --seed) SEED="$2"; shift 2;;     # fallback knobs ("BM SG CL LLPF HG MG [BL [LH]]"): used only when the memory has neither this track nor a neighbour
-  --start) START_GIVEN=1; BL=0; LH=0; SU=0; read -r BM SG CL LLPF HG MG BL LH SU SHP EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH [SU [stem|off]]]]" (6 to 10 fields; SU = fraction 0..1 of the sub-sine layer played an octave up (0/1 = the old binary octave); the 10th = bass shape)
+  --start) START_GIVEN=1; BL=0; LH=0; SU=0; KB=0; read -r BM SG CL LLPF HG MG BL LH SU SHP EXTRA <<<"$2"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"
+    # an optional 10th NUMBER is the kick-boom scale KB (2026-11-14), before the optional bass shape
+    if [ -n "${SHP:-}" ] && awk -v v="$SHP" 'BEGIN{exit !(v ~ /^[0-9]*\.?[0-9]+$/)}'; then KB="$SHP"; read -r SHP EXTRA <<<"${EXTRA:-}"; fi   # resume from a previous BEST: "BM SG CL LLPF HG MG [BL [LH [SU [KB] [stem|off]]]]" (6 to 11 fields; SU = fraction 0..1 of the sub-sine layer played an octave up (0/1 = the old binary octave); KB = kick-boom scale (a number); the last = bass shape)
     # The pre-"no vocals" format had a CV field after MG ("... MG CV [BL [LH]]"). A 9-field start is that old format;
     # 7/8 fields would silently shift CV into BL, but a real bass/lead cutoff is 0 or >= 20 Hz, a cal-vocal is ~1.
-    [ -z "${EXTRA:-}" ] || { echo "--start: more than 10 fields - the old CV (cal-vocal) field was removed; drop the 7th value" >&2; exit 64; }
+    [ -z "${EXTRA:-}" ] || { echo "--start: more than 11 fields - the old CV (cal-vocal) field was removed; drop the 7th value" >&2; exit 64; }
     if [ -n "${SHP:-}" ]; then case "$SHP" in stem|off) [ "$SHAPE_PIN" = 1 ] || BSHAPE="$SHP";; *) echo "--start: the 10th field is the bass shape stem|off (got $SHP)" >&2; exit 64;; esac; fi
     awk -v v="$SU" 'BEGIN{exit !(v ~ /^[0-9]*\.?[0-9]+$/ && v>=0 && v<=1)}' || { echo "--start: SU (9th field) must be a fraction in [0, 1] (got $SU) - old format with the removed CV field?" >&2; exit 64; }
     for _v in "$BL" "$LH"; do awk -v v="$_v" 'BEGIN{exit !(v==0 || v>=20)}' || { echo "--start: BL/LH must be 0 or >= 20 Hz (got $_v) - old format with the removed CV field? drop the 7th value" >&2; exit 64; }; done
@@ -234,7 +236,7 @@ if [ "$START_GIVEN" = 0 ] && [ "$MEM_ON" = 1 ]; then
   if [ -n "$WARM" ]; then
     IFS=$'\t' read -r WARM_SOURCE WARM_CAP WARM_KNOBS WARM_ENV WARM_DETAIL WARM_SHAPE WARM_SHAPE_TESTED WARM_PROMISE <<<"$WARM"
     if [ "$WARM_SOURCE" != cold ]; then
-      read -r BM SG CL LLPF HG MG BL LH SU <<<"$WARM_KNOBS"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"
+      read -r BM SG CL LLPF HG MG BL LH SU KB <<<"$WARM_KNOBS"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"; KB="${KB:-0}"
       [ -z "$ENV_START" ] && [ "$WARM_ENV" != "-" ] && ENV_START="$WARM_ENV"
       if [ "$SHAPE_PIN" = 0 ]; then   # the recorded shape decision of this track+mode (a neighbour's is never copied: stem, untested)
         case "${WARM_SHAPE:-stem}" in stem|off) BSHAPE="${WARM_SHAPE:-stem}";; esac; SHAPE_TESTED="${WARM_SHAPE_TESTED:-0}"
@@ -246,7 +248,7 @@ if [ "$START_GIVEN" = 0 ] && [ "$MEM_ON" = 1 ]; then
   fi
 fi
 if [ "$WARM_SOURCE" = cold ] && [ -n "$SEED" ]; then
-  WARM_SOURCE=seed; read -r BM SG CL LLPF HG MG BL LH SU <<<"$SEED"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"
+  WARM_SOURCE=seed; read -r BM SG CL LLPF HG MG BL LH SU KB <<<"$SEED"; BL="${BL:-0}"; LH="${LH:-0}"; SU="${SU:-0}"; KB="${KB:-0}"
   echo "warm start: seed - caller's fallback knobs: $SEED"
 fi
 [ "$START_GIVEN" = 1 ] && WARM_SOURCE=explicit
@@ -257,7 +259,7 @@ case "$WARM_SOURCE" in track|neighbour) [ -z "$ITERS_GIVEN" ] && [ -n "${WARM_PR
   && PROMISE_ARG=(--promise "$WARM_PROMISE");; esac
 # Budget from history: a warm start earns calibrate_loop.WARM_ITERS, anything else the full MAX_ITERS; --iters N always wins.
 if [ -z "$ITERS_GIVEN" ]; then ITERS="$("$PY" "$LOOP" cap "$([ "$WARM_SOURCE" = explicit ] && echo cold || echo "$WARM_SOURCE")")" || exit 2; fi
-echo "start: $WARM_SOURCE; knobs: $BM $SG $CL $LLPF $HG $MG $BL $LH $SU; bass shape: $BSHAPE (tested for this code version: $SHAPE_TESTED, pinned: $SHAPE_PIN); iteration cap: $ITERS"
+echo "start: $WARM_SOURCE; knobs: $BM $SG $CL $LLPF $HG $MG $BL $LH $SU $KB; bass shape: $BSHAPE (tested for this code version: $SHAPE_TESTED, pinned: $SHAPE_PIN); iteration cap: $ITERS"
 MEM_ARGS+=(--warm-source "$WARM_SOURCE")
 if [ "$MEM_ON" = 1 ]; then   # learned per-knob damping exponents (empty file / no history = the fixed sqrt damping)
   memcall responses --mode "$MODE" --out "$WORK/responses.json"
@@ -265,7 +267,7 @@ if [ "$MEM_ON" = 1 ]; then   # learned per-knob damping exponents (empty file / 
 fi
 
 # gen_piece OUT SUMMARY_JSON LOG [extra generator args]: one generation with the CURRENT knob variables
-# (BM SG CL LLPF HG MG BL LH SU) - the loop and the final mix-dynamics stage share it, so they cannot drift apart.
+# (BM SG CL LLPF HG MG BL LH SU KB) - the loop and the final mix-dynamics stage share it, so they cannot drift apart.
 gen_piece() {
   local out="$1" sum="$2" log="$3"; shift 3
   local inst_arg=() key_arg=() lh_arg=() snd_arg=()
@@ -280,7 +282,7 @@ gen_piece() {
     --mode "$MODE" --bpm "$BPM" ${key_arg[@]+"${key_arg[@]}"} --genre "$GENRE" --num-bars "$BARS" \
     --drum-mode "$DRUM_MODE" \
     --bass-mult "$BM" --sub-gain "$SG" --sub-up "$SU" --cal-lead "$CL" --lead-lpf "$LLPF" \
-    --hat-gain "$HG" --master-gain "$MG" --bass-lpf "$BL" --bass-shape "$BSHAPE" ${lh_arg[@]+"${lh_arg[@]}"} ${LEAD_ARG[@]+"${LEAD_ARG[@]}"} "$@" --out "$out" \
+    --hat-gain "$HG" --master-gain "$MG" --kick-boom-scale "$KB" --bass-lpf "$BL" --bass-shape "$BSHAPE" ${lh_arg[@]+"${lh_arg[@]}"} ${LEAD_ARG[@]+"${LEAD_ARG[@]}"} "$@" --out "$out" \
     >"$sum" 2>"$log"
 }
 
@@ -387,7 +389,7 @@ while [ "$i" -lt "$LOOP_BOUND" ]; do
     [ "$HAVE_MEL" = 1 ]  && solo_job mel  "$TAG"
   fi
   read -r OVER SECT < <("$PY" -c "import json,sys;d=json.load(open('$CJ'))['comparison'];print(round(d['overall_similarity'],4),round(d.get('section_aware_similarity',0),4))")
-  echo "[$TAG] mode=$MODE overall=$OVER section_aware=$SECT  (bm=$BM sg=$SG cl=$CL llpf=$LLPF hg=$HG mg=$MG su=$ESU bl=$BL eff_bl=$EBL lh=$LH eff_lh=$ELH)"
+  echo "[$TAG] mode=$MODE overall=$OVER section_aware=$SECT  (bm=$BM sg=$SG cl=$CL llpf=$LLPF hg=$HG mg=$MG su=$ESU kb=$KB bl=$BL eff_bl=$EBL lh=$LH eff_lh=$ELH)"
 
   # Bass / melodic voices alone vs the original stems (see bass_solo.py, melodic_solo.py): the job left its one-line message and
   # the measurement JSON; any failure only keeps the mix-share levers for this step.
@@ -408,7 +410,7 @@ while [ "$i" -lt "$LOOP_BOUND" ]; do
   fi
   echo "[$TAG] gate: $GATE_OUT"
   ENVUSED="-"; if [ -n "$PREV_ENV" ] && [ -s "$PREV_ENV" ]; then cp "$PREV_ENV" "$WORK/$TAG.envused.json"; ENVUSED="$WORK/$TAG.envused.json"; fi
-  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$TAG" "$OVER" "$MARG" "$GATE_OUT" "$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU" "$ENVUSED" "$SECT" "${PARENT:--}" "$ALPHA" "$BSHAPE" >>"$WORK/iters.tsv"
+  printf '%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\t%s\n' "$TAG" "$OVER" "$MARG" "$GATE_OUT" "$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU $KB" "$ENVUSED" "$SECT" "${PARENT:--}" "$ALPHA" "$BSHAPE" >>"$WORK/iters.tsv"
   echo "$EBL $ELH" >"$WORK/$TAG.eff"
   memcall record-step "${MEM_ARGS[@]}" --workdir "$WORK" --run-id "$RUN_ID" --tag "$TAG"
 
@@ -421,16 +423,16 @@ while [ "$i" -lt "$LOOP_BOUND" ]; do
     parent_knobs_arg=(--parent-knobs "$(awk -F'\t' -v t="$PARENT" '$1==t{print $5}' "$WORK/iters.tsv")"); fi
   CLI=$("$PY" "$CAL" --comparison "$CJ" ${parent_knobs_arg[@]+"${parent_knobs_arg[@]}"} ${BSOLO_ARG[@]+"${BSOLO_ARG[@]}"} ${MSOLO_ARG[@]+"${MSOLO_ARG[@]}"} ${parent_arg[@]+"${parent_arg[@]}"} ${RESP_ARG[@]+"${RESP_ARG[@]}"} --env-correction-out "$ENV_OUT" --bpm "$BPM" --bars "$BARS" ${envin_arg[@]+"${envin_arg[@]}"} \
     --bass-mult "$BM" --sub-gain "$SG" --sub-up "$ESU" --sub-up-max "$ESUMAX" --cal-lead "$CL" --lead-lpf "$LLPF" \
-    --hat-gain "$HG" --master-gain "$MG" \
+    --hat-gain "$HG" --master-gain "$MG" --kick-boom-scale "$KB" \
     --mode "$MODE" --bass-lpf "$EBL" --bass-lpf-max "$EBLMAX" --bass-note-max-hz "$EBHZ" \
     --lead-hpf "$ELH" --lead-note-min-hz "$ELHZ" 2>"$WORK/$TAG.cal.log")
   # parse "--bass-mult X --sub-gain Y ..." into the loop vars
   set -- $CLI
   while [ $# -gt 0 ]; do case "$1" in
     --bass-mult) BM="$2";; --sub-gain) SG="$2";; --cal-lead) CL="$2";;
-    --lead-lpf) LLPF="$2";; --hat-gain) HG="$2";; --master-gain) MG="$2";; --bass-lpf) BL="$2";; --lead-hpf) LH="$2";; --sub-up) SU="$2";;
+    --lead-lpf) LLPF="$2";; --hat-gain) HG="$2";; --master-gain) MG="$2";; --bass-lpf) BL="$2";; --lead-hpf) LH="$2";; --sub-up) SU="$2";; --kick-boom-scale) KB="$2";;
   esac; shift 2; done
-  echo "$BM $SG $CL $LLPF $HG $MG $BL $LH $SU" >"$WORK/$TAG.prop"
+  echo "$BM $SG $CL $LLPF $HG $MG $BL $LH $SU $KB" >"$WORK/$TAG.prop"
 
   # next step: continue from this iteration, or revert to the best and shorten the step; stop when nothing improves
   NEXT="$("$PY" "$LOOP" next "$WORK/iters.tsv" --cap "$ITERS" ${PROMISE_ARG[@]+"${PROMISE_ARG[@]}"})" || { echo "[$TAG] loop control FAILED"; RC=70; break; }
@@ -443,7 +445,7 @@ while [ "$i" -lt "$LOOP_BOUND" ]; do
   prow=$(awk -F'\t' -v t="$PARENT" '$1==t{print $5"\t"$6}' "$WORK/iters.tsv")
   pknobs="${prow%%$'\t'*}"; penv="${prow##*$'\t'}"
   read -r PEBL PELH <"$WORK/$PARENT.eff"
-  read -r BM SG CL LLPF HG MG BL LH SU < <("$PY" "$LOOP" blend --parent "$pknobs" --prop "$(cat "$WORK/$PARENT.prop")" --eff "$PEBL $PELH" --alpha "$ALPHA")
+  read -r BM SG CL LLPF HG MG BL LH SU KB < <("$PY" "$LOOP" blend --parent "$pknobs" --prop "$(cat "$WORK/$PARENT.prop")" --eff "$PEBL $PELH" --alpha "$ALPHA")
   PREV_ENV=""
   if [ -s "$WORK/$PARENT.env.json" ]; then
     "$PY" "$LOOP" blend-env --used "$penv" --new "$WORK/$PARENT.env.json" --alpha "$ALPHA" --out "$WORK/cal$((i+1)).envin.json" && PREV_ENV="$WORK/cal$((i+1)).envin.json"
@@ -472,7 +474,7 @@ if [ -n "$SEL" ]; then
   if [ "$MEM_ON" = 1 ] && [ "$SHAPE_PIN" = 0 ] && [ "$SHAPE_TRIAL" != 0 ] && [ "$SHAPE_TESTED" = 0 ] && [ "$RC" -eq 0 ]; then
     [ "$BSHAPE" = stem ] && ALT=off || ALT=stem; STAG="shape_$ALT"; KEPT_SHAPE="$BSHAPE"
     echo "[$STAG] bass-shape trial: BEST $best_tag knobs ($best_params) rendered once with --bass-shape $ALT (the loop ran $BSHAPE)"
-    read -r BM SG CL LLPF HG MG BL LH SU <<<"$best_params"
+    read -r BM SG CL LLPF HG MG BL LH SU KB <<<"$best_params"; KB="${KB:-0}"
     s_env=(); [ -s "$WORK/best.env.json" ] && s_env=(--env-correction "$WORK/best.env.json")
     SW="$WORK/$STAG.wav"; SC="$WORK/$STAG.cmp.json"; BSHAPE="$ALT"; srcok=1
     gen_piece "$WORK/$STAG.strudel" "$WORK/$STAG.gen.json" "$WORK/$STAG.gen.log" ${s_env[@]+"${s_env[@]}"} || { echo "[$STAG] GEN FAILED"; srcok=0; }
@@ -514,7 +516,7 @@ if [ -n "$SEL" ]; then
     [ "$LF_CAP" -le "$LEAD_EVALS" ] || LF_CAP="$LEAD_EVALS"
     echo "lead fit: start $LF_SRC${LF_DETAIL:+ ($LF_DETAIL)}; render budget $LF_CAP"
     if [ "$LF_CAP" -gt 0 ]; then
-      read -r BM SG CL LLPF HG MG BL LH SU <<<"$best_params"
+      read -r BM SG CL LLPF HG MG BL LH SU KB <<<"$best_params"; KB="${KB:-0}"
       lf_env=(); [ -s "$WORK/best.env.json" ] && lf_env=(--env-correction "$WORK/best.env.json")
       lf_warm=(); [ "$LF_WARM" != "-" ] && [ -n "$LF_WARM" ] && [ -s "$LF_WARM" ] && lf_warm=(--warm "$LF_WARM")
       LHIST="$WORK/leadfit.hist.json"; rm -f "$LHIST" "$WORK/leadfit.tsv"; lf_best=-1; lf_tag=""; lf_n=0; lf_ok=1
@@ -580,7 +582,7 @@ fi
 # unmixed BEST stays and the log says why.
 MIX_ROUNDS=3
 if [ "$MIXDYN" = 1 ] && [ -n "$best_tag" ] && [ -s "$WORK/best.wav" ]; then
-  read -r BM SG CL LLPF HG MG BL LH SU <<<"$best_params"     # the BEST piece's knobs, for gen_piece
+  read -r BM SG CL LLPF HG MG BL LH SU KB <<<"$best_params"; KB="${KB:-0}"     # the BEST piece's knobs, for gen_piece
   mix_env=(); [ -s "$WORK/best.env.json" ] && mix_env=(--env-correction "$WORK/best.env.json")
   round_args=(); mr=0; MIX_PREV_WAV="$WORK/best.wav"; MIX_MG="$MG"
   while [ "$mr" -lt "$MIX_ROUNDS" ]; do
@@ -618,7 +620,7 @@ fi
 # rounds (makeup closes the RMS error). Kept only if level, crest AND ceiling match (0 clipped samples) and the score did not
 # drop beyond the calibration noise vs the clip result; otherwise the clip result stays.
 if [ "$MIXDYN" = 1 ] && [ -n "$best_tag" ] && [ -s "$WORK/best.wav" ] && "$PY" "$RENDERER_PY" master-bus; then
-  read -r BM SG CL LLPF HG MG BL LH SU <<<"$best_params"
+  read -r BM SG CL LLPF HG MG BL LH SU KB <<<"$best_params"; KB="${KB:-0}"
   [ -s "$WORK/best.master" ] && MG="$(cat "$WORK/best.master")"      # the clip stage's final gain
   bus_env=(); [ -s "$WORK/best.env.json" ] && bus_env=(--env-correction "$WORK/best.env.json")
   CLIP_MG="$MG"; PROBE_MG="$("$PY" -c "print(round($CLIP_MG * 0.25, 4))")"      # 0.25 = 12.0412 dB below: peaks fit the 16-bit file

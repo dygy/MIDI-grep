@@ -973,8 +973,9 @@ def control_track_path(genre: str, exclude_key: str, repo_root: Path | None = No
     return None
 
 
-CALIBRATION_FIELDS = (6, 9)   # auto-calibrate.sh --start / BEST params: "BM SG CL LLPF HG MG [BL [LH [SU [stem|off]]]]" (SU = sub octave up 0/1;
-                              # the optional 10th token is the calibrator-chosen --bass-shape, only after all 9 numbers)
+CALIBRATION_FIELDS = (6, 10)  # auto-calibrate.sh --start / BEST params: "BM SG CL LLPF HG MG [BL [LH [SU [KB] [stem|off]]]]" (SU = sub octave
+                              # up fraction; KB = kick-boom scale >= 0, 2026-11-14); the optional last token is the calibrator-chosen
+                              # --bass-shape, only after the numbers
 BASS_SHAPES = ("stem", "off")
 
 
@@ -985,7 +986,7 @@ def params_valid(text: str) -> bool:
     --start`` rejects it (exit 64). Such a file is stale, not migratable: the best.wav / comparison next to it
     were rendered by the old recorder and scored on the old scale, so the whole stage is rerun."""
     fields = text.split()
-    if len(fields) == CALIBRATION_FIELDS[1] + 1 and fields[-1] in BASS_SHAPES:
+    if len(fields) >= CALIBRATION_FIELDS[1] and fields[-1] in BASS_SHAPES:
         fields = fields[:-1]
     if not CALIBRATION_FIELDS[0] <= len(fields) <= CALIBRATION_FIELDS[1]:
         return False
@@ -993,7 +994,9 @@ def params_valid(text: str) -> bool:
         vals = [float(f) for f in fields]
     except ValueError:
         return False
-    if len(vals) == 9:
+    if len(vals) == 10 and vals[9] < 0:          # KB: a level scale
+        return False
+    if len(vals) >= 9:
         # The 9th field is SU (the octave-up fraction 0..1; 0/1 in the binary-lever format) after BL/LH. The removed pre-branch layout also had 9 fields, with the cal-vocal
         # CV (~1) in 7th place where a cutoff must be 0 or >= 20 Hz - that is how the two are told apart.
         bl, lh, su = vals[6], vals[7], vals[8]
