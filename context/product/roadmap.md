@@ -566,6 +566,10 @@ measured runs: `eval/thresholds.yaml` `modes:` and `eval/datasets/reference_trac
   kicks, scaled by the bass voice's measured level, 10th knob KB), a failing warm start that still improves gets the full
   budget, hats never raised over an already-bright high band (Sem 0.757 / 0.714 FAIL -> 0.811 / 0.776 PASS, VAGABUNDO
   0.846 -> 0.851, Regime 0.908 held)
+- [x] **(PR #50) Tatuagem No Pescoço synth to the floor:** the synth drum machine's kick tuned per hit to the stem's 808
+  (`drum_pitch` against the bank kick the engine renders, unread hits at the common reading) and DL, an 11th knob: a drum
+  low-pass that closes while the mix `high` band is brighter than the original's (Tatuagem 0.769 / 0.786 FAIL -> 0.803 /
+  0.815 PASS; references within noise, DL never engages on them)
 
 ### Open
 
