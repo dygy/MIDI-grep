@@ -219,6 +219,21 @@ share ratio (at most an octave, floor = bottom of high_mid, open = top of the sc
 hats are never raised under a closed DL; held on a split step; a neighbour's DL is never copied. By hand at 3 kHz: 0.770
 -> 0.792. References' `high` sits inside the dead band (Regime too dark), so the lever stays shut there.
 
+**Tempo match, lead articulation, hat layer (2026-11-16, BibiBabydoll Melhor Sobrar synth):** (1) `compare_audio.tempo_match`
+also compares the RAW beat-tracker reads (x1/x2/x0.5): `correct_octave_error` mapped the original's 152 to 101.3 and the render's
+76 to 114, tempo 0.167 for a render at the right tempo (-> 1.0; 27 other pieces unchanged). (2) LC, the 12th knob
+(`--lead-clip`, 0 = `melodic_shape.LEAD_CLIP_DEFAULT`; ClickHouse `lead_clip`, migration 10): the melodic solo now runs in synth
+too, and only its articulation (`melodic_solo.articulation`: energy-equivalent note duration in the stem's onset windows)
+moves the lead `.clip()` (x clamp(r, 0.5, 2), outside `SHARE_DEAD_BAND`; references read 0.78-1.05 and hold). A global
+clip by hand (0.5) cost the references 0.007-0.026 - hence a measured per-track lever. (3) The hat layer
+`s("hh*8").gain(g)` sat inside the drum stack, whose `.gain()` replaces it (last wins): hat_gain 0.18/0.36/0.6 rendered
+identically. `hat_layer()` plays the stem's detected hh hits with the level in the velocity (sqrt(energy x 8 / hits per
+bar)); the calibrator raises it from at least 1 unit. Melhor at 150 BPM (the 112.5 stamp held 150-BPM quarters as 3
+sixteenths): trial 0.8036 / 0.762 FAIL -> 0.814 / 0.787 PASS. (4) A track's own memory rows at ANOTHER tempo are no warm
+start (`calibration_memory.same_tempo`: one tempogram bin at x1/x2/x0.5): the real track's 112.5 best seeded cal1 at 0.661 and
+ended 0.774 FAIL on the very stems the trial passed with. (5) `diagnose.tempo_check` accepts the raw beat read too (it
+flagged two false tempo REDs on that piece).
+
 **Loudness stage (2026-10-20, `scripts/python/mix_dynamics.py`, run by `auto-calibrate.sh` after BEST):** the score is
 level-invariant (`compare_audio.rms_normalize`), so renders sat 6-13 dB under the mastered instrumental with crest
 17-18 dB vs ~10 and nobody saw it. One measured lever moves it: `--master-gain` onto the instrumental's RMS (up to 3

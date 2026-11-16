@@ -98,7 +98,8 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   moves f (sub_bass:bass split) moves no other lever; in synth bass-mult follows the mix low end; synth KB = kick-boom
   scale (`kick_boom.py`: the drums stem's sustained 808 tone as a sine on the kicks, scaled by the bass voice's measured level);
   synth DL = drum low-pass (closes when the mix `high` is brighter than the original's); the synth kick is tuned per hit to
-  the stem's 808 (`drum_pitch.py`, against the bank kick the engine renders, `data/drum_shots/`).
+  the stem's 808 (`drum_pitch.py`, against the bank kick the engine renders, `data/drum_shots/`); synth LC = lead `.clip()`
+  from the melodic solo's articulation ratio (12th knob); the hat layer plays the stem's hat rhythm, level in the velocity.
   Each knob is a damped proportional correction of a
   measured band/centroid ratio — no hardcoded per-track values. Brightness lever uses the spectral
   CENTROID (the 1%-magnitude high bands are too noisy in bass-heavy genres); when lead-lpf maxes
