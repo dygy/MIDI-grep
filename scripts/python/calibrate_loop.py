@@ -179,6 +179,14 @@ def blend_knobs(parent: list[str], prop: list[str], eff: list[float], alpha: flo
         if i in (8, 9):                         # SU (octave-up fraction 0..1) / KB (kick-boom scale): magnitudes, blended like the others
             out.append(f"{pf + alpha * (qf - pf):.4g}")   # (0 and 1 print as before; no eff[] fallback: 0 is a real value)
             continue
+        if i == 11:                             # LC (lead note clip, 0 = melodic_shape.LEAD_CLIP_DEFAULT): blended as a ratio
+            if pf == qf:
+                out.append(p)
+                continue
+            from melodic_shape import LEAD_CLIP_DEFAULT
+            a, b = (pf or LEAD_CLIP_DEFAULT), (qf or LEAD_CLIP_DEFAULT)
+            out.append(f"{math.exp(math.log(a) + alpha * (math.log(b) - math.log(a))):.4g}")
+            continue
         if i == 10:                             # DL (drum low-pass Hz, 0 = open): a cutoff, blended in octaves; open = the top
             if pf == qf:                        # of the scored range (calibrate_dynamic.DRUM_LPF_OPEN_HZ), and back to 0 there
                 out.append(p)

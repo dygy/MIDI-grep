@@ -141,7 +141,7 @@ def test_auto_calibrate_syntax_and_10_field_contract():
     src = AUTO.read_text()
     assert 'read -r BM SG CL LLPF HG MG BL LH' in src                       # 6, 7 or 8 fields, BL/LH default 0
     assert '--bass-lpf "$BL"' in src and '--bass-lpf) BL="$2"' in src and '--lead-hpf) LH="$2"' in src
-    assert '"$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU $KB $DL"' in src and "iters.tsv" in src  # 11 fields per iteration (DL last)
+    assert '"$BM $SG $CL $LLPF $HG $MG $BL $LH $ESU $KB $DL $LC"' in src and "iters.tsv" in src  # 12 fields per iteration (LC last)
     assert '--cal-vocal "$CV"' not in src and '--vocal-mode "$VOCAL_MODE"' not in src      # the vocal knob is gone
 
 
@@ -236,9 +236,9 @@ def test_driver_runs_under_set_u_with_stubs(tmp_path, extra):
     assert r.returncode == 0, r.stderr
     best = [ln for ln in r.stdout.splitlines() if ln.startswith("BEST:")][0]
     params = best.split("params:")[1].split()
-    assert len(params) == 12 and params[-1] in ("stem", "off"), best   # 11 knobs + the bass shape the best render used
-    assert params[-6:-1] == ["0", "0", "0", "0", "0"]   # BL, LH (the overrides that went INTO the best render), SU, KB (no
-    # boom), DL (drums open)
+    assert len(params) == 13 and params[-1] in ("stem", "off"), best   # 12 knobs + the bass shape the best render used
+    assert params[-7:-1] == ["0", "0", "0", "0", "0", "0"]   # BL, LH (the overrides that went INTO the best render), SU, KB
+    # (no boom), DL (drums open), LC (generator clip)
 
 
 def test_driver_failure_exit_code_and_best_line(tmp_path):
@@ -313,9 +313,10 @@ def test_bass_mult_not_raised_while_cutoff_moves():
 
 
 def test_hats_via_drums_hold_lead_lpf_on_cal1():
-    # cal1 -> real cal2 moved BOTH hat 0 -> 0.135 and lead-lpf 5199 -> 5923; one brightness lever per step
+    # cal1 -> real cal2 moved BOTH hat 0 -> 0.135 and lead-lpf 5199 -> 5923; one brightness lever per step. Since
+    # 2026-11-15 the hat lever is energy in units of one steady hh*8 layer and engages at 1 unit (what 0.135 played)
     got = run_cal(CAL1, *CAL1_KNOBS, *SYNTH)
-    assert float(got["--hat-gain"]) == pytest.approx(0.135)
+    assert float(got["--hat-gain"]) == pytest.approx(1.0)
     assert int(got["--lead-lpf"]) == 5199
     # cal2 -> cal3: hats not engaged (centroid 1.11x), lead-lpf still opens as before
     assert int(run_cal(CAL2, *CAL2_KNOBS, *SYNTH)["--lead-lpf"]) == 6178

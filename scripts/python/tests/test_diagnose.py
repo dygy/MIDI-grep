@@ -75,6 +75,21 @@ def test_half_time_is_the_same_tempo(tmp_path, refs):
     assert t["stamp_matches_original"] and t["render_matches_stamp"]
 
 
+def test_the_raw_beat_read_counts_when_the_octave_correction_moved_it(tmp_path, refs):
+    # BibiBabydoll v013 (2026-11-16): stamped 150.01, both beat tracks read 152, compare_audio's octave correction
+    # turned both into 101.33 - tempo_similarity 1.0 (raw reads), yet stage 12 flagged two tempo REDs
+    comp = _comparison(101.33, 101.33)
+    comp["original"]["rhythm"]["tempo_raw"] = 152.0
+    comp["rendered"]["rhythm"]["tempo_raw"] = 152.0
+    v = _piece(tmp_path, "bibi150", comp, 150.012, 0.30)
+    d = D.diagnose(v, refs_path=refs)
+    assert d["tempo"]["stamp_matches_original"] and d["tempo"]["render_matches_stamp"]
+    assert not [f for f in d["flags"] if f.startswith("tempo:")]
+    # without the raw reads the same corrected values stay a contradiction
+    v2 = _piece(tmp_path, "bibi150_noraw", _comparison(101.33, 101.33), 150.012, 0.30)
+    assert not D.diagnose(v2, refs_path=refs)["tempo"]["stamp_matches_original"]
+
+
 def test_the_worst_section_names_the_component_that_drags_it(tmp_path, refs):
     v = _piece(tmp_path, "sec", _comparison(135.0, 135.0), 135.0, 0.30)
     s = D.diagnose(v, refs_path=refs)["worst_sections"][0]

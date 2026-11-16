@@ -158,7 +158,9 @@ def test_other_code_version_means_untested(db):
     ("0.4 0.7 1 5000 0 0.6 0 0 1 0.35", True), ("0.4 0.7 1 5000 0 0.6 0 0 1 0.35 stem", True),     # 10th = KB (kick boom)
     ("0.4 0.7 1 5000 0 0.6 0 0 1 -0.1", False),
     ("0.4 0.7 1 5000 0 0.6 0 0 1 1 3000", True), ("0.4 0.7 1 5000 0 0.6 0 0 1 1 0 off", True),       # 11th = DL (drum low-pass)
-    ("0.4 0.7 1 5000 0 0.6 0 0 1 1 1", False), ("0.4 0.7 1 5000 0 0.6 0 0 1 1 3000 5", False)])
+    ("0.4 0.7 1 5000 0 0.6 0 0 1 1 3000 0.5", True), ("0.4 0.7 1 5000 0 0.6 0 0 1 1 0 0 stem", True),  # 12th = LC (clip)
+    ("0.4 0.7 1 5000 0 0.6 0 0 1 1 1", False), ("0.4 0.7 1 5000 0 0.6 0 0 1 1 3000 -0.5", False),
+    ("0.4 0.7 1 5000 0 0.6 0 0 1 1 3000 0.5 5", False)])
 def test_params_valid_takes_the_bass_shape_token(text, ok):
     assert PH.params_valid(text) is ok
 

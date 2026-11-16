@@ -187,6 +187,6 @@ def test_a_fractional_octave_up_reaches_the_generator_and_the_calibrator_gets_th
     assert r.returncode == 0, r.stderr
     log = (tmp_path / "gen.log.cal").read_text().splitlines()
     assert [x.split("|")[0] for x in log] == ["1"] * 4
-    assert log[0].endswith("|-") and all(len(x.split("|")[1].split()) == 11 for x in log[1:])   # 11 knobs (DL last)
+    assert log[0].endswith("|-") and all(len(x.split("|")[1].split()) == 12 for x in log[1:])   # 12 knobs (LC last)
     asked = [(tmp_path / "work" / f"cal{i}.strudel.args").read_text().split() for i in range(1, 5)]
     assert [a[a.index("--sub-up") + 1] for a in asked] == ["0", "0.4", "0.4", "0.4"]

@@ -45,7 +45,7 @@ import clickhouse_store as CS  # noqa: E402
 
 TABLE = "midi_grep.calibration_steps"
 KNOBS = ("bass_mult", "sub_gain", "cal_lead", "lead_lpf", "hat_gain", "master_gain", "bass_lpf", "lead_hpf", "sub_up",
-         "kick_boom", "drum_lpf")
+         "kick_boom", "drum_lpf", "lead_clip")
 SHAPES = CL.SHAPES              # generate_dynamic_strudel.py --bass-shape; the first is the generator default (wins ties)
 DEFAULT_SHAPE = SHAPES[0]
 AUX_KINDS = ("shape", "leadfit")   # extra trial renders: they answer a question, they never seed a knob start
@@ -144,7 +144,7 @@ def _f(x, default: float = 0.0) -> float:
 
 
 def parse_knobs(text: str) -> dict[str, float]:
-    """'BM SG CL LLPF HG MG [BL [LH [SU [KB [DL]]]]]' -> knob dict (missing tail = 0)."""
+    """'BM SG CL LLPF HG MG [BL [LH [SU [KB [DL [LC]]]]]]' -> knob dict (missing tail = 0)."""
     v = text.split()
     if len(v) < 6:
         raise ValueError(f"need >= 6 knob fields, got {text!r}")
@@ -188,7 +188,7 @@ def make_row(*, kind: str, run_id: str, tag: str, track_key: str, mode: str, kno
         "code_version": ctx.get("code_version") or cv, "git_commit": commit, "run_id": run_id, "tag": tag,
         "parent_tag": parent if parent not in ("-", None) else "", "alpha": _f(alpha, 1.0),
         "warm_source": ctx.get("warm_source", ""),
-        **{k: _f(knobs.get(k)) for k in KNOBS},   # sub_up: fraction 0..1 (old rows 0/1); kick_boom, drum_lpf: old rows 0
+        **{k: _f(knobs.get(k)) for k in KNOBS},   # sub_up: fraction 0..1 (old rows 0/1); kick_boom, drum_lpf, lead_clip: old rows 0
         "bass_shape": bass_shape if bass_shape in SHAPES else DEFAULT_SHAPE,
         "lead_fit": lead_fit,
         "env_json": json.dumps(env, separators=(",", ":")) if env else "",
@@ -308,12 +308,25 @@ def _profile(rows: list[dict]) -> dict:
     return {"bpm": r["bpm"], "key": r["key"], "bands": json.loads(r["orig_bands"]) if r.get("orig_bands") else {}}
 
 
+def same_tempo(row_bpm, bpm) -> bool:
+    """True when a recorded row was calibrated at this tempo: within one tempogram bin at x1/x2/x0.5 (the tolerance
+    diagnose.tempo_check uses), or either side unknown. A track's own rows at ANOTHER tempo are no warm start: their
+    knobs fit another grid (BibiBabydoll synth adopted 150.012 BPM; its 112.516 best started cal1 at 0.661, the lead
+    low-pass never reached the hat path, 0.774 FAIL, while a fresh search at 150 passed with 0.814)."""
+    import tempo_refine as TR
+    a, b = float(row_bpm or 0.0), float(bpm or 0.0)
+    if a <= 0 or b <= 0:
+        return True
+    tol = TR.tempogram_bin_bpm(max(a, b), 22050)
+    return any(abs(a - b * r) <= tol for r in (1.0, 2.0, 0.5))
+
+
 def warm_start(track_key: str, mode: str, genre: str, bpm: float, key: str, bars: int, *, orig_bands: dict | None = None,
                stems: Path | None = None, current_code: str | None = None) -> dict:
     """{'source': track|neighbour|cold, 'knobs': 'BM ...'|'', 'env': dict|None, 'detail': str, 'promise': the overall
     the source's best scored (a warm start keeps its short budget only while cal1 reproduces it, calibrate_loop)}."""
     cur = current_code or code_version()[0]
-    own = history(track_key, mode)
+    own = [r for r in history(track_key, mode) if same_tempo(r.get("bpm"), bpm)]
     if own:
         # kind 'shape' rows (the extra render of the OTHER bass shape) never seed a start by themselves: a winning one
         # is also written as a 'best' row. They only say that the shape question was answered for this code version.
@@ -340,6 +353,7 @@ def warm_start(track_key: str, mode: str, genre: str, bpm: float, key: str, bars
         knobs["bass_lpf"] = knobs["lead_hpf"] = knobs["sub_up"] = 0   # note-bound / hypothesis knobs: re-derived, not copied
         knobs["kick_boom"] = 0            # a measurement of THIS track's bass voice: re-measured on the first step
         knobs["drum_lpf"] = 0             # how bright THIS track's drums stem is: re-derived from open
+        knobs["lead_clip"] = 0            # how THIS track's melodic stem articulates: re-measured from the default
         return {"source": "neighbour", "knobs": format_knobs(knobs), "env": None, "promise": float(best["overall"]),
                 "bass_shape": DEFAULT_SHAPE, "shape_tested": False,   # a per-piece decision: re-measured, never copied
                 "detail": f"nearest {genre}/{mode} track '{near}' (distance {distance(me, _profile(by_track[near])):.3f}) "

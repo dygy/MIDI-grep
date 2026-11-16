@@ -570,6 +570,12 @@ measured runs: `eval/thresholds.yaml` `modes:` and `eval/datasets/reference_trac
   (`drum_pitch` against the bank kick the engine renders, unread hits at the common reading) and DL, an 11th knob: a drum
   low-pass that closes while the mix `high` band is brighter than the original's (Tatuagem 0.769 / 0.786 FAIL -> 0.803 /
   0.815 PASS; references within noise, DL never engages on them)
+- [x] **BibiBabydoll Melhor Sobrar synth to the floor:** tempo similarity compares the raw beat reads too (the octave
+  correction turned 152 into 101.3; tempo 0.167 -> 1.0), LC - the 12th knob - sets the lead `.clip()` from the melodic solo's
+  articulation, the hat layer plays the stem's hat rhythm with its level in the velocity (the drum stack's `.gain()` had
+  replaced it), a track's memory rows at another tempo are no warm start, diagnosis reads the raw tempo. Adopted 150.012 BPM
+  (the 112.5 stamp held 150-BPM quarters as 3 sixteenths): synth 0.737 / 0.72 FAIL -> v014 0.812 / 0.784 PASS; Tatuagem
+  0.810 -> 0.819 with LC; references untouched (hats off, LC inside the dead band)
 
 ### Open
 

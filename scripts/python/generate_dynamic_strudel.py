@@ -630,6 +630,26 @@ def section_map(mix_path: Path, nbars: int, bpm: float):
     return spark, named
 
 
+
+def hat_layer(energy: float, grid: dict | None, quantize: int, nbars: int) -> str:
+    """The calibrator's hat layer (``--hat-gain``): ``energy`` in units of one steady ``hh*8`` layer at the drum
+    envelope, on the stem's own detected hh hits when there are any (else every 8th), at the per-hit velocity that
+    carries that energy (velocity multiplies the drum bus gain: energy ~ hits x velocity^2).
+
+    Before 2026-11-15 the layer was ``s("hh*8").gain(g)`` inside the drum stack, whose own per-bar ``.gain()`` REPLACES
+    an inner one (last wins): every g > 0 played the same steady 8ths at the envelope level - the lever was an on/off
+    switch. BibiBabydoll "Melhor Sobrar" (150 BPM): the stem's highs are claps on 2 and 4, the steady 8ths filled every
+    step (high-band envelope correlation -0.44); its detected hh hits at 4x the old energy: 0.804 / 0.764 -> 0.814 /
+    0.777."""
+    steps = sorted((grid or {}).get("hh") or ())
+    if not steps:
+        return f's("hh*8").velocity({math.sqrt(energy):.3g})'
+    on = set(steps)
+    bars = [" ".join("hh" if b * quantize + k in on else "~" for k in range(quantize)) for b in range(nbars)]
+    active = [x.split().count("hh") for x in bars if "hh" in x]
+    per_bar = sum(active) / len(active)
+    return "cat(" + ", ".join(f's("{x}")' for x in bars) + f").velocity({math.sqrt(energy * 8.0 / per_bar):.3g})"
+
 def measured_drum_pitch(args) -> dict | None:
     """{class: {hit time: rate ratio}} for the kick, measured on the drums stem against the one-shot the pattern plays:
     extracted kit = the kit entry of the pack's instruments/samples.json, else drums/bd.wav; bank = the palette drum
@@ -726,6 +746,9 @@ def main() -> int:
                          "stem's level over that note relative to what its grain plays (note_dynamics.py); off = every note at the voice gain")
     ap.add_argument("--drum-stem-gain", type=float, default=1.0,
                     help="gain for the realstem drum channel (balances the real drums in the mix)")
+    ap.add_argument("--lead-clip", type=float, default=0.0,
+                    help="fraction of its written length each lead / chord note plays (Strudel .clip); 0 = "
+                         "melodic_shape.LEAD_CLIP_DEFAULT. Set by the calibrator from the voices' measured articulation")
     ap.add_argument("--drum-lpf", type=int, default=0,
                     help="low-pass the drum bus toward the original drum stem brightness (0=off)")
     # per-voice gain calibration (multiplies the voice's base gain) — set from a render's
@@ -796,7 +819,8 @@ def main() -> int:
                     help="kick-boom level: the fraction of its stem (x master gain) the bass voice renders at (calibrate_dynamic.py, "
                          "measured from the bass voice alone); 0 = no boom (no measurement yet)")
     ap.add_argument("--hat-gain", type=float, default=0.0,
-                    help="steady TR808 hh*8 layer inside the drum bus (smooths envelope for shape + lifts centroid)")
+                    help="hat layer inside the drum bus, as ENERGY in units of one steady hh*8 layer at the drum envelope; "
+                         "it plays the stem's own detected hh hits when there are any (see hat_layer), else every 8th")
     ap.add_argument("--bass-f0", type=Path, default=None, metavar="PATH",
                     help="bass_register.py f0 track of bass.wav (default <stems-dir>/.pipeline/bass_f0.json, written by "
                          "editable-pipeline.sh). Gives the bass window + per-note octave; absent/stale -> loud "
@@ -1329,15 +1353,15 @@ def main() -> int:
                         ("chordsLegato", "chordsLegatoVel")):
             if nm in dyn:
                 L += [js_array(arr, dyn[nm]), ""]
+    lead_clip = args.lead_clip if args.lead_clip > 0 else MS.LEAD_CLIP_DEFAULT
     if lead_bars:
         L += [js_array("lead", lead_bars), ""]
         if lead_legato:
             L += [js_array("leadLegato", lead_legato), ""]
-        # lpf tames high-mid top while keeping mid body; hpf clears low bleed.
-        # clip(1.3) sustains notes slightly past their step so the monophonic lead's envelope
-        # is smoother (closer to the original melodic's sustained contour, lifting shape corr).
+        # lpf tames high-mid top while keeping mid body; hpf clears low bleed. clip: the fraction of each written note
+        # that sounds - the calibrator's measured articulation (--lead-clip), else melodic_shape.LEAD_CLIP_DEFAULT.
         lead_code = (f'{lead_row}{lead_voice}'
-                     f'.hpf({args.lead_hpf}).clip(1.3).room({lead_fx["room"]})'
+                     f'.hpf({args.lead_hpf}).clip({lead_clip:g}).room({lead_fx["room"]})'
                      f'{gain_pattern(lead_env, lead_g * lead_synth_gain * M)}')
         channels.append(("LEAD", "melody/harmony — edit notes in `lead`", lead_code))
     if chord_bars:
@@ -1348,7 +1372,7 @@ def main() -> int:
         # transcribed harmony-vs-melody amplitude ratio (harmony_notes), then the calibrator's cal-chord lever.
         chord_g = round(lead_g * harmony_info["gain_ratio"] * args.cal_chord, 4)
         chord_code = (f'{chord_row}{lead_voice}'
-                      f'.hpf({args.lead_hpf}).clip(1.3).room({lead_fx["room"]})'
+                      f'.hpf({args.lead_hpf}).clip({lead_clip:g}).room({lead_fx["room"]})'
                       f'{gain_pattern(lead_env, chord_g * lead_synth_gain * M)}')
         channels.append(("CHORDS", "harmony under the lead — edit chords in `chords`", chord_code))
 
@@ -1376,7 +1400,7 @@ def main() -> int:
                         f'.duckattack({bass_duck.attack_s})')
                 dlines = [d + duck if re.search(r's\("[^"]*\bbd\b', d) else d for d in dlines]
             if args.hat_gain > 0:
-                dlines.append(f'  s("hh*8").gain({args.hat_gain})')
+                dlines.append("  " + hat_layer(args.hat_gain, detected.grid, detected.quantize, nbars))
             if args.drum_mode == "extracted":
                 # DRUMS GENERATOR: the detected pattern triggers the track's OWN extracted
                 # bd/sd/hh one-shots (mapped in samples.json) — no library bank. Real sounds,
@@ -1510,6 +1534,7 @@ def main() -> int:
                       "sub_up": int(sub_up) if sub_up in (0.0, 1.0) else round(sub_up, 4), "sub_up_max": sub_up_max,
                       "kick_boom": boom_info,
                       "drum_pitch": drum_pitch_info,
+                      "lead_clip": lead_clip,
                       "harmony": harmony_info, "lead_dynamics": dyn_info, "chord_bars": len(chord_bars or []),
                       "lead_octave": lead_oct, "lead_octave_decision": lead_dec,
                       "lead_partial_log2": lead_partial,

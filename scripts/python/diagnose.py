@@ -136,15 +136,21 @@ def tempo_check(comp: dict, meta: dict, refs: dict) -> dict:
     stamped = float(meta.get("bpm") or 0.0)
     orig = float(comp["original"]["rhythm"]["tempo"])
     rend = float(comp["rendered"]["rhythm"]["tempo"])
+    # the beat tracker's read before compare_audio's octave correction, which can move a right read off by x2/3
+    # (BibiBabydoll: 152 -> 101.3 while the piece is stamped 150); the tempo similarity already accepts either read
+    orig_raw = comp["original"]["rhythm"].get("tempo_raw")
+    rend_raw = comp["rendered"]["rhythm"].get("tempo_raw")
     tol = TR.tempogram_bin_bpm(max(stamped, orig, 1.0), 22050)
 
-    def agrees(a: float, b: float) -> bool:
-        return any(abs(a - b * r) <= tol for r in TEMPO_RATIOS)
+    def agrees(reads: tuple, b: float) -> bool:
+        return any(abs(float(a) - b * r) <= tol for a in reads if a for r in TEMPO_RATIOS)
 
     conf = meta.get("bpm_confidence")
     ref_conf = refs.get("bpm_confidence") or []
     out = {"stamped_bpm": stamped, "original_measured": orig, "render_measured": rend, "tolerance_bpm": tol,
-           "stamp_matches_original": agrees(orig, stamped), "render_matches_stamp": agrees(rend, stamped),
+           "original_raw": orig_raw, "render_raw": rend_raw,
+           "stamp_matches_original": agrees((orig, orig_raw), stamped),
+           "render_matches_stamp": agrees((rend, rend_raw), stamped),
            "confidence": conf, "reference_confidence_min": min(ref_conf) if ref_conf else None,
            "original_candidates": comp["original"]["rhythm"].get("tempo_candidates")}
     out["confidence_below_references"] = bool(conf is not None and ref_conf and float(conf) < min(ref_conf))

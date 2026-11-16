@@ -138,6 +138,31 @@ def correct_octave_error(tempo, prior_center=120, prior_range=40):
     # Pick closest to prior center (typically 120 BPM)
     return min(valid, key=lambda t: abs(t - prior_center))
 
+# Check tempo at various musical ratios (including non-standard ones for synthesized audio): synthesized audio often
+# triggers the beat tracker at faster rates due to transients
+TEMPO_RATIOS = [1.0, 2.0, 0.5, 3.0, 1/3, 4.0, 0.25, 1.5, 0.67, 1.6, 0.625]
+
+
+def tempo_match(orig_tempo, rend_tempo, orig_raw=None, rend_raw=None):
+    """(BPM difference at the corrected original's scale, ratio) of the best musical match between two tempos.
+
+    correct_octave_error maps each file's tempo toward 120 on its own and may pick a different factor for each:
+    BibiBabydoll "Melhor Sobrar" (2026-11-15): the original's beat tracker read 152, the render's 76 (the same pulse an
+    octave down), corrected to 101.3 (x2/3) and 114 (x3/2) - a ratio of 8/9, in no list: tempo similarity 0.167 at the
+    right tempo. So the RAW reads are compared too and the closer match counts (it can only raise a similarity)."""
+    pairs = [(orig_tempo, rend_tempo)]
+    if orig_raw and rend_raw:
+        pairs.append((float(orig_raw), float(rend_raw)))
+    best, best_ratio = float('inf'), 1.0
+    for o_t, r_t in pairs:
+        scale = orig_tempo / o_t      # a raw diff in BPM is expressed at the corrected original's scale
+        for ratio in TEMPO_RATIOS:
+            diff = abs(o_t - r_t * ratio) * scale
+            if diff < best:
+                best, best_ratio = diff, ratio
+    return best, best_ratio
+
+
 def compute_spectral_features(y, sr=22050):
     """Compute spectral features for comparison."""
     features = {}
@@ -233,9 +258,10 @@ def estimate_tempo(y, sr=22050, prior_bpm=None, hop_length=512):
     tempo_a, beats = librosa.beat.beat_track(y=y, sr=sr, hop_length=hop_length)
     if hasattr(tempo_a, '__len__'):
         tempo_a = tempo_a[0] if len(tempo_a) > 0 else 120.0
-    tempo_a = correct_octave_error(float(tempo_a))
+    raw_a = float(tempo_a)
+    tempo_a = correct_octave_error(raw_a)
     env_a = librosa.onset.onset_strength(y=y, sr=sr, hop_length=hop_length)
-    cands = [{'method': 'full_band_beat_track', 'bpm': float(tempo_a),
+    cands = [{'method': 'full_band_beat_track', 'bpm': float(tempo_a), 'raw_bpm': raw_a,
               'support': _ac_support(env_a, tempo_a, sr, hop_length)}]
 
     # Candidate B (low-band kick envelope)
@@ -245,8 +271,9 @@ def estimate_tempo(y, sr=22050, prior_bpm=None, hop_length=512):
         start = float(prior_bpm) if prior_bpm and prior_bpm > 0 else 120.0
         tb = librosa.feature.tempo(onset_envelope=env_b, sr=sr, hop_length=hop_b,
                                    start_bpm=start, max_tempo=200)
-        tempo_b = correct_octave_error(float(np.atleast_1d(tb)[0]))
-        cands.append({'method': 'low_band_tempo', 'bpm': float(tempo_b),
+        raw_b = float(np.atleast_1d(tb)[0])
+        tempo_b = correct_octave_error(raw_b)
+        cands.append({'method': 'low_band_tempo', 'bpm': float(tempo_b), 'raw_bpm': raw_b,
                       'support': _ac_support(env_b, tempo_b, sr, hop_b)})
     except Exception as e:  # never let the tempo metric crash a comparison
         log(f"Warning: low-band tempo candidate failed: {e}")
@@ -254,7 +281,7 @@ def estimate_tempo(y, sr=22050, prior_bpm=None, hop_length=512):
     chosen = cands[0]
     if len(cands) > 1 and cands[1]['support'] > cands[0]['support'] + 0.02:
         chosen = cands[1]
-    return float(chosen['bpm']), {'tempo_candidates': cands, 'tempo_method': chosen['method'],
+    return float(chosen['bpm']), {'tempo_candidates': cands, 'tempo_method': chosen['method'], 'tempo_raw': chosen['raw_bpm'],
                                   'beat_count': len(beats)}
 
 
@@ -268,6 +295,7 @@ def compute_rhythm_features(y, sr=22050, prior_bpm=None):
 
     tempo, info = estimate_tempo(y, sr=sr, prior_bpm=prior_bpm)
     features['tempo'] = float(tempo)
+    features['tempo_raw'] = float(info['tempo_raw'])   # before correct_octave_error (see the tempo similarity)
     features['beat_count'] = info['beat_count']
     features['tempo_candidates'] = info['tempo_candidates']
     features['tempo_method'] = info['tempo_method']
@@ -839,18 +867,9 @@ def compare_audio(original_path, rendered_path, duration=60, synth_config_path=N
         best_tempo_diff = abs(orig_tempo - rend_tempo)
         best_ratio = 1.0
     else:
-        # Check tempo at various musical ratios (including non-standard ones for synthesized audio)
-        # Synthesized audio often triggers beat tracker at faster rates due to transients
-        tempo_ratios = [1.0, 2.0, 0.5, 3.0, 1/3, 4.0, 0.25, 1.5, 0.67, 1.6, 0.625]
-        best_tempo_diff = float('inf')
-        best_ratio = 1.0
-
-        for ratio in tempo_ratios:
-            adjusted_rend = rend_tempo * ratio
-            diff = abs(orig_tempo - adjusted_rend)
-            if diff < best_tempo_diff:
-                best_tempo_diff = diff
-                best_ratio = ratio
+        best_tempo_diff, best_ratio = tempo_match(orig_tempo, rend_tempo,
+                                                  results['original']['rhythm'].get('tempo_raw'),
+                                                  results['rendered']['rhythm'].get('tempo_raw'))
 
     # Store the best match info
     results['comparison']['tempo_ratio_used'] = best_ratio
