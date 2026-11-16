@@ -308,12 +308,25 @@ def _profile(rows: list[dict]) -> dict:
     return {"bpm": r["bpm"], "key": r["key"], "bands": json.loads(r["orig_bands"]) if r.get("orig_bands") else {}}
 
 
+def same_tempo(row_bpm, bpm) -> bool:
+    """True when a recorded row was calibrated at this tempo: within one tempogram bin at x1/x2/x0.5 (the tolerance
+    diagnose.tempo_check uses), or either side unknown. A track's own rows at ANOTHER tempo are no warm start: their
+    knobs fit another grid (BibiBabydoll synth adopted 150.012 BPM; its 112.516 best started cal1 at 0.661, the lead
+    low-pass never reached the hat path, 0.774 FAIL, while a fresh search at 150 passed with 0.814)."""
+    import tempo_refine as TR
+    a, b = float(row_bpm or 0.0), float(bpm or 0.0)
+    if a <= 0 or b <= 0:
+        return True
+    tol = TR.tempogram_bin_bpm(max(a, b), 22050)
+    return any(abs(a - b * r) <= tol for r in (1.0, 2.0, 0.5))
+
+
 def warm_start(track_key: str, mode: str, genre: str, bpm: float, key: str, bars: int, *, orig_bands: dict | None = None,
                stems: Path | None = None, current_code: str | None = None) -> dict:
     """{'source': track|neighbour|cold, 'knobs': 'BM ...'|'', 'env': dict|None, 'detail': str, 'promise': the overall
     the source's best scored (a warm start keeps its short budget only while cal1 reproduces it, calibrate_loop)}."""
     cur = current_code or code_version()[0]
-    own = history(track_key, mode)
+    own = [r for r in history(track_key, mode) if same_tempo(r.get("bpm"), bpm)]
     if own:
         # kind 'shape' rows (the extra render of the OTHER bass shape) never seed a start by themselves: a winning one
         # is also written as a 'best' row. They only say that the shape question was answered for this code version.

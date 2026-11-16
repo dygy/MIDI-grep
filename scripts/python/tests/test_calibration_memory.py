@@ -153,6 +153,20 @@ def test_warm_start_uses_the_recorded_best_of_this_track_and_caps_at_three(db, t
     assert len(bms) == 3, bms                           # still improving, stopped by the warm budget
 
 
+def test_own_rows_at_another_tempo_are_no_warm_start(db, tmp_path):
+    # BibiBabydoll synth (2026-11-16): the track adopted 150.012 BPM; its own best at 112.516 seeded cal1 (0.661) and
+    # the search ended 0.774 FAIL, while the same stems at 150 passed from a fresh start. Rows at the track's tempo
+    # (x2 / x0.5 included) still count; rows at another tempo do not, and the nearest track takes over.
+    db.write_rows([row(db, track="me", tag="cal2", overall=0.80, bpm=112.516, knobs="0.77 0.66 0.88 4100 0.1 0.7 300 410 1"),
+                   row(db, track="near", tag="cal1", overall=0.81, bpm=150.0, knobs="0.6 0.9 3 7167 1 2.3 0 139 0.8")])
+    w = db.warm_start("me", "synth", GENRE, 150.012, "C# minor", 81, orig_bands=BANDS, current_code="old")
+    assert w["source"] == "neighbour" and "'near'" in w["detail"]
+    db.write_rows([row(db, track="me", tag="cal3", overall=0.77, bpm=75.006, knobs="0.5 0.6 0.9 5000 0 0.78 400 450 1")])
+    w = db.warm_start("me", "synth", GENRE, 150.012, "C# minor", 81, orig_bands=BANDS, current_code="old")
+    assert w["source"] == "track" and w["promise"] == pytest.approx(0.77)
+    assert db.same_tempo(135.0, 135.2) and not db.same_tempo(112.516, 150.012) and db.same_tempo(0, 150.0)
+
+
 def test_a_warm_start_that_misses_its_promise_gets_the_full_budget(db, tmp_path):
     # BibiBabydoll synth (2026-11-08): a neighbour's knobs promised 0.762, cal1 scored 0.687, and the 3-render warm
     # budget stopped the loop with sub_bass/bass still +14.6 / -15.3 points off (synth frequency balance RED on 12 pieces).
