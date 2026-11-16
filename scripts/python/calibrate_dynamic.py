@@ -624,10 +624,15 @@ def main() -> int:
     # (and never under a closed drum low-pass, which filters the hat layer too: that lever opens first, below)
     elif (r_cent > 1.15 and (nxt["lead_lpf"] >= LEAD_LPF_WIDE or hat_via_drums) and not hat_overshoot
           and r_high >= 1 / SHARE_DEAD_BAND and cur["drum_lpf"] <= 0):
-        bump = clamp((r_cent - 1.0) * 0.35, 0.04, 0.18)   # darker mix -> bigger hat bump
-        nxt["hat_gain"] = round(clamp(cur["hat_gain"] + bump, 0.0, 0.7), 3)
-    elif r_cent < 0.9:                                     # overshot bright -> back hats off
-        nxt["hat_gain"] = round(clamp(cur["hat_gain"] - 0.06, 0.0, 0.7), 3)
+        # hat_gain is the layer's ENERGY in units of one steady hh*8 layer at the drum envelope (generate_dynamic_strudel
+        # .hat_layer; before 2026-11-15 the drum stack's own gain replaced the layer's, so any value played 1 unit).
+        # Engage at 1 unit (what every earlier engaged piece played); then the energy follows the darker of the two
+        # measured ratios (the `high` share it fills, the centroid it lifts), at most doubling per step. BibiBabydoll
+        # "Melhor Sobrar": 4 units on the stem's hh hits passed both floors (0.814 / 0.777).
+        factor = clamp(max(r_high, r_cent), 1.0, 2.0)
+        nxt["hat_gain"] = round(max(1.0, cur["hat_gain"] * factor), 3)
+    elif r_cent < 0.9:                                     # overshot bright -> back hats off (energy)
+        nxt["hat_gain"] = round(cur["hat_gain"] * clamp(r_cent * r_cent, 0.5, 1.0), 3)
     else:
         nxt["hat_gain"] = round(cur["hat_gain"], 3)
     # --- drums: the third brightness source (synth) ------------------------------------------------------------------

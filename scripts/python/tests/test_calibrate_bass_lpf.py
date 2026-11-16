@@ -313,9 +313,10 @@ def test_bass_mult_not_raised_while_cutoff_moves():
 
 
 def test_hats_via_drums_hold_lead_lpf_on_cal1():
-    # cal1 -> real cal2 moved BOTH hat 0 -> 0.135 and lead-lpf 5199 -> 5923; one brightness lever per step
+    # cal1 -> real cal2 moved BOTH hat 0 -> 0.135 and lead-lpf 5199 -> 5923; one brightness lever per step. Since
+    # 2026-11-15 the hat lever is energy in units of one steady hh*8 layer and engages at 1 unit (what 0.135 played)
     got = run_cal(CAL1, *CAL1_KNOBS, *SYNTH)
-    assert float(got["--hat-gain"]) == pytest.approx(0.135)
+    assert float(got["--hat-gain"]) == pytest.approx(1.0)
     assert int(got["--lead-lpf"]) == 5199
     # cal2 -> cal3: hats not engaged (centroid 1.11x), lead-lpf still opens as before
     assert int(run_cal(CAL2, *CAL2_KNOBS, *SYNTH)["--lead-lpf"]) == 6178

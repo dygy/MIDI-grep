@@ -630,6 +630,26 @@ def section_map(mix_path: Path, nbars: int, bpm: float):
     return spark, named
 
 
+
+def hat_layer(energy: float, grid: dict | None, quantize: int, nbars: int) -> str:
+    """The calibrator's hat layer (``--hat-gain``): ``energy`` in units of one steady ``hh*8`` layer at the drum
+    envelope, on the stem's own detected hh hits when there are any (else every 8th), at the per-hit velocity that
+    carries that energy (velocity multiplies the drum bus gain: energy ~ hits x velocity^2).
+
+    Before 2026-11-15 the layer was ``s("hh*8").gain(g)`` inside the drum stack, whose own per-bar ``.gain()`` REPLACES
+    an inner one (last wins): every g > 0 played the same steady 8ths at the envelope level - the lever was an on/off
+    switch. BibiBabydoll "Melhor Sobrar" (150 BPM): the stem's highs are claps on 2 and 4, the steady 8ths filled every
+    step (high-band envelope correlation -0.44); its detected hh hits at 4x the old energy: 0.804 / 0.764 -> 0.814 /
+    0.777."""
+    steps = sorted((grid or {}).get("hh") or ())
+    if not steps:
+        return f's("hh*8").velocity({math.sqrt(energy):.3g})'
+    on = set(steps)
+    bars = [" ".join("hh" if b * quantize + k in on else "~" for k in range(quantize)) for b in range(nbars)]
+    active = [x.split().count("hh") for x in bars if "hh" in x]
+    per_bar = sum(active) / len(active)
+    return "cat(" + ", ".join(f's("{x}")' for x in bars) + f").velocity({math.sqrt(energy * 8.0 / per_bar):.3g})"
+
 def measured_drum_pitch(args) -> dict | None:
     """{class: {hit time: rate ratio}} for the kick, measured on the drums stem against the one-shot the pattern plays:
     extracted kit = the kit entry of the pack's instruments/samples.json, else drums/bd.wav; bank = the palette drum
@@ -799,7 +819,8 @@ def main() -> int:
                     help="kick-boom level: the fraction of its stem (x master gain) the bass voice renders at (calibrate_dynamic.py, "
                          "measured from the bass voice alone); 0 = no boom (no measurement yet)")
     ap.add_argument("--hat-gain", type=float, default=0.0,
-                    help="steady TR808 hh*8 layer inside the drum bus (smooths envelope for shape + lifts centroid)")
+                    help="hat layer inside the drum bus, as ENERGY in units of one steady hh*8 layer at the drum envelope; "
+                         "it plays the stem's own detected hh hits when there are any (see hat_layer), else every 8th")
     ap.add_argument("--bass-f0", type=Path, default=None, metavar="PATH",
                     help="bass_register.py f0 track of bass.wav (default <stems-dir>/.pipeline/bass_f0.json, written by "
                          "editable-pipeline.sh). Gives the bass window + per-note octave; absent/stale -> loud "
@@ -1379,7 +1400,7 @@ def main() -> int:
                         f'.duckattack({bass_duck.attack_s})')
                 dlines = [d + duck if re.search(r's\("[^"]*\bbd\b', d) else d for d in dlines]
             if args.hat_gain > 0:
-                dlines.append(f'  s("hh*8").gain({args.hat_gain})')
+                dlines.append("  " + hat_layer(args.hat_gain, detected.grid, detected.quantize, nbars))
             if args.drum_mode == "extracted":
                 # DRUMS GENERATOR: the detected pattern triggers the track's OWN extracted
                 # bd/sd/hh one-shots (mapped in samples.json) — no library bank. Real sounds,
