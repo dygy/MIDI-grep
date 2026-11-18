@@ -580,6 +580,8 @@ measured runs: `eval/thresholds.yaml` `modes:` and `eval/datasets/reference_trac
   `--bpm` / an adopted autopilot trial, never by a `~trial` copy) outranks the extraction in every stamp and is re-applied
   at stage 1b each run; the Go cache merges into `metadata.json` instead of rewriting it (it wiped `bpm_decided`); no synth
   seed / lead-fit answer from a calibration at another tempo. All 19 tracks pinned at their stamped tempo.
+- [x] **(PR #54) Disk preflight prunes the shortfall:** a cache under its budget on a disk short of a run's need is
+  pruned by the shortfall (the 2026-11-18 batch stopped with 3.8 GB regenerable on disk); still refuses when only stems remain.
 
 ### Open
 
