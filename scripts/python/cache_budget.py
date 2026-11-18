@@ -324,6 +324,12 @@ def main(argv: list[str] | None = None) -> int:
         print(f"{_gb(sum(cats.values())):>9}  total (budget {_gb(budget_bytes())})")
         return 0
     target, current = budget_bytes(), size(CACHE)
+    need = run_growth() + ram_bytes()
+    if a.cmd == "preflight":
+        # The disk, not only the budget, decides how far to prune: a cache under its budget on a disk short of a run's
+        # need is pruned by the shortfall too (2026-11-18: 19.7 GB / 25 GB budget, 25.7 GB free < 25.7 GB needed - the
+        # batch stopped with 3.8 GB of regenerable material on disk).
+        target = min(target, current - max(0, need - shutil.disk_usage(ROOT).free))
     p = plan(target, current)
     by_tier: dict[str, int] = {}
     for tier, _, b in p.actions:
@@ -344,7 +350,6 @@ def main(argv: list[str] | None = None) -> int:
             return 3
     if a.cmd == "preflight":
         free = shutil.disk_usage(ROOT).free
-        need = run_growth() + ram_bytes()
         if free < need:
             print(f"disk preflight: {_gb(free)} free < {_gb(need)} needed (largest run growth {_gb(run_growth())} + "
                   f"swap headroom = RAM {_gb(ram_bytes())}). Free disk space before starting.", file=sys.stderr)

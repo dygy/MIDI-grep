@@ -288,7 +288,8 @@ measured cliff; `preset` from `metadata.json` genre (null when uncertain). Inser
 headroom). After a run: record the growth, prune. Tiers, cheapest loss first: calibration iteration renders (always; `best.wav`
 stays - stage 7's skip key), unprotected vNNN (protected = newest + best per mode + versions `reference_tracks.yaml` pins), the
 report sources of non-newest protected pieces (`render_<stem>.wav`, `iterations/`, `embed/` - `report.html` embeds them), the
-compare/sample caches (LRU), stage-3c views. Stems, metadata, `sample_pack/` and calibration memory are never deleted; a track a
+compare/sample caches (LRU), stage-3c views. Preflight prunes by the disk shortfall too, not only to the budget (2026-11-18: a cache under its
+budget on a disk 0.0 GB short stopped an autopilot batch with 3.8 GB regenerable). Stems, metadata, `sample_pack/` and calibration memory are never deleted; a track a
 run holds (`.pipeline/running.pid`) is skipped. `cache_budget.py report` shows the sizes.
 
 **Bass voice level (2026-10-23, `scripts/python/bass_solo.py`, run by `auto-calibrate.sh` every iteration):** the

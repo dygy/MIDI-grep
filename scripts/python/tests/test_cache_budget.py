@@ -119,6 +119,36 @@ def test_preflight_needs_the_largest_recorded_growth_plus_ram(cache, monkeypatch
     assert "29.0 GB needed" in capsys.readouterr().err
 
 
+def test_preflight_prunes_the_disk_shortfall_even_under_the_budget(cache, monkeypatch):
+    """2026-11-18: cache 19.7 GB under a 25 GB budget, disk 25.7 GB free < 25.7 GB needed - nothing was pruned and the
+    autopilot batch stopped although 3.8 GB of regenerable material was on disk."""
+    monkeypatch.setenv("MIDIGREP_CACHE_BUDGET_GB", "100")
+    monkeypatch.setattr(CB, "ram_bytes", lambda: 0)
+    CB.record_growth(0, 10 * MB)
+    start = CB.size(CB.CACHE)
+
+    class U:
+        @property
+        def free(self):
+            return 5 * MB + (start - CB.size(CB.CACHE))   # 5 MB short until the cache shrinks
+    monkeypatch.setattr(CB.shutil, "disk_usage", lambda _p: U())
+    assert CB.main(["preflight"]) == 0
+    assert not (cache / "v001" / "iterations").exists()    # beyond tier 1 (4 MB): a protected old piece was slimmed
+    assert (cache / "v001" / "report.html").is_file() and (cache / "v003" / "iterations").is_dir()
+    assert (cache / "bass.wav").is_file()
+
+
+def test_preflight_still_refuses_when_only_stems_are_left(cache, monkeypatch):
+    monkeypatch.setattr(CB, "ram_bytes", lambda: 0)
+    CB.record_growth(0, 10 ** 12)
+
+    class U:
+        free = 0
+    monkeypatch.setattr(CB.shutil, "disk_usage", lambda _p: U)
+    assert CB.main(["preflight"]) == 4
+    assert (cache / "bass.wav").is_file() and (cache / "metadata.json").is_file()
+
+
 def test_an_invalid_budget_is_an_error_not_a_default():
     with pytest.raises(SystemExit):
         CB.budget_bytes({"MIDIGREP_CACHE_BUDGET_GB": "lots"})
