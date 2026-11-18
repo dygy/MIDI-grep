@@ -576,6 +576,10 @@ measured runs: `eval/thresholds.yaml` `modes:` and `eval/datasets/reference_trac
   replaced it), a track's memory rows at another tempo are no warm start, diagnosis reads the raw tempo. Adopted 150.012 BPM
   (the 112.5 stamp held 150-BPM quarters as 3 sixteenths): synth 0.737 / 0.72 FAIL -> v014 0.812 / 0.784 PASS; Tatuagem
   0.810 -> 0.819 with LC; references untouched (hats off, LC inside the dead band)
+- [x] **(PR #52) A decided tempo survives restarts:** `eval/datasets/tempo_decisions.yaml` (committed; written by
+  `--bpm` / an adopted autopilot trial, never by a `~trial` copy) outranks the extraction in every stamp and is re-applied
+  at stage 1b each run; the Go cache merges into `metadata.json` instead of rewriting it (it wiped `bpm_decided`); no synth
+  seed / lead-fit answer from a calibration at another tempo. All 19 tracks pinned at their stamped tempo.
 
 ### Open
 
