@@ -225,20 +225,62 @@ def inputs_key(bpm: str, paths: list[Path]) -> str:
     return f"{bpm}|{h.hexdigest()[:16]}"
 
 
-def set_decided_bpm(track_dir: Path, coarse: float, *, by: str, evidence: dict | None = None) -> dict:
+def set_decided_bpm(track_dir: Path, coarse: float, *, by: str, evidence: dict | None = None,
+                    decisions_path: Path | None = None, record: bool = True) -> dict:
     """Stamp a DECIDED tempo: refine around ``coarse`` and record ``bpm_decided`` so every later stamp starts from it
     instead of the extraction's tempogram estimate. The autopilot writes it when a trial at this tempo scored better
     than the stamped one (BibiBabydoll 2026-11-08: the extractor locked onto a dotted subdivision, 112.5 BPM at
-    phase-coherence 0.045); ``editable-pipeline.sh --bpm`` writes it for a trial run."""
+    phase-coherence 0.045); ``editable-pipeline.sh --bpm`` writes it for a trial run.
+
+    ``record``: also write the decision to the tempo registry (``tempo_decisions.py``; never for a trial copy). The
+    metadata field alone was lost whenever the Go cache rewrote ``metadata.json``, and the next run went back to the
+    extraction's tempo."""
+    import tempo_decisions as TD
     track_dir = Path(track_dir)
     meta_path = track_dir / "metadata.json"
     meta = json.loads(meta_path.read_text())
     meta["bpm_decided"] = {"bpm_coarse": float(coarse), "by": by, "evidence": evidence or {}}
+    if record:
+        TD.record(track_dir.name, float(coarse), by=by, evidence=evidence, path=decisions_path)
     _refine_track_bpm(track_dir, meta, coarse=float(coarse))
     tmp = meta_path.with_suffix(".json.tmp")
     tmp.write_text(json.dumps(meta, indent=2, ensure_ascii=False))
     tmp.replace(meta_path)
     return meta
+
+
+def decided_bpm(track_dir: Path, meta: dict | None = None, decisions_path: Path | None = None) -> dict | None:
+    """The track's decided tempo: the registry's row (``tempo_decisions.py``), else the metadata's ``bpm_decided``
+    (a decision made before the registry existed), else None."""
+    import tempo_decisions as TD
+    track_dir = Path(track_dir)
+    row = TD.get(track_dir.name, decisions_path)
+    if row is not None:
+        return {"bpm_coarse": row["bpm_coarse"], "by": row.get("by") or "tempo_decisions.yaml",
+                "evidence": row.get("evidence") or {}}
+    if meta is None:
+        mp = track_dir / "metadata.json"
+        meta = json.loads(mp.read_text()) if mp.is_file() else {}
+    d = meta.get("bpm_decided")
+    return d if isinstance(d, dict) and d.get("bpm_coarse") else None
+
+
+def apply_decided_bpm(track_dir: Path, decisions_path: Path | None = None) -> dict:
+    """Make the stamp agree with the decided tempo (editable-pipeline stage 1b, every run). No-op when the stamp was
+    already refined around it; else re-refine around it (``set_decided_bpm`` without re-recording). Returns
+    {status: none|kept|applied, bpm, decided}."""
+    track_dir = Path(track_dir)
+    meta = json.loads((track_dir / "metadata.json").read_text())
+    d = decided_bpm(track_dir, meta, decisions_path)
+    if d is None:
+        return {"status": "none", "bpm": meta.get("bpm"), "decided": None}
+    cur = meta.get("bpm_decided") if isinstance(meta.get("bpm_decided"), dict) else {}
+    if (cur.get("bpm_coarse") == d["bpm_coarse"] and meta.get("bpm_coarse") == round(d["bpm_coarse"], 4)
+            and meta.get("bpm_method") and meta.get("bpm") not in (None, "")):
+        return {"status": "kept", "bpm": meta["bpm"], "decided": d["bpm_coarse"]}
+    m = set_decided_bpm(track_dir, d["bpm_coarse"], by=d["by"], evidence=d["evidence"],
+                        decisions_path=decisions_path, record=False)
+    return {"status": "applied", "bpm": m["bpm"], "decided": d["bpm_coarse"], "was": meta.get("bpm")}
 
 
 UNREFERENCED = "unreferenced"   # genre key meaning "no trusted genre": the gate uses its default floor, memory finds no neighbours
@@ -251,7 +293,8 @@ def _label_basis(lab: dict) -> str:
 def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
                          detector_json: Path | None = None, labels_path: Path | None = None,
                          embeddings_root: Path | None = None, stems_root: Path | None = None,
-                         keep_tempo: bool = False, text_json: Path | None = None) -> dict:
+                         keep_tempo: bool = False, text_json: Path | None = None,
+                         decisions_path: Path | None = None) -> dict:
     """Consolidate the per-track facts the pipeline needs into ``<track>/metadata.json``.
 
     The Go cache writes only title/url/video_id there; bpm/key/style live in the latest
@@ -291,8 +334,10 @@ def stamp_track_metadata(track_dir: Path, *, genre_override: str | None = None,
             if src in vmeta and vmeta[src] not in (None, ""):
                 meta[dst] = vmeta[src]
         coarse = float(vmeta["bpm"])
-        if isinstance(meta.get("bpm_decided"), dict):     # a decided tempo (set_decided_bpm) outranks the extraction's
-            coarse = float(meta["bpm_decided"]["bpm_coarse"])
+        decided = decided_bpm(track_dir, meta, decisions_path)   # a decided tempo outranks the extraction's estimate
+        if decided is not None:
+            coarse = float(decided["bpm_coarse"])
+            meta["bpm_decided"] = decided
     elif keep_tempo:
         coarse = None
     elif meta.get("bpm") not in (None, ""):
@@ -1094,6 +1139,8 @@ def main(argv: list[str] | None = None) -> int:
     sb.add_argument("track_dir", type=Path)
     sb.add_argument("bpm", type=float)
     sb.add_argument("--by", default="editable-pipeline.sh --bpm")
+    ad = sub.add_parser("apply-decided-bpm", help="re-refine the stamp around the decided tempo (tempo_decisions.yaml) when it differs")
+    ad.add_argument("track_dir", type=Path)
     st = sub.add_parser("stamp")
     st.add_argument("track_dir", type=Path)
     st.add_argument("--genre", default=None, help="explicit genre override (logged in metadata)")
@@ -1152,6 +1199,8 @@ def main(argv: list[str] | None = None) -> int:
         elif args.cmd == "set-bpm":
             m = set_decided_bpm(args.track_dir, args.bpm, by=args.by)
             print(json.dumps({k: m.get(k) for k in ("bpm", "bpm_coarse", "bpm_method", "bpm_confidence", "bpm_decided")}))
+        elif args.cmd == "apply-decided-bpm":
+            print(json.dumps(apply_decided_bpm(args.track_dir)))
         elif args.cmd == "stamp":
             m = stamp_track_metadata(args.track_dir, genre_override=args.genre, detector_json=args.detector_json,
                                      keep_tempo=args.keep_tempo, text_json=args.text_json)

@@ -345,3 +345,17 @@ def test_sub_up_column_upgrades_from_the_binary_octave_to_a_fraction(db, monkeyp
     assert db.write_rows([row(db, tag="new", knobs="0.5 0.6 0.9 5000 0 0.78 400 450 0.357")]) == 1
     got = {r["tag"]: r["sub_up"] for r in db.history("other", "synth")}
     assert got == {"old": 1.0, "new": pytest.approx(0.357)}
+
+
+def test_own_lead_fit_at_another_tempo_is_no_keep_answer(db):
+    # A restart at a newly decided tempo (BibiBabydoll 112.5 -> 150) must not take the lead vector fitted on the old grid
+    # as the final answer ('track-keep' = one verify render, no search).
+    import calibration_memory as M
+    keep = json.dumps({"decision": "keep", "spec": {"wave": "sawtooth"}})
+    db.write_rows([M.make_row(kind="leadfit", run_id="r1", tag="leadfit_1", track_key="me", mode="synth",
+                              knobs=M.parse_knobs("0.5 0.6 0.9 5000 0 0.78 400 450 1"),
+                              ctx={"title": "me", "genre": GENRE, "bpm": 112.516, "key": "F minor", "bars": 108,
+                                   "code_version": "cur"},
+                              cmp_json=None, margin=0.0, passed=False, code=("cur", "abc"), lead_fit=keep)])
+    assert db.lead_warm("me", "synth", GENRE, 112.516, "F minor", current_code="cur")["source"] == "track-keep"
+    assert db.lead_warm("me", "synth", GENRE, 150.012, "F minor", current_code="cur")["source"] == "none"

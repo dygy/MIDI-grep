@@ -319,7 +319,12 @@ references run ONCE at the end as the regression check. Trials run `--local --no
 per mode, the mix components the trial moved by more than the noise (`moved`, shown in the batch report - BibiBabydoll
 at 150 BPM: sample-instrument tempo +0.60 while synth brightness -0.31, a mixed verdict the means hid). Every trial is appended to `.cache/runlogs/autopilot/remedies.jsonl`
 (past winners are tried first); the batch writes `<time>.json` + `.md`. `editable-pipeline.sh --bpm B` decides a tempo
-(`pipeline_helpers.py set-bpm`, `bpm_decided` outranks the extraction's estimate in every later stamp). Stage 7 now also
+(`pipeline_helpers.py set-bpm`): it is recorded in the committed registry `eval/datasets/tempo_decisions.yaml`
+(`tempo_decisions.py`; never for a `~trial` copy) and every later run re-applies it at stage 1b without `--bpm`
+(`apply-decided-bpm`; registry > `metadata.json` `bpm_decided` > the extraction's estimate). Until 2026-11-18 the decision
+lived only in `metadata.json`, which the Go cache rewrote whole on re-separation (now merged, `writeTrackMetadata`), so
+restarts went back to the wrong tempo. A tempo change also voids what was calibrated at the old one: the synth seed from
+`sample-instrument/best.params` needs matching `best.inputs`, own memory rows (warm start, lead fit) need `same_tempo`. Stage 7 now also
 reruns when its INPUTS changed (`best.inputs`: bpm, drum hits, instruments manifest, stage-3c view) - before, a new bpm
 or drum detector never reached a calibrated piece.
 

@@ -77,7 +77,8 @@ Go's job: stem separation, BPM/key/genre detection, caching, orchestration.
   `--genre` overrides are logged. Renders are OFFLINE by default (`render-strudel-offline.js`, Strudel's own
   renderPatternAudio; `MIDIGREP_RENDERER=blackhole` = cross-check, known ~2.5-semitone-flat defect) and are scored
   against `instrumental.wav` (bass+drums+melodic) — **vocals are never generated** (owner decision 2026-10-19).
-  Tempo is phase-coherence-refined off librosa's tempogram bins (`tempo_refine.py`).
+  Tempo is phase-coherence-refined off librosa's tempogram bins (`tempo_refine.py`); a decided tempo (`--bpm B`) is kept
+  in `eval/datasets/tempo_decisions.yaml` and outranks the extraction on every later run.
 - **Section-aware diagnostics (fix #10):** `compare_audio.py` stores `comparison.section_windows` (per 10-s
   window mfcc/band/energy/win/rms/band_diff); `calibrate_dynamic.py --env-correction-out` derives per-bar
   bass/lead/master multipliers from them (damped, composable via `--env-correction-in`); the generator applies

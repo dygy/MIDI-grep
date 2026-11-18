@@ -51,8 +51,9 @@
 #              when working on the separation stage itself)
 #   --no-visuals  skip stage 11
 #   --force    redo every stage even if its output exists
-#   --bpm B    decide the tempo: refine around B and stamp it as bpm_decided (kept by every later stamp; the autopilot
-#              uses it for tempo trials on a copy of the track)
+#   --bpm B    decide the tempo: refine around B, stamp it as bpm_decided and record it in
+#              eval/datasets/tempo_decisions.yaml, so every later run of the track keeps it without --bpm (the autopilot
+#              uses it for tempo trials on a copy of the track - a trial copy is never recorded)
 #
 # Requires (checked per stage, not up front): the renderer built (scripts/node/dist; BlackHole + Multi-Output only for
 # MIDIGREP_RENDERER=blackhole), wrangler OAuth login for --r2. stdout carries ONLY the final JSON summary;
@@ -238,8 +239,16 @@ if [ -z "$(jget "$META" bpm)" ] || [ -z "$(jget "$META" bpm_method)" ] || [ -n "
   fi
 fi
 if [ -n "$TRIAL_BPM" ]; then   # a decided tempo (autopilot trial / owner): refined around it, kept by every later stamp
-  log "stage 1b: tempo decided at $TRIAL_BPM BPM (--bpm), refining around it"
+  log "stage 1b: tempo decided at $TRIAL_BPM BPM (--bpm), refining around it (recorded in eval/datasets/tempo_decisions.yaml)"
   "${PH[@]}" set-bpm "$TRACK" "$TRIAL_BPM" >&2 || die "stage 1b: set-bpm $TRIAL_BPM failed"
+else
+  # A tempo decided on an earlier run (tempo_decisions.yaml) holds on every run without --bpm: the stamp is re-refined
+  # around it whenever it says otherwise (the Go cache rewrote metadata.json, a re-extraction stamped its own estimate).
+  DEC="$("${PH[@]}" apply-decided-bpm "$TRACK")" || die "stage 1b: apply-decided-bpm failed"
+  case "$DEC" in
+    *'"status": "applied"'*) log "stage 1b: decided tempo restored from eval/datasets/tempo_decisions.yaml: $DEC";;
+    *'"status": "kept"'*) log "stage 1b: decided tempo $(jget "$META" bpm) BPM (eval/datasets/tempo_decisions.yaml)";;
+  esac
 fi
 BPM="$(jget "$META" bpm)"; KEY="$(jget "$META" key)"; GENRE="$(jget "$META" genre)"
 DURATION="$(jget "$META" duration)"; TRACK_TITLE="$(jget "$META" title)"
@@ -486,7 +495,9 @@ run_synth() {
   # otherwise the calibrator's cold-start defaults. The synth pass then runs its own calibration loop
   # (knobs + per-bar env correction measured on SYNTH renders), writing $W/best.env.json for stage 9.
   local start_arg=() knobs=""
-  if [ -s "$PW/sample-instrument/best.params" ] && params_ok "$PW/sample-instrument/best.params"; then
+  # Only a sample-instrument best made from the CURRENT inputs (bpm included): one calibrated at another tempo is a
+  # different grid and seeded the synth search with knobs that fit nothing here.
+  if [ -s "$PW/sample-instrument/best.params" ] && params_ok "$PW/sample-instrument/best.params" && inputs_ok "$PW/sample-instrument"; then
     # Seed the magnitudes (fields 1-8) but NOT the sub-sine octave (9th): whether the sine layer sounds better an
     # octave up depends on the main layer (a recorded sample vs a sawtooth) - Regime CLT synth seeded with the sample's
     # su=1 scored 0.682 and FAILED the gate, while its own octave trial from su=0 reached 0.763. Synth re-trials it.
@@ -494,7 +505,7 @@ run_synth() {
     start_arg=(--seed "$knobs")   # a FALLBACK: ClickHouse (this track's synth best, else the nearest track's) wins when it has one
     log "stage 7: synth calibration seed (used only when ClickHouse has no synth history for it): sample-instrument knobs $knobs"
   else
-    log "stage 7: no sample-instrument calibration found; synth calibration starts from cold-start defaults"
+    log "stage 7: no current sample-instrument calibration (none, or made from other inputs / another bpm); synth calibration starts from memory or cold-start defaults"
   fi
   local key_arg=(); [ -n "$KEY" ] && key_arg=(--key "$KEY")
   log "stage 7: auto-calibrate synth (iters cap=${SYNTH_ITERS:-default})"

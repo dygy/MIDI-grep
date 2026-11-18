@@ -12,3 +12,9 @@ import pytest
 def _isolated_compare_cache(tmp_path_factory, monkeypatch):
     monkeypatch.setenv("MIDIGREP_COMPARE_CACHE_DIR", str(tmp_path_factory.mktemp("compare-cache")))
     monkeypatch.delenv("MIDIGREP_COMPARE_CACHE", raising=False)
+
+
+@pytest.fixture(autouse=True)
+def _isolated_tempo_decisions(tmp_path_factory, monkeypatch):
+    """No test writes the committed tempo registry (eval/datasets/tempo_decisions.yaml), shell-driven pipelines included."""
+    monkeypatch.setenv("MIDIGREP_TEMPO_DECISIONS", str(tmp_path_factory.mktemp("tempo") / "tempo_decisions.yaml"))
