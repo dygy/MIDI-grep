@@ -1,0 +1,82 @@
+# DECIDED tempos (coarse bpm, refined by phase coherence at every stamp), written by
+# `pipeline_helpers.py set-bpm` (editable-pipeline.sh --bpm B, an adopted autopilot tempo trial).
+# Every stamp of the track starts from this bpm instead of the extraction's estimate. To decide another tempo
+# run the track with --bpm B (or edit bpm_coarse); to hand it back to the extraction delete the row AND
+# `bpm_decided` in the track's metadata.json (the pre-registry fallback).
+decisions:
+- cache_key: Automotivo Amar Ma Ma Ma - Bibi Babydoll, Dj Br
+  bpm_coarse: 134.9966
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: Automotivo Holiday (Dj Brunin XM, Kinechan & Mc
+  bpm_coarse: 140.039
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: Automotivo Novinho Depressivo
+  bpm_coarse: 135.1375
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: Automotivo XM, Taka Taka Taka Tá (Dj Brunin XM
+  bpm_coarse: 135.1343
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: Automotivo XM, É Muita Treta (Dj Brunin XM, Mc
+  bpm_coarse: 136.7846
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: Bibi Babydoll e DJ Brunin XM - Automotivo Bibi
+  bpm_coarse: 135.0257
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: BibiBabydoll - Melhor Sobrar Do Que Faltar (Pez
+  bpm_coarse: 150.012
+  by: editable-pipeline.sh --bpm
+  date: '2026-11-18'
+- cache_key: Creagina
+  bpm_coarse: 135.0033
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: Cópia (Dj Brunin XM, Mc Erikah, Mc Mayara)
+  bpm_coarse: 135.0554
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: Dumb Blond Bitches
+  bpm_coarse: 135.0725
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: Enter - Nigdy Więcej Wojny (prod. Enter) (2022)
+  bpm_coarse: 145.984
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: Menino Pq Não Deixa (Dj Brunin XM, MC NINA, V
+  bpm_coarse: 135.2287
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: Regime CLT (Dj Brunin XM, Aurora Shukita)
+  bpm_coarse: 135.0071
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: Sem Aliança no Dedo - Vou Sentar e Vou Sumir -
+  bpm_coarse: 135.0102
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: Tatuagem No Pescoço - Bibi Babydoll, DJ DN, Fl
+  bpm_coarse: 129.9959
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: VAGABUNDO NÃO NAMORA
+  bpm_coarse: 130.7334
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: VEM CÁ - VEM CÁ - MC ZKW (DJ DUH 011)
+  bpm_coarse: 132.9776
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: YES DADDY!
+  bpm_coarse: 111.2781
+  by: 'pinned 2026-11-18: the tempo the track was stamped and scored at'
+  date: '2026-11-18'
+- cache_key: אסף אמדורסקי - רכבת לצפון
+  bpm_coarse: 219.994
+  by: editable-pipeline.sh --bpm
+  date: '2026-11-18'

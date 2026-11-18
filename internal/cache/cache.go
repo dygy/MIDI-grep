@@ -289,16 +289,14 @@ func (c *StemCache) UpdateTrackMetadata(key, title, url string) (string, error) 
 		return key, fmt.Errorf("cache entry not found: %s", key)
 	}
 
-	// Save metadata
+	// Save metadata (merged: the pipeline's stamp - bpm, decided tempo, genre - lives in the same file)
 	meta := TrackMetadata{
 		Title:    title,
 		URL:      url,
 		VideoID:  ExtractVideoID(url),
 		CachedAt: time.Now(),
 	}
-	metaData, _ := json.MarshalIndent(meta, "", "  ")
-	metaPath := filepath.Join(cacheSubdir, "metadata.json")
-	if err := os.WriteFile(metaPath, metaData, 0644); err != nil {
+	if err := writeTrackMetadata(filepath.Join(cacheSubdir, "metadata.json"), meta); err != nil {
 		return key, err
 	}
 
@@ -449,12 +447,47 @@ func (c *StemCache) PutWithMetadata(key string, stems *StemPaths, trackTitle, ur
 			VideoID:  ExtractVideoID(url),
 			CachedAt: time.Now(),
 		}
-		metaData, _ := json.MarshalIndent(meta, "", "  ")
-		metaPath := filepath.Join(cacheSubdir, "metadata.json")
-		os.WriteFile(metaPath, metaData, 0644)
+		if err := writeTrackMetadata(filepath.Join(cacheSubdir, "metadata.json"), meta); err != nil {
+			return nil, fmt.Errorf("write track metadata: %w", err)
+		}
 	}
 
 	return result, nil
+}
+
+// writeTrackMetadata sets the cache's own fields (title, url, video_id, cached_at) in metaPath and keeps every other
+// key already there. The editable pipeline stamps bpm, the decided tempo, key and genre into the same file; rewriting
+// it with the four cache fields alone wiped that stamp on every re-separation, and the next run went back to the
+// extraction's tempo estimate.
+func writeTrackMetadata(metaPath string, meta TrackMetadata) error {
+	merged := map[string]any{}
+	if old, err := os.ReadFile(metaPath); err == nil {
+		if err := json.Unmarshal(old, &merged); err != nil {
+			merged = map[string]any{} // unreadable: the cache fields are all we can vouch for
+		}
+	} else if !os.IsNotExist(err) {
+		return fmt.Errorf("read %s: %w", metaPath, err)
+	}
+	own, err := json.Marshal(meta)
+	if err != nil {
+		return err
+	}
+	var fields map[string]any
+	if err := json.Unmarshal(own, &fields); err != nil {
+		return err
+	}
+	for k, v := range fields {
+		merged[k] = v
+	}
+	data, err := json.MarshalIndent(merged, "", "  ")
+	if err != nil {
+		return err
+	}
+	tmp := metaPath + ".tmp"
+	if err := os.WriteFile(tmp, data, 0644); err != nil {
+		return err
+	}
+	return os.Rename(tmp, metaPath)
 }
 
 // Clear removes all cached stems

@@ -389,7 +389,8 @@ def lead_warm(track_key: str, mode: str, genre: str, bpm: float, key: str, *, or
             'none'         nothing recorded -> cold search from the measured values
     spec: the vector to start from (None for 'none' / 'track-palette')."""
     cur = current_code or code_version()[0]
-    own = [r for r in history(track_key, mode) if r["kind"] == "leadfit" and _lead_fit_of(r)]
+    own = [r for r in history(track_key, mode) if r["kind"] == "leadfit" and _lead_fit_of(r)
+           and same_tempo(r.get("bpm"), bpm)]   # a vector fitted at another tempo is no 'keep' answer here
     if own:
         same = [r for r in own if r["code_version"] == cur]
         row = max(same or own, key=lambda r: r["created"])

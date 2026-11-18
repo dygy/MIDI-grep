@@ -227,11 +227,22 @@ def test_synth_does_not_start_from_an_old_format_sample_instrument_params(repo):
 
 def test_synth_is_seeded_with_the_sample_magnitudes_but_not_its_sub_octave(repo):
     """The 9th knob (sub-sine octave up) is a per-instrument decision: synth must re-trial it, not inherit su=1."""
+    run(repo, "--local", "--mode", "sample-instrument")               # builds the inputs a calibration is made from
     _seed_best(repo, "sample-instrument", NEW + " 1")                 # BM..MG BL LH SU=1 (9 fields)
     (repo.calls).write_text("")
     run(repo, "--local", "--mode", "synth")
     ac = [c for c in calls(repo) if c.startswith("auto-calibrate")][0]
     assert f"--seed {NEW}" in ac and f"--seed {NEW} 1" not in ac, ac
+
+
+def test_synth_is_not_seeded_from_a_sample_best_at_another_bpm(repo):
+    """2026-11-18: a sample-instrument best calibrated at the old tempo seeded the synth search after the tempo changed."""
+    run(repo, "--local", "--mode", "sample-instrument")
+    _seed_best(repo, "sample-instrument", NEW, inputs="112.516|0000000000000000")
+    (repo.calls).write_text("")
+    r = run(repo, "--local", "--mode", "synth")
+    ac = [c for c in calls(repo) if c.startswith("auto-calibrate")][0]
+    assert "--seed" not in ac and "no current sample-instrument calibration" in r.stderr, ac
 
 
 def test_best_from_other_inputs_reruns_the_stage(repo):
